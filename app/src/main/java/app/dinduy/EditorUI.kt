@@ -966,8 +966,10 @@ fun floatPlans(ed: Ed, dm: Dm): Map<String, FloatPlan> {
     var out: HashMap<String, FloatPlan>? = null
     val bl = ed.blocks
     for ((i, b) in bl.withIndex()) {
-        if (b.ty != "img" || !ed.sideOk(b)) continue
-        val p = planFloat(ed, i, dm, pal, tm, dn)
+        // semua gambar tunggal rata kiri/kanan selalu lewat FloatGroup, walau tak ada teks di sampingnya,
+        // supaya komponen gambar tidak berganti (dan gestur ubah ukuran tidak putus) saat teks samping habis
+        if (b.ty != "img" || b.im.size != 1 || b.im[0].al == "c") continue
+        val p = if (ed.sideOk(b)) planFloat(ed, i, dm, pal, tm, dn) else FloatPlan(emptyList())
         if (out == null) out = HashMap()
         out[b.id] = p
     }
