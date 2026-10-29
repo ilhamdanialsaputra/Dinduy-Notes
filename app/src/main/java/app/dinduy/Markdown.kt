@@ -283,7 +283,8 @@ fun toMd(bl: List<Blk>): String {
                     .joinToString("\n")
             }
             "hr" -> s = "---"
-            "img" -> s = b.im.joinToString(" ") { "![gambar]" }
+            "img" -> s = b.im.joinToString(" ") { "![gambar]" } +
+                (if (b.r.t.isNotBlank()) "\n\n" + rtMd(b.r).split("\n").joinToString("\n") { lineEsc(it) } else "")
             else -> continue
         }
         out.add(s to li)
