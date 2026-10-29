@@ -246,7 +246,7 @@ fun TF(
             modifier = modifier.focusRequester(fr).bringIntoViewRequester(bring).trackPos(ed, key)
                 .onFocusChanged { foc = it.isFocused; if (it.isFocused) ed.onFocus(key) },
             textStyle = base, cursorBrush = SolidColor(pal.p), visualTransformation = vt,
-            onTextLayout = { lay = it }, softWrap = true,
+            onTextLayout = { lay = it },
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
             decorationBox = { inner ->
                 Box {
