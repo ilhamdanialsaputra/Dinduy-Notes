@@ -2,6 +2,14 @@
 
 package app.dinduy
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -290,29 +298,31 @@ fun ListItem(ed: Ed, b: Blk, ordN: Int, dm: Dm, pal: Pal) {
     val mw = when (b.lt) { "o" -> 2.2f; "c" -> 1.9f; else -> 1.7f } * fs
     val done = b.lt == "c" && b.x
     Row(Modifier.fillMaxWidth().padding(start = (b.d * 1.4f * fs).dp, bottom = (fs * .5f).dp)) {
+        // penanda dipusatkan secara vertikal pada tinggi baris, lalu sedikit dinaikkan agar sejajar dengan x-height teks
         Box(
             Modifier.width(mw.dp).height(lineH.dp).then(
                 if (b.lt == "c") Modifier.clickable(
                     interactionSource = remember { MutableInteractionSource() }, indication = null
                 ) { ed.toggleCheck(b.id) } else Modifier
-            )
+            ),
+            contentAlignment = Alignment.CenterStart
         ) {
             when (b.lt) {
                 "o" -> Box(
-                    Modifier.offset(0.dp, (.15f * fs).dp).size((1.55f * fs).dp).clip(CircleShape).background(pal.p),
+                    Modifier.offset(0.dp, (-.04f * fs).dp).size((1.55f * fs).dp).clip(CircleShape).background(pal.p),
                     Alignment.Center
                 ) { T(ordN.toString(), fs * .85f, 900, pal.op) }
                 "c" -> {
                     val sz = (1.15f * fs).dp
                     val shape = RoundedCornerShape((.3f * 1.15f * fs).dp)
                     Box(
-                        Modifier.offset((.1f * fs).dp, (.3f * fs).dp).size(sz).clip(shape)
+                        Modifier.offset((.1f * fs).dp, (-.04f * fs).dp).size(sz).clip(shape)
                             .then(if (done) Modifier.background(pal.p) else Modifier.border((.14f * fs).dp, pal.p, shape)),
                         Alignment.Center
                     ) { if (done) Ic("ok", Color.White, sz * .78f) }
                 }
                 else -> Box(
-                    Modifier.offset((.3f * fs).dp, (.62f * fs).dp).size((.5f * fs).dp).clip(
+                    Modifier.offset((.3f * fs).dp, (-.04f * fs).dp).size((.5f * fs).dp).clip(
                         RoundedCornerShape(topStartPercent = 40, topEndPercent = 60, bottomEndPercent = 55, bottomStartPercent = 45)
                     ).background(pal.p)
                 )
@@ -510,7 +520,7 @@ fun Chip(text: String, bg: Color, fg: Color, shape: Shape, h: Dp = 46.dp, minW: 
 }
 
 @Composable
-fun EdBar(ed: Ed, act: Actions) {
+fun EdBar(ed: Ed, act: Actions, imeOpen: Boolean) {
     val pal = LocalPal.current
     val key = ed.focus
     val blk = key?.let { ed.blockOfKey(it) }
@@ -614,8 +624,23 @@ fun EdBar(ed: Ed, act: Actions) {
                 I("hr", "hr", off = blkOff) { ed.insHr() }
             }
             Sep()
-            Tbn({ Ic("hide", it) }, false, true) { ed.enterReading() }
+            // keyboard terbuka: cukup ciutkan kapsul (keyboard tetap); keyboard tertutup: masuk mode baca
+            Tbn({ Ic("hide", it) }, false, true) { if (imeOpen) { ed.pickQuote = false; ed.miniBar = true } else ed.enterReading() }
         }
+    }
+}
+
+/** Kapsul mini di atas keyboard: ketuk "Aa" untuk memunculkan kapsul lagi, panah bawah untuk mode baca. */
+@Composable
+fun MiniBar(ed: Ed) {
+    val pal = LocalPal.current
+    val shape = RoundedCornerShape(28.dp)
+    Row(
+        Modifier.shadow(if (pal.dark) 6.dp else 1.dp, shape).clip(shape).background(pal.c4).padding(5.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically
+    ) {
+        Tbn({ Ic("txt", it) }, false, true) { ed.miniBar = false }
+        Tbn({ Ic("hide", it) }, false, true) { ed.enterReading() }
     }
 }
 
@@ -659,11 +684,12 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
         }
     }
 
+    val imeOpen = WindowInsets.ime.getBottom(density) > 0
+
     Column(Modifier.fillMaxSize().background(pal.s)) {
-        if (!ed.reading) TopBar()
+        TopBar()
         Box(Modifier.weight(1f).fillMaxWidth()) {
             Column(Modifier.fillMaxSize().verticalScroll(scroll), horizontalAlignment = Alignment.CenterHorizontally) {
-                if (ed.reading) TopBar()
                 Column(
                     Modifier.widthIn(max = 700.dp).fillMaxWidth().padding(horizontal = 24.dp)
                         .onSizeChanged { ed.widthDp = with(density) { it.width.toDp().value } }
@@ -707,16 +733,26 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
             }
         }
         val showBar = !ed.reading && !ed.titleFocus
-        val barT by animateFloatAsState(if (showBar) 0f else 1f, tween(350, easing = Emph), label = "bar")
         Box(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))) {
-            if (barT < 1f) {
-                Box(
-                    Modifier.padding(bottom = 10.dp).fillMaxWidth()
-                        .graphicsLayer { translationY = barT * 140.dp.toPx(); alpha = 1f - barT },
-                    contentAlignment = Alignment.Center
-                ) {
-                    EdBar(ed, act)
+            // kapsul penuh: gerak kecil + pudar, karena keyboard sudah ikut bergerak sendiri
+            AnimatedVisibility(
+                visible = showBar && !ed.miniBar,
+                modifier = Modifier.align(Alignment.BottomCenter),
+                enter = fadeIn(tween(260, easing = Emph)) + slideInVertically(tween(320, easing = Emph)) { it / 3 },
+                exit = fadeOut(tween(180)) + slideOutVertically(tween(260, easing = Emph)) { it / 4 }
+            ) {
+                Box(Modifier.padding(bottom = 10.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    EdBar(ed, act, imeOpen)
                 }
+            }
+            // kapsul mini di pojok kanan bawah, dekat jempol
+            AnimatedVisibility(
+                visible = showBar && ed.miniBar,
+                modifier = Modifier.align(Alignment.BottomEnd),
+                enter = fadeIn(tween(200)) + scaleIn(spring(.7f, 500f), initialScale = .6f, transformOrigin = TransformOrigin(1f, 1f)),
+                exit = fadeOut(tween(150)) + scaleOut(tween(200, easing = Emph), targetScale = .6f, transformOrigin = TransformOrigin(1f, 1f))
+            ) {
+                Box(Modifier.padding(end = 14.dp, bottom = 10.dp)) { MiniBar(ed) }
             }
         }
     }
