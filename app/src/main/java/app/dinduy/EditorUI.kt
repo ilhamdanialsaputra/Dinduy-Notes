@@ -732,28 +732,33 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                 }
             }
         }
-        val showBar = !ed.reading && !ed.titleFocus
-        Box(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))) {
-            // kapsul penuh: gerak kecil + pudar, karena keyboard sudah ikut bergerak sendiri
-            AnimatedVisibility(
-                visible = showBar && !ed.miniBar,
-                modifier = Modifier.align(Alignment.BottomCenter),
-                enter = fadeIn(tween(260, easing = Emph)) + slideInVertically(tween(320, easing = Emph)) { it / 3 },
-                exit = fadeOut(tween(180)) + slideOutVertically(tween(260, easing = Emph)) { it / 4 }
-            ) {
-                Box(Modifier.padding(bottom = 10.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    EdBar(ed, act, imeOpen)
-                }
+        BottomBars(ed, act, !ed.reading && !ed.titleFocus, imeOpen)
+    }
+}
+
+/** Dipisah dari NoteScreen supaya tidak terjebak receiver ColumnScope milik Column di luarnya. */
+@Composable
+fun BottomBars(ed: Ed, act: Actions, showBar: Boolean, imeOpen: Boolean) {
+    Box(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))) {
+        // kapsul penuh: gerak kecil + pudar, karena keyboard sudah ikut bergerak sendiri
+        AnimatedVisibility(
+            visible = showBar && !ed.miniBar,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            enter = fadeIn(tween(260, easing = Emph)) + slideInVertically(tween(320, easing = Emph)) { it / 3 },
+            exit = fadeOut(tween(180)) + slideOutVertically(tween(260, easing = Emph)) { it / 4 }
+        ) {
+            Box(Modifier.padding(bottom = 10.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                EdBar(ed, act, imeOpen)
             }
-            // kapsul mini di pojok kanan bawah, dekat jempol
-            AnimatedVisibility(
-                visible = showBar && ed.miniBar,
-                modifier = Modifier.align(Alignment.BottomEnd),
-                enter = fadeIn(tween(200)) + scaleIn(spring(.7f, 500f), initialScale = .6f, transformOrigin = TransformOrigin(1f, 1f)),
-                exit = fadeOut(tween(150)) + scaleOut(tween(200, easing = Emph), targetScale = .6f, transformOrigin = TransformOrigin(1f, 1f))
-            ) {
-                Box(Modifier.padding(end = 14.dp, bottom = 10.dp)) { MiniBar(ed) }
-            }
+        }
+        // kapsul mini di pojok kanan bawah, dekat jempol
+        AnimatedVisibility(
+            visible = showBar && ed.miniBar,
+            modifier = Modifier.align(Alignment.BottomEnd),
+            enter = fadeIn(tween(200)) + scaleIn(spring(.7f, 500f), initialScale = .6f, transformOrigin = TransformOrigin(1f, 1f)),
+            exit = fadeOut(tween(150)) + scaleOut(tween(200, easing = Emph), targetScale = .6f, transformOrigin = TransformOrigin(1f, 1f))
+        ) {
+            Box(Modifier.padding(end = 14.dp, bottom = 10.dp)) { MiniBar(ed) }
         }
     }
 }
