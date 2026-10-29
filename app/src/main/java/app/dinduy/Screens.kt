@@ -91,6 +91,13 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.nestedScroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedScroll.NestedScrollSource
+import androidx.compose.ui.input.nestedScroll.nestedScroll
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -144,7 +151,7 @@ private fun fdate(u: Long): String {
 @Composable
 fun NoteCard(
     d: Note, i: Int, kind: String, selected: Boolean, modifier: Modifier = Modifier,
-    delTime: Long = 0L, onLong: (() -> Unit)? = null, onClick: (Morph) -> Unit
+    delTime: Long = 0L, onLong: (() -> Unit)? = null, track: ((Morph) -> Unit)? = null, onClick: (Morph) -> Unit
 ) {
     val pal = LocalPal.current
     val cs = when (i % 4) {
@@ -170,7 +177,10 @@ fun NoteCard(
     val dens = LocalDensity.current.density
     val haptic = LocalHapticFeedback.current
     Box(
-        modifier.onGloballyPositioned { rect = it.boundsInWindow() }
+        modifier.onGloballyPositioned {
+            rect = it.boundsInWindow()
+            track?.invoke(Morph(rect.left, rect.top, rect.right, rect.bottom, sh.average().toFloat() * dens, cs.first))
+        }
             .graphicsLayer { scaleX = sc; scaleY = sc }
             .fillMaxWidth().clip(shape).background(cs.first)
             .combinedClickable(
@@ -305,7 +315,23 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
     val dens = LocalDensity.current
     val focusMgr = LocalFocusManager.current
     val state = rememberLazyListState()
-    val sa by animateFloatAsState(if (vm.searchOn) 1f else 0f, spring(.8f, 300f), label = "sa")
+    // tween tanpa overshoot supaya buka/tutup pencarian tidak bergetar
+    val saRaw by animateFloatAsState(if (vm.searchOn) 1f else 0f, tween(420, easing = Emph), label = "sa")
+    val sa = saRaw.coerceIn(0f, 1f)
+    val fabConn = remember {
+        object : NestedScrollConnection {
+            var acc = 0f
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                val dy = available.y
+                if (dy == 0f) return Offset.Zero
+                if (dy * acc < 0f) acc = 0f
+                acc += dy
+                val th = 64f * dens.density
+                if (acc < -th) onSmall(true) else if (acc > th) onSmall(false)
+                return Offset.Zero
+            }
+        }
+    }
     val fr = remember { FocusRequester() }
     val sel = vm.sel
     val selMode = sel.isNotEmpty()
@@ -313,11 +339,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
     val pos = remember(live) { live.withIndex().associate { it.value.id to it.index } }
 
     LaunchedEffect(state) {
-        var last = 0
-        androidx.compose.runtime.snapshotFlow { state.firstVisibleItemIndex * 400 + state.firstVisibleItemScrollOffset }.collect { y ->
-            if (y > 240 * 2 || (y > 40 && y > last)) onSmall(true) else if (y < last - 4) onSmall(false)
-            last = y
-        }
+        androidx.compose.runtime.snapshotFlow { state.canScrollBackward }.collect { back -> if (!back) onSmall(false) }
     }
     LaunchedEffect(vm.searchOn) {
         if (vm.searchOn) {
@@ -331,13 +353,17 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val imeH = with(dens) { WindowInsets.ime.getBottom(dens).toDp() }
-        val panelH = (maxHeight - imeH - (sat + 8.dp) - 10.dp).coerceAtLeast(160.dp)
+        val livePanelH = (maxHeight - imeH - (sat + 8.dp) - 10.dp).coerceAtLeast(160.dp)
+        // saat menutup, tinggi panel dibekukan agar tidak ikut naik-turun mengikuti keyboard yang menghilang
+        val panelHold = remember { arrayOf(livePanelH) }
+        if (vm.searchOn) panelHold[0] = livePanelH
+        val panelH = panelHold[0]
 
         // daftar
         val np = live.count { it.p }
         val labels = np > 0 && np < live.size
         LazyColumn(
-            state = state, modifier = Modifier.fillMaxSize().graphicsLayer { alpha = 1f - sa },
+            state = state, modifier = Modifier.fillMaxSize().nestedScroll(fabConn).graphicsLayer { alpha = 1f - sa },
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = sat + 78.dp, bottom = 130.dp + sab),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -348,6 +374,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
             }
             items(live, key = { it.id }) { d ->
                 val i = pos[d.id] ?: 0
+                androidx.compose.runtime.DisposableEffect(d.id) { onDispose { vm.cardMorph.remove(d.id) } }
                 Column(Modifier.animateItem()) {
                     if (labels && i == 0) T("Disematkan", 13f, 900, pal.p, Modifier.padding(start = 12.dp, top = 8.dp, bottom = 12.dp), ls = .08f)
                     if (labels && i == np) T("Lainnya", 13f, 900, pal.p, Modifier.padding(start = 12.dp, top = 8.dp, bottom = 12.dp), ls = .08f)
@@ -372,6 +399,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                                 val s = .92f + .08f * pv.coerceIn(0f, 1f); scaleX = s; scaleY = s
                             },
                             onLong = { if (d.id !in sel) sel.add(d.id) },
+                            track = { m -> vm.cardMorph[d.id] = m },
                             onClick = { m ->
                                 if (selMode) { if (d.id in sel) sel.remove(d.id) else sel.add(d.id) }
                                 else nav.openNote(d.id, m)
@@ -447,7 +475,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
 }
 
 @Composable
-fun Fab(small: Boolean, hide: Boolean, lift: Dp, onClick: () -> Unit) {
+fun Fab(vm: AppVM, small: Boolean, hide: Boolean, lift: Dp, onClick: () -> Unit) {
     val pal = LocalPal.current
     val src = remember { MutableInteractionSource() }
     val pr by src.collectIsPressedAsState()
@@ -457,20 +485,37 @@ fun Fab(small: Boolean, hide: Boolean, lift: Dp, onClick: () -> Unit) {
     val ly by animateDpAsState(lift, spring(.7f, 400f), label = "ly")
     if (hide && al <= .01f) return
     val sab = sabDp()
+    val dens = LocalDensity.current.density
+    val shape = RoundedCornerShape(r)
     Box(Modifier.fillMaxSize().padding(end = 16.dp, bottom = 20.dp + sab), contentAlignment = Alignment.BottomEnd) {
+        // tanpa animateContentSize (itu yang memotong bayangan); label dianimasikan lewat AnimatedVisibility
         Row(
             Modifier.offset(y = -ly)
+                .onGloballyPositioned { c ->
+                    val b = c.boundsInWindow()
+                    if (!hide && b.width > 0f) vm.fabMorph = Morph(b.left, b.top, b.right, b.bottom, 26f * dens, pal.pc)
+                }
                 .graphicsLayer { scaleX = sc; scaleY = sc; alpha = al; transformOrigin = TransformOrigin(1f, 1f) }
-                .animateContentSize(spring(.8f, 400f))
-                .height(72.dp).widthIn(min = 72.dp).shadow(6.dp, RoundedCornerShape(r)).clip(RoundedCornerShape(r)).background(pal.pc)
+                .shadow(
+                    if (pal.dark) 4.dp else 3.dp, shape, clip = false,
+                    ambientColor = pal.p.copy(alpha = if (pal.dark) .35f else .22f),
+                    spotColor = pal.p.copy(alpha = if (pal.dark) .45f else .32f)
+                )
+                .height(72.dp).widthIn(min = 72.dp).clip(shape).background(pal.pc)
                 .clickable(interactionSource = src, indication = LocalIndication.current, enabled = !hide, onClick = onClick)
-                .padding(horizontal = if (small) 21.dp else 26.dp),
+                .padding(horizontal = 21.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center
         ) {
             Ic("plus", pal.opc, 30.dp)
-            if (!small) {
-                Spacer(Modifier.width(12.dp))
-                T("Baru", 20f, 900, pal.opc)
+            AnimatedVisibility(
+                visible = !small,
+                enter = expandHorizontally(tween(320, easing = Emph), expandFrom = Alignment.Start) + fadeIn(tween(240, 60)),
+                exit = shrinkHorizontally(tween(280, easing = Emph), shrinkTowards = Alignment.Start) + fadeOut(tween(120))
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Spacer(Modifier.width(12.dp))
+                    T("Baru", 20f, 900, pal.opc, maxLines = 1)
+                }
             }
         }
     }
@@ -761,7 +806,7 @@ fun SheetHost(vm: AppVM, nav: Nav, act: Actions) {
                 is Sheet.Add -> {
                     T("Tambah catatan", 26f, 1000, pal.os, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 14.dp), ls = -.01f)
                     Opt(1, "txt", "Tulis catatan", "Mulai dari halaman kosong") {
-                        close(); val n = vm.newNote(); nav.openNote(n.id, null, true)
+                        close(); val n = vm.newNote(); nav.openNote(n.id, vm.fabMorph, true)
                     }
                     Opt(2, "up", "Impor berkas", "Berkas .md atau .txt") { close(); act.importMd() }
                 }
