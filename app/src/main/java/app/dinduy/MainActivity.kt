@@ -68,7 +68,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
@@ -109,7 +114,14 @@ class Nav(private val vm: AppVM) {
 
     fun pop() {
         if (stack.size > 1) {
-            if (top is Scr.Note) vm.ed?.leave()
+            val t = top
+            if (t is Scr.Note) {
+                vm.ed?.leave()
+                // morph keluar selalu menuju posisi kartu saat ini (bukan posisi saat dibuka),
+                // jadi tetap konsisten walau catatan sudah pindah urutan setelah lama diedit
+                val live = vm.note(t.id)?.let { !it.a && it.dt == 0L } == true
+                vm.morph = vm.cardMorph[t.id] ?: (if (live) vm.fabMorph else null)
+            }
             stack.removeAt(stack.size - 1)
         }
     }
@@ -123,18 +135,23 @@ class Nav(private val vm: AppVM) {
 }
 
 @Composable
-fun ViewLayer(on: Boolean, under: Boolean, keep: Boolean = false, content: @Composable () -> Unit) {
+fun ViewLayer(on: Boolean, under: Boolean, keep: Boolean = false, base: Boolean = false, content: @Composable () -> Unit) {
     val pal = LocalPal.current
-    val t by animateFloatAsState(if (on) 1f else 0f, tween(500, easing = Emph), label = "t")
-    val u by animateFloatAsState(if (under) 1f else 0f, tween(500, easing = Emph), label = "u")
+    // geser horizontal penuh (opak, tanpa fade): layar baru masuk dari kanan, layar di bawahnya bergeser pelan + meredup
+    val t by animateFloatAsState(if (on || base) 1f else 0f, tween(460, easing = Emph), label = "t")
+    val u by animateFloatAsState(if (under) 1f else 0f, tween(460, easing = Emph), label = "u")
     if (!keep && !on && t == 0f) return
     Box(
-        Modifier.fillMaxSize().graphicsLayer {
-            translationX = (1f - t) * size.width * .14f - u * size.width * .08f
-            val sc = 1f - .05f * u
-            scaleX = sc; scaleY = sc
-            alpha = minOf(1f, t * 2.5f) * (1f - u)
-        }.background(pal.s).pointerInput(Unit) { }
+        Modifier.fillMaxSize()
+            .graphicsLayer { translationX = (1f - t) * size.width - u * size.width * .26f }
+            .drawBehind {
+                val w = 28.dp.toPx()
+                drawRect(
+                    Brush.horizontalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .14f)), startX = -w, endX = 0f),
+                    topLeft = Offset(-w, 0f), size = Size(w, size.height)
+                )
+            }
+            .background(pal.s).pointerInput(Unit) { }
             .then(
                 if (!on) Modifier.pointerInput(Unit) {
                     awaitPointerEventScope {
@@ -145,42 +162,35 @@ fun ViewLayer(on: Boolean, under: Boolean, keep: Boolean = false, content: @Comp
                     }
                 } else Modifier
             )
-    ) { content() }
+    ) {
+        content()
+        if (u > .001f) Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = .16f * u)))
+    }
 }
 
 @Composable
 fun NoteLayer(on: Boolean, morph: Morph?, content: @Composable () -> Unit) {
     val pal = LocalPal.current
-    val t by animateFloatAsState(
-        if (on) 1f else 0f,
-        if (morph != null) spring(.85f, 260f) else tween(500, easing = Emph), label = "nt"
-    )
+    // satu jalur saja: selalu morph kartu <-> layar penuh, tanpa geser/pudar UI lain
+    val t by animateFloatAsState(if (on) 1f else 0f, spring(.85f, 260f), label = "nt")
     if (!on && t <= .002f) return
-    if (morph == null) {
-        Box(
-            Modifier.fillMaxSize().graphicsLayer {
-                translationX = (1f - t) * size.width * .14f
-                alpha = minOf(1f, t * 2.5f)
-            }.background(pal.s).pointerInput(Unit) { }
-        ) { content() }
-    } else {
-        Box(
-            Modifier.fillMaxSize().pointerInput(Unit) { }.drawWithContent {
-                val tt = t.coerceIn(0f, 1f)
-                val l = lerp(morph.l, 0f, tt)
-                val tp = lerp(morph.t, 0f, tt)
-                val r = lerp(morph.r, size.width, tt)
-                val b = lerp(morph.b, size.height, tt)
-                val rad = lerp(morph.rad, 0f, tt)
-                val path = Path().apply { addRoundRect(RoundRect(Rect(l, tp, r, b), CornerRadius(rad, rad))) }
-                clipPath(path) {
-                    drawRect(androidx.compose.ui.graphics.lerp(morph.color, pal.s, tt))
-                    this@drawWithContent.drawContent()
-                }
+    Box(
+        Modifier.fillMaxSize().pointerInput(Unit) { }.drawWithContent {
+            val tt = t.coerceIn(0f, 1f)
+            val m = morph ?: Morph(size.width * .12f, size.height * .4f, size.width * .88f, size.height * .6f, 32.dp.toPx(), pal.s)
+            val l = lerp(m.l, 0f, tt)
+            val tp = lerp(m.t, 0f, tt)
+            val r = lerp(m.r, size.width, tt)
+            val b = lerp(m.b, size.height, tt)
+            val rad = lerp(m.rad, 0f, tt)
+            val path = Path().apply { addRoundRect(RoundRect(Rect(l, tp, r, b), CornerRadius(rad, rad))) }
+            clipPath(path) {
+                drawRect(androidx.compose.ui.graphics.lerp(m.color, pal.s, tt))
+                this@drawWithContent.drawContent()
             }
-        ) {
-            Box(Modifier.fillMaxSize().graphicsLayer { alpha = ((t - .4f) / .6f).coerceIn(0f, 1f) }) { content() }
         }
+    ) {
+        Box(Modifier.fillMaxSize().graphicsLayer { alpha = ((t - .4f) / .6f).coerceIn(0f, 1f) }) { content() }
     }
 }
 
@@ -301,13 +311,12 @@ fun AppRoot(vm: AppVM, act: Actions) {
             ) {
                 Box(Modifier.fillMaxSize().background(pal.s)) {
                     ViewLayer(
-                        on = isHome,
-                        under = top is Scr.Settings || top is Scr.Archive || top is Scr.Trash || (isNote && vm.morph == null),
-                        keep = true
+                        on = true, base = true, keep = true,
+                        under = nav.stack.any { it is Scr.Settings || it is Scr.Archive || it is Scr.Trash }
                     ) {
                         HomeScreen(vm, nav, act, openDrawer = { scope.launch { drawer.open() } }, onSmall = { fabSmall = it })
                     }
-                    ViewLayer(on = top is Scr.Archive, under = nav.stack.any { it is Scr.Archive } && isNote) {
+                    ViewLayer(on = top is Scr.Archive || (isNote && nav.stack.any { it is Scr.Archive }), under = false) {
                         ListScreen(
                             vm, "Arsip", vm.archived(), "Catatan yang diarsipkan tidak muncul di beranda.", "Arsip kosong", false,
                             onBack = { nav.pop() }, onClick = { vm.sheet = Sheet.Arc(it.id) }
@@ -339,7 +348,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
 
                     SelBar(vm)
                     Fab(
-                        small = fabSmall, hide = !isHome || vm.sel.isNotEmpty() || vm.searchOn,
+                        vm, small = fabSmall, hide = !isHome || vm.sel.isNotEmpty() || vm.searchOn,
                         lift = if (vm.snack != null) 76.dp else 0.dp
                     ) { vm.sheet = Sheet.Add }
                     SnackHost(vm, if (isNote) 84.dp else 20.dp + sabDp(), isNote)
