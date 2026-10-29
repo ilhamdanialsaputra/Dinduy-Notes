@@ -35,7 +35,13 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     var clearReq by mutableStateOf(0)
     var titleReq by mutableStateOf(0)
     var tick by mutableStateOf(0)
+    var miniBar by mutableStateOf(false)
     var widthDp = 340f
+
+    // penanda konversi otomatis (mis. "1. " -> nomor), untuk menahan IME yang mengembalikan teks penanda
+    private var convKey: String? = null
+    private var convPrefix = ""
+    private var convAt = 0L
 
     private var rq = 0
     private val hist = ArrayList<Snap>()
@@ -102,6 +108,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val p = (r.pos + 1).coerceIn(1, v.text.length.coerceAtLeast(1))
         tf[r.key] = v.copy(selection = TextRange(p))
         caretMoved(r.key)
+        if (req === r) req = null
     }
 
     fun onFocus(key: String) {
@@ -152,6 +159,17 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         }
         val nt = v.text.substring(1)
         val b = blockOfKey(key) ?: return
+        if (key == convKey && System.currentTimeMillis() - convAt < 1500 &&
+            convPrefix.isNotEmpty() && nt.startsWith(convPrefix) && !oldRt.t.startsWith(convPrefix)
+        ) {
+            // IME mengembalikan "1. " / "- " yang sudah jadi penanda: buang lagi
+            convKey = null
+            val rt2 = oldRt.edit(nt.substring(convPrefix.length), typing)
+            putRt(key, rt2)
+            tf[key] = TextFieldValue(Z + rt2.t, TextRange((v.selection.max - convPrefix.length).coerceIn(1, rt2.t.length + 1)))
+            dirty()
+            return
+        }
         val df = diff(oldRt.t, nt)
         val insStr = nt.substring(df.p, df.p + df.ins)
         val cell = isCellKey(key)
@@ -238,9 +256,12 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         commit()
         val nr = rt.slice(len, tx.length)
         setBlock(i, nb.copy(r = nr))
-        tf[key] = TextFieldValue(Z + nr.t, TextRange((c - len).coerceAtLeast(0) + 1))
+        val np = (c - len).coerceAtLeast(0)
+        tf[key] = TextFieldValue(Z + nr.t, TextRange(np + 1))
         typing = emptySet()
+        convKey = key; convPrefix = tx.substring(0, len); convAt = System.currentTimeMillis()
         afterStructural()
+        focusAt(key, np)
         return true
     }
 
@@ -748,7 +769,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     fun enterReading() {
         commit()
-        reading = true; selImg = null; pickQuote = false; clearReq++
+        reading = true; selImg = null; pickQuote = false; miniBar = false; clearReq++
     }
 
     fun exitReading(key: String? = null, off: Int = 0) {
