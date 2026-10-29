@@ -170,6 +170,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    @JvmName("applyPr")
     fun setPr(p: Prefs) {
         pr = p; save()
     }
