@@ -2,15 +2,10 @@
 
 package app.dinduy
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.LocalIndication
@@ -184,7 +179,7 @@ fun TF(
             value = v, onValueChange = { ed.onText(key, it) },
             modifier = modifier.focusRequester(fr).bringIntoViewRequester(bring)
                 .onFocusChanged { foc = it.isFocused; if (it.isFocused) ed.onFocus(key) },
-            textStyle = base, cursorBrush = SolidColor(pal.p), visualTransformation = vt, softWrap = wrap,
+            textStyle = base, cursorBrush = SolidColor(pal.p), visualTransformation = vt,
             onTextLayout = { lay = it },
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
             decorationBox = { inner ->
@@ -273,7 +268,7 @@ fun BlockView(ed: Ed, vm: AppVM, b: Blk, ordN: Int, dm: Dm) {
                                 color = pal.os, fontFamily = FontFamily.Monospace, fontSize = (fs * .82f).sp,
                                 lineHeight = (fs * .82f * 1.55f).sp
                             ),
-                            Modifier, wrap = false
+                            Modifier.widthIn(min = 240.dp), wrap = false
                         )
                     }
                 }
@@ -711,13 +706,15 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                 }
             }
         }
+        val showBar = !ed.reading && !ed.titleFocus
+        val barT by animateFloatAsState(if (showBar) 0f else 1f, tween(350, easing = Emph), label = "bar")
         Box(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))) {
-            AnimatedVisibility(
-                visible = !ed.reading && !ed.titleFocus,
-                enter = slideInVertically(tween(350, easing = Emph)) { it } + fadeIn(),
-                exit = slideOutVertically(tween(300, easing = Emph)) { it } + fadeOut()
-            ) {
-                Box(Modifier.padding(bottom = 10.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            if (barT < 1f) {
+                Box(
+                    Modifier.padding(bottom = 10.dp).fillMaxWidth()
+                        .graphicsLayer { translationY = barT * 140.dp.toPx(); alpha = 1f - barT },
+                    contentAlignment = Alignment.Center
+                ) {
                     EdBar(ed, act)
                 }
             }
