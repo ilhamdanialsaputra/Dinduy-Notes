@@ -163,6 +163,15 @@ fun styled(rt: Rt, text: String, off: Int, pal: Pal, fs: Float): AnnotatedString
 fun baseStyle(pal: Pal, dm: Dm, color: Color = pal.os, size: Float = dm.fs, w: Int = 400, lhEm: Float = dm.lh, ls: Float = 0f) =
     TextStyle(color = color, fontSize = size.sp, fontWeight = FontWeight(w), lineHeight = (lhEm * size).sp, letterSpacing = ls.em)
 
+/** Catat posisi kolom teks di ruang konten, dipakai seleksi lintas blok (mode baca maupun mode ketik). */
+private fun Modifier.trackPos(ed: Ed, key: String): Modifier = onGloballyPositioned { c ->
+    val cc = ed.contentCoords
+    if (cc != null && cc.isAttached && c.isAttached) {
+        val o = cc.localPositionOf(c, Offset.Zero)
+        if (ed.kpos[key] != o) ed.kpos[key] = o
+    }
+}
+
 /** Satu kolom teks: BasicTextField saat mengedit, Text biasa saat mode baca. */
 @Composable
 fun TF(
@@ -184,7 +193,7 @@ fun TF(
         }
         val uri = LocalUriHandler.current
         var lay by remember { mutableStateOf<TextLayoutResult?>(null) }
-        LaunchedEffect(lay) { lay?.let { ed.lays[key] = it } }
+        LaunchedEffect(lay) { lay?.let { ed.lays[key] = it; ed.lsh[key] = 0 } }
         Text(
             ann,
             modifier.heightIn(min = base.lineHeight.value.dp)
@@ -212,6 +221,7 @@ fun TF(
         val bring = remember { BringIntoViewRequester() }
         var lay by remember { mutableStateOf<TextLayoutResult?>(null) }
         var foc by remember { mutableStateOf(false) }
+        LaunchedEffect(lay) { lay?.let { ed.lays[key] = it; ed.lsh[key] = 1 } }
         val r = ed.req
         LaunchedEffect(r) {
             if (r != null && r.key == key) {
@@ -233,10 +243,10 @@ fun TF(
         }
         BasicTextField(
             value = v, onValueChange = { ed.onText(key, it) },
-            modifier = modifier.focusRequester(fr).bringIntoViewRequester(bring)
+            modifier = modifier.focusRequester(fr).bringIntoViewRequester(bring).trackPos(ed, key)
                 .onFocusChanged { foc = it.isFocused; if (it.isFocused) ed.onFocus(key) },
             textStyle = base, cursorBrush = SolidColor(pal.p), visualTransformation = vt,
-            onTextLayout = { lay = it },
+            onTextLayout = { lay = it }, softWrap = true,
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
             decorationBox = { inner ->
                 Box {
@@ -269,14 +279,17 @@ val VARS = listOf(
 )
 
 @Composable
-fun BlockView(ed: Ed, vm: AppVM, b: Blk, ordN: Int, dm: Dm) {
+fun BlockView(
+    ed: Ed, vm: AppVM, b: Blk, ordN: Int, dm: Dm,
+    side: List<Blk> = emptyList(), od: Map<String, Int> = emptyMap()
+) {
     val pal = LocalPal.current
     val fs = dm.fs
     val bottom = (fs * 1.1f).dp
     when (b.ty) {
         "p" -> {
             val only = ed.blocks.size == 1 && b.r.t.isEmpty()
-            TF(ed, b.id, baseStyle(pal, dm), Modifier.fillMaxWidth().padding(bottom = bottom), hint = if (only) "Tulis catatan…" else null)
+            TF(ed, b.id, baseStyle(pal, dm), Modifier.fillMaxWidth().padding(bottom = bottom), hint = if (only) "Tulis catatan…" else if (b.sd && b.r.t.isEmpty()) "Tulis di samping…" else null)
         }
         "h" -> {
             val st = when (b.lv) {
@@ -335,7 +348,7 @@ fun BlockView(ed: Ed, vm: AppVM, b: Blk, ordN: Int, dm: Dm) {
                 .clip(RoundedCornerShape(4.dp)).background(pal.sc)
         )
         "tbl" -> TableView(ed, b, dm, pal)
-        "img" -> ImgView(ed, vm, b, dm)
+        "img" -> ImgView(ed, vm, b, dm, side, od)
     }
 }
 
@@ -460,7 +473,8 @@ fun Modifier.holdDrag(
     enabled: Boolean,
     onStart: (Offset) -> Boolean,
     onMove: (Offset, Offset) -> Unit,
-    onEnd: (Boolean) -> Unit
+    onEnd: (Boolean) -> Unit,
+    lead: Long = 0L
 ): Modifier {
     val st by rememberUpdatedState(onStart)
     val mo by rememberUpdatedState(onMove)
@@ -470,7 +484,7 @@ fun Modifier.holdDrag(
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
             val slop = viewConfiguration.touchSlop
-            val early = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+            val early = withTimeoutOrNull((viewConfiguration.longPressTimeoutMillis - lead).coerceAtLeast(100L)) {
                 var done = false
                 while (!done) {
                     val ev = awaitPointerEvent(PointerEventPass.Initial)
@@ -529,7 +543,10 @@ fun Grip(
 }
 
 @Composable
-fun ImgView(ed: Ed, vm: AppVM, b: Blk, dm: Dm) {
+fun ImgView(
+    ed: Ed, vm: AppVM, b: Blk, dm: Dm,
+    side: List<Blk> = emptyList(), od: Map<String, Int> = emptyMap()
+) {
     val sel = ed.selImg?.takeIf { it.first == b.id }?.second
     val n = b.im.size
     val bottom = (dm.fs * 1.1f).dp
@@ -540,23 +557,29 @@ fun ImgView(ed: Ed, vm: AppVM, b: Blk, dm: Dm) {
             val imgW = maxWidth * w
             val ratio = m.a.coerceIn(.2f, 5f)
             val room = maxWidth.value * (1f - w) - SIDE_GAP
-            val side = m.al != "c" && room >= SIDE_MIN
+            val canSide = side.isNotEmpty() || (m.al != "c" && room >= SIDE_MIN)
+            val imgH = imgW / ratio
             val cell: @Composable () -> Unit = {
                 ImgCell(ed, vm, b, 0, Modifier.width(imgW).aspectRatio(ratio), sel == 0)
+            }
+            val sideContent: @Composable (Modifier) -> Unit = { mod ->
+                if (side.isNotEmpty()) SideColumn(ed, vm, side, od, dm, imgH, mod)
+                else if (!ed.reading) SidePlaceholder(ed, b, dm, imgH, sel == 0, mod)
+                else Spacer(mod)
             }
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = when (m.al) { "l" -> Arrangement.Start; "r" -> Arrangement.End; else -> Arrangement.Center },
                 verticalAlignment = Alignment.Top
             ) {
-                if (side && m.al == "r") {
-                    SideText(ed, b, dm, Modifier.weight(1f), imgW / ratio, sel == 0)
+                if (canSide && m.al == "r") {
+                    sideContent(Modifier.weight(1f))
                     Spacer(Modifier.width(SIDE_GAP.dp))
                 }
                 cell()
-                if (side && m.al == "l") {
+                if (canSide && m.al == "l") {
                     Spacer(Modifier.width(SIDE_GAP.dp))
-                    SideText(ed, b, dm, Modifier.weight(1f), imgW / ratio, sel == 0)
+                    sideContent(Modifier.weight(1f))
                 }
             }
         }
@@ -575,23 +598,31 @@ fun ImgView(ed: Ed, vm: AppVM, b: Blk, dm: Dm) {
     }
 }
 
-/** Sisi kosong di samping gambar: seluruh areanya bisa diketuk untuk mulai menulis. */
+/** Teks di samping gambar: blok-blok biasa (paragraf, judul, poin, dst.) yang disusun di kolom sisi gambar. */
 @Composable
-fun SideText(ed: Ed, b: Blk, dm: Dm, modifier: Modifier, minH: Dp, imgSel: Boolean) {
-    val pal = LocalPal.current
-    if (ed.reading && b.r.t.isEmpty()) { Spacer(modifier); return }
-    Box(
+fun SideColumn(ed: Ed, vm: AppVM, side: List<Blk>, od: Map<String, Int>, dm: Dm, minH: Dp, modifier: Modifier) {
+    Column(
         modifier.heightIn(min = minH).then(
             if (ed.reading) Modifier
             else Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                ed.focusAt(b.id, b.r.t.length)
+                side.lastOrNull { it.isText }?.let { ed.focusAt(it.id, it.r.t.length) }
             }
         )
     ) {
-        TF(
-            ed, b.id, baseStyle(pal, dm), Modifier.fillMaxWidth(),
-            hint = if (ed.reading) null else if (imgSel) "Ketuk di sini untuk menulis…" else "Tulis di samping…"
-        )
+        side.forEach { sb -> key(sb.id) { BlockView(ed, vm, sb, od[sb.id] ?: 1, dm) } }
+    }
+}
+
+/** Sisi kosong di samping gambar: ketuk untuk mulai menulis di sana. */
+@Composable
+fun SidePlaceholder(ed: Ed, b: Blk, dm: Dm, minH: Dp, imgSel: Boolean, modifier: Modifier) {
+    val pal = LocalPal.current
+    Box(
+        modifier.heightIn(min = minH).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+            ed.startSide(b.id)
+        }
+    ) {
+        T(if (imgSel) "Ketuk di sini untuk menulis di samping gambar…" else "Tulis di samping…", dm.fs, 400, pal.os, alpha = .4f)
     }
 }
 
@@ -668,6 +699,13 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
                 alpha = if (liftedRow) .94f else 1f
             }
             .onSizeChanged { box = it }
+            .onGloballyPositioned { c ->
+                val cc = ed.contentCoords
+                if (cc != null && cc.isAttached && c.isAttached) {
+                    val o = cc.localPositionOf(c, Offset.Zero)
+                    ed.ipos[mS.id] = androidx.compose.ui.geometry.Rect(o, Size(c.size.width.toFloat(), c.size.height.toFloat()))
+                }
+            }
     ) {
         Box(
             Modifier.matchParentSize().clip(shape).background(pal.c3)
@@ -1056,10 +1094,11 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                         .onSizeChanged { ed.widthDp = with(density) { it.width.toDp().value } }
                         .onGloballyPositioned { ed.contentCoords = it }
                         .holdDrag(
-                            ed.reading,
+                            true,
                             onStart = { pos -> ed.selLong(pos, pos.y - scroll.value) },
                             onMove = { pos, _ -> ed.selMove(pos, pos.y - scroll.value) },
-                            onEnd = { ed.selEnd() }
+                            onEnd = { ed.selEnd() },
+                            lead = 70L
                         )
                 ) {
                     Column(Modifier.fillMaxWidth()) {
@@ -1084,10 +1123,14 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                                     .pointerInput(ed.reading) { if (ed.reading) detectTapGestures { if (ed.selOn) ed.clearSel() else ed.exitReading() } }
                             )
                         }
-                        ed.blocks.forEachIndexed { bi, b ->
+                        var bi0 = 0
+                        while (bi0 < ed.blocks.size) {
+                            val bi = bi0
+                            val b = ed.blocks[bi]
+                            val cnt = ed.sideCount(bi)
                             key(b.id) {
                                 val lifted = ed.mv?.let { it.bid == b.id && !it.row } == true
-                                val last = bi == ed.blocks.size - 1
+                                val last = bi + cnt == ed.blocks.size - 1
                                 Box(
                                     Modifier
                                         .zIndex(if (lifted) 3f else 0f)
@@ -1107,8 +1150,9 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                                                 drawRoundRect(pal.p, Offset(0f, y), Size(size.width, th), CornerRadius(th / 2f))
                                             }
                                         }
-                                ) { BlockView(ed, vm, b, od[b.id] ?: 1, dm) }
+                                ) { BlockView(ed, vm, b, od[b.id] ?: 1, dm, ed.blocks.subList(bi + 1, bi + 1 + cnt).toList(), od) }
                             }
+                            bi0 += 1 + cnt
                         }
                         Box(
                             Modifier.fillMaxWidth().height(220.dp).clickable(
@@ -1137,6 +1181,8 @@ fun TextSelBar(ed: Ed, vm: AppVM, act: Actions) {
     val pal = LocalPal.current
     val has = ed.pa != null && ed.pf != null
     val cap = RoundedCornerShape(30.dp)
+    @Suppress("DEPRECATION")
+    val clip = androidx.compose.ui.platform.LocalClipboardManager.current
     Column(
         Modifier.widthIn(max = 560.dp).fillMaxWidth().padding(horizontal = 10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -1166,6 +1212,11 @@ fun TextSelBar(ed: Ed, vm: AppVM, act: Actions) {
                     Chip("Hapus", pal.ec, pal.oec, RoundedCornerShape(23.dp)) { ed.selDelete() }
                 }
                 Chip("Semua", pal.c3, pal.os, RoundedCornerShape(23.dp)) { ed.selAll() }
+                Chip("Tempel", pal.c3, pal.os, RoundedCornerShape(23.dp)) {
+                    @Suppress("DEPRECATION")
+                    val s = clip.getText()?.text
+                    if (!s.isNullOrEmpty() && has) ed.selPaste(s) else vm.show("Tidak ada yang bisa ditempel")
+                }
                 if (has) {
                     Sep()
                     listOf(K.B to "b", K.I to "i", K.U to "u", K.S to "s", K.M to "mark", K.C to "code").forEach { (k, ic) ->
