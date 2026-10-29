@@ -34,7 +34,13 @@ jobs:
           KS_PASS: ${{ secrets.KS_PASS }}
           KS_ALIAS: ${{ secrets.KS_ALIAS }}
           KEY_PASS: ${{ secrets.KEY_PASS }}
-        run: gradle assembleRelease --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          gradle assembleRelease --no-daemon 2>&1 | tee build.log
+
+      - name: Tampilkan error saja
+        if: failure()
+        run: grep '^e: ' build.log | sed 's#file:///home/runner/work/[^/]*/[^/]*/##' || true
 
       - uses: actions/upload-artifact@v4
         with:
