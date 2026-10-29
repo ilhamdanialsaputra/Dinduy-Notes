@@ -147,7 +147,7 @@ fun ViewLayer(on: Boolean, under: Boolean, keep: Boolean = false, base: Boolean 
             .drawBehind {
                 val w = 28.dp.toPx()
                 drawRect(
-                    Brush.horizontalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .14f)), startX = -w, endX = 0f),
+                    Brush.horizontalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = if (pal.dark) .14f else .04f)), startX = -w, endX = 0f),
                     topLeft = Offset(-w, 0f), size = Size(w, size.height)
                 )
             }
@@ -164,7 +164,7 @@ fun ViewLayer(on: Boolean, under: Boolean, keep: Boolean = false, base: Boolean 
             )
     ) {
         content()
-        if (u > .001f) Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = .16f * u)))
+        if (u > .001f) Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = (if (pal.dark) .16f else .05f) * u)))
     }
 }
 
