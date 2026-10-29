@@ -1,779 +1,771 @@
+@file:OptIn(ExperimentalFoundationApi::class, ExperimentalComposeUiApi::class)
+
 package app.dinduy
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.input.TextFieldValue
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.BiasAlignment
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
-class Req(val key: String, val pos: Int, val n: Int)
-class Snap(val bl: List<Blk>, val key: String?, val sel: TextRange)
+/** Lebar kapsul saat mengembang, sebagai pecahan dari lebar area. */
+private const val BAR_FRAC = 0.84f
 
-fun keyBlock(k: String) = k.substringBefore(':')
-fun isCellKey(k: String) = k.indexOf(':') >= 0
-fun cellRC(k: String): Pair<Int, Int> {
-    val p = k.split(':')
-    return (p.getOrNull(1)?.toIntOrNull() ?: 0) to (p.getOrNull(2)?.toIntOrNull() ?: 0)
+class Dm(val fs: Float, val lh: Float)
+
+fun spanStyle(k: Int, pal: Pal, fs: Float): SpanStyle = when (k) {
+    K.B -> SpanStyle(fontWeight = FontWeight(850))
+    K.I -> SpanStyle(fontStyle = FontStyle.Italic)
+    K.U -> SpanStyle(textDecoration = TextDecoration.Underline)
+    K.S -> SpanStyle(textDecoration = TextDecoration.LineThrough)
+    K.M -> SpanStyle(background = pal.pc, color = pal.opc)
+    K.C -> SpanStyle(fontFamily = FontFamily.Monospace, fontSize = (fs * .85f).sp, background = pal.sc, color = pal.osc)
+    else -> SpanStyle(color = pal.p, fontWeight = FontWeight(700), textDecoration = TextDecoration.Underline)
 }
 
-class Ed(private val vm: AppVM, val noteId: String, private val scope: CoroutineScope) {
-    var title by mutableStateOf("")
-    var blocks by mutableStateOf<List<Blk>>(listOf(Blk()))
-    val tf = mutableStateMapOf<String, TextFieldValue>()
-    var focus by mutableStateOf<String?>(null)
-    var typing by mutableStateOf(setOf<Int>())
-    var reading by mutableStateOf(false)
-    var pickQuote by mutableStateOf(false)
-    var selImg by mutableStateOf<Pair<String, Int>?>(null)
-    var req by mutableStateOf<Req?>(null)
-    var titleFocus by mutableStateOf(false)
-    var clearReq by mutableStateOf(0)
-    var titleReq by mutableStateOf(0)
-    var tick by mutableStateOf(0)
-    var miniBar by mutableStateOf(false)
-    var widthDp = 340f
-
-    // penanda konversi otomatis (mis. "1. " -> nomor), untuk menahan IME yang mengembalikan teks penanda
-    private var convKey: String? = null
-    private var convPrefix = ""
-    private var convAt = 0L
-
-    private var rq = 0
-    private val hist = ArrayList<Snap>()
-    private var hi = 0
-    private var typed = 0
-    private var cJob: Job? = null
-    private var sJob: Job? = null
-    private var chg = false
-
-    init {
-        val n = vm.note(noteId)
-        title = n?.t ?: ""
-        blocks = (n?.bl ?: emptyList()).ifEmpty { listOf(Blk()) }
-        blocks.forEach { seed(it) }
-        norm()
-        hist.add(Snap(blocks, null, TextRange.Zero))
+fun styled(rt: Rt, text: String, off: Int, pal: Pal, fs: Float): AnnotatedString = buildAnnotatedString {
+    append(text)
+    val n = text.length
+    for (s in rt.sp) {
+        val a = (s.s + off).coerceIn(0, n)
+        val b = (s.e + off).coerceIn(0, n)
+        if (b > a) addStyle(spanStyle(s.k, pal, fs), a, b)
     }
+}
 
-    // ---------- util ----------
-    private fun seed(b: Blk) {
-        if (b.ty == "tbl") {
-            b.tb.forEachIndexed { r, row ->
-                row.forEachIndexed { c, cell -> tf["${b.id}:$r:$c"] = TextFieldValue(Z + cell.t, TextRange(1)) }
+fun baseStyle(pal: Pal, dm: Dm, color: Color = pal.os, size: Float = dm.fs, w: Int = 400, lhEm: Float = dm.lh, ls: Float = 0f) =
+    TextStyle(color = color, fontSize = size.sp, fontWeight = FontWeight(w), lineHeight = (lhEm * size).sp, letterSpacing = ls.em)
+
+/** Satu kolom teks: BasicTextField saat mengedit, Text biasa saat mode baca. */
+@Composable
+fun TF(
+    ed: Ed, key: String, base: TextStyle, modifier: Modifier = Modifier,
+    hint: String? = null, wrap: Boolean = true
+) {
+    val pal = LocalPal.current
+    val v = ed.tf[key] ?: return
+    val rt = ed.rtOf(key)
+    val fs = base.fontSize.value
+    if (ed.reading) {
+        val ann = remember(rt, pal, fs) { styled(rt, rt.t, 0, pal, fs) }
+        val uri = LocalUriHandler.current
+        var lay by remember { mutableStateOf<TextLayoutResult?>(null) }
+        Text(
+            ann,
+            modifier.heightIn(min = base.lineHeight.value.dp).pointerInput(rt) {
+                detectTapGestures { pos ->
+                    val l = lay ?: return@detectTapGestures
+                    val o = l.getOffsetForPosition(pos)
+                    val lk = rt.sp.firstOrNull { it.k == K.L && o >= it.s && o < it.e }
+                    val u = lk?.u
+                    if (u != null) uri.openUri(u) else ed.exitReading(key, o)
+                }
+            },
+            style = base, softWrap = wrap, onTextLayout = { lay = it }
+        )
+    } else {
+        val fr = remember { FocusRequester() }
+        val bring = remember { BringIntoViewRequester() }
+        var lay by remember { mutableStateOf<TextLayoutResult?>(null) }
+        var foc by remember { mutableStateOf(false) }
+        val r = ed.req
+        LaunchedEffect(r) {
+            if (r != null && r.key == key) {
+                try { fr.requestFocus() } catch (e: Exception) { }
+                ed.applyReq(r)
             }
-        } else if (b.isText) tf[b.id] = TextFieldValue(Z + b.r.t, TextRange(1))
-    }
-
-    private fun reseedAll() {
-        tf.clear(); blocks.forEach { seed(it) }
-    }
-
-    fun idx(id: String) = blocks.indexOfFirst { it.id == id }
-    fun blockOfKey(k: String): Blk? = blocks.firstOrNull { it.id == keyBlock(k) }
-
-    fun rtOf(key: String): Rt {
-        val b = blockOfKey(key) ?: return Rt()
-        if (!isCellKey(key)) return b.r
-        val (r, c) = cellRC(key)
-        return b.tb.getOrNull(r)?.getOrNull(c) ?: Rt()
-    }
-
-    private fun putRt(key: String, rt: Rt) {
-        val id = keyBlock(key)
-        val rc = if (isCellKey(key)) cellRC(key) else null
-        blocks = blocks.map { b ->
-            if (b.id != id) b
-            else if (rc != null) b.copy(tb = b.tb.mapIndexed { ri, row ->
-                if (ri != rc.first) row else row.mapIndexed { ci, cell -> if (ci == rc.second) rt else cell }
-            })
-            else b.copy(r = rt)
         }
-    }
-
-    private fun setBlock(i: Int, nb: Blk) {
-        blocks = blocks.toMutableList().also { it[i] = nb }
-    }
-
-    fun focusAt(key: String, pos: Int) {
-        req = Req(key, pos, ++rq)
-    }
-
-    fun applyReq(r: Req) {
-        val v = tf[r.key] ?: return
-        val p = (r.pos + 1).coerceIn(1, v.text.length.coerceAtLeast(1))
-        tf[r.key] = v.copy(selection = TextRange(p))
-        caretMoved(r.key)
-        if (req === r) req = null
-    }
-
-    fun onFocus(key: String) {
-        titleFocus = false
-        selImg = null
-        caretMoved(key)
-    }
-
-    fun caretMoved(key: String) {
-        focus = key
-        val v = tf[key] ?: return
-        typing = rtOf(key).flags(v.selection.min - 1, v.selection.max - 1)
-    }
-
-    fun activeFlags(): Set<Int> {
-        val k = focus ?: return emptySet()
-        val v = tf[k] ?: return emptySet()
-        val a = v.selection.min - 1
-        val b = v.selection.max - 1
-        return if (a == b) typing else rtOf(k).flags(a, b)
-    }
-
-    private fun clampSel(v: TextFieldValue): TextFieldValue =
-        if (v.selection.min >= 1) v
-        else v.copy(selection = TextRange(maxOf(1, v.selection.start), maxOf(1, v.selection.end)))
-
-    // ---------- teks ----------
-    fun onText(key: String, v0: TextFieldValue) {
-        val old = tf[key] ?: return
-        if (v0.text == old.text) {
-            val v = clampSel(v0)
-            tf[key] = v
-            if (v.selection != old.selection) caretMoved(key)
-            return
-        }
-        val oldRt = rtOf(key)
-        var v = v0
-        if (!v.text.startsWith(Z)) {
-            if (v.text == oldRt.t && v.selection.collapsed && v.selection.start == 0 && !isCellKey(key)) {
-                tf[key] = TextFieldValue(Z + oldRt.t, TextRange(1))
-                backStart(key)
-                return
+        LaunchedEffect(v.selection, v.text.length, foc) {
+            if (foc && v.selection.collapsed) {
+                delay(30)
+                lay?.let { l ->
+                    val o = v.selection.start.coerceIn(0, l.layoutInput.text.length)
+                    try { bring.bringIntoView(l.getCursorRect(o)) } catch (e: Exception) { }
+                }
             }
-            v = TextFieldValue(Z + v.text, TextRange(v.selection.min + 1, v.selection.max + 1))
         }
-        if (v.text == old.text) {
-            tf[key] = clampSel(v); return
+        val vt = remember(rt, pal, fs) {
+            VisualTransformation { t -> TransformedText(styled(rt, t.text, 1, pal, fs), OffsetMapping.Identity) }
         }
-        val nt = v.text.substring(1)
-        val b = blockOfKey(key) ?: return
-        if (key == convKey && System.currentTimeMillis() - convAt < 1500 &&
-            convPrefix.isNotEmpty() && nt.startsWith(convPrefix) && !oldRt.t.startsWith(convPrefix)
+        BasicTextField(
+            value = v, onValueChange = { ed.onText(key, it) },
+            modifier = modifier.focusRequester(fr).bringIntoViewRequester(bring)
+                .onFocusChanged { foc = it.isFocused; if (it.isFocused) ed.onFocus(key) },
+            textStyle = base, cursorBrush = SolidColor(pal.p), visualTransformation = vt,
+            onTextLayout = { lay = it },
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+            decorationBox = { inner ->
+                Box {
+                    if (hint != null && v.text.length <= 1) {
+                        Text(hint, style = base.copy(color = base.color.copy(alpha = .4f)))
+                    }
+                    inner()
+                }
+            }
+        )
+    }
+}
+
+class QS(val bg: Color, val fg: Color, val shape: Shape, val label: String?, val bar: Boolean = false, val border: Boolean = false)
+
+fun qs(k: String, p: Pal): QS = when (k) {
+    "note" -> QS(p.pc, p.opc, RoundedCornerShape(28.dp), "Catatan")
+    "tip" -> QS(p.sc, p.osc, RoundedCornerShape(40.dp, 12.dp, 40.dp, 12.dp), "Tips")
+    "imp" -> QS(p.p, p.op, RoundedCornerShape(12.dp, 40.dp, 12.dp, 40.dp), "Penting")
+    "warn" -> QS(p.wc, p.owc, RoundedCornerShape(24.dp), "Peringatan", bar = true)
+    "cau" -> QS(p.ec, p.oec, RoundedCornerShape(6.dp, 32.dp, 32.dp, 32.dp), "Awas")
+    "idea" -> QS(p.ac, p.oac, RoundedCornerShape(44.dp, 44.dp, 12.dp, 44.dp), "Ide")
+    "def" -> QS(Color.Transparent, p.os, RoundedCornerShape(32.dp), "Definisi", border = true)
+    else -> QS(p.tc, p.otc, RoundedCornerShape(28.dp, 28.dp, 28.dp, 8.dp), null)
+}
+
+val VARS = listOf(
+    "quote" to "Kutipan", "note" to "Catatan", "tip" to "Tips", "imp" to "Penting",
+    "warn" to "Peringatan", "cau" to "Awas", "idea" to "Ide", "def" to "Definisi"
+)
+
+@Composable
+fun BlockView(ed: Ed, vm: AppVM, b: Blk, ordN: Int, dm: Dm) {
+    val pal = LocalPal.current
+    val fs = dm.fs
+    val bottom = (fs * 1.1f).dp
+    when (b.ty) {
+        "p" -> {
+            val only = ed.blocks.size == 1 && b.r.t.isEmpty()
+            TF(ed, b.id, baseStyle(pal, dm), Modifier.fillMaxWidth().padding(bottom = bottom), hint = if (only) "Tulis catatan…" else null)
+        }
+        "h" -> {
+            val st = when (b.lv) {
+                1 -> baseStyle(pal, dm, pal.p, fs * 2.5f, 1000, 1.02f, -.02f)
+                2 -> baseStyle(pal, dm, pal.os, fs * 1.85f, 1000, 1.02f, -.02f)
+                3 -> baseStyle(pal, dm, pal.p, fs * 1.45f, 1000, 1.02f, -.02f)
+                else -> baseStyle(pal, dm, pal.os, fs * 1.15f, 1000, 1.02f, -.02f)
+            }
+            TF(ed, b.id, st, Modifier.fillMaxWidth().padding(top = (fs * .4f).dp, bottom = (fs * .5f).dp))
+        }
+        "li" -> ListItem(ed, b, ordN, dm, pal)
+        "q" -> {
+            val q = qs(b.k, pal)
+            Box(
+                Modifier.fillMaxWidth().padding(bottom = bottom).clip(q.shape).background(q.bg)
+                    .then(if (q.border) Modifier.border(3.dp, pal.p, q.shape) else Modifier)
+                    .drawBehind { if (q.bar) drawRect(pal.owc, size = Size(7.dp.toPx(), size.height)) }
+                    .padding(horizontal = 22.dp, vertical = 18.dp)
+            ) {
+                Column {
+                    if (q.label != null) {
+                        T(
+                            q.label.uppercase(), fs * .7f * 1.05f, 900, if (b.k == "def") pal.p else q.fg,
+                            Modifier.padding(bottom = (fs * .45f * .7f).dp), ls = .12f, alpha = if (b.k == "def") 1f else .85f
+                        )
+                    }
+                    TF(ed, b.id, baseStyle(pal, dm, q.fg, fs * 1.05f, 500), Modifier.fillMaxWidth())
+                }
+            }
+        }
+        "code" -> {
+            Box(Modifier.fillMaxWidth().padding(bottom = bottom).clip(RoundedCornerShape(28.dp)).background(pal.c3).padding(20.dp)) {
+                Column {
+                    if (b.l.isNotEmpty()) {
+                        T(
+                            b.l.uppercase(), 12f, 900, pal.op,
+                            Modifier.padding(bottom = 14.dp).clip(RoundedCornerShape(12.dp)).background(pal.p)
+                                .padding(horizontal = 12.dp, vertical = 4.dp), ls = .1f
+                        )
+                    }
+                    Box(Modifier.horizontalScroll(rememberScrollState())) {
+                        TF(
+                            ed, b.id,
+                            TextStyle(
+                                color = pal.os, fontFamily = FontFamily.Monospace, fontSize = (fs * .82f).sp,
+                                lineHeight = (fs * .82f * 1.55f).sp
+                            ),
+                            Modifier.widthIn(min = 240.dp), wrap = false
+                        )
+                    }
+                }
+            }
+        }
+        "hr" -> Box(
+            Modifier.fillMaxWidth().padding(vertical = (fs * .9f).dp).height(8.dp)
+                .clip(RoundedCornerShape(4.dp)).background(pal.sc)
+        )
+        "tbl" -> TableView(ed, b, dm, pal)
+        "img" -> ImgView(ed, vm, b, dm)
+    }
+}
+
+@Composable
+fun ListItem(ed: Ed, b: Blk, ordN: Int, dm: Dm, pal: Pal) {
+    val fs = dm.fs
+    val lineH = fs * dm.lh
+    val mw = when (b.lt) { "o" -> 2.2f; "c" -> 1.9f; else -> 1.7f } * fs
+    val done = b.lt == "c" && b.x
+    Row(Modifier.fillMaxWidth().padding(start = (b.d * 1.4f * fs).dp, bottom = (fs * .5f).dp)) {
+        // penanda dipusatkan secara vertikal pada tinggi baris, lalu sedikit dinaikkan agar sejajar dengan x-height teks
+        Box(
+            Modifier.width(mw.dp).height(lineH.dp).then(
+                if (b.lt == "c") Modifier.clickable(
+                    interactionSource = remember { MutableInteractionSource() }, indication = null
+                ) { ed.toggleCheck(b.id) } else Modifier
+            ),
+            contentAlignment = Alignment.CenterStart
         ) {
-            // IME mengembalikan "1. " / "- " yang sudah jadi penanda: buang lagi
-            convKey = null
-            val rt2 = oldRt.edit(nt.substring(convPrefix.length), typing)
-            putRt(key, rt2)
-            tf[key] = TextFieldValue(Z + rt2.t, TextRange((v.selection.max - convPrefix.length).coerceIn(1, rt2.t.length + 1)))
-            dirty()
-            return
-        }
-        val df = diff(oldRt.t, nt)
-        val insStr = nt.substring(df.p, df.p + df.ins)
-        val cell = isCellKey(key)
-        if (df.ins > 0 && insStr.indexOf('\n') >= 0) {
-            val without = nt.removeRange(df.p, df.p + df.ins)
-            if (cell) {
-                val rt2 = oldRt.edit(without, typing)
-                putRt(key, rt2)
-                tf[key] = TextFieldValue(Z + rt2.t, TextRange(df.p + 1))
-                cellEnter(key)
-                return
-            }
-            if (!b.isMulti) {
-                val rt2 = oldRt.edit(without, typing)
-                putRt(key, rt2)
-                tf[key] = TextFieldValue(Z + rt2.t, TextRange(df.p + 1))
-                if (insStr == "\n") enter(key, df.p) else paste(key, df.p, insStr)
-                return
-            }
-            if (insStr == "\n" && df.p == nt.length - 1 && (oldRt.t.isEmpty() || oldRt.t.endsWith("\n"))) {
-                val keep = if (oldRt.t.endsWith("\n")) oldRt.slice(0, oldRt.t.length - 1) else oldRt
-                exitMulti(key, keep)
-                return
-            }
-        }
-        val rt = oldRt.edit(nt, typing)
-        putRt(key, rt)
-        tf[key] = v
-        typing = rt.flags(v.selection.min - 1, v.selection.max - 1)
-        // pengelompokan undo per kalimat
-        if (df.ins > 0) {
-            typed += df.ins
-            if (insStr.last() in ".!?") commit()
-            else if (insStr == " " && typed >= 28) commit()
-            else scheduleCommit()
-        } else scheduleCommit()
-        if (df.ins > 0 && v.selection.collapsed && !b.isMulti && !cell) {
-            if (autoBlock(key, v, df)) return
-        }
-        if (df.ins > 0 && v.selection.collapsed && b.ty != "code") autoInline(key)
-        dirty()
-    }
-
-    private fun scheduleCommit() {
-        cJob?.cancel()
-        cJob = scope.launch { delay(800); commit() }
-    }
-
-    private fun autoBlock(key: String, v: TextFieldValue, df: Df): Boolean {
-        val i = idx(key)
-        if (i < 0) return false
-        val b = blocks[i]
-        val rt = b.r
-        val tx = rt.t
-        if (tx.contains('\n')) return false
-        val c = v.selection.start - 1
-        var nb: Blk? = null
-        var len = 0
-        if (b.ty == "p") {
-            var m = Regex("^([-*•+])\\s").find(tx)
-            if (m != null && c == m.value.length) { nb = Blk(id = b.id, ty = "li", lt = "b"); len = m.value.length }
-            if (nb == null) {
-                m = Regex("^\\d{1,3}[.)]\\s").find(tx)
-                if (m != null && c == m.value.length) { nb = Blk(id = b.id, ty = "li", lt = "o"); len = m.value.length }
-            }
-            if (nb == null && Regex("^-\\p{L}").containsMatchIn(tx) && c >= 2 && c <= 1 + df.ins) {
-                nb = Blk(id = b.id, ty = "li", lt = "b"); len = 1
-            }
-            if (nb == null) {
-                m = Regex("^>\\s").find(tx)
-                if (m != null && c == 2) { nb = Blk(id = b.id, ty = "q", k = "quote"); len = 2 }
-            }
-            if (nb == null) {
-                m = Regex("^(#{1,2})\\s").find(tx)
-                if (m != null && c == m.value.length) { nb = Blk(id = b.id, ty = "h", lv = m.groupValues[1].length); len = m.value.length }
-            }
-        } else if (b.ty == "li" && b.lt == "b") {
-            val m = Regex("^\\[([ xX]?)]\\s").find(tx)
-            if (m != null && c == m.value.length) {
-                nb = Blk(id = b.id, ty = "li", lt = "c", d = b.d, x = m.groupValues[1].isNotBlank()); len = m.value.length
-            }
-        }
-        if (nb == null) return false
-        commit()
-        val nr = rt.slice(len, tx.length)
-        setBlock(i, nb.copy(r = nr))
-        val np = (c - len).coerceAtLeast(0)
-        tf[key] = TextFieldValue(Z + nr.t, TextRange(np + 1))
-        typing = emptySet()
-        convKey = key; convPrefix = tx.substring(0, len); convAt = System.currentTimeMillis()
-        afterStructural()
-        focusAt(key, np)
-        return true
-    }
-
-    private fun autoInline(key: String) {
-        val v = tf[key] ?: return
-        val rt = rtOf(key)
-        val c = v.selection.start - 1
-        if (c < 2 || c > rt.t.length) return
-        val tx = rt.t
-        val ch = tx[c - 1]
-        if ("*_~`".indexOf(ch) < 0) return
-        val mks = if (tx[c - 2] == ch && ch != '`') listOf("$ch$ch", "$ch") else listOf("$ch")
-        for (mk in mks) {
-            val L = mk.length
-            if (c - L < 0) continue
-            val body = tx.substring(0, c - L)
-            val oi = body.lastIndexOf(mk)
-            if (oi < 0) continue
-            val content = body.substring(oi + L)
-            if (content.isEmpty()) continue
-            if (ch != '`' && (content.first().isWhitespace() || content.last().isWhitespace() || content.contains(ch))) continue
-            if (oi > 0 && " \t\n([{\"'\u201C\u2018".indexOf(body[oi - 1]) < 0) continue
-            val kind = when (ch) { '*' -> K.B; '_' -> K.I; '~' -> K.S; else -> K.C }
-            commit()
-            val nr = rt.slice(0, oi) + Rt(content).withKind(kind) + rt.slice(c, tx.length)
-            putRt(key, nr)
-            tf[key] = TextFieldValue(Z + nr.t, TextRange(oi + content.length + 1))
-            typing = emptySet()
-            dirty(); commit()
-            return
-        }
-    }
-
-    // ---------- Enter / Backspace ----------
-    private fun enter(key: String, pos: Int) {
-        val i = idx(key)
-        if (i < 0) return
-        val b = blocks[i]
-        commit()
-        when {
-            b.ty == "li" && b.r.t.isEmpty() -> {
-                setBlock(i, if (b.d > 0) b.copy(d = b.d - 1) else b.copy(ty = "p"))
-                focusAt(b.id, 0)
-            }
-            b.ty == "h" && b.r.t.isNotEmpty() && pos == 0 -> {
-                val nb = Blk()
-                blocks = blocks.toMutableList().also { it.add(i, nb) }
-                seed(nb)
-                focusAt(b.id, 0)
-            }
-            else -> split(i, pos, if (b.ty == "li") "li" else "p")
-        }
-        afterStructural()
-    }
-
-    private fun split(i: Int, pos: Int, nty: String) {
-        val b = blocks[i]
-        val left = b.r.slice(0, pos)
-        val right = b.r.slice(pos, b.r.t.length)
-        val nb = if (nty == "li") Blk(ty = "li", lt = b.lt, d = b.d, r = right) else Blk(ty = "p", r = right)
-        blocks = blocks.toMutableList().also { it[i] = b.copy(r = left); it.add(i + 1, nb) }
-        tf[b.id] = TextFieldValue(Z + left.t, TextRange(left.t.length + 1))
-        seed(nb)
-        focusAt(nb.id, 0)
-    }
-
-    private fun exitMulti(key: String, keep: Rt) {
-        val i = idx(key)
-        if (i < 0) return
-        val b = blocks[i]
-        commit()
-        if (keep.t.isEmpty()) {
-            setBlock(i, b.copy(ty = "p", r = Rt()))
-            tf[b.id] = TextFieldValue(Z, TextRange(1))
-            focusAt(b.id, 0)
-        } else {
-            val nb = Blk()
-            blocks = blocks.toMutableList().also { it[i] = b.copy(r = keep); it.add(i + 1, nb) }
-            tf[b.id] = TextFieldValue(Z + keep.t, TextRange(keep.t.length + 1))
-            seed(nb)
-            focusAt(nb.id, 0)
-        }
-        afterStructural()
-    }
-
-    private fun backStart(key: String) {
-        val i = idx(key)
-        if (i < 0) return
-        val b = blocks[i]
-        commit()
-        if (b.ty == "li") {
-            setBlock(i, if (b.d > 0) b.copy(d = b.d - 1) else b.copy(ty = "p"))
-            focusAt(b.id, 0)
-        } else if (b.ty == "h" || b.isMulti) {
-            setBlock(i, b.copy(ty = "p"))
-            focusAt(b.id, 0)
-        } else {
-            if (i == 0) return
-            val pv = blocks[i - 1]
-            when {
-                pv.ty == "hr" || pv.ty == "img" -> {
-                    blocks = blocks.filterIndexed { j, _ -> j != i - 1 }
-                    focusAt(b.id, 0)
+            when (b.lt) {
+                "o" -> Box(
+                    Modifier.offset(0.dp, (-.04f * fs).dp).size((1.55f * fs).dp).clip(CircleShape).background(pal.p),
+                    Alignment.Center
+                ) { T(ordN.toString(), fs * .85f, 900, pal.op) }
+                "c" -> {
+                    val sz = (1.15f * fs).dp
+                    val shape = RoundedCornerShape((.3f * 1.15f * fs).dp)
+                    Box(
+                        Modifier.offset((.1f * fs).dp, (-.04f * fs).dp).size(sz).clip(shape)
+                            .then(if (done) Modifier.background(pal.p) else Modifier.border((.14f * fs).dp, pal.p, shape)),
+                        Alignment.Center
+                    ) { if (done) Ic("ok", Color.White, sz * .78f) }
                 }
-                pv.ty == "tbl" -> {
-                    val r = pv.tb.size - 1
-                    val c = pv.tb[r].size - 1
-                    val k = "${pv.id}:$r:$c"
-                    focusAt(k, pv.tb[r][c].t.length)
-                }
-                else -> {
-                    val at = pv.r.t.length
-                    val merged = pv.r + b.r
-                    blocks = blocks.toMutableList().also { it[i - 1] = pv.copy(r = merged); it.removeAt(i) }
-                    tf.remove(b.id)
-                    tf[pv.id] = TextFieldValue(Z + merged.t, TextRange(at + 1))
-                    focusAt(pv.id, at)
-                }
-            }
-        }
-        afterStructural()
-    }
-
-    private fun paste(key: String, pos: Int, s: String) {
-        val i = idx(key)
-        if (i < 0) return
-        val b = blocks[i]
-        commit()
-        val ns = md(s.trimEnd('\n'))
-        if (ns.isEmpty()) return
-        val l = blocks.toMutableList()
-        val rt = b.r
-        if (rt.t.isEmpty()) {
-            l.removeAt(i); l.addAll(i, ns)
-        } else if (pos >= rt.t.length) l.addAll(i + 1, ns)
-        else if (pos <= 0) l.addAll(i, ns)
-        else {
-            val right = if (b.ty == "li") Blk(ty = "li", lt = b.lt, d = b.d, r = rt.slice(pos, rt.t.length))
-            else Blk(ty = "p", r = rt.slice(pos, rt.t.length))
-            l[i] = b.copy(r = rt.slice(0, pos))
-            l.addAll(i + 1, ns + right)
-        }
-        blocks = l
-        norm()
-        reseedAll()
-        val last = ns.last()
-        if (last.isText) focusAt(last.id, last.r.t.length)
-        else {
-            val j = idx(last.id)
-            blocks.getOrNull(j + 1)?.let { if (it.isText) focusAt(it.id, 0) }
-        }
-        afterStructural()
-    }
-
-    // ---------- perintah toolbar ----------
-    fun toggleFmt(kind: Int) {
-        val key = focus ?: return
-        val v = tf[key] ?: return
-        val blk = blockOfKey(key) ?: return
-        if (blk.ty == "code") return
-        if (blk.ty == "h" && kind == K.B) return
-        val a = v.selection.min - 1
-        val b = v.selection.max - 1
-        commit()
-        if (a == b) {
-            typing = if (kind in typing) typing - kind else typing + kind
-            return
-        }
-        putRt(key, rtOf(key).toggle(a, b, kind))
-        typing = rtOf(key).flags(a, b)
-        dirty(); commit()
-    }
-
-    private fun flat(r: Rt) = r.copy(t = r.t.replace('\n', ' '))
-
-    private fun convertFocused(f: (Blk) -> Blk) {
-        val key = focus ?: return
-        if (isCellKey(key)) return
-        val i = idx(key)
-        if (i < 0) return
-        commit()
-        val nb = f(blocks[i])
-        setBlock(i, nb)
-        afterStructural()
-    }
-
-    fun setHead(lv: Int) = convertFocused { b ->
-        if (b.ty == "h" && b.lv == lv) b.copy(ty = "p") else b.copy(ty = "h", lv = lv, r = flat(b.r))
-    }
-
-    fun setList(t: String) = convertFocused { b ->
-        if (b.ty == "li" && b.lt == t) b.copy(ty = "p")
-        else b.copy(ty = "li", lt = t, d = if (b.ty == "li") b.d else 0, r = flat(b.r))
-    }
-
-    fun setQuote(k: String) = convertFocused { b ->
-        if (b.ty == "q" && b.k == k) b.copy(ty = "p") else b.copy(ty = "q", k = k)
-    }
-
-    fun setPlain() = convertFocused { b -> b.copy(ty = "p") }
-
-    fun setCode() = convertFocused { b ->
-        if (b.ty == "code") b.copy(ty = "p") else b.copy(ty = "code", r = Rt(b.r.t))
-    }
-
-    fun indent(dir: Int) {
-        val key = focus ?: return
-        val i = idx(key)
-        if (i < 0 || blocks[i].ty != "li") return
-        commit()
-        setBlock(i, blocks[i].copy(d = (blocks[i].d + dir).coerceIn(0, 4)))
-        afterStructural()
-    }
-
-    fun toggleCheck(id: String) {
-        val i = idx(id)
-        if (i < 0) return
-        commit()
-        setBlock(i, blocks[i].copy(x = !blocks[i].x))
-        dirty(); commit()
-    }
-
-    fun grid(c: Int, r: Int): List<List<Rt>> = List(r) { List(c) { Rt() } }
-
-    fun insertObjs(list: List<Blk>) {
-        val key = focus?.let { keyBlock(it) } ?: blocks.last().id
-        var i = idx(key)
-        if (i < 0) i = blocks.size - 1
-        commit()
-        val cur = blocks[i]
-        val l = blocks.toMutableList()
-        if (cur.ty == "p" && cur.r.t.isEmpty()) {
-            l.removeAt(i); l.addAll(i, list)
-        } else l.addAll(i + 1, list)
-        blocks = l
-        list.forEach { seed(it) }
-        norm()
-        val last = list.last()
-        when (last.ty) {
-            "tbl" -> focusAt("${last.id}:0:0", 0)
-            "hr" -> blocks.getOrNull(idx(last.id) + 1)?.let { focusAt(it.id, 0) }
-            "img" -> { selImg = last.id to 0; clearReq++ }
-        }
-        afterStructural()
-    }
-
-    fun insTable() = insertObjs(listOf(Blk(ty = "tbl", tb = grid(3, 3), ca = listOf("left", "left", "left"))))
-    fun insHr() = insertObjs(listOf(Blk(ty = "hr")))
-    fun addImages(imgs: List<Img>) {
-        if (imgs.isNotEmpty()) insertObjs(imgs.map { Blk(ty = "img", im = listOf(it)) })
-    }
-
-    // ---------- tabel ----------
-    fun cellEnter(key: String) {
-        val b = blockOfKey(key) ?: return
-        val (r, c) = cellRC(key)
-        if (r + 1 < b.tb.size) {
-            val k = "${b.id}:${r + 1}:$c"
-            focusAt(k, rtOf(k).t.length)
-        } else {
-            focus = key; tOp("ar")
-        }
-    }
-
-    fun tOp(op: String) {
-        val key = focus ?: return
-        if (!isCellKey(key)) return
-        val bid = keyBlock(key)
-        val (r, c) = cellRC(key)
-        val i = idx(bid)
-        if (i < 0) return
-        val b = blocks[i]
-        commit()
-        val cols = b.tb[0].size
-        var nb = b
-        var target = key
-        when (op) {
-            "ar" -> {
-                val at = if (r == 0) 1 else r + 1
-                nb = b.copy(tb = b.tb.toMutableList().also { it.add(at, List(cols) { Rt() }) })
-                target = "$bid:$at:$c"
-            }
-            "ac" -> {
-                nb = b.copy(
-                    tb = b.tb.map { row -> row.toMutableList().also { it.add(c + 1, Rt()) } },
-                    ca = b.ca.toMutableList().also { if (c + 1 <= it.size) it.add(c + 1, "left") }
+                else -> Box(
+                    Modifier.offset((.3f * fs).dp, (-.04f * fs).dp).size((.5f * fs).dp).clip(
+                        RoundedCornerShape(topStartPercent = 40, topEndPercent = 60, bottomEndPercent = 55, bottomStartPercent = 45)
+                    ).background(pal.p)
                 )
-                target = "$bid:$r:${c + 1}"
-            }
-            "dr" -> {
-                if (r == 0 || b.tb.size < 3) { vm.show("Baris ini tidak bisa dihapus"); return }
-                nb = b.copy(tb = b.tb.filterIndexed { k, _ -> k != r })
-                target = "$bid:${minOf(r, nb.tb.size - 1)}:$c"
-            }
-            "dc" -> {
-                if (cols < 2) { vm.show("Minimal satu kolom"); return }
-                nb = b.copy(tb = b.tb.map { row -> row.filterIndexed { k, _ -> k != c } }, ca = b.ca.filterIndexed { k, _ -> k != c })
-                target = "$bid:$r:${minOf(c, cols - 2)}"
-            }
-            "dt" -> {
-                blocks = blocks.filterIndexed { k, _ -> k != i }
-                tf.keys.removeAll { it.startsWith("$bid:") }
-                norm()
-                focus = null
-                afterStructural()
-                blocks.getOrNull(minOf(i, blocks.size - 1))?.let { if (it.isText) focusAt(it.id, it.r.t.length) }
-                return
             }
         }
-        setBlock(i, nb)
-        tf.keys.removeAll { it.startsWith("$bid:") }
-        seed(nb)
-        focusAt(target, 0)
-        afterStructural()
+        val st = baseStyle(pal, dm).let {
+            if (done) it.copy(color = it.color.copy(alpha = .6f), textDecoration = TextDecoration.LineThrough) else it
+        }
+        TF(ed, b.id, st, Modifier.weight(1f))
     }
+}
 
-    // ---------- gambar ----------
-    fun selectImg(bid: String, ix: Int) {
-        selImg = bid to ix
-        focus = null
-        clearReq++
+@Composable
+fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal) {
+    val cols = b.tb.firstOrNull()?.size ?: 1
+    val colW = maxOf(110f, ed.widthDp / cols).dp
+    Box(
+        Modifier.fillMaxWidth().padding(bottom = (dm.fs * 1.1f).dp).clip(RoundedCornerShape(24.dp)).background(pal.c2)
+            .horizontalScroll(rememberScrollState())
+    ) {
+        Column {
+            b.tb.forEachIndexed { r, row ->
+                Row {
+                    row.forEachIndexed { c, _ ->
+                        val k = "${b.id}:$r:$c"
+                        val focused = ed.focus == k && !ed.reading
+                        val head = r == 0
+                        val bg = if (focused) pal.pc else if (head) pal.sc else Color.Transparent
+                        val fg = if (focused) pal.opc else if (head) pal.osc else pal.os
+                        Box(
+                            Modifier.width(colW).background(bg)
+                                .drawBehind { if (r > 0) drawLine(pal.ol, androidx.compose.ui.geometry.Offset(0f, 0f), androidx.compose.ui.geometry.Offset(size.width, 0f), 1.dp.toPx()) }
+                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                        ) {
+                            val al = when (b.ca.getOrNull(c)) {
+                                "center" -> androidx.compose.ui.text.style.TextAlign.Center
+                                "right" -> androidx.compose.ui.text.style.TextAlign.End
+                                else -> androidx.compose.ui.text.style.TextAlign.Start
+                            }
+                            TF(
+                                ed, k,
+                                TextStyle(
+                                    color = fg, fontSize = (dm.fs * .9f).sp, lineHeight = (dm.fs * .9f * 1.45f).sp,
+                                    fontWeight = FontWeight(if (head) 850 else 400), textAlign = al
+                                ),
+                                Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
+}
 
-    private fun imgSet(bid: String, ix: Int, f: (Img) -> Img) {
-        blocks = blocks.map { b ->
-            if (b.id == bid) b.copy(im = b.im.mapIndexed { j, m -> if (j == ix) f(m) else m }) else b
+@Composable
+fun ImgView(ed: Ed, vm: AppVM, b: Blk, dm: Dm) {
+    val sel = ed.selImg?.takeIf { it.first == b.id }?.second
+    val n = b.im.size
+    val bottom = (dm.fs * 1.1f).dp
+    if (n == 1) {
+        val m = b.im[0]
+        Box(
+            Modifier.fillMaxWidth().padding(bottom = bottom),
+            contentAlignment = when (m.al) { "l" -> Alignment.CenterStart; "r" -> Alignment.CenterEnd; else -> Alignment.Center }
+        ) {
+            ImgCell(
+                ed, vm, b, 0, Modifier.fillMaxWidth(m.w.coerceIn(.2f, 1f)).aspectRatio(m.a.coerceIn(.2f, 5f)),
+                sel == 0
+            )
+        }
+    } else if (n > 1) {
+        val sum = b.im.sumOf { it.a.toDouble() }.toFloat().coerceAtLeast(.1f)
+        Row(
+            Modifier.fillMaxWidth().padding(bottom = bottom).aspectRatio(sum / (1f - (n - 1) * GAP)),
+            horizontalArrangement = Arrangement.spacedBy((ed.widthDp * GAP).dp)
+        ) {
+            b.im.forEachIndexed { j, m ->
+                ImgCell(ed, vm, b, j, Modifier.weight(m.a.coerceAtLeast(.05f)).fillMaxHeight(), sel == j)
+            }
+        }
+    }
+}
+
+@Composable
+fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Boolean) {
+    val pal = LocalPal.current
+    val m = b.im[ix]
+    val bmp = rememberImg(vm, m.id)
+    val dens = LocalDensity.current.density
+    var box by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    val shape = RoundedCornerShape(22.dp)
+    val row = b.im.size > 1
+    Box(
+        modifier.onSizeChanged { box = it }
+            .pointerInput(ed.reading, b.id, ix) {
+                if (!ed.reading) detectTapGestures(onTap = { ed.selectImg(b.id, ix) })
+            }
+    ) {
+        Box(
+            Modifier.matchParentSize().clip(shape).background(pal.c3)
+                .then(
+                    if (selected) Modifier.pointerInput(m.o, box) {
+                        detectDragGestures(onDragStart = { ed.commit() }, onDragEnd = { ed.commit() }) { ch, d ->
+                            ch.consume()
+                            val bw = box.width.toFloat().coerceAtLeast(1f)
+                            val bh = box.height.toFloat().coerceAtLeast(1f)
+                            val wider = m.o > bw / bh
+                            val rx = if (wider) bh * m.o - bw else 0f
+                            val ry = if (!wider) bw / m.o - bh else 0f
+                            ed.imgLive(b.id, ix) {
+                                it.copy(
+                                    px = if (rx > 2f) (it.px - d.x / rx).coerceIn(0f, 1f) else it.px,
+                                    py = if (ry > 2f) (it.py - d.y / ry).coerceIn(0f, 1f) else it.py
+                                )
+                            }
+                        }
+                    } else Modifier
+                )
+        ) {
+            if (bmp != null) {
+                Image(
+                    bmp, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop,
+                    alignment = BiasAlignment(m.px * 2f - 1f, m.py * 2f - 1f)
+                )
+            }
+        }
+        if (selected && !ed.reading) {
+            Box(Modifier.matchParentSize().border(2.5.dp, pal.p, shape))
+            var w0 by remember { mutableStateOf(0f) }
+            var h0 by remember { mutableStateOf(0f) }
+            var hPrev by remember { mutableStateOf(0f) }
+            var ax by remember { mutableStateOf(0f) }
+            var ay by remember { mutableStateOf(0f) }
+            Box(
+                Modifier.align(Alignment.BottomEnd).offset(24.dp, 24.dp).size(48.dp)
+                    .pointerInput(b.id, ix, row) {
+                        detectDragGestures(
+                            onDragStart = {
+                                ed.commit(); w0 = box.width.toFloat(); h0 = box.height.toFloat(); hPrev = h0; ax = 0f; ay = 0f
+                            },
+                            onDragEnd = { ed.commit() }
+                        ) { ch, d ->
+                            ch.consume()
+                            ax += d.x; ay += d.y
+                            val cw = ed.widthDp * dens
+                            val hNew = (h0 + ay).coerceIn(70f * dens, 1100f * dens)
+                            if (row) {
+                                ed.rowScale(b.id, hPrev / hNew); hPrev = hNew
+                            } else {
+                                val k = if (m.al == "c") 2f else 1f
+                                val w = (w0 + ax * k).coerceIn(cw * .22f, cw)
+                                var a = w / hNew
+                                if (Math.abs(a / m.o - 1f) < .05f) a = m.o else if (Math.abs(a - 1f) < .05f) a = 1f
+                                ed.imgLive(b.id, ix) { it.copy(w = w / cw, a = a) }
+                            }
+                        }
+                    },
+                Alignment.Center
+            ) {
+                Box(Modifier.size(18.dp).clip(CircleShape).background(pal.s).padding(3.dp).clip(CircleShape).background(pal.p))
+            }
+        }
+    }
+}
+
+// ---------- toolbar ----------
+@Composable
+fun Tbn(content: @Composable (Color) -> Unit, on: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val pal = LocalPal.current
+    val src = remember { MutableInteractionSource() }
+    val pr by src.collectIsPressedAsState()
+    val r by animateDpAsState(if (pr) 14.dp else 23.dp, spring(.6f, 600f), label = "r")
+    val sc by animateFloatAsState(if (pr) .88f else 1f, spring(.5f, 600f), label = "s")
+    val fg = if (on) pal.op else pal.os
+    Box(
+        Modifier.size(46.dp).graphicsLayer { scaleX = sc; scaleY = sc; alpha = if (enabled) 1f else .28f }
+            .clip(RoundedCornerShape(r)).background(if (on) pal.p else Color.Transparent)
+            .clickable(interactionSource = src, indication = LocalIndication.current, enabled = enabled, onClick = onClick),
+        Alignment.Center
+    ) { content(fg) }
+}
+
+@Composable
+fun Chip(text: String, bg: Color, fg: Color, shape: Shape, h: Dp = 46.dp, minW: Dp = 0.dp, onClick: () -> Unit) {
+    val src = remember { MutableInteractionSource() }
+    val pr by src.collectIsPressedAsState()
+    val sc by animateFloatAsState(if (pr) .92f else 1f, spring(.5f, 600f), label = "c")
+    Box(
+        Modifier.height(h).widthIn(min = minW).graphicsLayer { scaleX = sc; scaleY = sc }.clip(shape).background(bg)
+            .clickable(interactionSource = src, indication = LocalIndication.current, onClick = onClick)
+            .padding(horizontal = 18.dp),
+        Alignment.Center
+    ) { T(text, 15f, 850, fg, ls = 0f) }
+}
+
+@Composable
+fun EdBar(ed: Ed, act: Actions, imeOpen: Boolean) {
+    val pal = LocalPal.current
+    val key = ed.focus
+    val blk = key?.let { ed.blockOfKey(it) }
+    val cell = key != null && isCellKey(key)
+    val fl = ed.activeFlags()
+    val ty = blk?.ty
+    val noI = ty == "code"
+    val noB = noI || (ty == "h")
+    val blkOff = cell
+    val capShape = RoundedCornerShape(30.dp)
+    Column(
+        Modifier.widthIn(max = 560.dp).fillMaxWidth().padding(horizontal = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        if (ed.miniBar) Unit else if (ed.selImg != null) {
+            val s = ed.selImg!!
+            val b = ed.blocks.firstOrNull { it.id == s.first }
+            val inRow = (b?.im?.size ?: 1) > 1
+            Row(
+                Modifier.fillMaxWidth().shadow(if (pal.dark) 6.dp else 1.dp, RoundedCornerShape(28.dp)).clip(RoundedCornerShape(28.dp))
+                    .background(pal.c3).horizontalScroll(rememberScrollState()).padding(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                if (!inRow) {
+                    val al = b?.im?.getOrNull(s.second)?.al
+                    Tbn({ Ic("aL", it) }, al == "l", true) { ed.imgAlign("l") }
+                    Tbn({ Ic("aC", it) }, al == "c", true) { ed.imgAlign("c") }
+                    Tbn({ Ic("aR", it) }, al == "r", true) { ed.imgAlign("r") }
+                }
+                Tbn({ Ic(if (inRow) "rows" else "cols", it) }, false, true) { ed.toggleRow() }
+                Tbn({ Ic("aup", it) }, false, true) { ed.imgMove(-1) }
+                Tbn({ Ic("adn", it) }, false, true) { ed.imgMove(1) }
+                Tbn({ Ic("del", it) }, false, true) { ed.imgDelete() }
+            }
+        } else if (cell) {
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(pal.c3)
+                    .horizontalScroll(rememberScrollState()).padding(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                listOf("ar" to "+ Baris", "ac" to "+ Kolom", "dr" to "− Baris", "dc" to "− Kolom").forEach { (k, l) ->
+                    Chip(l, pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.tOp(k) }
+                }
+                Chip("Hapus tabel", pal.ec, pal.oec, RoundedCornerShape(23.dp)) { ed.tOp("dt") }
+            }
+        } else if (ed.pickQuote) {
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(pal.c3)
+                    .horizontalScroll(rememberScrollState()).padding(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                VARS.forEach { (k, l) ->
+                    val q = qs(k, pal)
+                    Chip(l, if (k == "def") pal.c4 else q.bg, q.fg, q.shape, 52.dp, 104.dp) {
+                        ed.pickQuote = false; ed.setQuote(k)
+                    }
+                }
+                if (ty == "q") Chip("Teks biasa", pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.pickQuote = false; ed.setPlain() }
+            }
+        }
+        // satu kapsul: lebarnya mengecil ke kanan (tinggal dua tombol) dan mengembang lagi ke kiri
+        val f by animateFloatAsState(if (ed.miniBar) 1f else 0f, tween(420, easing = Emph), label = "mini")
+        val toolsScroll = rememberScrollState()
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val full = maxWidth
+            val expW = full * BAR_FRAC
+            val miniW = 102.dp
+            val w = expW + (miniW - expW) * f
+            val endPad = (full - expW) / 2 * (1f - f)
+        Row(
+            Modifier.align(Alignment.CenterEnd).padding(end = endPad).width(w).height(56.dp)
+                .shadow(if (pal.dark) 6.dp else 1.dp, capShape).clip(capShape)
+                .background(pal.c4).padding(horizontal = 5.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                Modifier.weight(1f).fillMaxHeight().horizontalScroll(toolsScroll),
+                horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically
+            ) {
+                @Composable fun I(id: String, icon: String, on: Boolean = false, off: Boolean = false, f: () -> Unit) =
+                    Tbn({ Ic(icon, it) }, on, !off) { if (id != "quote") ed.pickQuote = false; f() }
+                @Composable fun H(id: String, lv: Int) = Tbn(
+                    { c ->
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            T("H", 19f, 1000, c); T(lv.toString(), 12f, 1000, c)
+                        }
+                    }, ty == "h" && blk?.lv == lv, !blkOff
+                ) { ed.pickQuote = false; ed.setHead(lv) }
+                val isLi = ty == "li" && !cell
+                I("undo", "undo", off = !ed.canUndo) { ed.undo() }
+                I("redo", "redo", off = !ed.canRedo) { ed.redo() }
+                Sep()
+                H("h1", 1); H("h2", 2)
+                I("b", "b", K.B in fl && !noB, noB) { ed.toggleFmt(K.B) }
+                I("i", "i", K.I in fl && !noI, noI) { ed.toggleFmt(K.I) }
+                I("u", "u", K.U in fl && !noI, noI) { ed.toggleFmt(K.U) }
+                I("s", "s", K.S in fl && !noI, noI) { ed.toggleFmt(K.S) }
+                I("mark", "mark", K.M in fl && !noI, noI) { ed.toggleFmt(K.M) }
+                I("code", "code", K.C in fl && !noI, noI) { ed.toggleFmt(K.C) }
+                Sep()
+                I("ul", "ul", isLi && blk?.lt == "b", blkOff) { ed.setList("b") }
+                I("ol", "ol", isLi && blk?.lt == "o", blkOff) { ed.setList("o") }
+                I("chk", "chk", isLi && blk?.lt == "c", blkOff) { ed.setList("c") }
+                I("out", "out", off = !isLi) { ed.indent(-1) }
+                I("ind", "ind", off = !isLi) { ed.indent(1) }
+                Sep()
+                I("quote", "quote", ty == "q" || ed.pickQuote, blkOff) { if (ed.focus != null) ed.pickQuote = !ed.pickQuote }
+                I("pre", "pre", ty == "code", blkOff) { ed.setCode() }
+                I("table", "table", off = blkOff) { ed.insTable() }
+                I("img", "img", off = blkOff) { act.pickImages() }
+                I("hr", "hr", off = blkOff) { ed.insHr() }
+            }
+            Box(Modifier.width(10.dp * (1f - f)).clipToBounds().wrapContentWidth(Alignment.Start, unbounded = true)) { Sep() }
+            // keyboard terbuka: ">" menciutkan kapsul ke kanan; "<" mengembangkannya lagi; keyboard tertutup: panah bawah = mode baca
+            Tbn({ Ic(if (ed.miniBar) "chl" else if (imeOpen) "chr" else "hide", it) }, false, true) {
+                if (ed.miniBar) ed.miniBar = false
+                else if (imeOpen) { ed.pickQuote = false; ed.miniBar = true }
+                else ed.enterReading()
+            }
+            if (f > .01f) {
+                Box(Modifier.width(46.dp * f).clipToBounds().wrapContentWidth(Alignment.Start, unbounded = true).graphicsLayer { alpha = f }) {
+                    Tbn({ Ic("hide", it) }, false, ed.miniBar) { ed.enterReading() }
+                }
+            }
+        }
+        }
+    }
+}
+
+@Composable
+fun Sep() {
+    val pal = LocalPal.current
+    Box(Modifier.padding(horizontal = 4.dp).width(2.dp).height(24.dp).clip(RoundedCornerShape(1.dp)).background(pal.ol))
+}
+
+// ---------- layar catatan ----------
+@Composable
+fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
+    val pal = LocalPal.current
+    val dm = Dm(vm.pr.fs.toFloat(), vm.pr.lh)
+    val scroll = rememberScrollState()
+    val focusMgr = LocalFocusManager.current
+    val kb = LocalSoftwareKeyboardController.current
+    val density = LocalDensity.current
+    LaunchedEffect(ed.clearReq) {
+        if (ed.clearReq > 0) { focusMgr.clearFocus(); kb?.hide() }
+    }
+    val od = remember(ed.blocks) { ords(ed.blocks) }
+    val titleFr = remember { FocusRequester() }
+    LaunchedEffect(ed.titleReq) {
+        if (ed.titleReq > 0) {
+            delay(380)
+            try { titleFr.requestFocus() } catch (e: Exception) { }
         }
     }
 
-    fun imgAlign(al: String) {
-        val s = selImg ?: return
-        commit(); imgSet(s.first, s.second) { it.copy(al = al) }; dirty(); commit()
-    }
-
-    fun imgLive(bid: String, ix: Int, f: (Img) -> Img) {
-        imgSet(bid, ix, f); dirty()
-    }
-
-    fun rowScale(bid: String, k: Float) {
-        blocks = blocks.map { b -> if (b.id == bid) b.copy(im = b.im.map { it.copy(a = it.a * k) }) else b }
-        dirty()
-    }
-
-    fun imgDelete() {
-        val s = selImg ?: return
-        val i = idx(s.first)
-        if (i < 0) return
-        commit()
-        val b = blocks[i]
-        val rest = b.im.filterIndexed { j, _ -> j != s.second }
-        if (rest.isEmpty()) blocks = blocks.filterIndexed { j, _ -> j != i }
-        else if (rest.size == 1) setBlock(i, b.copy(im = listOf(rest[0].copy(a = rest[0].o, w = 0.6f, al = "c"))))
-        else setBlock(i, b.copy(im = rest))
-        selImg = null
-        norm(); afterStructural()
-    }
-
-    fun imgMove(dir: Int) {
-        val s = selImg ?: return
-        val i = idx(s.first)
-        val j = i + dir
-        if (i < 0 || j < 0 || j >= blocks.size) return
-        commit()
-        val l = blocks.toMutableList()
-        val t = l[i]; l[i] = l[j]; l[j] = t
-        blocks = l
-        norm(); afterStructural()
-    }
-
-    fun toggleRow() {
-        val s = selImg ?: return
-        val i = idx(s.first)
-        if (i < 0) return
-        val b = blocks[i]
-        commit()
-        if (b.im.size > 1) {
-            val n = b.im.size
-            val sum = b.im.sumOf { it.a.toDouble() }.toFloat()
-            fun share(m: Img) = (m.a / sum * (1f - (n - 1) * GAP)).coerceIn(0.2f, 1f)
-            val m = b.im[s.second]
-            val solo = Blk(ty = "img", im = listOf(m.copy(a = m.o, w = share(m), al = "c")))
-            val rest = b.im.filterIndexed { j, _ -> j != s.second }
-            val restB = if (rest.size == 1) b.copy(im = listOf(rest[0].copy(a = rest[0].o, w = share(rest[0]), al = "c")))
-            else b.copy(im = rest)
-            val l = blocks.toMutableList()
-            l.removeAt(i)
-            if (s.second == 0) { l.add(i, restB); l.add(i, solo) } else { l.add(i, solo); l.add(i, restB) }
-            blocks = l
-            selImg = solo.id to 0
-            norm(); afterStructural()
-            return
-        }
-        fun emptyP(x: Blk) = x.ty == "p" && x.r.t.isEmpty()
-        var j = i - 1
-        while (j >= 0 && emptyP(blocks[j])) j--
-        var prev = true
-        var tgt = if (j >= 0 && blocks[j].ty == "img" && blocks[j].im.size < 3) j else -1
-        if (tgt < 0) {
-            j = i + 1
-            while (j < blocks.size && emptyP(blocks[j])) j++
-            prev = false
-            tgt = if (j < blocks.size && blocks[j].ty == "img" && blocks[j].im.size < 3) j else -1
-        }
-        if (tgt < 0) { vm.show("Belum ada gambar lain di dekatnya untuk dijejerkan"); return }
-        val t = blocks[tgt]
-        val me = b.im[0].copy(al = "c", w = 1f)
-        val merged = if (prev) t.im + me else listOf(me) + t.im
-        val n = merged.size
-        val sum = merged.sumOf { it.a.toDouble() }.toFloat()
-        val u = widthDp * (1f - (n - 1) * GAP)
-        val h = u / sum
-        val h2 = h.coerceIn(120f, 520f)
-        val k = if (h2 != h) h / h2 else 1f
-        val fin = merged.map { it.copy(a = it.a * k, al = "c", w = 1f) }
-        val lo = minOf(tgt, i)
-        val hiI = maxOf(tgt, i)
-        val l = blocks.toMutableList()
-        l[tgt] = t.copy(im = fin)
-        blocks = l.filterIndexed { q, x -> q != i && !(q > lo && q < hiI && emptyP(x)) }
-        selImg = t.id to (if (prev) n - 1 else 0)
-        norm(); afterStructural()
-    }
-
-    // ---------- struktur ----------
-    private fun norm() {
-        val out = ArrayList<Blk>()
-        for (b in blocks) {
-            if (b.isObj && (out.isEmpty() || out.last().isObj)) out.add(Blk())
-            out.add(b)
-        }
-        if (out.isEmpty() || out.last().isObj || out.last().isMulti) out.add(Blk())
-        if (out != blocks) {
-            blocks = out
-            out.forEach { if (it.isText && !tf.containsKey(it.id)) seed(it) }
+    @Composable
+    fun TopBar() {
+        Row(
+            Modifier.fillMaxWidth().background(pal.s).windowInsetsPadding(WindowInsets.statusBars)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconBtn("back", pal.os, { act.back() })
+            Spacer(Modifier.weight(1f))
+            IconBtn("more", pal.os, { ed.flush(); vm.sheet = Sheet.Doc(ed.noteId) })
         }
     }
 
-    private fun afterStructural() {
-        norm(); dirty(); commit()
+    val imeOpen = WindowInsets.ime.getBottom(density) > 0
+
+    Column(Modifier.fillMaxSize().background(pal.s)) {
+        TopBar()
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            Column(Modifier.fillMaxSize().verticalScroll(scroll), horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(
+                    Modifier.widthIn(max = 700.dp).fillMaxWidth().padding(horizontal = 24.dp)
+                        .onSizeChanged { ed.widthDp = with(density) { it.width.toDp().value } }
+                ) {
+                    val firstText = { ed.blocks.firstOrNull { it.isText }?.let { ed.focusAt(it.id, 0) } }
+                    Box(Modifier.padding(top = 6.dp, bottom = 12.dp)) {
+                        if (ed.title.isEmpty()) {
+                            T("Judul", 34f, 1000, pal.osv, alpha = .5f, ls = -.02f)
+                        }
+                        androidx.compose.foundation.text.BasicTextField(
+                            value = ed.title,
+                            onValueChange = { v -> val nl = v.contains('\n'); ed.titleChanged(v); if (nl) firstText() },
+                            readOnly = ed.reading,
+                            textStyle = TextStyle(
+                                color = pal.p, fontSize = 34.sp, fontWeight = FontWeight(1000),
+                                lineHeight = (34 * 1.1f).sp, letterSpacing = (-.02f).em
+                            ),
+                            cursorBrush = SolidColor(pal.p),
+                            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
+                            keyboardActions = KeyboardActions(onNext = { firstText() }),
+                            modifier = Modifier.fillMaxWidth().focusRequester(titleFr)
+                                .onFocusChanged { ed.titleFocus = it.isFocused; if (it.isFocused) ed.selImg = null }
+                                .pointerInput(ed.reading) { if (ed.reading) detectTapGestures { ed.exitReading() } }
+                        )
+                    }
+                    ed.blocks.forEach { b ->
+                        key(b.id) { BlockView(ed, vm, b, od[b.id] ?: 1, dm) }
+                    }
+                    Box(
+                        Modifier.fillMaxWidth().height(220.dp).clickable(
+                            interactionSource = remember { MutableInteractionSource() }, indication = null
+                        ) {
+                            if (ed.reading) ed.exitReading()
+                            else {
+                                val l = ed.blocks.lastOrNull { it.isText }
+                                if (l != null) ed.focusAt(l.id, l.r.t.length)
+                            }
+                        }
+                    )
+                }
+            }
+        }
+        BottomBars(ed, act, !ed.reading && !ed.titleFocus, imeOpen)
     }
+}
 
-    // ---------- riwayat ----------
-    fun commit() {
-        cJob?.cancel()
-        typed = 0
-        if (hist[hi].bl == blocks) return
-        while (hist.size > hi + 1) hist.removeAt(hist.size - 1)
-        hist.add(Snap(blocks, focus, focus?.let { tf[it]?.selection } ?: TextRange.Zero))
-        if (hist.size > 150) hist.removeAt(0)
-        hi = hist.size - 1
-        tick++
-    }
-
-    val canUndo: Boolean get() { tick; return hi > 0 || hist[hi].bl != blocks }
-    val canRedo: Boolean get() { tick; return hi < hist.size - 1 }
-
-    fun undo() {
-        if (reading) return
-        commit()
-        if (hi <= 0) return
-        hi--; load(hist[hi])
-    }
-
-    fun redo() {
-        if (reading) return
-        commit()
-        if (hi >= hist.size - 1) return
-        hi++; load(hist[hi])
-    }
-
-    private fun load(s: Snap) {
-        blocks = s.bl
-        reseedAll()
-        selImg = null
-        val k = s.key
-        if (k != null && tf.containsKey(k)) focusAt(k, (s.sel.start - 1).coerceAtLeast(0))
-        tick++
-        dirty()
-    }
-
-    // ---------- simpan ----------
-    fun dirty() {
-        chg = true
-        sJob?.cancel()
-        sJob = scope.launch { delay(450); flush() }
-    }
-
-    fun titleChanged(t: String) {
-        title = t.replace("\n", " ")
-        dirty()
-    }
-
-    fun flush() {
-        sJob?.cancel()
-        if (!chg) return
-        chg = false
-        commit()
-        vm.saveNote(noteId, title, blocks)
-    }
-
-    fun leave() {
-        flush()
-        vm.dropIfEmpty(noteId, title, blocks)
-    }
-
-    fun enterReading() {
-        commit()
-        reading = true; selImg = null; pickQuote = false; miniBar = false; clearReq++
-    }
-
-    fun exitReading(key: String? = null, off: Int = 0) {
-        reading = false
-        if (key != null) focusAt(key, off)
+/** Dipisah dari NoteScreen supaya tidak terjebak receiver ColumnScope milik Column di luarnya. */
+@Composable
+fun BottomBars(ed: Ed, act: Actions, showBar: Boolean, imeOpen: Boolean) {
+    Box(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))) {
+        // kapsul penuh: gerak kecil + pudar, karena keyboard sudah ikut bergerak sendiri
+        AnimatedVisibility(
+            visible = showBar,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            enter = fadeIn(tween(260, easing = Emph)) + slideInVertically(tween(320, easing = Emph)) { it / 3 } +
+                expandVertically(tween(320, easing = Emph)),
+            exit = fadeOut(tween(180)) + slideOutVertically(tween(260, easing = Emph)) { it / 4 } +
+                shrinkVertically(tween(300, easing = Emph))
+        ) {
+            Box(Modifier.padding(bottom = 10.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                EdBar(ed, act, imeOpen)
+            }
+        }
     }
 }
