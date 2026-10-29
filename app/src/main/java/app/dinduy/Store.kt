@@ -110,6 +110,8 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     var ed by mutableStateOf<Ed?>(null)
     val nav = Nav(this)
     var morph: Morph? = null
+    val cardMorph = HashMap<String, Morph>()   // posisi kartu beranda terkini, untuk morph keluar
+    var fabMorph: Morph? = null                // posisi tombol Baru, untuk morph catatan baru
     var pending by mutableStateOf<Pending?>(null)
     var lastBk by mutableStateOf(sp.getLong("bk", 0L))
 
