@@ -221,7 +221,7 @@ fun NoteCard(
 }
 
 @Composable
-fun SwipeCard(enabled: Boolean, onArchive: () -> Unit, onDelete: () -> Unit, content: @Composable () -> Unit) {
+fun SwipeCard(enabled: Boolean, shape: androidx.compose.ui.graphics.Shape, onArchive: () -> Unit, onDelete: () -> Unit, content: @Composable () -> Unit) {
     val pal = LocalPal.current
     val scope = rememberCoroutineScope()
     val off = remember { Animatable(0f) }
@@ -229,6 +229,8 @@ fun SwipeCard(enabled: Boolean, onArchive: () -> Unit, onDelete: () -> Unit, con
     var w by remember { mutableStateOf(1f) }
     val haptic = LocalHapticFeedback.current
     var hit by remember { mutableStateOf(false) }
+    var dir by remember { mutableStateOf(1) }
+    val dens = androidx.compose.ui.platform.LocalDensity.current.density
     val p = (Math.abs(off.value) / (w * .34f)).coerceIn(0f, 1f)
     Box(
         Modifier.fillMaxWidth().onSizeChanged { w = it.width.toFloat().coerceAtLeast(1f) }
@@ -242,6 +244,7 @@ fun SwipeCard(enabled: Boolean, onArchive: () -> Unit, onDelete: () -> Unit, con
                 state = rememberDraggableState { dx ->
                     scope.launch {
                         off.snapTo(off.value + dx)
+                        if (off.value != 0f) dir = if (off.value > 0f) 1 else -1
                         val nh = Math.abs(off.value) >= w * .34f
                         if (nh && !hit) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         hit = nh
@@ -250,7 +253,7 @@ fun SwipeCard(enabled: Boolean, onArchive: () -> Unit, onDelete: () -> Unit, con
                 onDragStopped = {
                     scope.launch {
                         val ok = Math.abs(off.value) >= w * .34f
-                        if (!ok) off.animateTo(0f, spring(.7f, 400f))
+                        if (!ok) off.animateTo(0f, spring(1f, 500f))
                         else {
                             val right = off.value > 0
                             off.animateTo(if (right) w * 1.1f else -w * 1.1f, tween(280, easing = Emph))
@@ -261,10 +264,11 @@ fun SwipeCard(enabled: Boolean, onArchive: () -> Unit, onDelete: () -> Unit, con
                 }
             )
     ) {
-        if (off.value != 0f) {
-            val r = off.value > 0
+        val reveal = (Math.abs(off.value) / (20f * dens)).coerceIn(0f, 1f)
+        if (reveal > 0f) {
+            val r = dir > 0
             Box(
-                Modifier.matchParentSize().clip(RoundedCornerShape(32.dp)).background(if (r) pal.p else pal.ec)
+                Modifier.matchParentSize().graphicsLayer { alpha = reveal }.clip(shape).background(if (r) pal.p else pal.ec)
                     .padding(horizontal = 34.dp),
                 contentAlignment = if (r) Alignment.CenterStart else Alignment.CenterEnd
             ) {
@@ -388,6 +392,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     }
                     SwipeCard(
                         enabled = !selMode,
+                        shape = SH[i % 5].let { RoundedCornerShape(it[0].dp, it[1].dp, it[2].dp, it[3].dp) },
                         onArchive = { vm.mark(listOf(d.id), "Catatan diarsipkan") { it.copy(a = true, p = false) } },
                         onDelete = { vm.mark(listOf(d.id), "Dipindah ke sampah") { it.copy(dt = System.currentTimeMillis()) } }
                     ) {
