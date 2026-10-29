@@ -177,8 +177,7 @@ data class Blk(
     val r: Rt = Rt(),
     val tb: List<List<Rt>> = emptyList(),
     val ca: List<String> = emptyList(),
-    val im: List<Img> = emptyList(),
-    val sd: Boolean = false   // true = teks ini berada di samping gambar tepat di atasnya
+    val im: List<Img> = emptyList()
 ) {
     val isText: Boolean get() = ty == "p" || ty == "h" || ty == "li" || ty == "q" || ty == "code"
     val isObj: Boolean get() = ty == "tbl" || ty == "img" || ty == "hr"
