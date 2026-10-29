@@ -40,7 +40,8 @@ jobs:
 
       - name: Tampilkan error saja
         if: failure()
-        run: grep '^e: ' build.log | sed 's#file:///home/runner/work/[^/]*/[^/]*/##' || true
+        run: |
+          grep '^e: ' build.log | sed 's#file:///home/runner/work/[^/]*/[^/]*/##' || true
 
       - uses: actions/upload-artifact@v4
         with:
