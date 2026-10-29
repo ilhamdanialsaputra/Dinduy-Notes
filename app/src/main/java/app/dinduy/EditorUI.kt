@@ -53,8 +53,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.BringIntoViewResponder
-import androidx.compose.foundation.relocation.bringIntoViewResponder
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -70,7 +68,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -81,7 +78,6 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -704,29 +700,11 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
 
     val imeOpen = WindowInsets.ime.getBottom(density) > 0
 
-    // tinggi kapsul (termasuk jarak bawah & baris pemilih di atasnya) yang melayang transparan di atas area ketik
-    var barH by remember { mutableStateOf(0) }
-    val showBar = !ed.reading && !ed.titleFocus
-    val reservePx = if (showBar) barH + with(density) { 12.dp.roundToPx() } else 0
-    val reservePxState = rememberUpdatedState(reservePx)
-    // setiap permintaan "tampilkan kursor" (dari BasicTextField maupun manual) diperluas ke bawah sebesar tinggi kapsul,
-    // jadi auto-scroll berhenti saat kursor ada DI ATAS kapsul, bukan di batas keyboard. Latar kapsul tetap transparan.
-    val capsuleAware = remember {
-        object : BringIntoViewResponder {
-            override fun calculateRectForParent(localRect: Rect): Rect =
-                localRect.copy(bottom = localRect.bottom + reservePxState.value)
-            override suspend fun bringChildIntoView(localRect: () -> Rect?) {}
-        }
-    }
-
     Column(Modifier.fillMaxSize().background(pal.s)) {
         TopBar()
         // area catatan berhenti tepat di atas keyboard / navbar; kapsul melayang di atasnya tanpa latar
         Box(Modifier.weight(1f).fillMaxWidth().windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))) {
-            Column(
-                Modifier.fillMaxSize().verticalScroll(scroll).bringIntoViewResponder(capsuleAware),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
+            Column(Modifier.fillMaxSize().verticalScroll(scroll), horizontalAlignment = Alignment.CenterHorizontally) {
                 Column(
                     Modifier.widthIn(max = 700.dp).fillMaxWidth().padding(horizontal = 24.dp)
                         .onSizeChanged { ed.widthDp = with(density) { it.width.toDp().value } }
@@ -768,14 +746,14 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                     )
                 }
             }
-            BottomBars(ed, act, showBar, imeOpen) { barH = it }
+            BottomBars(ed, act, !ed.reading && !ed.titleFocus, imeOpen)
         }
     }
 }
 
 /** Dipisah dari NoteScreen supaya tidak terjebak receiver ColumnScope milik Column di luarnya. */
 @Composable
-fun BottomBars(ed: Ed, act: Actions, showBar: Boolean, imeOpen: Boolean, onHeight: (Int) -> Unit = {}) {
+fun BottomBars(ed: Ed, act: Actions, showBar: Boolean, imeOpen: Boolean) {
     Box(Modifier.fillMaxSize()) {
         // kapsul penuh: gerak kecil + pudar, karena keyboard sudah ikut bergerak sendiri
         AnimatedVisibility(
@@ -786,10 +764,7 @@ fun BottomBars(ed: Ed, act: Actions, showBar: Boolean, imeOpen: Boolean, onHeigh
             exit = fadeOut(tween(180)) + slideOutVertically(tween(260, easing = Emph)) { it / 4 } +
                 shrinkVertically(tween(300, easing = Emph))
         ) {
-            Box(
-                Modifier.onSizeChanged { onHeight(it.height) }.padding(bottom = 10.dp).fillMaxWidth(),
-                contentAlignment = Alignment.Center
-            ) {
+            Box(Modifier.padding(bottom = 10.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 EdBar(ed, act, imeOpen)
             }
         }
