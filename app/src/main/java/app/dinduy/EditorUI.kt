@@ -702,7 +702,8 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
 
     Column(Modifier.fillMaxSize().background(pal.s)) {
         TopBar()
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        // area catatan berhenti tepat di atas keyboard / navbar; kapsul melayang di atasnya tanpa latar
+        Box(Modifier.weight(1f).fillMaxWidth().windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))) {
             Column(Modifier.fillMaxSize().verticalScroll(scroll), horizontalAlignment = Alignment.CenterHorizontally) {
                 Column(
                     Modifier.widthIn(max = 700.dp).fillMaxWidth().padding(horizontal = 24.dp)
@@ -745,15 +746,15 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                     )
                 }
             }
+            BottomBars(ed, act, !ed.reading && !ed.titleFocus, imeOpen)
         }
-        BottomBars(ed, act, !ed.reading && !ed.titleFocus, imeOpen)
     }
 }
 
 /** Dipisah dari NoteScreen supaya tidak terjebak receiver ColumnScope milik Column di luarnya. */
 @Composable
 fun BottomBars(ed: Ed, act: Actions, showBar: Boolean, imeOpen: Boolean) {
-    Box(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))) {
+    Box(Modifier.fillMaxSize()) {
         // kapsul penuh: gerak kecil + pudar, karena keyboard sudah ikut bergerak sendiri
         AnimatedVisibility(
             visible = showBar,
