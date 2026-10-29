@@ -280,7 +280,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     drawer.isOpen -> scope.launch { drawer.close() }
                     isHome && vm.sel.isNotEmpty() -> vm.sel.clear()
                     isHome && vm.searchOn -> vm.searchOn = false
-                    isNote && reading -> vm.ed?.exitReading()
+                    isNote && reading -> vm.ed?.let { if (it.selOn) it.clearSel() else it.exitReading() }
                     else -> nav.pop()
                 }
             }
