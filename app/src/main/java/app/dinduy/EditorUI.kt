@@ -3,6 +3,8 @@
 package app.dinduy
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -731,6 +733,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                     )
                 }
             }
+            MiniSlot(ed, !ed.reading && !ed.titleFocus)
         }
         BottomBars(ed, act, !ed.reading && !ed.titleFocus, imeOpen)
     }
@@ -744,16 +747,24 @@ fun BottomBars(ed: Ed, act: Actions, showBar: Boolean, imeOpen: Boolean) {
         AnimatedVisibility(
             visible = showBar && !ed.miniBar,
             modifier = Modifier.align(Alignment.BottomCenter),
-            enter = fadeIn(tween(260, easing = Emph)) + slideInVertically(tween(320, easing = Emph)) { it / 3 },
-            exit = fadeOut(tween(180)) + slideOutVertically(tween(260, easing = Emph)) { it / 4 }
+            enter = fadeIn(tween(260, easing = Emph)) + slideInVertically(tween(320, easing = Emph)) { it / 3 } +
+                expandVertically(tween(320, easing = Emph)),
+            exit = fadeOut(tween(180)) + slideOutVertically(tween(260, easing = Emph)) { it / 4 } +
+                shrinkVertically(tween(300, easing = Emph))
         ) {
             Box(Modifier.padding(bottom = 10.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 EdBar(ed, act, imeOpen)
             }
         }
-        // kapsul mini di pojok kanan bawah, dekat jempol
+    }
+}
+
+/** Kapsul mini melayang di atas area catatan (tanpa memakan ruang), tepat di atas keyboard. */
+@Composable
+fun MiniSlot(ed: Ed, show: Boolean) {
+    Box(Modifier.fillMaxSize()) {
         AnimatedVisibility(
-            visible = showBar && ed.miniBar,
+            visible = show && ed.miniBar,
             modifier = Modifier.align(Alignment.BottomEnd),
             enter = fadeIn(tween(200)) + scaleIn(spring(.7f, 500f), initialScale = .6f, transformOrigin = TransformOrigin(1f, 1f)),
             exit = fadeOut(tween(150)) + scaleOut(tween(200, easing = Emph), targetScale = .6f, transformOrigin = TransformOrigin(1f, 1f))
