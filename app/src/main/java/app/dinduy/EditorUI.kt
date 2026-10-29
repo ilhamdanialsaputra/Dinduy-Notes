@@ -29,6 +29,9 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -108,6 +111,9 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.BiasAlignment
 import kotlinx.coroutines.delay
+
+/** Lebar kapsul saat mengembang, sebagai pecahan dari lebar area. */
+private const val BAR_FRAC = 0.84f
 
 class Dm(val fs: Float, val lh: Float)
 
@@ -537,7 +543,7 @@ fun EdBar(ed: Ed, act: Actions, imeOpen: Boolean) {
         Modifier.widthIn(max = 560.dp).fillMaxWidth().padding(horizontal = 10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        if (ed.selImg != null) {
+        if (ed.miniBar) Unit else if (ed.selImg != null) {
             val s = ed.selImg!!
             val b = ed.blocks.firstOrNull { it.id == s.first }
             val inRow = (b?.im?.size ?: 1) > 1
@@ -583,13 +589,23 @@ fun EdBar(ed: Ed, act: Actions, imeOpen: Boolean) {
                 if (ty == "q") Chip("Teks biasa", pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.pickQuote = false; ed.setPlain() }
             }
         }
+        // satu kapsul: lebarnya mengecil ke kanan (tinggal dua tombol) dan mengembang lagi ke kiri
+        val f by animateFloatAsState(if (ed.miniBar) 1f else 0f, tween(420, easing = Emph), label = "mini")
+        val toolsScroll = rememberScrollState()
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val full = maxWidth
+            val expW = full * BAR_FRAC
+            val miniW = 102.dp
+            val w = expW + (miniW - expW) * f
+            val endPad = (full - expW) / 2 * (1f - f)
         Row(
-            Modifier.fillMaxWidth().height(60.dp).shadow(if (pal.dark) 6.dp else 1.dp, capShape).clip(capShape)
-                .background(pal.c4).padding(horizontal = 6.dp),
+            Modifier.align(Alignment.CenterEnd).padding(end = endPad).width(w).height(56.dp)
+                .shadow(if (pal.dark) 6.dp else 1.dp, capShape).clip(capShape)
+                .background(pal.c4).padding(horizontal = 5.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(
-                Modifier.weight(1f).fillMaxHeight().horizontalScroll(rememberScrollState()),
+                Modifier.weight(1f).fillMaxHeight().horizontalScroll(toolsScroll),
                 horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically
             ) {
                 @Composable fun I(id: String, icon: String, on: Boolean = false, off: Boolean = false, f: () -> Unit) =
@@ -625,24 +641,20 @@ fun EdBar(ed: Ed, act: Actions, imeOpen: Boolean) {
                 I("img", "img", off = blkOff) { act.pickImages() }
                 I("hr", "hr", off = blkOff) { ed.insHr() }
             }
-            Sep()
-            // keyboard terbuka: cukup ciutkan kapsul (keyboard tetap); keyboard tertutup: masuk mode baca
-            Tbn({ Ic("hide", it) }, false, true) { if (imeOpen) { ed.pickQuote = false; ed.miniBar = true } else ed.enterReading() }
+            Box(Modifier.width(10.dp * (1f - f)).clipToBounds().wrapContentWidth(Alignment.Start, unbounded = true)) { Sep() }
+            // keyboard terbuka: ">" menciutkan kapsul ke kanan; "<" mengembangkannya lagi; keyboard tertutup: panah bawah = mode baca
+            Tbn({ Ic(if (ed.miniBar) "chl" else if (imeOpen) "chr" else "hide", it) }, false, true) {
+                if (ed.miniBar) ed.miniBar = false
+                else if (imeOpen) { ed.pickQuote = false; ed.miniBar = true }
+                else ed.enterReading()
+            }
+            if (f > .01f) {
+                Box(Modifier.width(46.dp * f).clipToBounds().wrapContentWidth(Alignment.Start, unbounded = true).graphicsLayer { alpha = f }) {
+                    Tbn({ Ic("hide", it) }, false, ed.miniBar) { ed.enterReading() }
+                }
+            }
         }
-    }
-}
-
-/** Kapsul mini di atas keyboard: ketuk "Aa" untuk memunculkan kapsul lagi, panah bawah untuk mode baca. */
-@Composable
-fun MiniBar(ed: Ed) {
-    val pal = LocalPal.current
-    val shape = RoundedCornerShape(28.dp)
-    Row(
-        Modifier.shadow(if (pal.dark) 6.dp else 1.dp, shape).clip(shape).background(pal.c4).padding(5.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically
-    ) {
-        Tbn({ Ic("txt", it) }, false, true) { ed.miniBar = false }
-        Tbn({ Ic("hide", it) }, false, true) { ed.enterReading() }
+        }
     }
 }
 
@@ -733,7 +745,6 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                     )
                 }
             }
-            MiniSlot(ed, !ed.reading && !ed.titleFocus)
         }
         BottomBars(ed, act, !ed.reading && !ed.titleFocus, imeOpen)
     }
@@ -745,7 +756,7 @@ fun BottomBars(ed: Ed, act: Actions, showBar: Boolean, imeOpen: Boolean) {
     Box(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))) {
         // kapsul penuh: gerak kecil + pudar, karena keyboard sudah ikut bergerak sendiri
         AnimatedVisibility(
-            visible = showBar && !ed.miniBar,
+            visible = showBar,
             modifier = Modifier.align(Alignment.BottomCenter),
             enter = fadeIn(tween(260, easing = Emph)) + slideInVertically(tween(320, easing = Emph)) { it / 3 } +
                 expandVertically(tween(320, easing = Emph)),
@@ -755,21 +766,6 @@ fun BottomBars(ed: Ed, act: Actions, showBar: Boolean, imeOpen: Boolean) {
             Box(Modifier.padding(bottom = 10.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 EdBar(ed, act, imeOpen)
             }
-        }
-    }
-}
-
-/** Kapsul mini melayang di atas area catatan (tanpa memakan ruang), tepat di atas keyboard. */
-@Composable
-fun MiniSlot(ed: Ed, show: Boolean) {
-    Box(Modifier.fillMaxSize()) {
-        AnimatedVisibility(
-            visible = show && ed.miniBar,
-            modifier = Modifier.align(Alignment.BottomEnd),
-            enter = fadeIn(tween(200)) + scaleIn(spring(.7f, 500f), initialScale = .6f, transformOrigin = TransformOrigin(1f, 1f)),
-            exit = fadeOut(tween(150)) + scaleOut(tween(200, easing = Emph), targetScale = .6f, transformOrigin = TransformOrigin(1f, 1f))
-        ) {
-            Box(Modifier.padding(end = 14.dp, bottom = 10.dp)) { MiniBar(ed) }
         }
     }
 }
