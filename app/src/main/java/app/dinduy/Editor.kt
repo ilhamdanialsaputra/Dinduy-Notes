@@ -71,7 +71,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     init {
         val n = vm.note(noteId)
         title = n?.t ?: ""
-        blocks = (n?.bl ?: emptyList()).ifEmpty { listOf(Blk()) }
+        blocks = migrateSide((n?.bl ?: emptyList()).ifEmpty { listOf(Blk()) })
         blocks.forEach { seed(it) }
         norm()
         hist.add(Snap(blocks, null, TextRange.Zero))
@@ -83,7 +83,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             b.tb.forEachIndexed { r, row ->
                 row.forEachIndexed { c, cell -> tf["${b.id}:$r:$c"] = TextFieldValue(Z + cell.t, TextRange(1)) }
             }
-        } else if (b.isText || b.ty == "img") tf[b.id] = TextFieldValue(Z + b.r.t, TextRange(1))
+        } else if (b.isText) tf[b.id] = TextFieldValue(Z + b.r.t, TextRange(1))
     }
 
     private fun reseedAll() {
@@ -272,7 +272,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (nb == null) return false
         commit()
         val nr = rt.slice(len, tx.length)
-        setBlock(i, nb.copy(r = nr))
+        setBlock(i, nb.copy(r = nr, sd = b.sd))
         val np = (c - len).coerceAtLeast(0)
         tf[key] = TextFieldValue(Z + nr.t, TextRange(np + 1))
         typing = emptySet()
@@ -318,13 +318,19 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (i < 0) return
         val b = blocks[i]
         commit()
+        val lastSide = b.sd && (i + 1 >= blocks.size || !blocks[i + 1].sd)
         when {
             b.ty == "li" && b.r.t.isEmpty() -> {
                 setBlock(i, if (b.d > 0) b.copy(d = b.d - 1) else b.copy(ty = "p"))
                 focusAt(b.id, 0)
             }
+            // Enter pada baris kosong terakhir di samping gambar = keluar dari kolom samping
+            b.ty == "p" && b.r.t.isEmpty() && lastSide -> {
+                setBlock(i, b.copy(sd = false))
+                focusAt(b.id, 0)
+            }
             b.ty == "h" && b.r.t.isNotEmpty() && pos == 0 -> {
-                val nb = Blk()
+                val nb = Blk(sd = b.sd)
                 blocks = blocks.toMutableList().also { it.add(i, nb) }
                 seed(nb)
                 focusAt(b.id, 0)
@@ -338,7 +344,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val b = blocks[i]
         val left = b.r.slice(0, pos)
         val right = b.r.slice(pos, b.r.t.length)
-        val nb = if (nty == "li") Blk(ty = "li", lt = b.lt, d = b.d, r = right) else Blk(ty = "p", r = right)
+        val nb = if (nty == "li") Blk(ty = "li", lt = b.lt, d = b.d, r = right, sd = b.sd) else Blk(ty = "p", r = right, sd = b.sd)
         blocks = blocks.toMutableList().also { it[i] = b.copy(r = left); it.add(i + 1, nb) }
         tf[b.id] = TextFieldValue(Z + left.t, TextRange(left.t.length + 1))
         seed(nb)
@@ -355,7 +361,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             tf[b.id] = TextFieldValue(Z, TextRange(1))
             focusAt(b.id, 0)
         } else {
-            val nb = Blk()
+            val nb = Blk(sd = b.sd)
             blocks = blocks.toMutableList().also { it[i] = b.copy(r = keep); it.add(i + 1, nb) }
             tf[b.id] = TextFieldValue(Z + keep.t, TextRange(keep.t.length + 1))
             seed(nb)
@@ -368,7 +374,6 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val i = idx(key)
         if (i < 0) return
         val b = blocks[i]
-        if (b.ty == "img") { selectImg(b.id, 0); return }   // Backspace di awal teks samping: pilih gambarnya
         commit()
         if (b.ty == "li") {
             setBlock(i, if (b.d > 0) b.copy(d = b.d - 1) else b.copy(ty = "p"))
@@ -380,6 +385,10 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             if (i == 0) return
             val pv = blocks[i - 1]
             when {
+                b.sd && pv.ty == "img" -> {          // awal teks samping: lepaskan teks ke bawah gambar
+                    unwrapFrom(i - 1)
+                    focusAt(b.id, 0)
+                }
                 pv.ty == "hr" || pv.ty == "img" -> {
                     blocks = blocks.filterIndexed { j, _ -> j != i - 1 }
                     focusAt(b.id, 0)
@@ -408,7 +417,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (i < 0) return
         val b = blocks[i]
         commit()
-        val ns = md(s.trimEnd('\n'))
+        val ns = md(s.trimEnd('\n')).map { x -> if (b.sd && x.isText) x.copy(sd = true) else x }
         if (ns.isEmpty()) return
         val l = blocks.toMutableList()
         val rt = b.r
@@ -418,8 +427,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         } else if (pos >= rt.t.length) l.addAll(i + 1, ns)
         else if (pos <= 0) l.addAll(i, ns)
         else {
-            val right = if (b.ty == "li") Blk(ty = "li", lt = b.lt, d = b.d, r = rt.slice(pos, rt.t.length))
-            else Blk(ty = "p", r = rt.slice(pos, rt.t.length))
+            val right = if (b.ty == "li") Blk(ty = "li", lt = b.lt, d = b.d, r = rt.slice(pos, rt.t.length), sd = b.sd)
+            else Blk(ty = "p", r = rt.slice(pos, rt.t.length), sd = b.sd)
             l[i] = b.copy(r = rt.slice(0, pos))
             l.addAll(i + 1, ns + right)
         }
@@ -619,16 +628,101 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         return b.ty == "img" && m.al != "c" && m.w.coerceIn(.2f, 1f) <= maxSideW() + .001f
     }
 
-    /** Teks di sisi gambar yang sudah tak punya ruang dipindah jadi paragraf di bawah gambar (tidak ada teks yang hilang). */
+    // ---------- teks di samping gambar ----------
+    // Teks samping = blok biasa tepat setelah gambar yang bertanda sd=true. Jadi Enter, judul, poin, seleksi, dll. berlaku normal.
+
+    /** Jumlah blok teks yang tampil di samping gambar pada indeks [i] (0 bila tidak ada / tak muat). */
+    fun sideCount(i: Int): Int {
+        val b = blocks.getOrNull(i) ?: return 0
+        if (b.ty != "img" || !sideOk(b)) return 0
+        var n = 0
+        while (i + 1 + n < blocks.size && blocks[i + 1 + n].sd) n++
+        return n
+    }
+
+    private fun migrateSide(l: List<Blk>): List<Blk> {
+        val out = ArrayList<Blk>()
+        for (b in l) {
+            if (b.ty == "img" && b.r.t.isNotEmpty()) {
+                val m = b.im.singleOrNull()
+                out.add(b.copy(r = Rt()))
+                out.add(Blk(ty = "p", r = b.r, sd = m != null && m.al != "c"))
+            } else out.add(b)
+        }
+        return out
+    }
+
+    /** Lepas semua teks samping milik gambar [i]: teksnya tetap ada, pindah jadi paragraf di bawah gambar. */
+    private fun unwrapFrom(i: Int) {
+        val l = blocks.toMutableList()
+        var j = i + 1
+        var ch = false
+        while (j < l.size && l[j].sd) { l[j] = l[j].copy(sd = false); ch = true; j++ }
+        if (ch) blocks = l
+    }
+
     fun releaseSide(bid: String, force: Boolean = false) {
         val i = idx(bid)
         if (i < 0) return
         val b = blocks[i]
-        if (b.ty != "img" || b.r.t.isEmpty() || (!force && sideOk(b))) return
-        val p = Blk(ty = "p", r = b.r)
-        blocks = blocks.toMutableList().also { it[i] = b.copy(r = Rt()); it.add(i + 1, p) }
-        tf[b.id] = TextFieldValue(Z, TextRange(1))
-        seed(p)
+        if (b.ty != "img" || (!force && sideOk(b))) return
+        unwrapFrom(i)
+    }
+
+    /** Ketuk area kosong di samping gambar: mulai menulis di sana. */
+    fun startSide(bid: String) {
+        val i = idx(bid)
+        if (i < 0 || !sideOk(blocks[i])) return
+        commit()
+        val l = blocks.toMutableList()
+        val nx = l.getOrNull(i + 1)
+        val id: String
+        if (nx != null && nx.ty == "p" && nx.r.t.isEmpty()) {
+            l[i + 1] = nx.copy(sd = true); id = nx.id
+        } else {
+            val nb = Blk(sd = true)
+            l.add(i + 1, nb); seed(nb); id = nb.id
+        }
+        blocks = l
+        afterStructural()
+        focusAt(id, 0)
+    }
+
+    /** Paragraf di bawah gambar ikut jadi teks samping, kira-kira sebanyak yang muat setinggi gambar. */
+    private fun adoptSide(i: Int) {
+        val b = blocks.getOrNull(i) ?: return
+        if (b.ty != "img" || !sideOk(b) || sideCount(i) > 0) return
+        val m = b.im[0]
+        val imgW = widthDp * m.w.coerceIn(.2f, 1f)
+        val imgH = imgW / m.a.coerceIn(.2f, 5f)
+        val colW = (widthDp - imgW - SIDE_GAP).coerceAtLeast(SIDE_MIN)
+        val fs = vm.pr.fs.toFloat()
+        val lh = vm.pr.lh
+        val perLine = (colW / (fs * .5f)).toInt().coerceAtLeast(4)
+        val l = blocks.toMutableList()
+        var used = 0f
+        var n = 0
+        var j = i + 1
+        while (j < l.size) {
+            val x = l[j]
+            if (!x.isText || x.isMulti || x.r.t.isEmpty()) break
+            val lines = ((x.r.t.length + perLine - 1) / perLine).coerceAtLeast(1)
+            val hh = lines * fs * lh + fs * 1.1f
+            if (n > 0 && used + hh > imgH) break
+            l[j] = x.copy(sd = true)
+            used += hh; n++; j++
+            if (used >= imgH) break
+        }
+        if (n > 0) blocks = l
+    }
+
+    /** Setelah rata/posisi gambar berubah: lepas teks bila tak muat, atau ambil paragraf di bawahnya. */
+    fun settleSide(bid: String) {
+        val i = idx(bid)
+        if (i < 0) return
+        val b = blocks[i]
+        if (b.ty != "img") return
+        if (!sideOk(b)) unwrapFrom(i) else if (sideCount(i) == 0) adoptSide(i)
     }
 
     fun imgAlign(al: String) {
@@ -638,7 +732,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             val w = if (al != "c" && it.w > maxSideW()) minOf(SIDE_W, maxSideW()) else it.w
             it.copy(al = al, w = w)
         }
-        releaseSide(s.first)
+        settleSide(s.first)
         dirty(); commit()
     }
 
@@ -710,9 +804,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val b = blocks[i]
         val rest = b.im.filterIndexed { j, _ -> j != s.second }
         if (rest.isEmpty()) {
-            // teks di sisi gambar tidak ikut hilang: jadi paragraf biasa
-            if (b.r.t.isNotEmpty()) setBlock(i, Blk(id = b.id, ty = "p", r = b.r))
-            else blocks = blocks.filterIndexed { j, _ -> j != i }
+            // teks samping tidak ikut hilang: otomatis jadi paragraf biasa (lihat norm)
+            blocks = blocks.filterIndexed { j, _ -> j != i }
         } else if (rest.size == 1) setBlock(i, b.copy(im = listOf(rest[0].copy(a = rest[0].o, w = 0.6f, al = "c"))))
         else setBlock(i, b.copy(im = rest))
         selImg = null
@@ -722,11 +815,26 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     fun imgMove(dir: Int) {
         val s = selImg ?: return
         val i = idx(s.first)
-        val j = i + dir
-        if (i < 0 || j < 0 || j >= blocks.size) return
-        commit()
+        if (i < 0) return
+        val g = sideCount(i)
         val l = blocks.toMutableList()
-        val t = l[i]; l[i] = l[j]; l[j] = t
+        if (dir < 0) {
+            var j = i - 1
+            if (j < 0) return
+            while (j > 0 && l[j].sd) j--
+            commit()
+            val unit = l.subList(i, i + g + 1).toList()
+            repeat(g + 1) { l.removeAt(i) }
+            l.addAll(j, unit)
+        } else {
+            val nx = i + g + 1
+            if (nx >= l.size) return
+            val ng = sideCount(nx)
+            commit()
+            val nxt = l.subList(nx, nx + ng + 1).toList()
+            repeat(ng + 1) { l.removeAt(nx) }
+            l.addAll(i, nxt)
+        }
         blocks = l
         norm(); afterStructural()
     }
@@ -870,13 +978,14 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val i = idx(m.bid)
         if (i < 0) return
         val cy = m.top + m.h / 2f + mvY
+        val g = sideCount(i)
         var gap = blocks.size
         for ((j, b) in blocks.withIndex()) {
-            if (j == i) continue
+            if (j in i..(i + g) || b.sd) continue
             val q = bpos[b.id] ?: continue
             if (q[0] + q[1] / 2f >= cy) { gap = j; break }
         }
-        val nd = if (gap == i || gap == i + 1) -1 else gap
+        val nd = if (gap in i..(i + 1 + g)) -1 else gap
         if (nd != dropAt) { dropAt = nd; if (nd >= 0) buzz?.invoke() }
         val b = blocks[i]
         if (b.im.size == 1) {
@@ -894,6 +1003,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val m = mv ?: return
         autoJob?.cancel()
         val i = idx(m.bid)
+        val g = if (i >= 0) sideCount(i) else 0
         val to = dropAt
         val al = mvAl
         val anchor = if (to in 0 until blocks.size) blocks[to].id else null
@@ -905,15 +1015,16 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             val w = if (al != "c" && mi.w > maxSideW()) minOf(SIDE_W, maxSideW()) else mi.w
             b = b.copy(im = listOf(mi.copy(al = al, w = w)))
         }
+        val unit = listOf(b) + blocks.subList(i + 1, i + 1 + g)
         val l = blocks.toMutableList()
-        if (!m.row && to >= 0 && to != i && to != i + 1) {
-            l.removeAt(i)
+        if (!m.row && to >= 0 && to !in i..(i + 1 + g)) {
+            repeat(g + 1) { l.removeAt(i) }
             if (i > 0 && i < l.size && isEmptyP(l[i - 1]) && isEmptyP(l[i])) l.removeAt(i)
             val at = if (anchor == null) l.size else l.indexOfFirst { it.id == anchor }.let { if (it < 0) l.size else it }
-            l.add(at, b)
+            l.addAll(at, unit)
         } else l[i] = b
         blocks = l
-        releaseSide(b.id)
+        settleSide(b.id)
         selImg = b.id to maxOf(0, b.im.indexOfFirst { it.id == m.imgId })
         norm(); afterStructural()
     }
@@ -925,6 +1036,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     var selDrag by mutableStateOf(false)
     val lays = mutableStateMapOf<String, TextLayoutResult>()
     val kpos = mutableStateMapOf<String, Offset>()
+    val lsh = HashMap<String, Int>()          // 1 bila layout berasal dari kolom edit (ada awalan Z di indeks 0)
+    val ipos = HashMap<String, Rect>()        // kotak tiap gambar di ruang konten (agar tekan-tahan gambar tak jadi seleksi teks)
     var contentCoords: LayoutCoordinates? = null
     private var selBack: Pt? = null            // asal dari mode ketik: kembali ke sana saat selesai
     private var wordA: Pt? = null
@@ -944,7 +1057,6 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             when {
                 b.ty == "tbl" -> b.tb.forEachIndexed { r, row -> row.indices.forEach { c -> l.add("${b.id}:$r:$c") } }
                 b.isText -> l.add(b.id)
-                b.ty == "img" && b.r.t.isNotEmpty() -> l.add(b.id)
             }
         }
         ordList = l
@@ -983,11 +1095,12 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     fun ptRect(p: Pt): Rect? {
         val lay = lays[p.key] ?: return null
         val pos = kpos[p.key] ?: return null
-        val o = p.off.coerceIn(0, lay.layoutInput.text.length)
+        val sh = lsh[p.key] ?: 0
+        val o = (p.off + sh).coerceIn(0, lay.layoutInput.text.length)
         return lay.getCursorRect(o).translate(pos)
     }
 
-    fun hitPt(p: Offset): Pt? {
+    private fun nearest(p: Offset): Pair<String, Float>? {
         ordRefresh()
         var best: String? = null
         var bd = Float.MAX_VALUE
@@ -1001,11 +1114,17 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             val d = dy * 4f + dx
             if (d < bd) { bd = d; best = k }
         }
-        val k = best ?: return null
+        return best?.let { it to bd }
+    }
+
+    fun hitPt(p: Offset): Pt? {
+        val k = nearest(p)?.first ?: return null
         val lay = lays[k] ?: return null
         val pos = kpos[k] ?: return null
+        val sh = lsh[k] ?: 0
+        val len = rtOf(k).t.length
         val local = Offset(p.x - pos.x, (p.y - pos.y).coerceIn(0f, maxOf(0f, lay.size.height - 1f)))
-        return Pt(k, lay.getOffsetForPosition(local).coerceIn(0, lay.layoutInput.text.length))
+        return Pt(k, (lay.getOffsetForPosition(local) - sh).coerceIn(0, len))
     }
 
     /** Masuk mode seleksi dari mode ketik: mulai dari seleksi/kata di kursor. */
@@ -1045,16 +1164,31 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (back != null && tf.containsKey(back.key)) exitReading(back.key, back.off.coerceAtLeast(0))
     }
 
-    /** Tekan-tahan di teks (mode baca / seleksi): pilih satu kata. */
+    /**
+     * Tekan-tahan di teks: pilih satu kata, lalu geser untuk memperluas ke blok mana pun.
+     * Berlaku di mode baca MAUPUN mode ketik; dari mode ketik, setelah selesai kursor kembali ke teks.
+     */
     fun selLong(p: Offset, fingerY: Float): Boolean {
+        val edit = !reading
+        if (edit) {
+            if (ipos.values.any { it.contains(p) }) return false          // itu gambar, bukan teks
+            val nr = nearest(p) ?: return false
+            if (nr.second > 32f * dens) return false                       // jauh dari teks (mis. judul / ruang kosong)
+        }
         val h = hitPt(p) ?: return false
         val lay = lays[h.key] ?: return false
-        val len = lay.layoutInput.text.length
+        val sh = lsh[h.key] ?: 0
+        val len = rtOf(h.key).t.length
         var a = h
         var b = h
         if (len > 0) {
-            val w = lay.getWordBoundary(h.off.coerceIn(0, len - 1))
-            a = Pt(h.key, w.start); b = Pt(h.key, w.end)
+            val w = lay.getWordBoundary((h.off + sh).coerceIn(0, maxOf(0, lay.layoutInput.text.length - 1)))
+            a = Pt(h.key, (w.start - sh).coerceIn(0, len)); b = Pt(h.key, (w.end - sh).coerceIn(0, len))
+        }
+        if (edit) {
+            commit()
+            selBack = Pt(b.key, b.off)
+            selImg = null; pickQuote = false; miniBar = false; clearReq++
         }
         wordA = a; wordB = b; selWho = 0
         pa = a; pf = b
@@ -1217,6 +1351,26 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         exitReading(lo.key, lo.off)
     }
 
+    /** Tempel teks di tempat seleksi (menggantikannya), lalu lanjut mengetik setelah teks yang ditempel. */
+    fun selPaste(s: String) {
+        if (s.isEmpty()) return
+        val (lo, _) = selSpan() ?: return
+        selDelete()
+        val key = lo.key
+        val b = blockOfKey(key) ?: return
+        if (s.indexOf('\n') >= 0 && !b.isMulti && !isCellKey(key)) {
+            paste(key, lo.off, s)
+            return
+        }
+        val clean = if (isCellKey(key)) s.replace('\n', ' ') else s
+        val rt = rtOf(key)
+        val nr = rt.slice(0, lo.off) + Rt(clean) + rt.slice(lo.off, rt.t.length)
+        putRt(key, nr)
+        tf[key] = TextFieldValue(Z + nr.t, TextRange(lo.off + clean.length + 1))
+        dirty(); commit()
+        focusAt(key, lo.off + clean.length)
+    }
+
     // ---------- struktur ----------
     private fun norm() {
         val out = ArrayList<Blk>()
@@ -1225,9 +1379,19 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             out.add(b)
         }
         if (out.isEmpty() || out.last().isObj || out.last().isMulti) out.add(Blk())
+        // teks samping hanya sah tepat setelah gambar tunggal rata kiri/kanan; selebihnya jadi paragraf biasa
+        var inGrp = false
+        for (k in out.indices) {
+            val x = out[k]
+            if (x.ty == "img") inGrp = x.im.size == 1 && x.im[0].al != "c"
+            else if (x.sd) {
+                if (inGrp && x.isText) continue
+                out[k] = x.copy(sd = false); inGrp = false
+            } else inGrp = false
+        }
         if (out != blocks) {
             blocks = out
-            out.forEach { if ((it.isText || it.ty == "img") && !tf.containsKey(it.id)) seed(it) }
+            out.forEach { if (it.isText && !tf.containsKey(it.id)) seed(it) }
         }
     }
 
