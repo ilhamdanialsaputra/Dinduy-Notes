@@ -116,6 +116,16 @@ fun Rt.toggle(a: Int, b: Int, k: Int): Rt {
     return copy(sp = normSp(l, t.length))
 }
 
+/** Pasang / lepas gaya pada rentang tanpa membalik (dipakai seleksi lintas blok). */
+fun Rt.setFmt(a: Int, b: Int, k: Int, on: Boolean): Rt {
+    val lo = minOf(a, b)
+    val hi = maxOf(a, b)
+    if (hi <= lo) return this
+    val l = sp.toMutableList()
+    if (on) l.add(Sp(lo, hi, k)) else subtract(l, k, lo, hi)
+    return copy(sp = normSp(l, t.length))
+}
+
 fun Rt.flags(a: Int, b: Int): Set<Int> {
     val lo = minOf(a, b).coerceAtLeast(0)
     val hi = maxOf(a, b).coerceAtLeast(0)
@@ -149,7 +159,8 @@ data class Img(
     val al: String = "c",   // l / c / r
     val w: Float = 1f,      // lebar relatif (gambar tunggal)
     val px: Float = 0.5f,
-    val py: Float = 0.5f
+    val py: Float = 0.5f,
+    val z: Float = 1f       // zoom pangkas (1 = pas bingkai)
 )
 
 /** ty: p, h, li, q, code, tbl, hr, img */
@@ -201,7 +212,8 @@ data class Db(val pr: Prefs = Prefs(), val docs: List<Note> = emptyList())
 
 fun plainOf(bl: List<Blk>): String = bl.joinToString("\n") {
     when (it.ty) {
-        "img", "hr" -> ""
+        "hr" -> ""
+        "img" -> it.r.t.replace('\n', ' ')
         "tbl" -> it.tb.flatten().joinToString(" ") { c -> c.t }
         else -> it.r.t.replace('\n', ' ')
     }
