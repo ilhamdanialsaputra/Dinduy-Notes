@@ -9,6 +9,36 @@ plugins {
 // (yang berubah tiap build, jadi update-an harus uninstall dulu).
 val ksFile: String? = System.getenv("KS_FILE")
 
+// Font (Roboto Flex & Tinos/"Times New Roman") diunduh otomatis saat build ke folder build/, TIDAK disimpan di repository.
+// Kalau unduhan gagal, build tetap jalan dan aplikasi memakai font sistem sebagai cadangan.
+val fontAssets = layout.buildDirectory.dir("generated/font-assets")
+val fetchFonts by tasks.registering {
+    val root = fontAssets.get().asFile
+    outputs.dir(root)
+    doLast {
+        val out = File(root, "fonts").apply { mkdirs() }
+        val base = "https://raw.githubusercontent.com/google/fonts/main/ofl"
+        val files = listOf(
+            "roboto_flex.ttf" to "$base/robotoflex/RobotoFlex%5BGRAD%2CXOPQ%2CXTRA%2CYOPQ%2CYTAS%2CYTDE%2CYTFI%2CYTLC%2CYTUC%2Copsz%2Cslnt%2Cwdth%2Cwght%5D.ttf",
+            "tinos_regular.ttf" to "$base/tinos/Tinos-Regular.ttf",
+            "tinos_bold.ttf" to "$base/tinos/Tinos-Bold.ttf",
+            "tinos_italic.ttf" to "$base/tinos/Tinos-Italic.ttf",
+            "tinos_bolditalic.ttf" to "$base/tinos/Tinos-BoldItalic.ttf"
+        )
+        for ((name, url) in files) {
+            val f = File(out, name)
+            if (f.exists() && f.length() > 20_000) continue
+            try {
+                java.net.URL(url).openStream().use { i -> f.outputStream().use { o -> i.copyTo(o) } }
+            } catch (e: Exception) {
+                f.delete()
+                logger.warn("Font $name gagal diunduh: ${e.message}")
+            }
+        }
+    }
+}
+tasks.named("preBuild") { dependsOn(fetchFonts) }
+
 android {
     namespace = "app.dinduy"
     compileSdk = 34
@@ -48,6 +78,7 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
+    sourceSets.getByName("main").assets.srcDir(fetchFonts)
     packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
 }
 
