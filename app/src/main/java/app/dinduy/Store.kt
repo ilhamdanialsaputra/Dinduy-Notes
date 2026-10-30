@@ -142,7 +142,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         }
         if (db == null) {
             val dark = (ctx.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
-            pr = Prefs(mode = if (dark) "dark" else "light")
+            pr = Prefs()   // mode otomatis + warna Material You mengikuti perangkat
             val t = now
             docs.add(Note(id = "w", t = "Selamat datang di Dinduy", bl = md(WEL), x = "", u = t, c = t))
             docs[0] = docs[0].copy(x = plainOf(docs[0].bl))
