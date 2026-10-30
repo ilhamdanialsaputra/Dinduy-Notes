@@ -331,7 +331,13 @@ fun TF(
         val vcNoLong = remember(vcBase) {
             object : ViewConfiguration by vcBase { override val longPressTimeoutMillis: Long get() = 60_000L }
         }
-        CompositionLocalProvider(LocalViewConfiguration provides vcNoLong) {
+        val selCols = androidx.compose.foundation.text.selection.LocalTextSelectionColors.current
+        val hideNative = ed.selOn   // seleksi editor aktif: sembunyikan kursor + pegangan bawaan field supaya tidak dobel
+        val cols = if (hideNative) androidx.compose.foundation.text.selection.TextSelectionColors(Color.Transparent, selCols.backgroundColor) else selCols
+        CompositionLocalProvider(
+            LocalViewConfiguration provides vcNoLong,
+            androidx.compose.foundation.text.selection.LocalTextSelectionColors provides cols
+        ) {
             BasicTextField(
                 value = v, onValueChange = { ed.onText(key, it) },
                 modifier = modifier.focusRequester(fr).bringIntoViewRequester(bring).trackPos(ed, key)
@@ -347,7 +353,7 @@ fun TF(
                             }
                         }
                     ),
-                textStyle = base, cursorBrush = SolidColor(pal.p), visualTransformation = vt,
+                textStyle = base, cursorBrush = SolidColor(if (hideNative) Color.Transparent else pal.p), visualTransformation = vt,
                 onTextLayout = { lay = it },
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 decorationBox = { inner ->
@@ -1415,10 +1421,25 @@ fun SelBubble(ed: Ed, vm: AppVM, act: Actions, scrollY: Int) {
     val has = span.first != span.second
     val edit = ed.selEdit
     val gap = with(dn) { 10.dp.toPx() }
-    val above = r0.top - bs.height - gap - scrollY >= 0f
-    val y = if (above) r0.top - bs.height - gap else r1.bottom + with(dn) { 52.dp.toPx() }
+    // bubble selalu diusahakan tampil di area layar yang terlihat (di luar kapsul alat), mengikuti scroll
+    val m = with(dn) { 8.dp.toPx() }
+    val visTop = scrollY + m
+    val visBot = scrollY + ed.viewH - (if (ed.barOn) ed.barH + with(dn) { 10.dp.toPx() } else 0f) - m
+    val belowGap = with(dn) { 52.dp.toPx() }
+    val aboveY = r0.top - bs.height - gap
+    val belowY = r1.bottom + belowGap
+    val canAbove = aboveY >= visTop && r0.top < visBot
+    val canBelow = belowY + bs.height <= visBot && r1.bottom > visTop
+    val pinned = !canAbove && !canBelow
+    val yRaw = when {
+        canAbove -> aboveY
+        canBelow -> belowY
+        else -> visTop + (visBot - visTop - bs.height).coerceAtLeast(0f) * .35f   // seleksi menutupi layar: tempel di area terlihat
+    }
+    val y = yRaw.coerceIn(visTop, maxOf(visTop, visBot - bs.height))
     val maxX = ed.widthDp * dn.density
-    val x = ((r0.left + r1.left) / 2f - bs.width / 2f).coerceIn(0f, (maxX - bs.width).coerceAtLeast(0f))
+    val cx = if (pinned) maxX / 2f else (r0.left + r1.left) / 2f
+    val x = (cx - bs.width / 2f).coerceIn(0f, (maxX - bs.width).coerceAtLeast(0f))
     @Composable
     fun Act(label: String, f: () -> Unit) {
         T(
