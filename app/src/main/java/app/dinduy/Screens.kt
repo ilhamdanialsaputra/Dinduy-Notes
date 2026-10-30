@@ -186,7 +186,7 @@ fun LazyStaggeredGridItemScope.flowItemG(): Modifier = Modifier.animateItem(
  * kartu di atas terdorong ke atas, kartu di bawah terdorong ke bawah mengikuti tepi kartu yang melebar,
  * sedikit mengecil dan memudar. Saat menutup, geraknya berbalik dengan spring yang sama.
  */
-fun Modifier.makeRoom(vm: AppVM, id: String, idx: Int, openIdx: () -> Int, h: Float, dens: Float): Modifier = graphicsLayer {
+fun Modifier.makeRoom(vm: AppVM, id: String, idx: Int, openIdx: () -> Int, h: Float, dens: Float, cols: Int = 1, w: Float = 0f): Modifier = graphicsLayer {
     val oid = vm.openId
     val m = vm.morph
     val p = vm.openP.value.coerceIn(0f, 1f)
@@ -194,7 +194,21 @@ fun Modifier.makeRoom(vm: AppVM, id: String, idx: Int, openIdx: () -> Int, h: Fl
     val oi = openIdx()
     if (oi < 0) return@graphicsLayer
     val wave = minOf(Math.abs(idx - oi), 5) * 10f * dens
-    translationY = if (idx < oi) -(maxOf(m.t, 0f) + wave) * p else (maxOf(h - m.b, 0f) + wave) * p
+    val me = if (cols == 2 && w > 0f) vm.cardMorph[id] else null
+    if (me != null) {
+        // 2 kolom: kartu di samping terdorong ke kiri/kanan menjauhi kartu yang melebar,
+        // kartu di atas ke atas, kartu di bawah ke bawah (bukan satu aliran vertikal seperti 1 kolom)
+        val eps = 4f * dens
+        val above = me.b <= m.t + eps
+        val below = me.t >= m.b - eps
+        if (!above && !below) {
+            translationX = if (me.r <= m.l + eps || (me.l + me.r) < (m.l + m.r)) -(me.r + 8f * dens) * p else (w - me.l + 8f * dens) * p
+        } else {
+            translationY = if (above) -(maxOf(m.t, 0f) + wave) * p else (maxOf(h - m.b, 0f) + wave) * p
+        }
+    } else {
+        translationY = if (idx < oi) -(maxOf(m.t, 0f) + wave) * p else (maxOf(h - m.b, 0f) + wave) * p
+    }
     val s = 1f - .05f * p
     scaleX = s; scaleY = s
     alpha = 1f - .6f * p
@@ -608,6 +622,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val imeH = with(dens) { WindowInsets.ime.getBottom(dens).toDp() }
         val hPx = with(dens) { maxHeight.toPx() }
+        val wPx = with(dens) { maxWidth.toPx() }
         val livePanelH = (maxHeight - imeH - (sat + 8.dp) - 10.dp).coerceAtLeast(160.dp)
         // saat menutup, tinggi panel dibekukan agar tidak ikut naik-turun mengikuti keyboard yang menghilang
         val panelHold = remember { arrayOf(livePanelH) }
@@ -639,13 +654,13 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                 T("Disematkan", 13f, 900, pal.p, Modifier.padding(start = 12.dp, top = 8.dp, bottom = 4.dp), ls = .08f)
             }
             gridItems(pinned, key = { it.id }) { d ->
-                HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, dens.density, pos, flowItemG())
+                HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, wPx, dens.density, pos, flowItemG())
             }
             if (sections) item(key = "h-other", span = full) {
                 T("Lainnya", 13f, 900, pal.p, Modifier.padding(start = 12.dp, top = 8.dp, bottom = 4.dp), ls = .08f)
             }
             gridItems(others, key = { it.id }) { d ->
-                HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, dens.density, pos, flowItemG())
+                HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, wPx, dens.density, pos, flowItemG())
             }
         }
 
@@ -721,12 +736,12 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
 
 @Composable
 fun HomeCard(
-    vm: AppVM, nav: Nav, d: Note, i: Int, selMode: Boolean, cols: Int, hPx: Float, dens: Float,
+    vm: AppVM, nav: Nav, d: Note, i: Int, selMode: Boolean, cols: Int, hPx: Float, wPx: Float, dens: Float,
     pos: Map<String, Int>, base: Modifier
 ) {
     val sel = vm.sel
     androidx.compose.runtime.DisposableEffect(d.id) { onDispose { vm.cardMorph.remove(d.id) } }
-    Column(base.makeRoom(vm, d.id, i, { vm.openId?.let { pos[it] } ?: -1 }, hPx, dens)) {
+    Column(base.makeRoom(vm, d.id, i, { vm.openId?.let { pos[it] } ?: -1 }, hPx, dens, cols, wPx)) {
         val first = remember(d.id) { !vm.seen.contains(d.id) }
         val prog = remember(d.id) { Animatable(if (first) 0f else 1f) }
         LaunchedEffect(d.id) {
