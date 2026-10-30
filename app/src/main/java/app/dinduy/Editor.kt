@@ -92,6 +92,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     var tick by mutableStateOf(0)
     var miniBar by mutableStateOf(false)
     var widthDp by mutableStateOf(340f)
+    var barH by mutableStateOf(0f)        // tinggi kapsul alat (px) yang melayang di atas keyboard
+    var barOn by mutableStateOf(false)    // kapsul alat sedang tampil
 
     // penanda konversi otomatis (mis. "1. " -> nomor), untuk menahan IME yang mengembalikan teks penanda
     private var convKey: String? = null
@@ -662,6 +664,23 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         selImg = bid to ix
         focus = null
         clearReq++
+    }
+
+    /** Tutup pilihan gambar dan kembali mengetik (keyboard terbuka), bukan ke mode baca. */
+    fun closeImg() {
+        val s = selImg ?: return
+        selImg = null
+        val i = idx(s.first)
+        val after = if (i >= 0) blocks.drop(i + 1).firstOrNull { it.isText } else null
+        val before = if (i > 0) blocks.take(i).lastOrNull { it.isText } else null
+        if (after != null) focusAt(after.id, 0)
+        else if (before != null) focusAt(before.id, before.r.t.length)
+    }
+
+    /** Dari mode baca: ketuk dua kali gambar = masuk mode edit dengan gambar itu terpilih. */
+    fun openImgFromReading(bid: String, ix: Int) {
+        exitReading()
+        selectImg(bid, ix)
     }
 
     private fun imgSet(bid: String, ix: Int, f: (Img) -> Img) {
