@@ -48,7 +48,14 @@ class Snack(val msg: String, val undo: (() -> Unit)?, val id: Long = System.nano
 
 class Morph(
     val l: Float, val t: Float, val r: Float, val b: Float, val rad: Float, val color: Color,
-    val r4: FloatArray? = null   // radius 4 sudut (kiri-atas, kanan-atas, kanan-bawah, kiri-bawah) dalam px
+    val r4: FloatArray? = null,  // radius 4 sudut (kiri-atas, kanan-atas, kanan-bawah, kiri-bawah) dalam px
+    val ghost: Ghost? = null     // gaya teks kartu, supaya teks kartu bisa pudar-silang dengan isi catatan saat morph
+)
+
+class Ghost(
+    val kind: String, val c2: Boolean, val fg: Color,
+    val padH: androidx.compose.ui.unit.Dp, val padV: androidx.compose.ui.unit.Dp,
+    val insTL: androidx.compose.ui.unit.Dp, val insBL: androidx.compose.ui.unit.Dp
 )
 
 sealed class Sheet {
