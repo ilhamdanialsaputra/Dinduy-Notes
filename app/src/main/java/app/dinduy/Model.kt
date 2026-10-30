@@ -204,7 +204,8 @@ data class Prefs(
     val fs: Int = 19,
     val lh: Float = 1.65f,
     val sort: String = "u",
-    val cd: String = "f"
+    val cd: String = "f",
+    val ff: String = "def"   // jenis huruf: def / flex / times
 )
 
 @Serializable
