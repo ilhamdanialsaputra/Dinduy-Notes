@@ -194,7 +194,8 @@ data class Note(
     val c: Long = 0L,
     val a: Boolean = false,
     val p: Boolean = false,
-    val dt: Long = 0L
+    val dt: Long = 0L,
+    val lb: List<String> = emptyList()   // nama label catatan
 )
 
 @Serializable
@@ -206,11 +207,12 @@ data class Prefs(
     val sort: String = "u",
     val cd: String = "f",
     val ff: String = "def",  // jenis huruf: def / flex / times
+    val cols: Int = 1,       // jumlah kolom kartu di beranda (1 / 2)
     val dyn: Boolean = true  // true = warna mengikuti perangkat (Material You, Android 12+); false = warna kustom (seed)
 )
 
 @Serializable
-data class Db(val pr: Prefs = Prefs(), val docs: List<Note> = emptyList())
+data class Db(val pr: Prefs = Prefs(), val docs: List<Note> = emptyList(), val lbl: List<String> = emptyList())
 
 fun plainOf(bl: List<Blk>): String = bl.joinToString("\n") {
     when (it.ty) {
