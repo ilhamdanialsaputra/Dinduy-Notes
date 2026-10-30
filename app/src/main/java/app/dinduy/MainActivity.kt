@@ -78,6 +78,8 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -120,6 +122,7 @@ class Nav(private val vm: AppVM) {
                 // morph keluar selalu menuju posisi kartu saat ini (bukan posisi saat dibuka),
                 // jadi tetap konsisten walau catatan sudah pindah urutan setelah lama diedit
                 val live = vm.note(t.id)?.let { !it.a && it.dt == 0L } == true
+                vm.openId = t.id
                 vm.morph = vm.cardMorph[t.id] ?: (if (live) vm.fabMorph else null)
             }
             stack.removeAt(stack.size - 1)
@@ -128,6 +131,7 @@ class Nav(private val vm: AppVM) {
 
     fun openNote(id: String, m: Morph?, newNote: Boolean = false) {
         vm.morph = m
+        vm.openId = id
         noteId = id
         pendingTitle = newNote
         stack.add(Scr.Note(id))
@@ -169,28 +173,44 @@ fun ViewLayer(on: Boolean, under: Boolean, keep: Boolean = false, base: Boolean 
 }
 
 @Composable
-fun NoteLayer(on: Boolean, morph: Morph?, content: @Composable () -> Unit) {
+fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, content: @Composable () -> Unit) {
     val pal = LocalPal.current
-    // satu jalur saja: selalu morph kartu <-> layar penuh, tanpa geser/pudar UI lain
-    val t by animateFloatAsState(if (on) 1f else 0f, spring(.85f, 260f), label = "nt")
-    if (!on && t <= .002f) return
+    // satu progres bersama (vm.openP): morph kartu <-> layar penuh DAN kartu lain yang memberi ruang membaca nilai yang sama,
+    // jadi selalu sinkron. Spring spatial M3 Expressive: membuka sedikit lentur, menutup lebih rapat (tanpa overshoot keluar layar).
+    LaunchedEffect(on) {
+        vm.openP.animateTo(if (on) 1f else 0f, if (on) spring(.86f, 320f) else spring(.92f, 400f))
+    }
+    val t0 = vm.openP.value
+    if (!on && t0 <= .01f) return
     Box(
         Modifier.fillMaxSize().pointerInput(Unit) { }.drawWithContent {
-            val tt = t.coerceIn(0f, 1f)
+            val tt = vm.openP.value.coerceIn(0f, 1f)
             val m = morph ?: Morph(size.width * .12f, size.height * .4f, size.width * .88f, size.height * .6f, 32.dp.toPx(), pal.s)
-            val l = lerp(m.l, 0f, tt)
+            // tepi kiri/kanan sedikit lebih cepat dari tepi atas/bawah: wadah terasa "meregang" ke bawah/atas di akhir
+            val tx = (tt * 1.12f).coerceIn(0f, 1f)
+            val l = lerp(m.l, 0f, tx)
+            val r = lerp(m.r, size.width, tx)
             val tp = lerp(m.t, 0f, tt)
-            val r = lerp(m.r, size.width, tt)
             val b = lerp(m.b, size.height, tt)
-            val rad = lerp(m.rad, 0f, tt)
-            val path = Path().apply { addRoundRect(RoundRect(Rect(l, tp, r, b), CornerRadius(rad, rad))) }
+            val r4 = m.r4 ?: FloatArray(4) { m.rad }
+            fun rr(k: Int) = CornerRadius(lerp(r4[k], 0f, tt))
+            val path = Path().apply { addRoundRect(RoundRect(Rect(l, tp, r, b), rr(0), rr(1), rr(2), rr(3))) }
             clipPath(path) {
                 drawRect(androidx.compose.ui.graphics.lerp(m.color, pal.s, tt))
                 this@drawWithContent.drawContent()
             }
         }
     ) {
-        Box(Modifier.fillMaxSize().graphicsLayer { alpha = ((t - .4f) / .6f).coerceIn(0f, 1f) }) { content() }
+        Box(
+            Modifier.fillMaxSize().graphicsLayer {
+                val a = ((vm.openP.value - .3f) / .5f).coerceIn(0f, 1f)
+                alpha = a
+                translationY = (1f - a) * 24.dp.toPx()
+                val s = .96f + .04f * a
+                scaleX = s; scaleY = s
+                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(.5f, 0f)
+            }
+        ) { content() }
     }
 }
 
@@ -261,8 +281,11 @@ fun AppRoot(vm: AppVM, act: Actions) {
     val cs = if (pal.dark) darkColorScheme(primary = pal.p, onPrimary = pal.op, surface = pal.s, onSurface = pal.os, background = pal.s)
     else lightColorScheme(primary = pal.p, onPrimary = pal.op, surface = pal.s, onSurface = pal.os, background = pal.s)
 
+    val am = LocalContext.current.assets
+    val ff = remember(vm.pr.ff) { loadFont(am, vm.pr.ff) }
     MaterialTheme(colorScheme = cs) {
         CompositionLocalProvider(
+            LocalFF provides ff,
             LocalPal provides pal,
             LocalContentColor provides pal.os,
             LocalTextSelectionColors provides TextSelectionColors(handleColor = pal.p, backgroundColor = pal.pc)
@@ -292,22 +315,16 @@ fun AppRoot(vm: AppVM, act: Actions) {
                 gesturesEnabled = isHome && vm.sel.isEmpty() && !vm.searchOn,
                 scrimColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = .5f),
                 drawerContent = {
-                    val w = minOf(340.dp, (LocalConfiguration.current.screenWidthDp * .84f).dp)
+                    val w = minOf(360.dp, (LocalConfiguration.current.screenWidthDp * .84f).dp)
                     ModalDrawerSheet(
-                        modifier = Modifier.width(w), drawerContainerColor = pal.c3,
-                        drawerShape = RoundedCornerShape(topEnd = 36.dp, bottomEnd = 36.dp),
-                        windowInsets = WindowInsets(0)
+                        modifier = Modifier.width(w), drawerContainerColor = pal.s, drawerShape = RectangleShape,
+                        drawerTonalElevation = 0.dp, windowInsets = WindowInsets(0)
                     ) {
-                        Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp, vertical = 24.dp)) {
-                            T("Dinduy", 38f, 1000, pal.p, Modifier.padding(start = 12.dp, bottom = 24.dp), ls = -.02f)
-                            Opt(1, "set", "Pengaturan") { scope.launch { drawer.close() }; nav.push(Scr.Settings) }
-                            Opt(2, "arc", "Arsip", trailing = vm.archived().size.takeIf { it > 0 }?.toString()) {
-                                scope.launch { drawer.close() }; nav.push(Scr.Archive)
-                            }
-                            Opt(3, "del", "Baru saja dihapus", trailing = vm.trashed().size.takeIf { it > 0 }?.toString()) {
-                                scope.launch { drawer.close() }; nav.push(Scr.Trash)
-                            }
-                        }
+                        DrawerContent(
+                            vm,
+                            close = { scope.launch { drawer.close() } },
+                            go = { sc -> scope.launch { drawer.close() }; nav.push(sc) }
+                        )
                     }
                 }
             ) {
@@ -334,7 +351,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     ViewLayer(on = top is Scr.Settings, under = false) {
                         SettingsScreen(vm, act, onBack = { nav.pop() })
                     }
-                    NoteLayer(on = isNote, morph = vm.morph) {
+                    NoteLayer(vm, on = isNote, morph = vm.morph) {
                         val id = nav.noteId
                         if (id != null) {
                             val sc = rememberCoroutineScope()
