@@ -258,7 +258,15 @@ fun SnackHost(vm: AppVM, bottom: Dp, aboveKeyboard: Boolean) {
 @Composable
 fun AppRoot(vm: AppVM, act: Actions) {
     val nav = vm.nav
-    val target = remember(vm.pr.mode, vm.pr.seed) { buildPal(vm.pr.mode, vm.pr.seed) }
+    val ctx = LocalContext.current
+    // default: ikuti perangkat (Material You). Warna kustom dipakai hanya jika pengguna memilihnya, atau perangkat < Android 12.
+    val dynOn = vm.pr.dyn && Build.VERSION.SDK_INT >= 31
+    // mode "auto" = ikuti terang/gelap perangkat
+    val sysDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val effMode = if (vm.pr.mode == "auto") (if (sysDark) "dark" else "light") else vm.pr.mode
+    val target = remember(effMode, vm.pr.seed, dynOn) {
+        (if (dynOn) dynamicPal(ctx, effMode) else null) ?: buildPal(effMode, vm.pr.seed)
+    }
     val anim = remember { Animatable(1f) }
     var from by remember { mutableStateOf(target) }
     var to by remember { mutableStateOf(target) }
@@ -281,7 +289,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
     val cs = if (pal.dark) darkColorScheme(primary = pal.p, onPrimary = pal.op, surface = pal.s, onSurface = pal.os, background = pal.s)
     else lightColorScheme(primary = pal.p, onPrimary = pal.op, surface = pal.s, onSurface = pal.os, background = pal.s)
 
-    val am = LocalContext.current.assets
+    val am = ctx.assets
     val ff = remember(vm.pr.ff) { loadFont(am, vm.pr.ff) }
     MaterialTheme(colorScheme = cs) {
         CompositionLocalProvider(
