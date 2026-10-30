@@ -4,6 +4,9 @@ package app.dinduy
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.border
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -944,64 +947,190 @@ fun ListScreen(
     }
 }
 
-// ---------- pengaturan ----------
+// ---------- pengaturan: gaya aplikasi Google (Pixel Settings + Material 3 Expressive) ----------
+private const val POS_ONE = 0
+private const val POS_TOP = 1
+private const val POS_MID = 2
+private const val POS_BOT = 3
+
+/** Pegas tinggi untuk semua kartu di Pengaturan: tinggi berubah mengikuti isi dengan gerak lembut tanpa memantul. */
+val SizeSpring = spring<androidx.compose.ui.unit.IntSize>(dampingRatio = .9f, stiffness = 420f)
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.slab(c: Color, l: Float, r: Float, y: Float, h: Float, rl: Float, rr: Float) {
+    if (r - l < 1f) return
+    val p = androidx.compose.ui.graphics.Path().apply {
+        addRoundRect(
+            androidx.compose.ui.geometry.RoundRect(
+                l, y, r, y + h,
+                topLeftCornerRadius = androidx.compose.ui.geometry.CornerRadius(rl),
+                topRightCornerRadius = androidx.compose.ui.geometry.CornerRadius(rr),
+                bottomRightCornerRadius = androidx.compose.ui.geometry.CornerRadius(rr),
+                bottomLeftCornerRadius = androidx.compose.ui.geometry.CornerRadius(rl)
+            )
+        )
+    }
+    drawPath(p, c)
+}
+
+/** Slider M3 Expressive: trek tebal terbelah di sekitar gagang; gagang menipis dan memanjang saat disentuh. */
 @Composable
 fun BigSlider(value: Float, min: Float, max: Float, onChange: (Float) -> Unit) {
     val pal = LocalPal.current
     var w by remember { mutableStateOf(1f) }
+    var down by remember { mutableStateOf(false) }
     val f = ((value - min) / (max - min)).coerceIn(0f, 1f)
+    val fa by animateFloatAsState(f, spring(1f, 1200f), label = "sf")
+    val hw by animateFloatAsState(if (down) 2f else 4f, spring(.6f, 600f), label = "shw")
+    val hh by animateFloatAsState(if (down) 56f else 44f, spring(.6f, 600f), label = "shh")
     fun at(x: Float) = onChange((min + (x / w).coerceIn(0f, 1f) * (max - min)).let { Math.round(it).toFloat().coerceIn(min, max) })
     Box(
-        Modifier.fillMaxWidth().height(48.dp).onSizeChanged { w = it.width.toFloat().coerceAtLeast(1f) }
+        Modifier.fillMaxWidth().height(56.dp).onSizeChanged { w = it.width.toFloat().coerceAtLeast(1f) }
             .pointerInput(min, max) { detectTapGestures { at(it.x) } }
-            .pointerInput(min, max) { detectDragGestures(onDragStart = { at(it.x) }) { ch, _ -> ch.consume(); at(ch.position.x) } }
+            .pointerInput(min, max) {
+                detectDragGestures(
+                    onDragStart = { down = true; at(it.x) },
+                    onDragEnd = { down = false },
+                    onDragCancel = { down = false }
+                ) { ch, _ -> ch.consume(); at(ch.position.x) }
+            }
             .drawBehind {
-                val th = 20.dp.toPx()
+                val th = 18.dp.toPx()
                 val y = (size.height - th) / 2
-                drawRoundRect(pal.c4, Offset(0f, y), Size(size.width, th), androidx.compose.ui.geometry.CornerRadius(th / 2))
-                drawRoundRect(pal.p, Offset(0f, y), Size(size.width * f, th), androidx.compose.ui.geometry.CornerRadius(th / 2))
-                val tx = (size.width * f).coerceIn(3.dp.toPx(), size.width - 3.dp.toPx())
-                drawRoundRect(pal.c2, Offset(tx - 7.dp.toPx(), 0f), Size(14.dp.toPx(), size.height), androidx.compose.ui.geometry.CornerRadius(7.dp.toPx()))
-                drawRoundRect(pal.p, Offset(tx - 3.dp.toPx(), 0f), Size(6.dp.toPx(), size.height), androidx.compose.ui.geometry.CornerRadius(3.dp.toPx()))
+                val hwp = hw.dp.toPx()
+                val gap = 6.dp.toPx()
+                val tx = (size.width * fa).coerceIn(hwp / 2, size.width - hwp / 2)
+                slab(pal.p, 0f, tx - hwp / 2 - gap, y, th, th / 2, 3.dp.toPx())
+                slab(pal.sc, tx + hwp / 2 + gap, size.width, y, th, 3.dp.toPx(), th / 2)
+                val hp = hh.dp.toPx()
+                drawRoundRect(
+                    pal.p, Offset(tx - hwp / 2, (size.height - hp) / 2), Size(hwp, hp),
+                    androidx.compose.ui.geometry.CornerRadius(hwp / 2)
+                )
             }
     )
 }
 
+/** Tombol segmen pil: indikator meluncur dengan pegas dan meregang selagi bergerak (morphing). */
 @Composable
-fun Seg(n: Int, sel: Int, onSel: (Int) -> Unit, item: @Composable (Int, Boolean) -> Unit) {
+fun SegPill(n: Int, sel: Int, onSel: (Int) -> Unit, h: Dp = 52.dp, item: @Composable (Int, Color) -> Unit) {
     val pal = LocalPal.current
-    val x by animateFloatAsState(sel.toFloat(), spring(.6f, 350f), label = "seg")
-    Box(Modifier.fillMaxWidth().height(64.dp).clip(RoundedCornerShape(32.dp)).background(pal.c4).padding(6.dp)) {
+    val x = animateFloatAsState(sel.toFloat(), spring(.62f, 380f), label = "seg")
+    Box(Modifier.fillMaxWidth().height(h).clip(CircleShape).background(pal.c4).padding(4.dp)) {
         Box(
-            Modifier.fillMaxHeight().fillMaxWidth(1f / n).graphicsLayer { translationX = x * size.width }
-                .clip(RoundedCornerShape(26.dp)).background(pal.p)
+            Modifier.fillMaxHeight().fillMaxWidth(1f / n)
+                .graphicsLayer {
+                    val st = Math.abs(sel - x.value).coerceAtMost(1f)
+                    translationX = x.value * size.width
+                    scaleX = 1f + .22f * st
+                    scaleY = 1f - .08f * st
+                }
+                .clip(CircleShape).background(pal.p)
         )
         Row(Modifier.fillMaxSize()) {
             for (i in 0 until n) {
+                val fg by animateColorAsState(if (i == sel) pal.op else pal.os, tween(220), label = "segfg")
                 Box(
-                    Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(26.dp)).clickable { onSel(i) },
+                    Modifier.weight(1f).fillMaxHeight().clip(CircleShape).clickable { onSel(i) },
                     Alignment.Center
-                ) { item(i, i == sel) }
+                ) { item(i, fg) }
             }
         }
     }
 }
 
-/** Pegas tinggi untuk semua kotak di Pengaturan: tinggi berubah mengikuti isi dengan gerak lembut tanpa memantul. */
-val SizeSpring = spring<androidx.compose.ui.unit.IntSize>(dampingRatio = .9f, stiffness = 420f)
-
+/** Sakelar M3 Expressive: gagang membesar dan bergeser, warna trek ikut berubah. */
 @Composable
-fun Section(title: String, wait: Int, content: @Composable () -> Unit) {
+fun MorphSwitch(on: Boolean) {
+    val pal = LocalPal.current
+    val k by animateFloatAsState(if (on) 1f else 0f, spring(.7f, 420f), label = "sw")
+    val track = androidx.compose.ui.graphics.lerp(pal.c4, pal.p, k)
+    val edge = androidx.compose.ui.graphics.lerp(pal.osv, pal.p, k)
+    val thumb = androidx.compose.ui.graphics.lerp(pal.osv, pal.op, k)
+    Box(Modifier.size(width = 52.dp, height = 32.dp).clip(CircleShape).background(track).border(2.dp, edge, CircleShape)) {
+        val d = 16f + 8f * k
+        val cx = 16f + 20f * k
+        Box(
+            Modifier.size(d.dp).graphicsLayer { translationX = (cx - d / 2f).dp.toPx(); translationY = ((32f - d) / 2f - 0f).dp.toPx() }
+                .clip(CircleShape).background(thumb),
+            Alignment.Center
+        ) { Box(Modifier.graphicsLayer { alpha = k; scaleX = k; scaleY = k }) { Ic("ok", pal.p, 16.dp) } }
+    }
+}
+
+/** Grup pengaturan: judul kecil berwarna di atas, kartu bersambung di bawahnya. Masuk bergantian dengan pegas. */
+@Composable
+fun SGroup(title: String, wait: Int, content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
     val pal = LocalPal.current
     val a = remember { Animatable(0f) }
-    LaunchedEffect(Unit) { delay(wait.toLong()); a.animateTo(1f, spring(.7f, 350f)) }
+    LaunchedEffect(Unit) { delay(wait.toLong()); a.animateTo(1f, spring(.8f, 320f)) }
     Column(
-        Modifier.fillMaxWidth().padding(bottom = 14.dp)
-            .graphicsLayer { alpha = a.value.coerceIn(0f, 1f); translationY = (1f - a.value) * 32.dp.toPx() }
-            .clip(RoundedCornerShape(36.dp)).background(pal.c2).animateContentSize(SizeSpring).padding(horizontal = 20.dp, vertical = 24.dp)
+        Modifier.fillMaxWidth().padding(bottom = 28.dp)
+            .graphicsLayer { alpha = a.value.coerceIn(0f, 1f); translationY = (1f - a.value) * 28.dp.toPx() }
     ) {
-        T(title.uppercase(), 15f, 900, pal.p, Modifier.padding(start = 4.dp, bottom = 18.dp), ls = .08f)
-        content()
+        T(title, 14f, 600, pal.p, Modifier.padding(start = 16.dp, bottom = 10.dp), ls = .01f)
+        Column(verticalArrangement = Arrangement.spacedBy(3.dp), content = content)
+    }
+}
+
+/** Kartu bersambung: sudut luar besar, sudut antar kartu kecil. Saat ditekan semua sudut membulat (morph). */
+@Composable
+fun SCard(
+    pos: Int, onClick: (() -> Unit)? = null,
+    pad: PaddingValues = PaddingValues(horizontal = 20.dp, vertical = 18.dp),
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit
+) {
+    val pal = LocalPal.current
+    val src = remember { MutableInteractionSource() }
+    val pr by src.collectIsPressedAsState()
+    val press = pr && onClick != null
+    val top = if (pos == POS_ONE || pos == POS_TOP) 28f else 6f
+    val bot = if (pos == POS_ONE || pos == POS_BOT) 28f else 6f
+    val tr by animateFloatAsState(if (press) 28f else top, spring(.6f, 500f), label = "tr")
+    val br by animateFloatAsState(if (press) 28f else bot, spring(.6f, 500f), label = "br")
+    val shape = RoundedCornerShape(tr.coerceAtLeast(0f).dp, tr.coerceAtLeast(0f).dp, br.coerceAtLeast(0f).dp, br.coerceAtLeast(0f).dp)
+    Column(
+        Modifier.fillMaxWidth().clip(shape).background(pal.c2)
+            .then(if (onClick != null) Modifier.clickable(interactionSource = src, indication = LocalIndication.current, onClick = onClick) else Modifier)
+            .animateContentSize(SizeSpring).padding(pad),
+        content = content
+    )
+}
+
+@Composable
+fun SActionRow(pos: Int, icon: String, title: String, sub: String, onClick: () -> Unit) {
+    val pal = LocalPal.current
+    SCard(pos, onClick, PaddingValues(horizontal = 20.dp, vertical = 14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Box(Modifier.size(44.dp).clip(CircleShape).background(pal.pc), Alignment.Center) { Ic(icon, pal.opc, 22.dp) }
+            Column(Modifier.weight(1f)) {
+                T(title, 16f, 500, pal.os)
+                T(sub, 14f, 400, pal.osv, lh = 1.3f)
+            }
+        }
+    }
+}
+
+@Composable
+fun FontChoice(name: String, fam: FontFamily, on: Boolean, onClick: () -> Unit) {
+    val pal = LocalPal.current
+    val src = remember { MutableInteractionSource() }
+    val pr by src.collectIsPressedAsState()
+    val r by animateDpAsState(if (pr) 12.dp else if (on) 28.dp else 16.dp, spring(.6f, 500f), label = "r")
+    val k by animateFloatAsState(if (on) 1f else 0f, spring(.8f, 380f), label = "b")
+    val fg = if (on) pal.opc else pal.os
+    CompositionLocalProvider(LocalFF provides fam) {
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(r)).background(pal.pc.copy(alpha = k))
+                .clickable(interactionSource = src, indication = LocalIndication.current, onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                T(name, 18f, 500, fg)
+                T("Catatan rapi, cepat, nyaman 0123", 14f, 400, fg, alpha = .75f)
+            }
+            Box(Modifier.size(24.dp).graphicsLayer { scaleX = k; scaleY = k; alpha = k }) { Ic("ok", fg, 24.dp) }
+        }
     }
 }
 
@@ -1011,62 +1140,89 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
     val sat = satDp()
     val sab = sabDp()
     val pr = vm.pr
+    val scroll = rememberScrollState()
     var custom by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxSize().background(pal.s).verticalScroll(rememberScrollState())) {
-        Row(Modifier.fillMaxWidth().padding(top = sat + 8.dp, bottom = 8.dp, start = 12.dp, end = 12.dp)) {
-            IconBtn("back", pal.os, onBack)
-        }
-        Column(
-            Modifier.widthIn(max = 640.dp).fillMaxWidth().align(Alignment.CenterHorizontally).padding(start = 20.dp, end = 20.dp, bottom = 40.dp + sab)
-        ) {
-            T("Atur", 64f, 1000, pal.p, Modifier.padding(start = 4.dp, bottom = 28.dp), ls = -.02f, lh = .95f)
-            Section("Mode", 0) {
-                val modes = listOf("auto" to "phone", "light" to "lm", "tonal" to "pal", "dark" to "dm", "amoled" to "am")
-                Seg(5, modes.indexOfFirst { it.first == pr.mode }.coerceAtLeast(0), { vm.setPr(pr.copy(mode = modes[it].first)) }) { i, a ->
-                    Ic(modes[i].second, if (a) pal.op else pal.os, 26.dp)
-                }
+    Box(Modifier.fillMaxSize().background(pal.s)) {
+        Column(Modifier.fillMaxSize().verticalScroll(scroll)) {
+            Spacer(Modifier.height(sat + 64.dp))
+            Column(
+                Modifier.widthIn(max = 640.dp).fillMaxWidth().align(Alignment.CenterHorizontally)
+                    .padding(start = 16.dp, end = 16.dp, bottom = 24.dp + sab)
+            ) {
+                // judul besar: mengecil dan memudar saat digulir, digantikan judul kecil di bilah atas
                 T(
-                    when (pr.mode) {
-                        "auto" -> "Otomatis: terang atau gelap mengikuti perangkat"
-                        "light" -> "Terang"
-                        "tonal" -> "Tonal"
-                        "dark" -> "Gelap"
-                        else -> "AMOLED (hitam pekat)"
+                    "Pengaturan", 40f, 400, pal.os,
+                    Modifier.padding(start = 8.dp, top = 20.dp, bottom = 32.dp).graphicsLayer {
+                        val k = (scroll.value / 110.dp.toPx()).coerceIn(0f, 1f)
+                        alpha = 1f - (k * 1.6f).coerceAtMost(1f)
+                        scaleX = 1f - .12f * k; scaleY = 1f - .12f * k
+                        transformOrigin = TransformOrigin(0f, .5f)
                     },
-                    14f, 600, pal.osv, Modifier.padding(start = 4.dp, top = 12.dp)
+                    ls = -.01f, maxLines = 1
                 )
-            }
-            Section("Warna aplikasi", 60) {
-                val dynAvail = android.os.Build.VERSION.SDK_INT >= 31
-                val dynOn = pr.dyn && dynAvail
-                if (dynAvail) DeviceColorRow(dynOn) { vm.setPr(pr.copy(dyn = true)) }
-                val seeds = listOf("#6750A4", "#0B57D0", "#00796B", "#2E7D32", "#C77700", "#B3261E", "#C2185B", "#5D4037")
-                val all: List<String?> = seeds + listOf<String?>(null)
-                all.chunked(4).forEach { row ->
-                    Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        for (k in 0 until 4) {
-                            val c = row.getOrNull(k)
-                            Box(Modifier.weight(1f).aspectRatio(1f)) {
-                                if (k < row.size) {
-                                    if (c != null) {
-                                        val act0 = !dynOn && c.equals(pr.seed, true)
-                                        val rp by animateFloatAsState(if (act0) 28f else 50f, spring(.6f, 400f), label = "rp")
-                                        val ck by animateFloatAsState(if (act0) 1f else 0f, spring(.6f, 400f), label = "ck")
-                                        Box(
-                                            Modifier.fillMaxSize().clip(RoundedCornerShape(rp.toInt())).background(Color(android.graphics.Color.parseColor(c)))
-                                                .clickable { vm.setPr(pr.copy(seed = c, dyn = false)) },
-                                            Alignment.Center
-                                        ) { Box(Modifier.graphicsLayer { scaleX = ck; scaleY = ck }) { Ic("ok", Color.White) } }
-                                    } else {
-                                        Box(
-                                            Modifier.fillMaxSize().clip(CircleShape).background(
-                                                androidx.compose.ui.graphics.Brush.sweepGradient(
-                                                    listOf(Color(0xFFFF4444), Color(0xFFFFBB33), Color(0xFF44DD66), Color(0xFF33CCFF), Color(0xFF7744FF), Color(0xFFFF44AA), Color(0xFFFF4444))
-                                                )
-                                            ).clickable { custom = true },
-                                            Alignment.Center
-                                        ) {
-                                            Box(Modifier.size(34.dp).clip(CircleShape).background(pal.c4), Alignment.Center) { Ic("plus", pal.os, 20.dp) }
+                SGroup("Tampilan", 0) {
+                    SCard(POS_TOP) {
+                        T("Tema", 16f, 500, pal.os)
+                        val modes = listOf("auto" to "phone", "light" to "lm", "tonal" to "pal", "dark" to "dm", "amoled" to "am")
+                        val cap = when (pr.mode) {
+                            "auto" -> "Otomatis: terang atau gelap mengikuti perangkat"
+                            "light" -> "Terang"
+                            "tonal" -> "Tonal"
+                            "dark" -> "Gelap"
+                            else -> "AMOLED (hitam pekat)"
+                        }
+                        Crossfade(cap, Modifier.padding(top = 2.dp, bottom = 14.dp), tween(200), label = "cap") { T(it, 14f, 400, pal.osv) }
+                        SegPill(5, modes.indexOfFirst { it.first == pr.mode }.coerceAtLeast(0), { vm.setPr(pr.copy(mode = modes[it].first)) }) { i, fg ->
+                            Ic(modes[i].second, fg, 24.dp)
+                        }
+                    }
+                    SCard(POS_BOT) {
+                        T("Warna aplikasi", 16f, 500, pal.os, Modifier.padding(bottom = 12.dp))
+                        val dynAvail = android.os.Build.VERSION.SDK_INT >= 31
+                        val dynOn = pr.dyn && dynAvail
+                        if (dynAvail) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(bottom = 16.dp).clip(RoundedCornerShape(20.dp))
+                                    .clickable { vm.setPr(pr.copy(dyn = !dynOn)) }
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    T("Warna dinamis", 16f, 400, pal.os)
+                                    T("Material You, mengikuti wallpaper", 14f, 400, pal.osv)
+                                }
+                                MorphSwitch(dynOn)
+                            }
+                        }
+                        val dim by animateFloatAsState(if (dynOn) .38f else 1f, tween(260), label = "dim")
+                        val seeds = listOf("#6750A4", "#0B57D0", "#00796B", "#2E7D32", "#C77700", "#B3261E", "#C2185B", "#5D4037")
+                        val all: List<String?> = seeds + listOf<String?>(null)
+                        Column(Modifier.graphicsLayer { alpha = dim }) {
+                            all.chunked(5).forEachIndexed { ri, row ->
+                                Row(Modifier.fillMaxWidth().padding(top = if (ri == 0) 0.dp else 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    for (k in 0 until 5) {
+                                        val c = row.getOrNull(k)
+                                        Box(Modifier.weight(1f).aspectRatio(1f)) {
+                                            if (c != null) {
+                                                val sel = !dynOn && c.equals(pr.seed, true)
+                                                val rp by animateFloatAsState(if (sel) 30f else 50f, spring(.6f, 400f), label = "rp")
+                                                val ck by animateFloatAsState(if (sel) 1f else 0f, spring(.6f, 400f), label = "ck")
+                                                Box(
+                                                    Modifier.fillMaxSize().clip(RoundedCornerShape(rp.toInt().coerceIn(0, 50)))
+                                                        .background(Color(android.graphics.Color.parseColor(c)))
+                                                        .clickable { vm.setPr(pr.copy(seed = c, dyn = false)) },
+                                                    Alignment.Center
+                                                ) { Box(Modifier.graphicsLayer { scaleX = ck; scaleY = ck; alpha = ck.coerceIn(0f, 1f) }) { Ic("ok", Color.White) } }
+                                            } else if (k < row.size) {
+                                                Box(
+                                                    Modifier.fillMaxSize().clip(CircleShape).background(
+                                                        androidx.compose.ui.graphics.Brush.sweepGradient(
+                                                            listOf(Color(0xFFFF4444), Color(0xFFFFBB33), Color(0xFF44DD66), Color(0xFF33CCFF), Color(0xFF7744FF), Color(0xFFFF44AA), Color(0xFFFF4444))
+                                                        )
+                                                    ).clickable { custom = true },
+                                                    Alignment.Center
+                                                ) { Box(Modifier.size(30.dp).clip(CircleShape).background(pal.c2), Alignment.Center) { Ic("plus", pal.os, 18.dp) } }
+                                            }
                                         }
                                     }
                                 }
@@ -1074,66 +1230,93 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                         }
                     }
                 }
+                SGroup("Catatan", 60) {
+                    SCard(POS_TOP) {
+                        T("Tampilan kartu", 16f, 500, pal.os, Modifier.padding(bottom = 14.dp))
+                        val kinds = listOf("t" to "Judul", "s" to "Ringkas", "f" to "Lengkap")
+                        SegPill(3, kinds.indexOfFirst { it.first == pr.cd }.coerceAtLeast(0), { vm.setPr(pr.copy(cd = kinds[it].first)) }) { i, fg ->
+                            T(kinds[i].second, 15f, 500, fg)
+                        }
+                        Box(Modifier.padding(top = 16.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(pal.s).animateContentSize(SizeSpring).padding(12.dp)) {
+                            NoteCard(
+                                Note(id = "pv", t = "Rencana minggu ini", x = "Selesaikan tinjauan pustaka, kirim proposal ke dosen, lalu rapikan catatan kuliah sebelum Jumat.", u = System.currentTimeMillis()),
+                                0, pr.cd, false
+                            ) { }
+                        }
+                    }
+                    SCard(POS_BOT) {
+                        T("Urutan catatan", 16f, 500, pal.os, Modifier.padding(bottom = 14.dp))
+                        val sorts = listOf("u" to "Diubah", "c" to "Dibuat")
+                        SegPill(2, sorts.indexOfFirst { it.first == pr.sort }.coerceAtLeast(0), { vm.setPr(pr.copy(sort = sorts[it].first)) }) { i, fg ->
+                            T(sorts[i].second, 15f, 500, fg)
+                        }
+                        Crossfade(if (pr.sort == "c") "Yang terbaru dibuat di atas" else "Yang terakhir diedit di atas", Modifier.padding(top = 12.dp, start = 4.dp), tween(200), label = "scap") {
+                            T(it, 14f, 400, pal.osv)
+                        }
+                    }
+                }
+                SGroup("Teks", 120) {
+                    SCard(POS_TOP) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            T("Ukuran teks", 16f, 500, pal.os)
+                            T("${pr.fs} px", 16f, 600, pal.p)
+                        }
+                        BigSlider(pr.fs.toFloat(), 14f, 30f) { vm.setPr(pr.copy(fs = it.toInt())) }
+                        T("Jarak baris", 16f, 500, pal.os, Modifier.padding(top = 6.dp, bottom = 14.dp))
+                        val lhs = listOf(1.45f to "Rapat", 1.65f to "Normal", 1.95f to "Lega")
+                        SegPill(3, lhs.indexOfFirst { it.first == pr.lh }.let { if (it < 0) 1 else it }, { vm.setPr(pr.copy(lh = lhs[it].first)) }) { i, fg ->
+                            T(lhs[i].second, 15f, 500, fg)
+                        }
+                    }
+                    SCard(POS_MID) {
+                        T("Pratinjau", pr.fs * 1.4f, 500, pal.p, lh = 1.1f, ls = -.01f)
+                        Spacer(Modifier.height((pr.fs * .35f).dp))
+                        T("Dinduy menjaga catatan tetap rapi, dengan huruf tebal dan jarak yang nyaman untuk mata.", pr.fs.toFloat(), 400, pal.os, lh = pr.lh)
+                    }
+                    SCard(POS_BOT, pad = PaddingValues(start = 12.dp, end = 12.dp, top = 18.dp, bottom = 12.dp)) {
+                        T("Jenis huruf", 16f, 500, pal.os, Modifier.padding(start = 8.dp, bottom = 10.dp))
+                        val am = LocalContext.current.assets
+                        listOf("def" to "Bawaan", "flex" to "Roboto Flex", "times" to "Times New Roman").forEach { (id, name) ->
+                            val fam = remember(id) { loadFont(am, id) }
+                            FontChoice(name, fam, pr.ff == id) { vm.setPr(pr.copy(ff = id)) }
+                        }
+                    }
+                }
+                SGroup("Cadangan", 180) {
+                    val n = vm.docs.size
+                    val ni = vm.imgIds().size
+                    val old = vm.lastBk != 0L && System.currentTimeMillis() - vm.lastBk > 7 * 86400000L
+                    val info = "$n catatan, $ni foto. " + (if (vm.lastBk != 0L) {
+                        "Cadangan terakhir: " + SimpleDateFormat("d MMM yyyy, HH.mm", Locale("id", "ID")).format(Date(vm.lastBk)) +
+                            (if (old) ". Sudah lebih dari seminggu, cadangkan lagi." else ".")
+                    } else "Belum pernah dicadangkan.") + " Berkas cadangan disimpan di perangkat, tanpa server."
+                    SCard(POS_TOP) { T(info, 14f, 400, pal.osv, lh = 1.5f) }
+                    SActionRow(POS_MID, "dl", "Simpan cadangan", "Satu berkas .dinduy berisi catatan dan foto") { act.saveBackup() }
+                    SActionRow(POS_MID, "up", "Bagikan cadangan", "Kirim lewat WhatsApp, Berkas, dan lainnya") { act.shareBackup() }
+                    SActionRow(POS_BOT, "restore", "Pulihkan cadangan", "Pilih berkas .dinduy dari perangkat (termasuk dari versi web)") { act.restoreBackup() }
+                }
             }
-            Section("Kartu catatan", 120) {
-                val kinds = listOf("t" to "Judul", "s" to "Ringkas", "f" to "Lengkap")
-                Seg(3, kinds.indexOfFirst { it.first == pr.cd }.coerceAtLeast(0), { vm.setPr(pr.copy(cd = kinds[it].first)) }) { i, a ->
-                    T(kinds[i].second, 16f, 800, if (a) pal.op else pal.os)
+        }
+        // bilah atas: transparan di puncak, berubah jadi warna wadah saat digulir; judul kecil muncul menggantikan judul besar
+        Row(
+            Modifier.fillMaxWidth().height(sat + 64.dp)
+                .drawBehind {
+                    val k = (scroll.value / 80.dp.toPx()).coerceIn(0f, 1f)
+                    drawRect(androidx.compose.ui.graphics.lerp(pal.s, pal.c2, k))
                 }
-                Box(Modifier.padding(top = 18.dp).fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(pal.s).animateContentSize(SizeSpring).padding(14.dp)) {
-                    NoteCard(
-                        Note(id = "pv", t = "Rencana minggu ini", x = "Selesaikan tinjauan pustaka, kirim proposal ke dosen, lalu rapikan catatan kuliah sebelum Jumat.", u = System.currentTimeMillis()),
-                        0, pr.cd, false
-                    ) { }
-                }
-            }
-            Section("Urutan catatan", 150) {
-                val sorts = listOf("u" to "Diubah", "c" to "Dibuat")
-                Seg(2, sorts.indexOfFirst { it.first == pr.sort }.coerceAtLeast(0), { vm.setPr(pr.copy(sort = sorts[it].first)) }) { i, a ->
-                    T(sorts[i].second, 16f, 800, if (a) pal.op else pal.os)
-                }
-                T(
-                    if (pr.sort == "c") "Yang terbaru dibuat di atas" else "Yang terakhir diedit di atas",
-                    14f, 600, pal.osv, Modifier.padding(start = 4.dp, top = 12.dp)
-                )
-            }
-            Section("Tampilan teks", 180) {
-                Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, bottom = 14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    T("Ukuran teks", 16f, 700, pal.os)
-                    T("${pr.fs} px", 22f, 1000, pal.p)
-                }
-                BigSlider(pr.fs.toFloat(), 14f, 30f) { vm.setPr(pr.copy(fs = it.toInt())) }
-                T("Jarak baris", 16f, 700, pal.os, Modifier.padding(start = 4.dp, top = 10.dp, bottom = 14.dp))
-                val lhs = listOf(1.45f to "Rapat", 1.65f to "Normal", 1.95f to "Lega")
-                Seg(3, lhs.indexOfFirst { it.first == pr.lh }.let { if (it < 0) 1 else it }, { vm.setPr(pr.copy(lh = lhs[it].first)) }) { i, a ->
-                    T(lhs[i].second, 16f, 800, if (a) pal.op else pal.os)
-                }
-                Column(Modifier.padding(top = 18.dp).fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(pal.s).animateContentSize(SizeSpring).padding(20.dp)) {
-                    T("Pratinjau", pr.fs * 1.4f, 1000, pal.p, lh = 1.05f, ls = -.02f)
-                    Spacer(Modifier.height((pr.fs * .35f).dp))
-                    T("Dinduy menjaga catatan tetap rapi, dengan huruf tebal dan jarak yang nyaman untuk mata.", pr.fs.toFloat(), 400, pal.os, lh = pr.lh)
-                }
-            }
-            Section("Jenis huruf", 210) {
-                val am = LocalContext.current.assets
-                listOf("def" to "Bawaan", "flex" to "Roboto Flex", "times" to "Times New Roman").forEach { (id, name) ->
-                    val fam = remember(id) { loadFont(am, id) }
-                    FontRow(name, fam, pr.ff == id) { vm.setPr(pr.copy(ff = id)) }
-                }
-            }
-            Section("Cadangan", 240) {
-                val n = vm.docs.size
-                val ni = vm.imgIds().size
-                val old = vm.lastBk != 0L && System.currentTimeMillis() - vm.lastBk > 7 * 86400000L
-                val info = "$n catatan, $ni foto. " + (if (vm.lastBk != 0L) {
-                    "Cadangan terakhir: " + SimpleDateFormat("d MMM yyyy, HH.mm", Locale("id", "ID")).format(Date(vm.lastBk)) +
-                        (if (old) ". Sudah lebih dari seminggu, cadangkan lagi." else ".")
-                } else "Belum pernah dicadangkan.") + " Berkas cadangan disimpan di perangkat, tanpa server."
-                T(info, 14f, 400, pal.osv, Modifier.padding(start = 4.dp, end = 4.dp, bottom = 14.dp), lh = 1.5f)
-                Opt(1, "dl", "Simpan cadangan", "Satu berkas .dinduy berisi catatan dan foto") { act.saveBackup() }
-                Opt(2, "up", "Bagikan cadangan", "Kirim lewat WhatsApp, Berkas, dan lainnya") { act.shareBackup() }
-                Opt(3, "restore", "Pulihkan cadangan", "Pilih berkas .dinduy dari perangkat (termasuk dari versi web)") { act.restoreBackup() }
-            }
+                .padding(top = sat, start = 8.dp, end = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconBtn("back", pal.os, onBack)
+            T(
+                "Pengaturan", 22f, 400, pal.os,
+                Modifier.padding(start = 8.dp).graphicsLayer {
+                    val k = (scroll.value / 110.dp.toPx()).coerceIn(0f, 1f)
+                    val a = ((k - .5f) * 2f).coerceIn(0f, 1f)
+                    alpha = a; translationY = (1f - a) * 12.dp.toPx()
+                },
+                maxLines = 1
+            )
         }
     }
     if (custom) {
@@ -1144,23 +1327,24 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
         AlertDialog(
             onDismissRequest = { custom = false },
             containerColor = pal.c3,
-            title = { T("Warna kustom", 22f, 900, pal.os) },
+            shape = RoundedCornerShape(28.dp),
+            title = { T("Warna kustom", 24f, 400, pal.os) },
             text = {
                 Column {
                     Box(Modifier.fillMaxWidth().height(56.dp).clip(RoundedCornerShape(28.dp)).background(col))
                     Spacer(Modifier.height(16.dp))
-                    T("Corak", 14f, 700, pal.osv)
+                    T("Corak", 14f, 500, pal.osv)
                     BigSlider(h, 0f, 360f) { h = it }
-                    T("Intensitas", 14f, 700, pal.osv)
+                    T("Intensitas", 14f, 500, pal.osv)
                     BigSlider(s, 35f, 88f) { s = it }
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
                     vm.setPr(pr.copy(seed = String.format("#%06X", hsl(h, s, 50f).toArgb() and 0xFFFFFF), dyn = false)); custom = false
-                }) { T("Pakai", 16f, 900, pal.p) }
+                }) { T("Pakai", 15f, 600, pal.p) }
             },
-            dismissButton = { TextButton(onClick = { custom = false }) { T("Batal", 16f, 700, pal.osv) } }
+            dismissButton = { TextButton(onClick = { custom = false }) { T("Batal", 15f, 500, pal.osv) } }
         )
     }
 }
