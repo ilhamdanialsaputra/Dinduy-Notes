@@ -38,6 +38,10 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.zIndex
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.platform.ViewConfiguration
+import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.runtime.rememberUpdatedState
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -195,6 +199,41 @@ private fun Fold.applyTo(a: AnnotatedString, z: Int): AnnotatedString = buildAnn
     append(a.subSequence(from, a.length))
 }
 
+/**
+ * Deteksi ketuk sekali / dua kali tanpa mengonsumsi apa pun (dibaca di pass Final), jadi tidak mengganggu
+ * ketukan bawaan BasicTextField (fokus, posisi kursor) maupun scroll.
+ */
+@Composable
+private fun Modifier.wordTap(onTap: () -> Unit, onDouble: (Offset) -> Unit): Modifier {
+    val t by rememberUpdatedState(onTap)
+    val d by rememberUpdatedState(onDouble)
+    return pointerInput(Unit) {
+        var lastUp = -1L
+        var lastPos = Offset.Zero
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Final)
+            val slop = viewConfiguration.touchSlop
+            var up: PointerInputChange? = null
+            while (true) {
+                val ev = awaitPointerEvent(PointerEventPass.Final)
+                val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                if ((c.position - down.position).getDistance() > slop || c.uptimeMillis - down.uptimeMillis > 400L) break
+                if (!c.pressed) { up = c; break }
+            }
+            val u = up
+            if (u == null) { lastUp = -1L; return@awaitEachGesture }
+            if (lastUp >= 0L && down.uptimeMillis - lastUp <= 300L && (down.position - lastPos).getDistance() < slop * 4f) {
+                lastUp = -1L
+                d(u.position)
+            } else {
+                lastUp = u.uptimeMillis
+                lastPos = u.position
+                t()
+            }
+        }
+    }
+}
+
 /** Satu kolom teks: BasicTextField saat mengedit, Text biasa saat mode baca. */
 @Composable
 fun TF(
@@ -231,18 +270,13 @@ fun TF(
                 .pointerInput(rt, ed.selOn) {
                     if (ed.selOn) detectTapGestures { ed.clearSel() }
                     else detectTapGestures(
-                        // mode baca: ketuk dua kali di teks mana pun = kembali mengedit di situ; ketuk sekali hanya membuka tautan
-                        onDoubleTap = { pos ->
-                            val l = lay ?: return@detectTapGestures
-                            val o0 = l.getOffsetForPosition(pos)
-                            ed.exitReading(key, fold?.t2o(o0, 0) ?: o0)
-                        },
+                        // mode baca: ketuk sekali di teks mana pun = langsung mengedit di situ (ketuk tautan = buka tautan)
                         onTap = { pos ->
                             val l = lay ?: return@detectTapGestures
                             val o0 = l.getOffsetForPosition(pos)
                             val o = fold?.t2o(o0, 0) ?: o0
-                            val lk = rt.sp.firstOrNull { it.k == K.L && o >= it.s && o < it.e }
-                            lk?.u?.let { uri.openUri(it) }
+                            val u = rt.sp.firstOrNull { it.k == K.L && o >= it.s && o < it.e }?.u
+                            if (u != null) uri.openUri(u) else ed.exitReading(key, o)
                         }
                     )
                 },
@@ -271,9 +305,16 @@ fun TF(
                 }
             }
         }
-        val vt = remember(rt, pal, fs, fold) {
+        val sr = if (ed.selOn) ed.selRangeOf(key) else null
+        val vt = remember(rt, pal, fs, fold, sr) {
             VisualTransformation { t ->
-                val a = styled(rt, t.text, 1, pal, fs)
+                val a0 = styled(rt, t.text, 1, pal, fs)
+                val a = if (sr == null) a0 else buildAnnotatedString {
+                    append(a0)
+                    val s0 = (sr.first + 1).coerceIn(0, t.text.length)
+                    val e0 = (sr.second + 1).coerceIn(0, t.text.length)
+                    if (e0 > s0) addStyle(SpanStyle(background = pal.p.copy(alpha = .32f)), s0, e0)
+                }
                 if (fold == null) TransformedText(a, OffsetMapping.Identity)
                 else {
                     val n = t.text.length
@@ -285,22 +326,40 @@ fun TF(
                 }
             }
         }
-        BasicTextField(
-            value = v, onValueChange = { ed.onText(key, it) },
-            modifier = modifier.focusRequester(fr).bringIntoViewRequester(bring).trackPos(ed, key)
-                .onFocusChanged { foc = it.isFocused; if (it.isFocused) ed.onFocus(key) },
-            textStyle = base, cursorBrush = SolidColor(pal.p), visualTransformation = vt,
-            onTextLayout = { lay = it },
-            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-            decorationBox = { inner ->
-                Box {
-                    if (hint != null && v.text.length <= 1) {
-                        Text(hint, style = base.copy(color = base.color.copy(alpha = .4f)))
+        // tekan-tahan ditangani seleksi milik editor (satu jenis seleksi, keyboard tetap terbuka), bukan seleksi bawaan field
+        val vcBase = LocalViewConfiguration.current
+        val vcNoLong = remember(vcBase) {
+            object : ViewConfiguration by vcBase { override val longPressTimeoutMillis: Long get() = 60_000L }
+        }
+        CompositionLocalProvider(LocalViewConfiguration provides vcNoLong) {
+            BasicTextField(
+                value = v, onValueChange = { ed.onText(key, it) },
+                modifier = modifier.focusRequester(fr).bringIntoViewRequester(bring).trackPos(ed, key)
+                    .onFocusChanged { foc = it.isFocused; if (it.isFocused) ed.onFocus(key) }
+                    .wordTap(
+                        onTap = { if (ed.selEdit) ed.dropSel() },
+                        onDouble = { pos ->
+                            val l = lay
+                            if (l != null) {
+                                val t = l.getOffsetForPosition(pos)
+                                val o = (fold?.t2o(t, 1) ?: t) - 1
+                                ed.dblWord(key, o.coerceAtLeast(0))
+                            }
+                        }
+                    ),
+                textStyle = base, cursorBrush = SolidColor(pal.p), visualTransformation = vt,
+                onTextLayout = { lay = it },
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                decorationBox = { inner ->
+                    Box {
+                        if (hint != null && v.text.length <= 1) {
+                            Text(hint, style = base.copy(color = base.color.copy(alpha = .4f)))
+                        }
+                        inner()
                     }
-                    inner()
                 }
-            }
-        )
+            )
+        }
     }
 }
 
@@ -702,7 +761,7 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
             )
             .pointerInput(ed.reading) {
                 if (!ed.reading) detectTapGestures(onTap = { ed.selectImg(bS.id, ixS) })
-                else detectTapGestures(onDoubleTap = { ed.openImgFromReading(bS.id, ixS) })
+                else detectTapGestures(onTap = { ed.openImgFromReading(bS.id, ixS) })
             }
             .zIndex(if (liftedRow) 2f else 0f)
             .graphicsLayer {
@@ -1288,12 +1347,12 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                                 keyboardActions = KeyboardActions(onNext = { firstText() }),
                                 modifier = Modifier.fillMaxWidth().focusRequester(titleFr)
                                     .onFocusChanged { ed.titleFocus = it.isFocused; if (it.isFocused) ed.selImg = null }
-                                    .pointerInput(ed.reading, ed.selOn) {
-                                        if (ed.reading) {
-                                            if (ed.selOn) detectTapGestures { ed.clearSel() }
-                                            else detectTapGestures(onDoubleTap = { ed.exitReading() })
-                                        }
-                                    }
+                                    .then(
+                                        if (ed.reading) Modifier.wordTap(
+                                            onTap = { if (ed.selOn) ed.clearSel() else { ed.exitReading(); ed.titleReq++ } },
+                                            onDouble = { if (ed.selOn) ed.clearSel() else { ed.exitReading(); ed.titleReq++ } }
+                                        ) else Modifier
+                                    )
                             )
                         }
                         var bi0 = 0
@@ -1322,12 +1381,12 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                         }
                         Box(
                             Modifier.fillMaxWidth().height(220.dp).pointerInput(ed.reading, ed.selOn) {
-                                if (ed.reading && !ed.selOn) detectTapGestures(onDoubleTap = { ed.exitReading() })
-                                else detectTapGestures {
+                                detectTapGestures {
                                     if (ed.selOn) ed.clearSel()
                                     else {
                                         val l = ed.blocks.lastOrNull { it.isText }
                                         if (l != null) ed.focusAt(l.id, l.r.t.length)
+                                        else if (ed.reading) ed.exitReading()
                                     }
                                 }
                             }
@@ -1364,8 +1423,15 @@ fun SelBubble(ed: Ed, vm: AppVM, act: Actions, scrollY: Int) {
     fun Act(label: String, f: () -> Unit) {
         T(
             label, 14f, 800, pal.os,
-            Modifier.clip(RoundedCornerShape(16.dp)).clickable { f() }.padding(horizontal = 13.dp, vertical = 9.dp)
+            Modifier.clip(RoundedCornerShape(16.dp)).clickable { f() }.padding(horizontal = 10.dp, vertical = 9.dp)
         )
+    }
+    @Composable
+    fun ActIc(icon: String, f: () -> Unit) {
+        Box(
+            Modifier.clip(RoundedCornerShape(16.dp)).clickable { f() }.padding(horizontal = 9.dp, vertical = 7.dp),
+            Alignment.Center
+        ) { Ic(icon, pal.os, 22.dp) }
     }
     Row(
         Modifier.offset { IntOffset(x.roundToInt(), y.roundToInt()) }.onSizeChanged { bs = it }
@@ -1379,6 +1445,7 @@ fun SelBubble(ed: Ed, vm: AppVM, act: Actions, scrollY: Int) {
             val s = clip.getText()?.text
             if (!s.isNullOrEmpty()) ed.selPaste(s) else vm.show("Tidak ada yang bisa ditempel")
         }
+        if (edit && has) ActIc("del") { ed.selDelete() }
         Act("Semua") { ed.selAll() }
     }
 }
