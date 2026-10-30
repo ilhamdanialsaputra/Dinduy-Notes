@@ -306,12 +306,14 @@ fun AppRoot(vm: AppVM, act: Actions) {
             val isNote = top is Scr.Note
             val reading = vm.ed?.reading == true && isNote
             val imgSel = vm.ed?.selImg != null && isNote
+            val selE = vm.ed?.selEdit == true && isNote
 
-            BackHandler(enabled = nav.stack.size > 1 || drawer.isOpen || vm.sel.isNotEmpty() || vm.searchOn || reading || imgSel) {
+            BackHandler(enabled = nav.stack.size > 1 || drawer.isOpen || vm.sel.isNotEmpty() || vm.searchOn || reading || imgSel || selE) {
                 when {
                     drawer.isOpen -> scope.launch { drawer.close() }
                     isHome && vm.sel.isNotEmpty() -> vm.sel.clear()
                     isHome && vm.searchOn -> vm.searchOn = false
+                    isNote && selE -> vm.ed?.clearSel()
                     isNote && reading -> vm.ed?.let { if (it.selOn) it.clearSel() else it.exitReading() }
                     isNote && imgSel -> vm.ed?.closeImg()
                     else -> nav.pop()
