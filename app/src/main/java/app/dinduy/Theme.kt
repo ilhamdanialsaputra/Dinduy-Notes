@@ -2,6 +2,7 @@
 
 package app.dinduy
 
+import android.content.res.AssetManager
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -32,6 +33,11 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.PathParser
+import androidx.compose.ui.text.ExperimentalTextApi
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -42,6 +48,35 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 
 val Emph = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+
+// ---------- jenis huruf ----------
+// Berkas font TIDAK ada di repository: Gradle mengunduhnya ke assets/fonts saat build (lihat app/build.gradle.kts).
+// Kalau berkasnya belum ada (unduhan gagal), otomatis jatuh ke font sistem supaya aplikasi tidak crash.
+val LocalFF = compositionLocalOf<FontFamily> { FontFamily.Default }
+
+@OptIn(ExperimentalTextApi::class)
+fun loadFont(am: AssetManager, id: String): FontFamily {
+    fun has(n: String) = try { am.open("fonts/$n").close(); true } catch (e: Exception) { false }
+    return try {
+        when (id) {
+            "flex" -> if (has("roboto_flex.ttf")) FontFamily(
+                (100..1000 step 50).map { w ->
+                    Font("fonts/roboto_flex.ttf", am, FontWeight(w), FontStyle.Normal, FontVariation.Settings(FontVariation.weight(w)))
+                }
+            ) else FontFamily.SansSerif
+            // Times New Roman bersifat proprietary; Tinos adalah padanan metrik resminya (ukuran & bentuk huruf nyaris identik)
+            "times" -> if (has("tinos_regular.ttf") && has("tinos_bold.ttf")) FontFamily(
+                Font("fonts/tinos_regular.ttf", am, FontWeight.Normal, FontStyle.Normal),
+                Font("fonts/tinos_bold.ttf", am, FontWeight.Bold, FontStyle.Normal),
+                Font("fonts/tinos_italic.ttf", am, FontWeight.Normal, FontStyle.Italic),
+                Font("fonts/tinos_bolditalic.ttf", am, FontWeight.Bold, FontStyle.Italic)
+            ) else FontFamily.Serif
+            else -> FontFamily.Default
+        }
+    } catch (e: Exception) {
+        FontFamily.Default
+    }
+}
 
 @Immutable
 class Pal(
@@ -130,6 +165,7 @@ val LocalPal = compositionLocalOf { buildPal("light", "#6750A4") }
 // ---------- ikon (path SVG yang sama dengan versi web) ----------
 object Pth {
     val m: Map<String, String> = mapOf(
+        "bulb" to "M9 21c0 .55.45 1 1 1h4c.55 0 1-.45 1-1v-1H9v1zm3-19C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7zm2.85 11.1l-.85.6V16h-4v-2.3l-.85-.6C7.8 12.16 7 10.63 7 9c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.63-.8 3.16-2.15 4.1z",
         "set" to "M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z",
         "more" to "M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z",
         "up" to "M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z",
@@ -205,7 +241,7 @@ fun T(
 ) {
     Text(
         text, if (alpha < 1f) modifier.alpha(alpha) else modifier, color = color,
-        fontSize = size.sp, fontWeight = FontWeight(w), letterSpacing = ls.em, maxLines = maxLines,
+        fontSize = size.sp, fontWeight = FontWeight(w), fontFamily = LocalFF.current, letterSpacing = ls.em, maxLines = maxLines,
         overflow = TextOverflow.Ellipsis,
         lineHeight = if (lh > 0f) lh.em else TextUnit.Unspecified, textAlign = align
     )
