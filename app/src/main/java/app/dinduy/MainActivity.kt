@@ -308,11 +308,12 @@ fun AppRoot(vm: AppVM, act: Actions) {
             val imgSel = vm.ed?.selImg != null && isNote
             val selE = vm.ed?.selEdit == true && isNote
 
-            BackHandler(enabled = nav.stack.size > 1 || drawer.isOpen || vm.sel.isNotEmpty() || vm.searchOn || reading || imgSel || selE) {
+            BackHandler(enabled = nav.stack.size > 1 || drawer.isOpen || vm.sel.isNotEmpty() || vm.searchOn || (isHome && vm.filter != null) || reading || imgSel || selE) {
                 when {
                     drawer.isOpen -> scope.launch { drawer.close() }
                     isHome && vm.sel.isNotEmpty() -> vm.sel.clear()
                     isHome && vm.searchOn -> vm.searchOn = false
+                    isHome && vm.filter != null -> vm.filter = null
                     isNote && selE -> vm.ed?.clearSel()
                     isNote && reading -> vm.ed?.let { if (it.selOn) it.clearSel() else it.exitReading() }
                     isNote && imgSel -> vm.ed?.closeImg()
@@ -382,6 +383,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     ) { vm.sheet = Sheet.Add }
                     SnackHost(vm, if (isNote) 84.dp else 20.dp + sabDp(), isNote)
                     SheetHost(vm, nav, act)
+                    LabelDialogHost(vm)
                 }
             }
         }
