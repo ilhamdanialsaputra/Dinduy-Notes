@@ -143,7 +143,7 @@ import kotlinx.coroutines.delay
 /** Lebar kapsul saat mengembang, sebagai pecahan dari lebar area. */
 private const val BAR_FRAC = 0.84f
 
-class Dm(val fs: Float, val lh: Float)
+class Dm(val fs: Float, val lh: Float, val ff: FontFamily = FontFamily.Default)
 
 fun spanStyle(k: Int, pal: Pal, fs: Float): SpanStyle = when (k) {
     K.B -> SpanStyle(fontWeight = FontWeight(850))
@@ -166,7 +166,7 @@ fun styled(rt: Rt, text: String, off: Int, pal: Pal, fs: Float): AnnotatedString
 }
 
 fun baseStyle(pal: Pal, dm: Dm, color: Color = pal.os, size: Float = dm.fs, w: Int = 400, lhEm: Float = dm.lh, ls: Float = 0f) =
-    TextStyle(color = color, fontSize = size.sp, fontWeight = FontWeight(w), lineHeight = (lhEm * size).sp, letterSpacing = ls.em)
+    TextStyle(color = color, fontFamily = dm.ff, fontSize = size.sp, fontWeight = FontWeight(w), lineHeight = (lhEm * size).sp, letterSpacing = ls.em)
 
 /** Catat posisi kolom teks di ruang konten, dipakai seleksi lintas blok (mode baca maupun mode ketik). */
 private fun Modifier.trackPos(ed: Ed, key: String): Modifier = onGloballyPositioned { c ->
@@ -467,7 +467,7 @@ fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal) {
                             TF(
                                 ed, k,
                                 TextStyle(
-                                    color = fg, fontSize = (dm.fs * .9f).sp, lineHeight = (dm.fs * .9f * 1.45f).sp,
+                                    color = fg, fontFamily = dm.ff, fontSize = (dm.fs * .9f).sp, lineHeight = (dm.fs * .9f * 1.45f).sp,
                                     fontWeight = FontWeight(if (head) 850 else 400), textAlign = al
                                 ),
                                 Modifier.fillMaxWidth()
@@ -1196,7 +1196,7 @@ fun Sep() {
 @Composable
 fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     val pal = LocalPal.current
-    val dm = Dm(vm.pr.fs.toFloat(), vm.pr.lh)
+    val dm = Dm(vm.pr.fs.toFloat(), vm.pr.lh, LocalFF.current)
     val scroll = rememberScrollState()
     val focusMgr = LocalFocusManager.current
     val kb = LocalSoftwareKeyboardController.current
@@ -1280,7 +1280,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                                 onValueChange = { v -> val nl = v.contains('\n'); ed.titleChanged(v); if (nl) firstText() },
                                 readOnly = ed.reading,
                                 textStyle = TextStyle(
-                                    color = pal.p, fontSize = 34.sp, fontWeight = FontWeight(1000),
+                                    color = pal.p, fontFamily = dm.ff, fontSize = 34.sp, fontWeight = FontWeight(1000),
                                     lineHeight = (34 * 1.1f).sp, letterSpacing = (-.02f).em
                                 ),
                                 cursorBrush = SolidColor(pal.p),
