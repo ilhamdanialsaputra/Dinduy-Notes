@@ -405,6 +405,35 @@ fun FontRow(name: String, fam: FontFamily, on: Boolean, onClick: () -> Unit) {
     }
 }
 
+/** Pilihan "Ikuti perangkat" (Material You): warna aplikasi mengikuti wallpaper. */
+@Composable
+fun DeviceColorRow(on: Boolean, onClick: () -> Unit) {
+    val pal = LocalPal.current
+    val src = remember { MutableInteractionSource() }
+    val pr by src.collectIsPressedAsState()
+    val r by animateDpAsState(if (pr) 14.dp else if (on) 32.dp else 24.dp, spring(.6f, 500f), label = "r")
+    val sc by animateFloatAsState(if (pr) .97f else 1f, spring(.5f, 600f), label = "s")
+    val k by animateFloatAsState(if (on) 1f else 0f, spring(.8f, 380f), label = "b")
+    val bg = androidx.compose.ui.graphics.lerp(pal.c4, pal.pc, k)
+    val fg = if (on) pal.opc else pal.os
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = 14.dp).graphicsLayer { scaleX = sc; scaleY = sc }
+            .clip(RoundedCornerShape(r)).background(bg)
+            .clickable(interactionSource = src, indication = LocalIndication.current, onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Box(Modifier.size(48.dp).clip(RoundedCornerShape(if (on) 24.dp else 16.dp)).background(pal.p), Alignment.Center) {
+            Ic("pal", pal.op, 24.dp)
+        }
+        Column(Modifier.weight(1f)) {
+            T("Ikuti perangkat", 19f, 800, fg)
+            T("Material You, warna mengikuti wallpaper", 14f, 400, fg, alpha = .75f)
+        }
+        if (on) Ic("ok", fg, 24.dp)
+    }
+}
+
 // ---------- drawer ala Google Keep: panel persegi, baris berbentuk pil ----------
 @Composable
 fun DrawerItem(icon: String, title: String, selected: Boolean = false, trailing: String? = null, onClick: () -> Unit) {
@@ -843,12 +872,25 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
         ) {
             T("Atur", 64f, 1000, pal.p, Modifier.padding(start = 4.dp, bottom = 28.dp), ls = -.02f, lh = .95f)
             Section("Mode", 0) {
-                val modes = listOf("light" to "lm", "tonal" to "pal", "dark" to "dm", "amoled" to "am")
-                Seg(4, modes.indexOfFirst { it.first == pr.mode }.coerceAtLeast(0), { vm.setPr(pr.copy(mode = modes[it].first)) }) { i, a ->
+                val modes = listOf("auto" to "phone", "light" to "lm", "tonal" to "pal", "dark" to "dm", "amoled" to "am")
+                Seg(5, modes.indexOfFirst { it.first == pr.mode }.coerceAtLeast(0), { vm.setPr(pr.copy(mode = modes[it].first)) }) { i, a ->
                     Ic(modes[i].second, if (a) pal.op else pal.os, 26.dp)
                 }
+                T(
+                    when (pr.mode) {
+                        "auto" -> "Otomatis: terang atau gelap mengikuti perangkat"
+                        "light" -> "Terang"
+                        "tonal" -> "Tonal"
+                        "dark" -> "Gelap"
+                        else -> "AMOLED (hitam pekat)"
+                    },
+                    14f, 600, pal.osv, Modifier.padding(start = 4.dp, top = 12.dp)
+                )
             }
             Section("Warna aplikasi", 60) {
+                val dynAvail = android.os.Build.VERSION.SDK_INT >= 31
+                val dynOn = pr.dyn && dynAvail
+                if (dynAvail) DeviceColorRow(dynOn) { vm.setPr(pr.copy(dyn = true)) }
                 val seeds = listOf("#6750A4", "#0B57D0", "#00796B", "#2E7D32", "#C77700", "#B3261E", "#C2185B", "#5D4037")
                 val all: List<String?> = seeds + listOf<String?>(null)
                 all.chunked(4).forEach { row ->
@@ -858,12 +900,12 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                             Box(Modifier.weight(1f).aspectRatio(1f)) {
                                 if (k < row.size) {
                                     if (c != null) {
-                                        val act0 = c.equals(pr.seed, true)
+                                        val act0 = !dynOn && c.equals(pr.seed, true)
                                         val rp by animateFloatAsState(if (act0) 28f else 50f, spring(.6f, 400f), label = "rp")
                                         val ck by animateFloatAsState(if (act0) 1f else 0f, spring(.6f, 400f), label = "ck")
                                         Box(
                                             Modifier.fillMaxSize().clip(RoundedCornerShape(rp.toInt())).background(Color(android.graphics.Color.parseColor(c)))
-                                                .clickable { vm.setPr(pr.copy(seed = c)) },
+                                                .clickable { vm.setPr(pr.copy(seed = c, dyn = false)) },
                                             Alignment.Center
                                         ) { Box(Modifier.graphicsLayer { scaleX = ck; scaleY = ck }) { Ic("ok", Color.White) } }
                                     } else {
@@ -956,7 +998,7 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
             },
             confirmButton = {
                 TextButton(onClick = {
-                    vm.setPr(pr.copy(seed = String.format("#%06X", hsl(h, s, 50f).toArgb() and 0xFFFFFF))); custom = false
+                    vm.setPr(pr.copy(seed = String.format("#%06X", hsl(h, s, 50f).toArgb() and 0xFFFFFF), dyn = false)); custom = false
                 }) { T("Pakai", 16f, 900, pal.p) }
             },
             dismissButton = { TextButton(onClick = { custom = false }) { T("Batal", 16f, 700, pal.osv) } }
