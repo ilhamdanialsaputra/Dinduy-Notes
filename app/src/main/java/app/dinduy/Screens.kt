@@ -251,8 +251,9 @@ fun NoteCard(
     val pa by animateFloatAsState(if (pressed && !selected) 1f else 0f, spring(.7f, 300f), label = "pa")
     val sc by animateFloatAsState(if (selected || pressed) .97f else 1f, spring(.55f, 500f), label = "sc")
     fun cr(k: Int): Dp {
-        val a = sh[k] + (58f - sh[k]) * pa
-        return (a + (84f - a) * selA).dp
+        // kartu sempit (2 kolom): sudut terpilih dibatasi supaya ceklis di pojok kanan atas tidak terpotong
+        val a = sh[k] + ((if (c2) 36f else 58f) - sh[k]).coerceAtMost(if (c2) 0f else 999f) * pa
+        return (a + ((if (c2) 44f else 84f) - a).coerceAtMost(if (c2) 0f else 999f) * selA).dp
     }
     val shape = RoundedCornerShape(cr(0), cr(1), cr(2), cr(3))
     val padV by animateDpAsState(if (selected) (if (c2) 20.dp else 26.dp) else if (c2) 16.dp else if (kind == "t") 22.dp else if (kind == "s") 20.dp else 24.dp, spring(.7f, 400f), label = "pv")
@@ -833,28 +834,28 @@ fun SelBar(vm: AppVM) {
         enter = slideInVertically(tween(450, easing = Emph)) { -it }, exit = slideOutVertically(tween(450, easing = Emph)) { -it }
     ) {
         Row(
-            Modifier.fillMaxWidth().background(pal.pc).padding(top = sat + 8.dp, bottom = 8.dp, start = 8.dp, end = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
+            Modifier.fillMaxWidth().height(sat + 72.dp).background(pal.s).padding(top = sat + 12.dp, start = 10.dp, end = 10.dp),
+            verticalAlignment = Alignment.Top
         ) {
-            IconBtn("x", pal.opc, { vm.sel.clear() }, size = 46.dp)
-            T("$count dipilih", 18f, 900, pal.opc, Modifier.weight(1f).padding(start = 6.dp))
-            IconBtn("all", pal.opc, { vm.liveF().forEach { if (it.id !in vm.sel) vm.sel.add(it.id) } }, size = 46.dp)
-            IconBtn("pin", pal.opc, {
+            IconBtn("x", pal.os, { vm.sel.clear() }, size = 48.dp)
+            Box(Modifier.weight(1f).height(48.dp).padding(start = 6.dp), Alignment.CenterStart) { T("$count dipilih", 18f, 900, pal.os) }
+            IconBtn("all", pal.os, { vm.liveF().forEach { if (it.id !in vm.sel) vm.sel.add(it.id) } }, size = 48.dp)
+            IconBtn("pin", pal.os, {
                 val ids = vm.sel.toList()
                 if (ids.isNotEmpty()) {
                     val all = ids.all { vm.note(it)?.p == true }
                     vm.sel.clear()
                     vm.mark(ids, if (all) "Sematan dilepas" else "${ids.size} catatan disematkan") { it.copy(p = !all) }
                 }
-            }, size = 46.dp)
-            IconBtn("arc", pal.opc, {
+            }, size = 48.dp)
+            IconBtn("arc", pal.os, {
                 val ids = vm.sel.toList()
                 if (ids.isNotEmpty()) { vm.sel.clear(); vm.mark(ids, "${ids.size} catatan diarsipkan") { it.copy(a = true, p = false) } }
-            }, size = 46.dp)
-            IconBtn("del", pal.opc, {
+            }, size = 48.dp)
+            IconBtn("del", pal.os, {
                 val ids = vm.sel.toList()
                 if (ids.isNotEmpty()) { vm.sel.clear(); vm.mark(ids, "${ids.size} catatan dipindah ke sampah") { it.copy(dt = System.currentTimeMillis()) } }
-            }, size = 46.dp)
+            }, size = 48.dp)
         }
     }
 }
