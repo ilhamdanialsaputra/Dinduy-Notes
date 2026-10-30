@@ -194,7 +194,7 @@ fun Modifier.makeRoom(vm: AppVM, id: String, idx: Int, openIdx: () -> Int, h: Fl
     val oi = openIdx()
     if (oi < 0) return@graphicsLayer
     val wave = minOf(Math.abs(idx - oi), 5) * 10f * dens
-    val me = if (cols == 2 && w > 0f) vm.cardMorph[id] else null
+    val me = if (cols == 2 && w > 0f && !vm.searchOn && (m.r - m.l) < w * .7f) vm.cardMorph[id] else null
     if (me != null) {
         // 2 kolom: kartu di samping terdorong ke kiri/kanan menjauhi kartu yang melebar,
         // kartu di atas ke atas, kartu di bawah ke bawah (bukan satu aliran vertikal seperti 1 kolom)
@@ -769,7 +769,7 @@ fun HomeCard(
                     val sc = .92f + .08f * pv.coerceIn(0f, 1f); scaleX = sc; scaleY = sc
                 },
                 onLong = { if (d.id !in sel) sel.add(d.id) },
-                track = { m -> vm.cardMorph[d.id] = m },
+                track = { m -> if (!vm.searchOn) vm.cardMorph[d.id] = m },
                 cols = cols,
                 onClick = { m ->
                     if (selMode) { if (d.id in sel) sel.remove(d.id) else sel.add(d.id) }
