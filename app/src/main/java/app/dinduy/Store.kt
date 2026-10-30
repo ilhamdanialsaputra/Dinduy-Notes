@@ -7,6 +7,7 @@ import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
+import androidx.compose.animation.core.Animatable
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -45,7 +46,10 @@ import java.nio.ByteOrder
 
 class Snack(val msg: String, val undo: (() -> Unit)?, val id: Long = System.nanoTime())
 
-class Morph(val l: Float, val t: Float, val r: Float, val b: Float, val rad: Float, val color: Color)
+class Morph(
+    val l: Float, val t: Float, val r: Float, val b: Float, val rad: Float, val color: Color,
+    val r4: FloatArray? = null   // radius 4 sudut (kiri-atas, kanan-atas, kanan-bawah, kiri-bawah) dalam px
+)
 
 sealed class Sheet {
     object Sort : Sheet()
@@ -110,6 +114,8 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     var ed by mutableStateOf<Ed?>(null)
     val nav = Nav(this)
     var morph: Morph? = null
+    val openP = Animatable(0f)                 // progres morph catatan (0 = kartu, 1 = layar penuh), dibagi ke semua daftar
+    var openId: String? = null                 // catatan yang sedang dibuka/ditutup, supaya kartu lain memberi ruang
     val cardMorph = HashMap<String, Morph>()   // posisi kartu beranda terkini, untuk morph keluar
     var fabMorph: Morph? = null                // posisi tombol Baru, untuk morph catatan baru
     var pending by mutableStateOf<Pending?>(null)
