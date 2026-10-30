@@ -388,7 +388,7 @@ val VARS = listOf(
 )
 
 @Composable
-fun BlockView(ed: Ed, vm: AppVM, b: Blk, ordN: Int, dm: Dm, fold: Fold? = null) {
+fun BlockView(ed: Ed, vm: AppVM, b: Blk, ordN: Int, dm: Dm, fold: Fold? = null, mk: Float = 0f) {
     val pal = LocalPal.current
     val fs = dm.fs
     val bottom = (fs * 1.1f).dp
@@ -406,7 +406,7 @@ fun BlockView(ed: Ed, vm: AppVM, b: Blk, ordN: Int, dm: Dm, fold: Fold? = null) 
             }
             TF(ed, b.id, st, Modifier.fillMaxWidth().padding(top = (fs * .4f).dp, bottom = (fs * .5f).dp))
         }
-        "li" -> ListItem(ed, b, ordN, dm, pal)
+        "li" -> ListItem(ed, b, ordN, dm, pal, fold, mk)
         "q" -> {
             val q = qs(b.k, pal)
             Box(
@@ -459,7 +459,7 @@ fun BlockView(ed: Ed, vm: AppVM, b: Blk, ordN: Int, dm: Dm, fold: Fold? = null) 
 }
 
 @Composable
-fun ListItem(ed: Ed, b: Blk, ordN: Int, dm: Dm, pal: Pal) {
+fun ListItem(ed: Ed, b: Blk, ordN: Int, dm: Dm, pal: Pal, fold: Fold? = null, mk: Float = 0f) {
     val fs = dm.fs
     val lineH = fs * dm.lh
     val mw = when (b.lt) { "o" -> 2.2f; "c" -> 1.9f; else -> 1.7f } * fs
@@ -467,7 +467,7 @@ fun ListItem(ed: Ed, b: Blk, ordN: Int, dm: Dm, pal: Pal) {
     Row(Modifier.fillMaxWidth().padding(start = (b.d * 1.4f * fs).dp, bottom = (fs * .5f).dp)) {
         // penanda dipusatkan secara vertikal pada tinggi baris, lalu sedikit dinaikkan agar sejajar dengan x-height teks
         Box(
-            Modifier.width(mw.dp).height(lineH.dp).then(
+            Modifier.offset(mk.dp, 0.dp).width(mw.dp).height(lineH.dp).then(
                 if (b.lt == "c") Modifier.clickable(
                     interactionSource = remember { MutableInteractionSource() }, indication = null
                 ) { ed.toggleCheck(b.id) } else Modifier
@@ -498,7 +498,7 @@ fun ListItem(ed: Ed, b: Blk, ordN: Int, dm: Dm, pal: Pal) {
         val st = baseStyle(pal, dm).let {
             if (done) it.copy(color = it.color.copy(alpha = .6f), textDecoration = TextDecoration.LineThrough) else it
         }
-        TF(ed, b.id, st, Modifier.weight(1f))
+        TF(ed, b.id, st, Modifier.weight(1f), fold = fold)
     }
 }
 
@@ -929,7 +929,7 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
 
 // ---------- gambar mengambang: teks mengalir di sekelilingnya ----------
 /** Tambahan tata letak satu blok peserta (dp): geser kiri/kanan, ruang bawah ekstra, dan pemotongan baris bila blok melewati dasar gambar. */
-class FSpec(val ps: Float, val pe: Float, var extra: Float, val fold: Fold?)
+class FSpec(val ps: Float, val pe: Float, var extra: Float, val fold: Fold?, val mk: Float = 0f)
 
 /** Blok-blok setelah gambar yang ikut mengelilinginya, beserta tata letaknya. */
 class FloatPlan(val parts: List<Pair<Blk, FSpec>>)
@@ -987,22 +987,27 @@ private fun planFloat(ed: Ed, i: Int, dm: Dm, pal: Pal, tm: TextMeasurer, dn: De
         val h = maxOf(res.size.height.toFloat(), with(dn) { bm.style.lineHeight.toPx() })
         val fits = top + h <= rem
         var fold: Fold? = null
-        if (!fits && x.ty == "p" && x.r.t.indexOf('\n') < 0) {
+        var mk = 0f
+        if (!fits && (x.ty == "p" || x.ty == "li") && x.r.t.indexOf('\n') < 0) {
             var k = 0
             while (k < res.lineCount && top + res.getLineTop(k) < rem) k++
             if (k in 1 until res.lineCount) {
                 val cuts = IntArray(k) { res.getLineEnd(it) }
-                fold = if (left) {
+                // poin/nomor: kolom teks berawal sesudah penanda (x0), jadi geseran baris sempit = indent - x0, dan penanda ikut digeser ke kanan gambar
+                val x0 = if (x.ty == "li") bm.inset - when (x.lt) { "o" -> 2.2f; "c" -> 1.9f; else -> 1.7f } * fs else 0f
+                val gapDp = maxOf(0f, indent - x0)
+                fold = if (left && gapDp > 0f) {
                     val em = tm.measure("\u2003", bm.style).size.width.toFloat().let { if (it < 1f) fsz * d else it }
-                    val indPx = indent * d
+                    val indPx = gapDp * d
                     val n = (indPx / em).roundToInt().coerceIn(1, 40)
                     val ls = (indPx - n * em) / n
+                    mk = gapDp
                     Fold(cuts, n, k - 1, with(dn) { ls.toSp() }.value)
                 } else Fold(cuts, 0, 0, 0f)
             }
         }
         val narrow = fold == null
-        out.add(x to FSpec(if (narrow && left) indent else 0f, if (narrow && !left) indent else 0f, 0f, fold))
+        out.add(x to FSpec(if (narrow && left) indent else 0f, if (narrow && !left) indent else 0f, 0f, fold, mk))
         j++
         if (!fits) { rem = 0f; break }
         rem -= top + h + bm.bottom * d
@@ -1051,7 +1056,7 @@ fun FloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<String, Int>,
                                     ed.bpos[x.id] = floatArrayOf(cc.localPositionOf(c, Offset.Zero).y, c.size.height.toFloat())
                                 }
                             }
-                    ) { BlockView(ed, vm, x, od[x.id] ?: 1, dm, sp.fold) }
+                    ) { BlockView(ed, vm, x, od[x.id] ?: 1, dm, sp.fold, sp.mk) }
                 }
             }
         }
