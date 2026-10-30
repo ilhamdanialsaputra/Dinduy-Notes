@@ -666,15 +666,9 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         clearReq++
     }
 
-    /** Tutup pilihan gambar dan kembali mengetik (keyboard terbuka), bukan ke mode baca. */
+    /** Tutup pilihan gambar: tetap di mode edit (bar alat tetap ada), tanpa membuka keyboard dan tanpa masuk mode baca. */
     fun closeImg() {
-        val s = selImg ?: return
         selImg = null
-        val i = idx(s.first)
-        val after = if (i >= 0) blocks.drop(i + 1).firstOrNull { it.isText } else null
-        val before = if (i > 0) blocks.take(i).lastOrNull { it.isText } else null
-        if (after != null) focusAt(after.id, 0)
-        else if (before != null) focusAt(before.id, before.r.t.length)
     }
 
     /** Dari mode baca: ketuk dua kali gambar = masuk mode edit dengan gambar itu terpilih. */
