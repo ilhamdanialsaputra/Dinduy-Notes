@@ -256,6 +256,9 @@ fun NoteCard(
         return (a + ((if (c2) 44f else 84f) - a).coerceAtMost(if (c2) 0f else 999f) * selA).dp
     }
     val shape = RoundedCornerShape(cr(0), cr(1), cr(2), cr(3))
+    // 2 kolom: sudut besar memotong teks di pojok, jadi teks digeser menjauhi lengkungan (kiri-atas untuk judul, kiri-bawah untuk lencana/footer)
+    val insTL = if (c2) ((cr(0).value - 40f).coerceAtLeast(0f) * .45f).dp else 0.dp
+    val insBL = if (c2) ((cr(3).value - 40f).coerceAtLeast(0f) * .45f).dp else 0.dp
     val padV by animateDpAsState(if (selected) (if (c2) 20.dp else 26.dp) else if (c2) 16.dp else if (kind == "t") 22.dp else if (kind == "s") 20.dp else 24.dp, spring(.7f, 400f), label = "pv")
     val padH by animateDpAsState(if (selected) (if (c2) 20.dp else 32.dp) else if (c2) 16.dp else 24.dp, spring(.7f, 400f), label = "ph")
     var rect by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
@@ -291,8 +294,9 @@ fun NoteCard(
             verticalArrangement = Arrangement.spacedBy(if (kind == "t") 0.dp else if (kind == "s") 6.dp else 10.dp)
         ) {
             T(
-                d.t.ifEmpty { "Tanpa judul" }, if (c2) 17f else if (kind == "s") 19f else 21f, 900, cs.second,
-                Modifier.padding(end = if (c2) 30.dp else 44.dp), ls = -.015f, lh = 1.1f
+                d.t.ifEmpty { "Tanpa judul" }, if (c2) 16f else if (kind == "s") 19f else 21f, 900, cs.second,
+                Modifier.padding(start = insTL, top = insTL, end = if (c2) 30.dp else 44.dp), ls = -.015f, lh = 1.1f,
+                maxLines = if (c2) 3 else Int.MAX_VALUE
             )
             if (kind != "t") {
                 T(
@@ -303,7 +307,7 @@ fun NoteCard(
             if (d.lb.isNotEmpty()) {
                 val maxShow = if (c2) 1 else 2
                 Row(
-                    Modifier.fillMaxWidth().padding(top = if (kind == "t") 8.dp else 0.dp),
+                    Modifier.fillMaxWidth().padding(top = if (kind == "t") 8.dp else 0.dp).padding(start = insBL, bottom = if (kind == "f") 0.dp else insBL),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     d.lb.take(maxShow).forEach { n -> Capsule(n, cs.second, Modifier.weight(1f, fill = false)) }
@@ -311,7 +315,7 @@ fun NoteCard(
                 }
             }
             if (kind == "f") {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = if (c2) Arrangement.Start else Arrangement.SpaceBetween) {
+                Row(Modifier.fillMaxWidth().padding(start = insBL, bottom = insBL), horizontalArrangement = if (c2) Arrangement.Start else Arrangement.SpaceBetween) {
                     if (!c2) T(wordCount(d.x).toString() + " kata", 13f, 700, cs.second, ls = .02f, alpha = .75f)
                     T((if (delTime != 0L) "Dihapus " else "") + fdate(if (delTime != 0L) delTime else d.u), if (c2) 12f else 13f, 700, cs.second, ls = .02f, alpha = .75f)
                 }
@@ -1078,7 +1082,7 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                 BigSlider(pr.fs.toFloat(), 14f, 30f) { vm.setPr(pr.copy(fs = it.toInt())) }
                 T("Jarak baris", 16f, 700, pal.os, Modifier.padding(start = 4.dp, top = 10.dp, bottom = 14.dp))
                 val lhs = listOf(1.45f to "Rapat", 1.65f to "Normal", 1.95f to "Lega")
-                Seg(3, lhs.indexOfFirst { it.first == pr.lh }.coerceAtLeast(1), { vm.setPr(pr.copy(lh = lhs[it].first)) }) { i, a ->
+                Seg(3, lhs.indexOfFirst { it.first == pr.lh }.let { if (it < 0) 1 else it }, { vm.setPr(pr.copy(lh = lhs[it].first)) }) { i, a ->
                     T(lhs[i].second, 16f, 800, if (a) pal.op else pal.os)
                 }
                 Column(Modifier.padding(top = 18.dp).fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(pal.s).padding(20.dp)) {
