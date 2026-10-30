@@ -229,15 +229,22 @@ fun TF(
                     }
                 }
                 .pointerInput(rt, ed.selOn) {
-                    detectTapGestures { pos ->
-                        if (ed.selOn) { ed.clearSel(); return@detectTapGestures }
-                        val l = lay ?: return@detectTapGestures
-                        val o0 = l.getOffsetForPosition(pos)
-                        val o = fold?.t2o(o0, 0) ?: o0
-                        val lk = rt.sp.firstOrNull { it.k == K.L && o >= it.s && o < it.e }
-                        val u = lk?.u
-                        if (u != null) uri.openUri(u) else ed.exitReading(key, o)
-                    }
+                    if (ed.selOn) detectTapGestures { ed.clearSel() }
+                    else detectTapGestures(
+                        // mode baca: ketuk dua kali di teks mana pun = kembali mengedit di situ; ketuk sekali hanya membuka tautan
+                        onDoubleTap = { pos ->
+                            val l = lay ?: return@detectTapGestures
+                            val o0 = l.getOffsetForPosition(pos)
+                            ed.exitReading(key, fold?.t2o(o0, 0) ?: o0)
+                        },
+                        onTap = { pos ->
+                            val l = lay ?: return@detectTapGestures
+                            val o0 = l.getOffsetForPosition(pos)
+                            val o = fold?.t2o(o0, 0) ?: o0
+                            val lk = rt.sp.firstOrNull { it.k == K.L && o >= it.s && o < it.e }
+                            lk?.u?.let { uri.openUri(it) }
+                        }
+                    )
                 },
             style = base, softWrap = wrap, onTextLayout = { lay = it }
         )
@@ -254,12 +261,13 @@ fun TF(
                 ed.applyReq(r)
             }
         }
-        LaunchedEffect(v.selection, v.text.length, foc) {
+        val clear = if (ed.barOn) ed.barH else 0f
+        LaunchedEffect(v.selection, v.text.length, foc, clear) {
             if (foc && v.selection.collapsed) {
                 delay(30)
                 lay?.let { l ->
                     val o = (fold?.o2t(v.selection.start, 1) ?: v.selection.start).coerceIn(0, l.layoutInput.text.length)
-                    try { bring.bringIntoView(l.getCursorRect(o)) } catch (e: Exception) { }
+                    try { bring.bringIntoView(l.getCursorRect(o).let { c -> c.copy(bottom = c.bottom + clear) }) } catch (e: Exception) { }
                 }
             }
         }
@@ -472,19 +480,9 @@ fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal) {
     }
 }
 
-private class Snp(val a: Float, val label: String, val snapped: Boolean)
-
-private val RATIOS = listOf(
-    "1:1" to 1f, "4:3" to 4f / 3f, "3:4" to 3f / 4f, "16:9" to 16f / 9f,
-    "9:16" to 9f / 16f, "3:2" to 1.5f, "2:3" to 2f / 3f
-)
-
-/** Menempel ke rasio umum / rasio asli saat dekat, supaya mudah "pas" dengan jempol. */
-private fun snapRatio(a: Float, o: Float): Snp {
-    if (abs(a / o - 1f) < .035f) return Snp(o, "Asli", true)
-    for ((l, r) in RATIOS) if (abs(a / r - 1f) < .035f) return Snp(r, l, true)
-    return Snp(a, String.format(java.util.Locale.US, "%.2f : 1", a), false)
-}
+/** Menempel halus ke rasio asli gambar saat sudah dekat (ada getar kecil); tanpa angka apa pun di layar. */
+private fun snapRatio(a: Float, o: Float): Pair<Float, Boolean> =
+    if (abs(a / o - 1f) < .03f) o to true else a to false
 
 /** Ukuran konten gambar (px) saat menutup bingkai bw x bh dengan zoom z. */
 private fun cropSize(o: Float, bw: Float, bh: Float, z: Float): Pair<Float, Float> =
@@ -565,12 +563,9 @@ fun Grip(
         },
         pill
     ) {
-        val (w, h) = when (kind) { 0 -> 6.dp to 38.dp; 1 -> 38.dp to 6.dp; else -> 20.dp to 20.dp }
-        Box(Modifier.padding(9.dp).graphicsLayer { scaleX = sc; scaleY = sc }.size(w, h)) {
-            Box(
-                Modifier.matchParentSize().shadow(2.dp, CircleShape).clip(CircleShape).background(pal.s)
-                    .padding(1.5.dp).clip(CircleShape).background(pal.p)
-            )
+        val (w, h) = when (kind) { 0 -> 5.dp to 30.dp; 1 -> 30.dp to 5.dp; else -> 16.dp to 16.dp }
+        Box(Modifier.padding(10.dp).graphicsLayer { scaleX = sc; scaleY = sc }.size(w, h)) {
+            Box(Modifier.matchParentSize().clip(CircleShape).background(pal.s).padding(1.5.dp).clip(CircleShape).background(pal.p))
         }
     }
 }
@@ -650,7 +645,7 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
     val dens = LocalDensity.current.density
     val haptic = LocalHapticFeedback.current
     var box by remember { mutableStateOf(IntSize.Zero) }
-    var badge by remember { mutableStateOf<String?>(null) }
+    var snapOn by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(22.dp)
     val row = b.im.size > 1
     val mS by rememberUpdatedState(m)
@@ -691,10 +686,10 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
         val cw = ed.widthDp * dens
         val wC = wpx.coerceIn(cw * .22f, cw)
         val hC = hpx.coerceIn(70f * dens, 1100f * dens)
-        val sn = snapRatio(wC / hC, mS.o)
-        if (sn.snapped && badge != sn.label) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        badge = sn.label
-        ed.imgLive(bS.id, ixS) { it.copy(w = wC / cw, a = sn.a) }
+        val (a, snapped) = snapRatio(wC / hC, mS.o)
+        if (snapped && !snapOn) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        snapOn = snapped
+        ed.imgLive(bS.id, ixS) { it.copy(w = wC / cw, a = a) }
     }
 
     Box(
@@ -707,6 +702,7 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
             )
             .pointerInput(ed.reading) {
                 if (!ed.reading) detectTapGestures(onTap = { ed.selectImg(bS.id, ixS) })
+                else detectTapGestures(onDoubleTap = { ed.openImgFromReading(bS.id, ixS) })
             }
             .zIndex(if (liftedRow) 2f else 0f)
             .graphicsLayer {
@@ -796,7 +792,7 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
             ) { T(t, 13f, 900, pal.op) }
         }
         if (selected && !ed.reading && ed.mv == null) {
-            Box(Modifier.matchParentSize().border(2.5.dp, pal.p, shape))
+            Box(Modifier.matchParentSize().border(2.dp, pal.p, shape))
             val right = m.al != "r"
             val gx = if (right) 1f else -1f
             val kk = if (m.al == "c") 2f else 1f
@@ -807,14 +803,14 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
                     0, if (right) Alignment.CenterEnd else Alignment.CenterStart,
                     onStart = { ed.commit(); rs[0] = box.width.toFloat(); rs[1] = box.height.toFloat(); rs[2] = 0f },
                     onDrag = { dx, _ -> rs[2] += dx * gx * kk; applyResize(rs[0] + rs[2], rs[1]) },
-                    onEnd = { badge = null; ed.releaseSide(bS.id); ed.commit() }
+                    onEnd = { snapOn = false; ed.releaseSide(bS.id); ed.commit() }
                 )
                 // tepi bawah: ubah tinggi saja -> rasio berubah
                 Grip(
                     Modifier.align(Alignment.BottomCenter).size(96.dp, 46.dp), 1, Alignment.BottomCenter,
                     onStart = { ed.commit(); rs[0] = box.width.toFloat(); rs[1] = box.height.toFloat(); rs[3] = 0f },
                     onDrag = { _, dy -> rs[3] += dy; applyResize(rs[0], rs[1] + rs[3]) },
-                    onEnd = { badge = null; ed.commit() }
+                    onEnd = { snapOn = false; ed.commit() }
                 )
                 // sudut: perbesar/perkecil dengan rasio tetap
                 Grip(
@@ -861,13 +857,6 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
                     },
                     onEnd = { ed.commit() }
                 )
-            }
-            val bt = badge
-            if (bt != null) {
-                Box(
-                    Modifier.align(Alignment.TopCenter).padding(top = 10.dp).clip(RoundedCornerShape(14.dp)).background(pal.p)
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                ) { T(bt, 13f, 900, pal.op) }
             }
         }
     }
@@ -1056,66 +1045,75 @@ fun EdBar(ed: Ed, act: Actions, imeOpen: Boolean) {
     val convOff = cell || ty == "img"   // teks samping gambar tidak bisa diubah jadi judul/daftar
     val capShape = RoundedCornerShape(30.dp)
     Column(
-        Modifier.widthIn(max = 560.dp).fillMaxWidth().padding(horizontal = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        Modifier.widthIn(max = 560.dp).fillMaxWidth().padding(horizontal = 10.dp)
     ) {
-        if (ed.miniBar) Unit else if (ed.selImg != null) {
-            val s = ed.selImg!!
-            val b = ed.blocks.firstOrNull { it.id == s.first }
-            val inRow = (b?.im?.size ?: 1) > 1
-            val mi = b?.im?.getOrNull(s.second)
-            val isR: (Float?) -> Boolean = { r -> mi != null && abs(mi.a - (r ?: mi.o)) < .02f }
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(pal.c3)
-                    .horizontalScroll(rememberScrollState()).padding(6.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Chip("Asli", if (isR(null)) pal.p else pal.c4, if (isR(null)) pal.op else pal.os, RoundedCornerShape(23.dp)) { ed.imgRatio(null) }
-                RATIOS.forEach { (l, r) ->
-                    Chip(l, if (isR(r)) pal.p else pal.c4, if (isR(r)) pal.op else pal.os, RoundedCornerShape(23.dp)) { ed.imgRatio(r) }
-                }
-                Chip("Reset pangkas", pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.imgResetCrop() }
-            }
-            Row(
-                Modifier.fillMaxWidth().shadow(if (pal.dark) 6.dp else 1.dp, RoundedCornerShape(28.dp)).clip(RoundedCornerShape(28.dp))
-                    .background(pal.c3).horizontalScroll(rememberScrollState()).padding(6.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                if (!inRow) {
-                    val al = b?.im?.getOrNull(s.second)?.al
-                    Tbn({ Ic("aL", it) }, al == "l", true) { ed.imgAlign("l") }
-                    Tbn({ Ic("aC", it) }, al == "c", true) { ed.imgAlign("c") }
-                    Tbn({ Ic("aR", it) }, al == "r", true) { ed.imgAlign("r") }
-                }
-                Tbn({ Ic(if (inRow) "rows" else "cols", it) }, false, true) { ed.toggleRow() }
-                Tbn({ Ic("aup", it) }, false, true) { ed.imgMove(-1) }
-                Tbn({ Ic("adn", it) }, false, true) { ed.imgMove(1) }
-                Tbn({ Ic("del", it) }, false, true) { ed.imgDelete() }
-            }
-        } else if (cell) {
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(pal.c3)
-                    .horizontalScroll(rememberScrollState()).padding(6.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                listOf("ar" to "+ Baris", "ac" to "+ Kolom", "dr" to "− Baris", "dc" to "− Kolom").forEach { (k, l) ->
-                    Chip(l, pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.tOp(k) }
-                }
-                Chip("Hapus tabel", pal.ec, pal.oec, RoundedCornerShape(23.dp)) { ed.tOp("dt") }
-            }
-        } else if (ed.pickQuote) {
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(pal.c3)
-                    .horizontalScroll(rememberScrollState()).padding(6.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                VARS.forEach { (k, l) ->
-                    val q = qs(k, pal)
-                    Chip(l, if (k == "def") pal.c4 else q.bg, q.fg, q.shape, 52.dp, 104.dp) {
-                        ed.pickQuote = false; ed.setQuote(k)
+        // kapsul tambahan (gambar / tabel / kutipan): muncul dan hilang dengan animasi mulus
+        val kindNow = if (ed.miniBar) 0 else if (ed.selImg != null) 1 else if (cell) 2 else if (ed.pickQuote) 3 else 0
+        var kindShown by remember { mutableStateOf(0) }
+        var lastSel by remember { mutableStateOf<Pair<String, Int>?>(null) }
+        SideEffect {
+            if (kindNow != 0) kindShown = kindNow
+            ed.selImg?.let { lastSel = it }
+        }
+        val kind = if (kindNow != 0) kindNow else kindShown
+        AnimatedVisibility(
+            visible = kindNow != 0,
+            enter = fadeIn(tween(220, easing = Emph)) + slideInVertically(tween(300, easing = Emph)) { it / 2 } +
+                expandVertically(tween(300, easing = Emph)),
+            exit = fadeOut(tween(140)) + slideOutVertically(tween(220, easing = Emph)) { it / 2 } +
+                shrinkVertically(tween(240, easing = Emph))
+        ) {
+            Box(Modifier.padding(bottom = 8.dp)) {
+                when (kind) {
+                    1 -> {
+                        val s = ed.selImg ?: lastSel
+                        if (s != null) {
+                            val b = ed.blocks.firstOrNull { it.id == s.first }
+                            val inRow = (b?.im?.size ?: 1) > 1
+                            Row(
+                                Modifier.fillMaxWidth().shadow(if (pal.dark) 6.dp else 1.dp, RoundedCornerShape(28.dp)).clip(RoundedCornerShape(28.dp))
+                                    .background(pal.c3).horizontalScroll(rememberScrollState()).padding(6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Tbn({ Ic("ok", it) }, true, true) { ed.closeImg() }
+                                Sep()
+                                if (!inRow) {
+                                    val al = b?.im?.getOrNull(s.second)?.al
+                                    Tbn({ Ic("aL", it) }, al == "l", true) { ed.imgAlign("l") }
+                                    Tbn({ Ic("aC", it) }, al == "c", true) { ed.imgAlign("c") }
+                                    Tbn({ Ic("aR", it) }, al == "r", true) { ed.imgAlign("r") }
+                                }
+                                Tbn({ Ic(if (inRow) "rows" else "cols", it) }, false, true) { ed.toggleRow() }
+                                Tbn({ Ic("aup", it) }, false, true) { ed.imgMove(-1) }
+                                Tbn({ Ic("adn", it) }, false, true) { ed.imgMove(1) }
+                                Tbn({ Ic("del", it) }, false, true) { ed.imgDelete() }
+                            }
+                        }
+                    }
+                    2 -> Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(pal.c3)
+                            .horizontalScroll(rememberScrollState()).padding(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf("ar" to "+ Baris", "ac" to "+ Kolom", "dr" to "− Baris", "dc" to "− Kolom").forEach { (k, l) ->
+                            Chip(l, pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.tOp(k) }
+                        }
+                        Chip("Hapus tabel", pal.ec, pal.oec, RoundedCornerShape(23.dp)) { ed.tOp("dt") }
+                    }
+                    3 -> Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(pal.c3)
+                            .horizontalScroll(rememberScrollState()).padding(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        VARS.forEach { (k, l) ->
+                            val q = qs(k, pal)
+                            Chip(l, if (k == "def") pal.c4 else q.bg, q.fg, q.shape, 52.dp, 104.dp) {
+                                ed.pickQuote = false; ed.setQuote(k)
+                            }
+                        }
+                        if (ty == "q") Chip("Teks biasa", pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.pickQuote = false; ed.setPlain() }
                     }
                 }
-                if (ty == "q") Chip("Teks biasa", pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.pickQuote = false; ed.setPlain() }
             }
         }
         // satu kapsul: lebarnya mengecil ke kanan (tinggal dua tombol) dan mengembang lagi ke kiri
@@ -1149,7 +1147,6 @@ fun EdBar(ed: Ed, act: Actions, imeOpen: Boolean) {
                 val isLi = ty == "li" && !cell
                 I("undo", "undo", off = !ed.canUndo || selMode) { ed.undo() }
                 I("redo", "redo", off = !ed.canRedo || selMode) { ed.redo() }
-                I("sel", "all") { ed.enterSelect() }
                 Sep()
                 H("h1", 1); H("h2", 2)
                 I("b", "b", K.B in fl && !noB, noB) { ed.toggleFmt(K.B) }
@@ -1291,7 +1288,12 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                                 keyboardActions = KeyboardActions(onNext = { firstText() }),
                                 modifier = Modifier.fillMaxWidth().focusRequester(titleFr)
                                     .onFocusChanged { ed.titleFocus = it.isFocused; if (it.isFocused) ed.selImg = null }
-                                    .pointerInput(ed.reading) { if (ed.reading) detectTapGestures { if (ed.selOn) ed.clearSel() else ed.exitReading() } }
+                                    .pointerInput(ed.reading, ed.selOn) {
+                                        if (ed.reading) {
+                                            if (ed.selOn) detectTapGestures { ed.clearSel() }
+                                            else detectTapGestures(onDoubleTap = { ed.exitReading() })
+                                        }
+                                    }
                             )
                         }
                         var bi0 = 0
@@ -1319,14 +1321,14 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                             bi0 += 1 + plan.let { it?.parts?.size ?: 0 }
                         }
                         Box(
-                            Modifier.fillMaxWidth().height(220.dp).clickable(
-                                interactionSource = remember { MutableInteractionSource() }, indication = null
-                            ) {
-                                if (ed.selOn) ed.clearSel()
-                                else if (ed.reading) ed.exitReading()
-                                else {
-                                    val l = ed.blocks.lastOrNull { it.isText }
-                                    if (l != null) ed.focusAt(l.id, l.r.t.length)
+                            Modifier.fillMaxWidth().height(220.dp).pointerInput(ed.reading, ed.selOn) {
+                                if (ed.reading && !ed.selOn) detectTapGestures(onDoubleTap = { ed.exitReading() })
+                                else detectTapGestures {
+                                    if (ed.selOn) ed.clearSel()
+                                    else {
+                                        val l = ed.blocks.lastOrNull { it.isText }
+                                        if (l != null) ed.focusAt(l.id, l.r.t.length)
+                                    }
                                 }
                             }
                         )
@@ -1422,6 +1424,7 @@ fun SelHandles(ed: Ed) {
 /** Dipisah dari NoteScreen supaya tidak terjebak receiver ColumnScope milik Column di luarnya. */
 @Composable
 fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boolean) {
+    SideEffect { ed.barOn = showBar }
     Box(Modifier.fillMaxSize()) {
         // kapsul penuh: gerak kecil + pudar, karena keyboard sudah ikut bergerak sendiri
         AnimatedVisibility(
@@ -1432,7 +1435,10 @@ fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boole
             exit = fadeOut(tween(180)) + slideOutVertically(tween(260, easing = Emph)) { it / 4 } +
                 shrinkVertically(tween(300, easing = Emph))
         ) {
-            Box(Modifier.padding(bottom = 10.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier.padding(bottom = 10.dp).fillMaxWidth().onSizeChanged { ed.barH = it.height.toFloat() },
+                contentAlignment = Alignment.Center
+            ) {
                 EdBar(ed, act, imeOpen)
             }
         }
