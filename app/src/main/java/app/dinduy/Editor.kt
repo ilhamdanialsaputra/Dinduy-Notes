@@ -208,9 +208,10 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (v0.text == old.text) {
             val v = clampSel(v0)
             tf[key] = v
-            if (v.selection != old.selection) caretMoved(key)
+            if (v.selection != old.selection) { if (selEdit) dropSel(); caretMoved(key) }
             return
         }
+        if (selEdit && selSpan()?.let { it.first != it.second } == true && typeOverSel(key, v0)) return
         val oldRt = rtOf(key)
         var v = v0
         if (!v.text.startsWith(Z)) {
@@ -661,6 +662,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     // ---------- gambar ----------
     fun selectImg(bid: String, ix: Int) {
+        if (selOn) dropSel()
         selImg = bid to ix
         focus = null
         clearReq++
@@ -1161,11 +1163,12 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (edit) {
             commit()
             selBack = Pt(b.key, b.off)
-            selImg = null; pickQuote = false; miniBar = false; clearReq++
+            selImg = null; pickQuote = false; miniBar = false
+            focusAt(b.key, b.off)   // tetap di mode ketik: keyboard terbuka, ketikan langsung mengganti seleksi
         }
         wordA = a; wordB = b; selWho = 0
         pa = a; pf = b
-        selOn = true; reading = true
+        selOn = true
         selTarget = p; selFinger = fingerY; selDrag = true
         selAuto()
         buzz?.invoke()
@@ -1329,19 +1332,64 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (s.isEmpty()) return
         val (lo, _) = selSpan() ?: return
         selDelete()
-        val key = lo.key
+        typeAt(lo.key, lo.off, s)
+    }
+
+    /** Sisipkan teks s di posisi off (dipakai tempel dan mengetik di atas seleksi), lalu kursor di akhir teks itu. */
+    private fun typeAt(key: String, off: Int, s: String) {
         val b = blockOfKey(key) ?: return
         if (s.indexOf('\n') >= 0 && !b.isMulti && !isCellKey(key)) {
-            paste(key, lo.off, s)
+            if (s == "\n") enter(key, off) else paste(key, off, s)
             return
         }
         val clean = if (isCellKey(key)) s.replace('\n', ' ') else s
         val rt = rtOf(key)
-        val nr = rt.slice(0, lo.off) + Rt(clean) + rt.slice(lo.off, rt.t.length)
+        val nr = rt.slice(0, off) + Rt(clean) + rt.slice(off, rt.t.length)
         putRt(key, nr)
-        tf[key] = TextFieldValue(Z + nr.t, TextRange(lo.off + clean.length + 1))
+        tf[key] = TextFieldValue(Z + nr.t, TextRange(off + clean.length + 1))
         dirty(); commit()
-        focusAt(key, lo.off + clean.length)
+        focusAt(key, off + clean.length)
+    }
+
+    /** Ada seleksi di mode ketik lalu pengguna mengetik / menekan hapus: seleksi diganti ketikan itu, seperti editor biasa. */
+    private fun typeOverSel(key: String, v: TextFieldValue): Boolean {
+        if (!v.text.startsWith(Z)) { dropSel(); return false }
+        val (lo, _) = selSpan() ?: return false
+        val oldT = rtOf(key).t
+        val nt = v.text.substring(1)
+        val df = diff(oldT, nt)
+        val ins = nt.substring(df.p, df.p + df.ins)
+        selDelete()
+        if (ins.isNotEmpty()) typeAt(lo.key, lo.off, ins)
+        return true
+    }
+
+    /** Lepas seleksi tanpa mengubah fokus / keyboard. */
+    fun dropSel() {
+        selOn = false; pa = null; pf = null; selBack = null; selDrag = false
+        selJob?.cancel()
+    }
+
+    /** Ketuk dua kali di mode ketik: pilih kata di situ. Keyboard tetap terbuka. */
+    fun dblWord(key: String, off: Int) {
+        val t = rtOf(key).t
+        if (t.isEmpty()) return
+        fun w(c: Char) = c.isLetterOrDigit() || c == '_'
+        val i = off.coerceIn(0, t.length)
+        if (!((i < t.length && w(t[i])) || (i > 0 && w(t[i - 1])))) return
+        var l = i
+        var r = i
+        while (l > 0 && w(t[l - 1])) l--
+        while (r < t.length && w(t[r])) r++
+        commit()
+        val a = Pt(key, l)
+        val b = Pt(key, r)
+        selBack = b; wordA = a; wordB = b; selWho = 0
+        pa = a; pf = b; selOn = true; selDrag = false
+        selImg = null; pickQuote = false; miniBar = false
+        tf[key]?.let { tf[key] = it.copy(selection = TextRange(r + 1)) }
+        caretMoved(key)
+        buzz?.invoke()
     }
 
     // ---------- struktur ----------
