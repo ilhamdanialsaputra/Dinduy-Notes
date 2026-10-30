@@ -187,7 +187,9 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, content: @Composable () -> 
             val tt = vm.openP.value.coerceIn(0f, 1f)
             val m = morph ?: Morph(size.width * .12f, size.height * .4f, size.width * .88f, size.height * .6f, 32.dp.toPx(), pal.s)
             // tepi kiri/kanan sedikit lebih cepat dari tepi atas/bawah: wadah terasa "meregang" ke bawah/atas di akhir
-            val tx = (tt * 1.12f).coerceIn(0f, 1f)
+            // kartu sempit (grid 2 kolom): semua tepi bergerak serempak supaya tidak miring/melar; kartu lebar: tepi kiri-kanan sedikit lebih cepat
+            val narrow = (m.r - m.l) < size.width * .7f
+            val tx = if (narrow) tt else (tt * 1.12f).coerceIn(0f, 1f)
             val l = lerp(m.l, 0f, tx)
             val r = lerp(m.r, size.width, tx)
             val tp = lerp(m.t, 0f, tt)
