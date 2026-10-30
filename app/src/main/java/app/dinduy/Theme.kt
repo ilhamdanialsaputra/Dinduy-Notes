@@ -30,6 +30,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.PathParser
@@ -151,6 +152,55 @@ fun buildPal(mode: String, seed: String): Pal {
     }
 }
 
+/** Material You: palet dari warna sistem (wallpaper). Null jika perangkat < Android 12 atau warna sistem tak terbaca. */
+fun dynamicPal(ctx: android.content.Context, mode: String): Pal? {
+    if (android.os.Build.VERSION.SDK_INT < 31) return null
+    return try {
+        fun tone(group: String, n: Int): Color {
+            val id = ctx.resources.getIdentifier("system_${group}_$n", "color", "android")
+            return Color(ctx.getColor(id))
+        }
+        fun a1(n: Int) = tone("accent1", n)
+        fun a2(n: Int) = tone("accent2", n)
+        fun a3(n: Int) = tone("accent3", n)
+        fun n1(n: Int) = tone("neutral1", n)
+        fun n2(n: Int) = tone("neutral2", n)
+        val seed = a1(500)
+        val base = buildPal(mode, String.format("#%06X", seed.toArgb() and 0xFFFFFF))   // sumber warna peringatan/error/aksen
+        when (mode) {
+            "light" -> Pal(
+                false, a1(600), a1(0), a1(100), a1(900), a2(100), a2(900), a3(100), a3(900),
+                n1(10), n1(900), n2(700), n2(200),
+                n1(50), lerp(n1(50), n1(100), .5f), n1(100), lerp(n1(100), n1(200), .35f),
+                base.wc, base.owc, base.ec, base.oec, base.ac, base.oac
+            )
+            "tonal" -> Pal(
+                false, a1(700), a1(0), a1(200), a1(900), a2(200), a2(900), a3(200), a3(900),
+                a2(50), n1(900), n2(700), n2(300),
+                a2(100), lerp(a2(100), a2(200), .3f), lerp(a2(100), a2(200), .6f), a2(200),
+                base.wc, base.owc, base.ec, base.oec, base.ac, base.oac
+            )
+            else -> {
+                val am = mode == "amoled"
+                val s = if (am) Color.Black else lerp(n1(900), n1(1000), .4f)
+                val hi = n1(800)
+                Pal(
+                    true, a1(200), a1(800),
+                    if (am) lerp(a1(700), a1(800), .5f) else a1(700), a1(100),
+                    if (am) lerp(a2(700), a2(800), .5f) else a2(700), a2(100),
+                    if (am) lerp(a3(700), a3(800), .5f) else a3(700), a3(100),
+                    s, n1(100), n2(200), n2(700),
+                    if (am) Color(0xFF080808) else lerp(s, hi, .18f), if (am) Color(0xFF0F0F0F) else lerp(s, hi, .32f),
+                    if (am) Color(0xFF161616) else lerp(s, hi, .5f), if (am) Color(0xFF1F1F1F) else lerp(s, hi, .75f),
+                    base.wc, base.owc, base.ec, base.oec, base.ac, base.oac
+                )
+            }
+        }
+    } catch (e: Exception) {
+        null
+    }
+}
+
 fun lerpPal(a: Pal, b: Pal, f: Float): Pal = Pal(
     b.dark, lerp(a.p, b.p, f), lerp(a.op, b.op, f), lerp(a.pc, b.pc, f), lerp(a.opc, b.opc, f),
     lerp(a.sc, b.sc, f), lerp(a.osc, b.osc, f), lerp(a.tc, b.tc, f), lerp(a.otc, b.otc, f),
@@ -166,6 +216,7 @@ val LocalPal = compositionLocalOf { buildPal("light", "#6750A4") }
 object Pth {
     val m: Map<String, String> = mapOf(
         "bulb" to "M9 21c0 .55.45 1 1 1h4c.55 0 1-.45 1-1v-1H9v1zm3-19C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7zm2.85 11.1l-.85.6V16h-4v-2.3l-.85-.6C7.8 12.16 7 10.63 7 9c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.63-.8 3.16-2.15 4.1z",
+        "phone" to "M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-2-2-2zM17 19H7V5h10v14z",
         "set" to "M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z",
         "more" to "M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z",
         "up" to "M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z",
