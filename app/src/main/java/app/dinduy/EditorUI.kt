@@ -261,7 +261,7 @@ fun TF(
                 ed.applyReq(r)
             }
         }
-        val clear = if (ed.barOn) ed.barH else 0f
+        val clear = if (ed.barOn) ed.barH + 16f * ed.dens else 0f   // tinggi kapsul (termasuk jarak bawahnya) + sedikit ruang napas
         LaunchedEffect(v.selection, v.text.length, foc, clear) {
             if (foc && v.selection.collapsed) {
                 delay(30)
@@ -1436,7 +1436,7 @@ fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boole
                 shrinkVertically(tween(300, easing = Emph))
         ) {
             Box(
-                Modifier.padding(bottom = 10.dp).fillMaxWidth().onSizeChanged { ed.barH = it.height.toFloat() },
+                Modifier.onSizeChanged { ed.barH = it.height.toFloat() }.padding(bottom = 10.dp).fillMaxWidth(),
                 contentAlignment = Alignment.Center
             ) {
                 EdBar(ed, act, imeOpen)
