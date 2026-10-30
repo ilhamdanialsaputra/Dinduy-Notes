@@ -2,6 +2,9 @@
 
 package app.dinduy
 
+import kotlin.math.roundToInt
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.layout.offset
 import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -205,7 +208,9 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, content: @Composable () -> 
     ) {
         Box(
             Modifier.fillMaxSize().graphicsLayer {
-                val a = ((vm.openP.value - .3f) / .5f).coerceIn(0f, 1f)
+                // isi catatan mulai muncul lebih awal dan bertumpang dengan teks kartu (pudar-silang), bukan menunggu kartu hilang dulu
+                val x = ((vm.openP.value - .2f) / .5f).coerceIn(0f, 1f)
+                val a = x * x * (3f - 2f * x)
                 alpha = a
                 translationY = (1f - a) * 24.dp.toPx()
                 val s = .96f + .04f * a
@@ -213,6 +218,22 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, content: @Composable () -> 
                 transformOrigin = androidx.compose.ui.graphics.TransformOrigin(.5f, 0f)
             }
         ) { content() }
+        // teks kartu ikut melebur: tetap di posisi aslinya di dalam wadah yang membesar/mengecil, lalu pudar seiring isi catatan muncul.
+        // Saat menutup urutannya terbalik, jadi begitu wadah sampai di kartu, teksnya sudah identik dengan kartu asli (tidak ada lompatan).
+        val g = morph?.ghost
+        val gn = if (g != null) vm.openId?.let { vm.note(it) } else null
+        if (morph != null && g != null && gn != null) {
+            val dn = androidx.compose.ui.platform.LocalDensity.current
+            Box(
+                Modifier.offset { androidx.compose.ui.unit.IntOffset(morph.l.roundToInt(), morph.t.roundToInt()) }
+                    .width(with(dn) { (morph.r - morph.l).toDp() })
+                    .wrapContentHeight(Alignment.Top, unbounded = true)
+                    .graphicsLayer {
+                        val x = (1f - (vm.openP.value - .02f) / .3f).coerceIn(0f, 1f)
+                        alpha = x * x * (3f - 2f * x)
+                    }
+            ) { GhostCard(gn, g) }
+        }
     }
 }
 
