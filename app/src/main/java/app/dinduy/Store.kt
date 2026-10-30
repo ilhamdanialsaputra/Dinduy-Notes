@@ -52,7 +52,8 @@ class Morph(
 )
 
 sealed class Sheet {
-    object Sort : Sheet()
+    class Lbl(val id: String) : Sheet()          // pilih label untuk satu catatan
+    class LblEdit(val name: String) : Sheet()    // ganti nama / hapus label
     object Add : Sheet()
     class Doc(val id: String) : Sheet()
     class Arc(val id: String) : Sheet()
@@ -61,7 +62,10 @@ sealed class Sheet {
     object EmptyTrash : Sheet()
 }
 
-class Pending(val notes: List<Note>, val pr: Prefs?, val nImg: Int, val at: Long, val dir: File, val ids: List<String>)
+class Pending(val notes: List<Note>, val pr: Prefs?, val nImg: Int, val at: Long, val dir: File, val ids: List<String>, val lbl: List<String> = emptyList())
+
+/** Dialog nama label. old == null: label baru; forNote != null: langsung dipasang ke catatan itu. */
+class LblDlg(val old: String?, val forNote: String?)
 
 object Imgs {
     private val cache = object : android.util.LruCache<String, ImageBitmap>(48 * 1024 * 1024) {
@@ -109,6 +113,9 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     var pr by mutableStateOf(Prefs())
     val docs = mutableStateListOf<Note>()
+    val labels = mutableStateListOf<String>()
+    var filter by mutableStateOf<String?>(null)   // null = semua catatan, selain itu = nama label yang menyaring beranda
+    var lblDlg by mutableStateOf<LblDlg?>(null)
     var snack by mutableStateOf<Snack?>(null)
     var sheet by mutableStateOf<Sheet?>(null)
     var ed by mutableStateOf<Ed?>(null)
@@ -150,6 +157,8 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         } else {
             pr = db.pr
             docs.addAll(db.docs.filter { it.dt == 0L || now - it.dt < 2592000000L })
+            labels.addAll(db.lbl)
+            syncLabels()
         }
     }
 
@@ -157,14 +166,14 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         saveJob?.cancel()
         saveJob = viewModelScope.launch {
             delay(200)
-            val db = Db(pr, docs.toList())
+            val db = Db(pr, docs.toList(), labels.toList())
             withContext(Dispatchers.IO) { write(db) }
         }
     }
 
     fun saveNow() {
         saveJob?.cancel()
-        write(Db(pr, docs.toList()))
+        write(Db(pr, docs.toList(), labels.toList()))
     }
 
     private fun write(db: Db) {
@@ -195,7 +204,8 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     fun newNote(): Note {
         val t = now
-        val n = Note(id = uid(), u = t, c = t)
+        // dibuat saat melihat sebuah label -> otomatis berlabel itu (seperti Keep), supaya tidak hilang dari tampilan
+        val n = Note(id = uid(), u = t, c = t, lb = listOfNotNull(filter))
         docs.add(0, n); save()
         return n
     }
@@ -211,6 +221,59 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     }
 
     fun live() = docs.filter { !it.a && it.dt == 0L }
+    /** Catatan beranda setelah disaring label aktif. */
+    fun liveF() = live().filter { filter == null || filter in it.lb }
+
+    // ---------- label ----------
+    fun sortedLabels() = labels.sortedBy { it.lowercase() }
+    fun labelCount(n: String) = live().count { n in it.lb }
+
+    /** Pastikan setiap label yang dipakai catatan terdaftar di daftar label. */
+    private fun syncLabels() {
+        docs.forEach { d -> d.lb.forEach { n -> if (labels.none { it.equals(n, true) }) labels.add(n) } }
+    }
+
+    fun addLabel(raw: String, forNote: String? = null): Boolean {
+        val n = raw.trim().take(30)
+        if (n.isEmpty()) return false
+        val ex = labels.firstOrNull { it.equals(n, true) }
+        if (ex != null && forNote == null) { show("Label sudah ada"); return false }
+        val name = ex ?: n.also { labels.add(it) }
+        if (forNote != null) upd(forNote) { if (name in it.lb) it else it.copy(lb = it.lb + name) }
+        save()
+        return true
+    }
+
+    fun renameLabel(old: String, raw: String): Boolean {
+        val n = raw.trim().take(30)
+        if (n.isEmpty()) return false
+        if (n == old) return true
+        if (labels.any { !it.equals(old, true) && it.equals(n, true) }) { show("Label sudah ada"); return false }
+        val ix = labels.indexOf(old)
+        if (ix >= 0) labels[ix] = n
+        for (i in docs.indices) {
+            val d = docs[i]
+            if (old in d.lb) docs[i] = d.copy(lb = d.lb.map { if (it == old) n else it }.distinct())
+        }
+        if (filter == old) filter = n
+        save()
+        return true
+    }
+
+    fun deleteLabel(name: String) {
+        labels.remove(name)
+        for (i in docs.indices) {
+            val d = docs[i]
+            if (name in d.lb) docs[i] = d.copy(lb = d.lb - name)
+        }
+        if (filter == name) filter = null
+        save(); show("Label dihapus")
+    }
+
+    fun toggleLabel(id: String, name: String) {
+        upd(id) { it.copy(lb = if (name in it.lb) it.lb - name else it.lb + name) }
+    }
+
     fun archived() = docs.filter { it.a && it.dt == 0L }.sortedByDescending { it.u }
     fun trashed() = docs.filter { it.dt != 0L }.sortedByDescending { it.dt }
     fun sortKey(n: Note) = if (pr.sort == "c") (if (n.c != 0L) n.c else n.u) else n.u
@@ -244,7 +307,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     fun addMd(title: String, body: String): Note {
         val bl = md(body)
         val t = now
-        val n = Note(id = uid(), t = title, bl = bl, x = plainOf(bl), u = t, c = t)
+        val n = Note(id = uid(), t = title, bl = bl, x = plainOf(bl), u = t, c = t, lb = listOfNotNull(filter))
         docs.add(0, n); save()
         return n
     }
@@ -327,6 +390,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             put("at", now)
             put("pr", J.encodeToJsonElement(pr))
             put("docs", J.encodeToJsonElement(docs.toList()))
+            put("lbl", J.encodeToJsonElement(labels.toList()))
             put("img", JsonArray(files.map { (id, f) ->
                 buildJsonObject { put("id", id); put("n", f.length()); put("t", "image/jpeg") }
             }))
@@ -406,7 +470,8 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                     ids.add(id)
                 }
                 val prf = try { m["pr"]?.let { J.decodeFromJsonElement<Prefs>(it) } } catch (e: Exception) { null }
-                val p = Pending(notes, prf, ids.size, m.num("at").let { if (it == 0L) now else it }, dir, ids)
+                val lbl = (m["lbl"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content } ?: emptyList()
+                val p = Pending(notes, prf, ids.size, m.num("at").let { if (it == 0L) now else it }, dir, ids, lbl)
                 withContext(Dispatchers.Main) { pending = p }
                 true
             } ?: false
@@ -425,13 +490,17 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             }
             if (replace) {
                 docs.clear(); docs.addAll(p.notes)
+                labels.clear(); labels.addAll(p.lbl)
+                filter = null
                 p.pr?.let { pr = it.copy(fs = it.fs.coerceIn(14, 30)) }
             } else {
                 for (d in p.notes) {
                     val i = docs.indexOfFirst { it.id == d.id }
                     if (i < 0) docs.add(d) else if (d.u > docs[i].u) docs[i] = d
                 }
+                p.lbl.forEach { n -> if (labels.none { it.equals(n, true) }) labels.add(n) }
             }
+            syncLabels()
             save()
             show(p.notes.size.toString() + " catatan dan " + p.nImg + " foto dipulihkan")
         }
