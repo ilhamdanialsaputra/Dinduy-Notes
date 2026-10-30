@@ -50,6 +50,7 @@ import androidx.compose.foundation.layout.systemBars
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyItemScope
+import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.tween as tweenSpec
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableFloatStateOf
@@ -122,7 +123,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
@@ -518,7 +518,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                 val i = pos[d.id] ?: 0
                 androidx.compose.runtime.DisposableEffect(d.id) { onDispose { vm.cardMorph.remove(d.id) } }
                 Column(
-                    Modifier.flowItem().makeRoom(vm, d.id, i, { vm.openId?.let { pos[it] } ?: -1 }, hPx, dens.density)
+                    flowItem().makeRoom(vm, d.id, i, { vm.openId?.let { pos[it] } ?: -1 }, hPx, dens.density)
                 ) {
                     if (labels && i == 0) T("Disematkan", 13f, 900, pal.p, Modifier.padding(start = 12.dp, top = 8.dp, bottom = 12.dp), ls = .08f)
                     if (labels && i == np) T("Lainnya", 13f, 900, pal.p, Modifier.padding(start = 12.dp, top = 8.dp, bottom = 12.dp), ls = .08f)
@@ -606,7 +606,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                 ) {
                     if (res.isEmpty() && vm.searchOn) item(key = "empty-search") {
                         T(if (q.isNotEmpty()) "Tidak ada hasil" else "Belum ada catatan", 17f, 600, pal.osv,
-                            Modifier.flowItem().fillMaxWidth().padding(vertical = 48.dp), align = androidx.compose.ui.text.style.TextAlign.Center)
+                            flowItem().fillMaxWidth().padding(vertical = 48.dp), align = androidx.compose.ui.text.style.TextAlign.Center)
                     }
                     // indeks warna/bentuk memakai posisi di daftar penuh, jadi kartu tidak berganti warna saat tersaring;
                     // kartu yang cocok bergeser mulus, yang tidak cocok memudar keluar
@@ -614,7 +614,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                         val ri = res.indexOf(d)
                         NoteCard(
                             d, pos[d.id] ?: ri, vm.pr.cd, false,
-                            Modifier.flowItem().makeRoom(vm, d.id, ri, { res.indexOfFirst { it.id == vm.openId } }, hPx, dens.density)
+                            flowItem().makeRoom(vm, d.id, ri, { res.indexOfFirst { it.id == vm.openId } }, hPx, dens.density)
                         ) { m ->
                             focusMgr.clearFocus(); vm.cardMorph[d.id] = m; nav.openNote(d.id, m)
                         }
@@ -739,7 +739,7 @@ fun ListScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             if (notes.isEmpty()) item(key = "empty-list") {
-                T(empty, 17f, 600, pal.osv, Modifier.flowItem().fillMaxWidth().padding(vertical = 48.dp), align = androidx.compose.ui.text.style.TextAlign.Center)
+                T(empty, 17f, 600, pal.osv, flowItem().fillMaxWidth().padding(vertical = 48.dp), align = androidx.compose.ui.text.style.TextAlign.Center)
             }
             items(notes, key = { it.id }) { d ->
                 val ix = notes.indexOf(d)
@@ -754,7 +754,7 @@ fun ListScreen(
                 }
                 NoteCard(
                     d, ix, vm.pr.cd, false,
-                    Modifier.flowItem()
+                    flowItem()
                         .makeRoom(vm, d.id, ix, { notes.indexOfFirst { it.id == vm.openId } }, hPx, dens)
                         .graphicsLayer {
                             val pv = prog.value
