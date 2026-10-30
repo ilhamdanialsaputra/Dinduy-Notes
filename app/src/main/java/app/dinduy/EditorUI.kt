@@ -3,6 +3,10 @@
 package app.dinduy
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.shrinkHorizontally
+import kotlinx.coroutines.launch
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.fadeIn
@@ -1403,7 +1407,8 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                             }
                         )
                     }
-                    if (ed.selOn) { SelHandles(ed); SelBubble(ed, vm, act, scroll.value) }
+                    if (ed.selOn) SelHandles(ed)
+                    SelBubble(ed, vm, act, scroll.value)   // selalu ada di komposisi supaya bisa animasi keluar
                 }
             }
             BottomBars(ed, vm, act, (!ed.reading || ed.selEdit) && !ed.titleFocus, imeOpen)
@@ -1411,67 +1416,136 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     }
 }
 
-/** Gelembung Potong / Salin / Tempel yang menempel di seleksi (di atasnya, atau di bawahnya bila tak muat). */
+private class BubbleHold {
+    var x = 0f
+    var y = 0f
+    var mode = -1          // 0 di atas seleksi, 1 di bawah, 2 menempel di area terlihat
+    var has = false
+    var edit = false
+}
+
+/** Tombol di gelembung seleksi: sudut menyempit + sedikit mengecil saat ditekan (M3 Expressive). */
+@Composable
+fun SelBtn(enabled: Boolean, padH: Dp, padV: Dp, onClick: () -> Unit, content: @Composable () -> Unit) {
+    val src = remember { MutableInteractionSource() }
+    val pr by src.collectIsPressedAsState()
+    val r by animateDpAsState(if (pr) 8.dp else 16.dp, spring(.55f, 700f), label = "r")
+    val sc by animateFloatAsState(if (pr) .92f else 1f, spring(.5f, 700f), label = "sc")
+    Box(
+        Modifier.graphicsLayer { scaleX = sc; scaleY = sc }.clip(RoundedCornerShape(r))
+            .clickable(interactionSource = src, indication = LocalIndication.current, enabled = enabled, onClick = onClick)
+            .padding(horizontal = padH, vertical = padV),
+        Alignment.Center
+    ) { content() }
+}
+
+/**
+ * Gelembung Potong / Salin / Tempel yang menempel di seleksi (di atasnya, atau di bawahnya bila tak muat).
+ * Muncul/hilang dengan spring (membesar dari sisi yang menghadap seleksi, sedikit memantul), tidak berkedip
+ * karena baru ditampilkan setelah ukurannya terukur, pindah atas/bawah digeser mulus, dan tombolnya
+ * masuk/keluar dengan melebar-menyempit.
+ */
 @Composable
 fun SelBubble(ed: Ed, vm: AppVM, act: Actions, scrollY: Int) {
-    if (ed.selDrag) return
-    val span = ed.selSpan() ?: return
     val pal = LocalPal.current
     val dn = LocalDensity.current
     @Suppress("DEPRECATION")
     val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+    val hold = remember { BubbleHold() }
     var bs by remember { mutableStateOf(IntSize.Zero) }
-    val r0 = ed.ptRect(span.first) ?: return
-    val r1 = ed.ptRect(span.second) ?: return
-    val has = span.first != span.second
-    val edit = ed.selEdit
-    val gap = with(dn) { 10.dp.toPx() }
-    // bubble selalu diusahakan tampil di area layar yang terlihat (di luar kapsul alat), mengikuti scroll
-    val m = with(dn) { 8.dp.toPx() }
-    val visTop = scrollY + m
-    val visBot = scrollY + ed.viewH - (if (ed.barOn) ed.barH + with(dn) { 10.dp.toPx() } else 0f) - m
-    val belowGap = with(dn) { 52.dp.toPx() }
-    val aboveY = r0.top - bs.height - gap
-    val belowY = r1.bottom + belowGap
-    val canAbove = aboveY >= visTop && r0.top < visBot
-    val canBelow = belowY + bs.height <= visBot && r1.bottom > visTop
-    val pinned = !canAbove && !canBelow
-    val yRaw = when {
-        canAbove -> aboveY
-        canBelow -> belowY
-        else -> visTop + (visBot - visTop - bs.height).coerceAtLeast(0f) * .35f   // seleksi menutupi layar: tempel di area terlihat
+    val vis = remember { Animatable(0f) }
+    val corrX = remember { Animatable(0f) }
+    val corrY = remember { Animatable(0f) }
+    val span = if (ed.selOn) ed.selSpan() else null
+    val r0 = span?.let { ed.ptRect(it.first) }
+    val r1 = span?.let { ed.ptRect(it.second) }
+    val live = ed.selOn && !ed.selDrag && span != null && r0 != null && r1 != null
+    val measured = bs != IntSize.Zero
+    var x = hold.x
+    var y = hold.y
+    var mode = hold.mode
+    var has = hold.has
+    var edit = hold.edit
+    if (live && span != null && r0 != null && r1 != null) {
+        has = span.first != span.second
+        edit = ed.selEdit
+        val gap = with(dn) { 10.dp.toPx() }
+        // bubble selalu diusahakan tampil di area layar yang terlihat (di luar kapsul alat), mengikuti scroll
+        val m = with(dn) { 8.dp.toPx() }
+        val visTop = scrollY + m
+        val visBot = scrollY + ed.viewH - (if (ed.barOn) ed.barH + with(dn) { 10.dp.toPx() } else 0f) - m
+        val belowGap = with(dn) { 52.dp.toPx() }
+        val aboveY = r0.top - bs.height - gap
+        val belowY = r1.bottom + belowGap
+        val canAbove = aboveY >= visTop && r0.top < visBot
+        val canBelow = belowY + bs.height <= visBot && r1.bottom > visTop
+        val pinned = !canAbove && !canBelow
+        val yRaw = when {
+            canAbove -> aboveY
+            canBelow -> belowY
+            else -> visTop + (visBot - visTop - bs.height).coerceAtLeast(0f) * .35f   // seleksi menutupi layar: tempel di area terlihat
+        }
+        y = yRaw.coerceIn(visTop, maxOf(visTop, visBot - bs.height))
+        val maxX = ed.widthDp * dn.density
+        val cx = if (pinned) maxX / 2f else (r0.left + r1.left) / 2f
+        x = (cx - bs.width / 2f).coerceIn(0f, (maxX - bs.width).coerceAtLeast(0f))
+        mode = if (canAbove) 0 else if (canBelow) 1 else 2
+        // pindah atas <-> bawah: geser mulus dari posisi lama, bukan melompat
+        val sx = if (measured && vis.value > .5f && hold.mode != -1 && hold.mode != mode) hold.x - x else 0f
+        val sy = if (measured && vis.value > .5f && hold.mode != -1 && hold.mode != mode) hold.y - y else 0f
+        LaunchedEffect(mode) {
+            if (sx != 0f || sy != 0f) {
+                corrX.snapTo(sx); corrY.snapTo(sy)
+                launch { corrX.animateTo(0f, spring(.78f, 420f)) }
+                corrY.animateTo(0f, spring(.78f, 420f))
+            }
+        }
+        val fx = x; val fy = y; val fm = mode; val fh = has; val fe = edit
+        SideEffect { hold.x = fx; hold.y = fy; hold.mode = fm; hold.has = fh; hold.edit = fe }
     }
-    val y = yRaw.coerceIn(visTop, maxOf(visTop, visBot - bs.height))
-    val maxX = ed.widthDp * dn.density
-    val cx = if (pinned) maxX / 2f else (r0.left + r1.left) / 2f
-    val x = (cx - bs.width / 2f).coerceIn(0f, (maxX - bs.width).coerceAtLeast(0f))
-    @Composable
-    fun Act(label: String, f: () -> Unit) {
-        T(
-            label, 14f, 800, pal.os,
-            Modifier.clip(RoundedCornerShape(16.dp)).clickable { f() }.padding(horizontal = 10.dp, vertical = 9.dp)
-        )
+    // muncul hanya setelah ukuran terukur (tidak ada frame di posisi salah = tidak berkedip); hilang pakai spring tanpa pantulan
+    LaunchedEffect(live && measured) {
+        if (live && measured) vis.animateTo(1f, spring(.62f, 520f))
+        else if (!live) vis.animateTo(0f, spring(1f, 800f))
     }
-    @Composable
-    fun ActIc(icon: String, f: () -> Unit) {
-        Box(
-            Modifier.clip(RoundedCornerShape(16.dp)).clickable { f() }.padding(horizontal = 9.dp, vertical = 7.dp),
-            Alignment.Center
-        ) { Ic(icon, pal.os, 22.dp) }
-    }
+    if (!live && vis.value <= .001f) return
+    val m0 = mode
     Row(
-        Modifier.offset { IntOffset(x.roundToInt(), y.roundToInt()) }.onSizeChanged { bs = it }
+        Modifier.offset { IntOffset((x + corrX.value).roundToInt(), (y + corrY.value).roundToInt()) }
+            .graphicsLayer {
+                val v = vis.value
+                alpha = if (measured) (v * 1.5f).coerceIn(0f, 1f) else 0f
+                val sc = .55f + .45f * v
+                scaleX = sc; scaleY = sc
+                transformOrigin = TransformOrigin(.5f, if (m0 == 0) 1f else if (m0 == 1) 0f else .5f)
+                translationY = (1f - v) * (if (m0 == 0) 12f else if (m0 == 1) -12f else 0f) * density
+            }
+            .onSizeChanged { bs = it }
             .shadow(if (pal.dark) 6.dp else 3.dp, RoundedCornerShape(20.dp)).clip(RoundedCornerShape(20.dp))
             .background(pal.c4).padding(horizontal = 3.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        if (edit && has) Act("Potong") { act.copyText(ed.selText()); ed.selDelete() }
-        if (has) Act("Salin") { act.copyText(ed.selText()); vm.show("Disalin"); ed.clearSel() }
-        if (edit) Act("Tempel") {
-            val s = clip.getText()?.text
-            if (!s.isNullOrEmpty()) ed.selPaste(s) else vm.show("Tidak ada yang bisa ditempel")
+        val enter = fadeIn(tween(180, 40)) + expandHorizontally(tween(260, easing = Emph))
+        val exit = fadeOut(tween(110)) + shrinkHorizontally(tween(220, easing = Emph))
+        @Composable
+        fun Act(label: String, f: () -> Unit) {
+            SelBtn(live, 10.dp, 9.dp, f) { T(label, 14f, 800, pal.os, maxLines = 1) }
         }
-        if (edit && has) ActIc("del") { ed.selDelete() }
+        AnimatedVisibility(edit && has, enter = enter, exit = exit) {
+            Act("Potong") { act.copyText(ed.selText()); ed.selDelete() }
+        }
+        AnimatedVisibility(has, enter = enter, exit = exit) {
+            Act("Salin") { act.copyText(ed.selText()); vm.show("Disalin"); ed.clearSel() }
+        }
+        AnimatedVisibility(edit, enter = enter, exit = exit) {
+            Act("Tempel") {
+                val s = clip.getText()?.text
+                if (!s.isNullOrEmpty()) ed.selPaste(s) else vm.show("Tidak ada yang bisa ditempel")
+            }
+        }
+        AnimatedVisibility(edit && has, enter = enter, exit = exit) {
+            SelBtn(live, 9.dp, 7.dp, { ed.selDelete() }) { Ic("del", pal.os, 22.dp) }
+        }
         Act("Semua") { ed.selAll() }
     }
 }
