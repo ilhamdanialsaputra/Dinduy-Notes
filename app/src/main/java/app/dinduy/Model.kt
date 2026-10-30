@@ -199,13 +199,14 @@ data class Note(
 
 @Serializable
 data class Prefs(
-    val mode: String = "light",
+    val mode: String = "auto",   // auto (ikuti perangkat) / light / tonal / dark / amoled
     val seed: String = "#6750A4",
     val fs: Int = 19,
     val lh: Float = 1.65f,
     val sort: String = "u",
     val cd: String = "f",
-    val ff: String = "def"   // jenis huruf: def / flex / times
+    val ff: String = "def",  // jenis huruf: def / flex / times
+    val dyn: Boolean = true  // true = warna mengikuti perangkat (Material You, Android 12+); false = warna kustom (seed)
 )
 
 @Serializable
