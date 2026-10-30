@@ -66,7 +66,7 @@ data class Pt(val key: String, val off: Int)
 /** Gambar yang sedang diangkat (tekan-tahan lalu geser). */
 class Mv(val bid: String, val imgId: String, val row: Boolean, val top: Float, val h: Float)
 
-class Req(val key: String, val pos: Int, val n: Int)
+class Req(val key: String, val pos: Int, val n: Int, val sel: TextRange? = null)
 class Snap(val bl: List<Blk>, val key: String?, val sel: TextRange)
 
 fun keyBlock(k: String) = k.substringBefore(':')
@@ -172,8 +172,12 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     fun applyReq(r: Req) {
         val v = tf[r.key] ?: return
+        val rs = r.sel
         val p = (r.pos + 1).coerceIn(1, v.text.length.coerceAtLeast(1))
-        tf[r.key] = v.copy(selection = TextRange(p))
+        tf[r.key] = if (rs != null) {
+            val n = v.text.length
+            v.copy(selection = TextRange(rs.start.coerceIn(0, n), rs.end.coerceIn(0, n)))
+        } else v.copy(selection = TextRange(p))
         caretMoved(r.key)
         if (req === r) req = null
     }
@@ -524,10 +528,13 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val i = idx(key)
         if (i < 0) return
         if (blocks[i].ty == "img") return
+        val keepSel = tf[key]?.selection
         commit()
         val nb = f(blocks[i])
         setBlock(i, nb)
         afterStructural()
+        // jenis blok berubah = TextField dibuat ulang; minta fokus balik (dengan posisi kursor/seleksi sama) supaya keyboard tidak menutup
+        req = Req(key, 0, ++rq, keepSel)
     }
 
     fun setHead(lv: Int) = convertFocused { b ->
