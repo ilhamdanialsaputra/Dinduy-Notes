@@ -5,13 +5,16 @@ package app.dinduy
 import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.offset
+import android.Manifest
 import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
@@ -92,6 +95,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
@@ -196,6 +200,8 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
     val u by animateFloatAsState(if (under) 1f else 0f, tween(460, easing = Emph), label = "nu")
     // satu progres bersama (vm.openP): morph kartu <-> layar penuh DAN kartu lain yang memberi ruang membaca nilai yang sama,
     // jadi selalu sinkron. Spring spatial M3 Expressive: membuka sedikit lentur, menutup lebih rapat (tanpa overshoot keluar layar).
+    // Mode 1 kolom dan 2 kolom memakai satu animasi yang sama (container transform): wadah tumbuh dari kartu, isi catatan
+    // ikut membesar dari dalam kartu. Hanya kartu "Tambah catatan" (lebar penuh) yang memakai gerak naik biasa.
     LaunchedEffect(on) {
         if (on) {
             vm.closing = false
@@ -218,10 +224,9 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
             val tt = vm.openP.value.coerceIn(0f, 1f)
             vm.morphTick
             val m = effMorph(vm) ?: Morph(size.width * .12f, size.height * .4f, size.width * .88f, size.height * .6f, 32.dp.toPx(), pal.s)
-            // tepi kiri/kanan sedikit lebih cepat dari tepi atas/bawah: wadah terasa "meregang" ke bawah/atas di akhir
-            // kartu sempit (grid 2 kolom): semua tepi bergerak serempak supaya tidak miring/melar; kartu lebar: tepi kiri-kanan sedikit lebih cepat
-            val narrow = (m.r - m.l) < size.width * .7f
-            val tx = if (narrow) tt else (tt * 1.12f).coerceIn(0f, 1f)
+            // kartu (1 atau 2 kolom): semua tepi bergerak serempak supaya wadah tidak miring/melar;
+            // selain kartu (Tambah catatan): tepi kiri-kanan sedikit lebih cepat dari atas-bawah
+            val tx = if (m.card) tt else (tt * 1.12f).coerceIn(0f, 1f)
             val l = lerp(m.l, 0f, tx)
             val r = lerp(m.r, size.width, tx)
             val tp = lerp(m.t, 0f, tt)
@@ -244,8 +249,9 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
                 val x = ((vm.openP.value - .2f) / .5f).coerceIn(0f, 1f)
                 val a = x * x * (3f - 2f * x)
                 alpha = a
-                if (mm != null && (mm.r - mm.l) < size.width * .7f) {
-                    // kartu sempit (2 kolom): isi editor ikut mengecil ke dalam kartu lalu tumbuh bersama wadah (container transform)
+                if (mm != null && mm.card) {
+                    // kartu (1 atau 2 kolom): isi editor ikut mengecil ke dalam kartu lalu tumbuh bersama wadah (container transform);
+                    // di 1 kolom kartunya lebar, jadi skalanya hanya sedikit di bawah 1 dan yang terasa adalah wadah yang memanjang
                     val l = lerp(mm.l, 0f, tt)
                     val r = lerp(mm.r, size.width, tt)
                     val tp = lerp(mm.t, 0f, tt)
@@ -267,8 +273,6 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
         val g = morph?.ghost
         val gn = if (g != null) vm.openId?.let { vm.note(it) } else null
         if (morph != null && g != null && gn != null) {
-            val dn = androidx.compose.ui.platform.LocalDensity.current
-            val scrW = LocalConfiguration.current.screenWidthDp * dn.density
             Box(
                 Modifier.layout { meas, c ->
                         vm.morphTick
@@ -284,9 +288,7 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
                         val tt = vm.openP.value.coerceIn(0f, 1f)
                         vm.morphTick
                         val mm = effMorph(vm) ?: morph
-                        val narrow = (mm.r - mm.l) < scrW * .7f
-                        val tx = if (narrow) tt else (tt * 1.12f).coerceIn(0f, 1f)
-                        translationX = lerp(mm.l, 0f, tx)
+                        translationX = lerp(mm.l, 0f, tt)
                         translationY = lerp(mm.t, 0f, tt)
                         transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
                         val x = (1f - (vm.openP.value - .02f) / .3f).coerceIn(0f, 1f)
@@ -315,7 +317,7 @@ fun effMorph(vm: AppVM): Morph? {
     val tt = vm.openP.value.coerceIn(0f, 1f)
     return Morph(
         live.l + e[0] * tt, live.t + e[1] * tt, live.r + e[2] * tt, live.b + e[3] * tt,
-        live.rad, live.color, live.r4, live.ghost
+        live.rad, live.color, live.r4, live.ghost, live.card
     )
 }
 
@@ -439,7 +441,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
             (top as? Scr.NoteMenu)?.let { pageIds[0] = it.id }
             (top as? Scr.NoteLabels)?.let { pageIds[1] = it.id }
 
-            BackHandler(enabled = nav.stack.size > 1 || drawer.isOpen || vm.addOn || vm.sel.isNotEmpty() || vm.searchOn || (isHome && vm.filter != null) || reading || imgSel || selE || finding) {
+            BackHandler(enabled = nav.stack.size > 1 || drawer.isOpen || vm.addOn || vm.sel.isNotEmpty() || vm.searchOn || (isHome && (vm.filter != null || vm.remFilter)) || reading || imgSel || selE || finding) {
                 when {
                     drawer.isOpen -> scope.launch { drawer.close() }
                     vm.addOn -> vm.addOn = false
@@ -447,6 +449,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     isHome && vm.sel.isNotEmpty() -> vm.sel.clear()
                     isHome && vm.searchOn -> vm.searchOn = false
                     isHome && vm.filter != null -> vm.filter = null
+                    isHome && vm.remFilter -> vm.remFilter = false
                     isNote && selE -> vm.ed?.clearSel()
                     isNote && reading -> vm.ed?.let { if (it.selOn) it.clearSel() else it.exitReading() }
                     isNote && imgSel -> vm.ed?.closeImg()
@@ -520,12 +523,13 @@ fun AppRoot(vm: AppVM, act: Actions) {
 
                     SelBar(vm)
                     Fab(
-                        vm, small = fabSmall, hide = !isHome || vm.sel.isNotEmpty() || vm.searchOn || vm.addOn,
+                        vm, small = fabSmall, hide = !isHome || vm.sel.isNotEmpty() || vm.searchOn || vm.addOn || vm.remFilter,
                         lift = if (vm.snack != null) 76.dp else 0.dp
                     ) { vm.addOn = true }
                     SnackHost(vm, if (inNote) 84.dp else 20.dp + sabDp(), inNote)
                     AddNoteLayer(vm, act)
                     SheetHost(vm, nav, act)
+                    ReminderHost(vm, act)
                     LabelDialogHost(vm)
                 }
             }
@@ -566,6 +570,10 @@ class MainActivity : ComponentActivity(), Actions {
             if (vm.stageBackup(uri)) vm.sheet = Sheet.Bk else vm.show("Berkas bukan cadangan Dinduy yang valid")
         }
     }
+    private val notifPerm = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        vm.permTick++
+        if (!ok) vm.show("Izin notifikasi ditolak, pengingat tidak akan muncul")
+    }
     private val mdSaver = registerForActivityResult(ActivityResultContracts.CreateDocument("text/markdown")) { uri ->
         if (uri != null) {
             try {
@@ -583,6 +591,58 @@ class MainActivity : ComponentActivity(), Actions {
         )
         if (Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
         setContent { AppRoot(vm, this) }
+        Rem.ensureChannel(this)
+        openFromIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        openFromIntent(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        vm.permTick++   // status izin notifikasi bisa berubah setelah pengguna kembali dari Pengaturan
+    }
+
+    /** Ketuk notifikasi pengingat: buka catatannya (menutup halaman lain dulu bila perlu). */
+    private fun openFromIntent(i: Intent?) {
+        val id = i?.getStringExtra(Rem.EXTRA_NOTE) ?: return
+        i.removeExtra(Rem.EXTRA_NOTE)
+        if (vm.note(id) == null) return
+        val top = vm.nav.top
+        if (top is Scr.Note && top.id == id) return
+        lifecycleScope.launch {
+            vm.remDlg = null
+            vm.sheet = null
+            vm.addOn = false
+            if (vm.nav.stack.size > 1) {
+                while (vm.nav.stack.size > 1) vm.nav.pop()
+                delay(380)
+            }
+            vm.remFilter = false
+            vm.nav.openNote(id, vm.cardMorph[id])
+        }
+    }
+
+    override fun askNotif() {
+        val sp = getSharedPreferences("dinduy", 0)
+        val asked = sp.getBoolean("np", false)
+        val canAsk = Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED &&
+            (!asked || shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS))
+        if (canAsk) {
+            sp.edit().putBoolean("np", true).apply()
+            notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            // sudah ditolak permanen (atau dimatikan di Pengaturan): arahkan ke halaman notifikasi aplikasi
+            try {
+                startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+            } catch (e: Exception) {
+                startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+            }
+        }
     }
 
     override fun onStop() {
