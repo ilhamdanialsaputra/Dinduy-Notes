@@ -9,6 +9,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.draggable
@@ -85,10 +87,10 @@ private fun smooth(x: Float): Float {
 }
 
 // ======================================================================================
-// Kartu "Tambah catatan": muncul dari bawah, bisa diketuk (Tulis catatan) atau ditarik ke atas.
-// Keduanya berakhir sama: bentuk kartu SAAT ITU diserahkan ke morph catatan (NoteLayer), jadi
-// kartu melebar mulus menjadi halaman editor tanpa lompatan, entah dari posisi diam maupun
-// dari posisi jari saat dilepas.
+// Kartu "Tambah catatan": naik dari bawah layar dengan pegas (sedikit memantul), warnanya sama dengan kertas
+// editor. Bisa diketuk (Tulis catatan) atau ditarik ke atas. Keduanya berakhir sama: bentuk kartu SAAT ITU
+// diserahkan ke morph catatan (NoteLayer), jadi kartu melebar mulus menjadi editor tanpa lompatan warna
+// maupun bentuk, entah dari posisi diam maupun dari posisi jari saat dilepas.
 // ======================================================================================
 
 /** Latar gelap di belakang kartu. Berada DI BAWAH NoteLayer supaya morph catatan tidak ikut digelapkan. */
@@ -97,7 +99,7 @@ fun AddScrim(vm: AppVM) {
     if (!vm.addOn && !vm.addHand && vm.addF.value <= .0005f) return
     Box(
         Modifier.fillMaxSize()
-            .graphicsLayer { alpha = (vm.addF.value / .3f).coerceIn(0f, 1f) * vm.addFade.value }
+            .graphicsLayer { alpha = smooth(vm.addF.value / .28f) * vm.addFade.value }
             .background(Color.Black.copy(alpha = .5f))
             .pointerInput(Unit) { detectTapGestures { if (vm.addOn) vm.addOn = false } }
     )
@@ -117,15 +119,19 @@ fun AddNoteLayer(vm: AppVM, act: Actions) {
     val st = remember { floatArrayOf(0f, 0f) }   // [0] pecahan saat menyeret, [1] 1 bila sudah melewati ambang
     // pecahan tinggi layar saat kartu diam (tinggi isi / tinggi layar)
     val restF = if (boxH > 0f && contentH > 0f) (contentH / boxH).coerceIn(.1f, .9f) else 0f
-    val fSpec = spring<Float>(.82f, 380f, .0004f)
+    val inSpec = spring<Float>(.74f, 300f, .0004f)    // masuk: naik lalu sedikit memantul sebelum diam
+    val fSpec = spring<Float>(.82f, 380f, .0004f)     // kembali ke posisi diam setelah ditarik
 
     fun pull(f: Float): Float = if (restF <= 0f) 0f else ((f - restF) / (1f - restF) * 1.8f).coerceIn(0f, 1f)
+    /** Kemunculan kartu 0..1 (1 = sudah di posisi diam); mengatur stagger isi. */
+    fun rise(): Float = if (restF <= 0f) 0f else (vm.addF.value / restF).coerceIn(0f, 1f)
+    fun colorNow(): Color = androidx.compose.ui.graphics.lerp(pal.s, pal.s, 0f)
 
     LaunchedEffect(vm.addOn, restF) {
         if (vm.addOn) {
             if (restF > 0f) {
                 vm.addFade.snapTo(1f)
-                vm.addF.animateTo(restF, fSpec)
+                vm.addF.animateTo(restF, inSpec)
             }
         } else if (!vm.addHand && vm.addF.value > 0f) {
             vm.addF.animateTo(0f, spring(1f, 520f, .0004f))
@@ -135,19 +141,16 @@ fun AddNoteLayer(vm: AppVM, act: Actions) {
     fun openNew() {
         if (vm.addHand || boxH <= 0f) return
         val f = vm.addF.value
-        val pc = pull(f)
         val top = boxH * (1f - f)
-        val rad = 40f * dens * (1f - pc)   // sama persis dengan radius yang sedang digambar kartu
-        val col = androidx.compose.ui.graphics.lerp(pal.c3, pal.s, pc)
+        val rad = 40f * dens * (1f - pull(f))
         val n = vm.newNote()
         vm.addHand = true
         vm.addOn = false
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-        vm.nav.openNote(n.id, Morph(0f, top, boxW, boxH, rad, col, floatArrayOf(rad, rad, 0f, 0f)), true)
+        vm.nav.openNote(n.id, Morph(0f, top, boxW, boxH, rad, colorNow(), floatArrayOf(rad, rad, 0f, 0f)), true)
         scope.launch {
             vm.addFade.animateTo(0f, tween(240))
-            vm.addF.snapTo(0f)
-            vm.addFade.snapTo(1f)
+            vm.addF.snapTo(0f); vm.addFade.snapTo(1f)
             vm.addHand = false
         }
     }
@@ -160,7 +163,7 @@ fun AddNoteLayer(vm: AppVM, act: Actions) {
                     .offset { IntOffset(0, (boxH * (1f - vm.addF.value)).roundToInt()) }
                     .fillMaxWidth()
                     .layout { m, c ->
-                        val h = (boxH * vm.addF.value).roundToInt().coerceAtLeast(0)
+                        val h = (boxH * vm.addF.value).roundToInt().coerceIn(0, c.maxHeight)
                         val p = m.measure(Constraints.fixed(c.maxWidth, h))
                         layout(c.maxWidth, h) { p.place(0, 0) }
                     }
@@ -169,9 +172,7 @@ fun AddNoteLayer(vm: AppVM, act: Actions) {
                         shape = RoundedCornerShape(CornerSize(r), CornerSize(r), CornerSize(0f), CornerSize(0f))
                         clip = true
                     }
-                    .drawBehind {
-                        if (!vm.addHand) drawRect(androidx.compose.ui.graphics.lerp(pal.c3, pal.s, pull(vm.addF.value)))
-                    }
+                    .drawBehind { if (!vm.addHand) drawRect(colorNow()) }
                     .draggable(
                         orientation = Orientation.Vertical,
                         state = rememberDraggableState { dy ->
@@ -207,21 +208,27 @@ fun AddNoteLayer(vm: AppVM, act: Actions) {
                     Box(Modifier.padding(start = 12.dp, top = sat + 8.dp).size(52.dp), Alignment.Center) { Ic("back", pal.os, 24.dp) }
                     T("Judul", 34f, 1000, pal.osv, Modifier.padding(start = 24.dp, top = sat + 74.dp), ls = -.02f, alpha = .5f)
                 }
+                // tiap elemen naik + muncul bergiliran (stagger) mengikuti kartu yang sedang naik;
+                // semuanya pudar saat ditarik jauh atau diserahkan ke editor
+                fun stag(i: Int): Modifier = Modifier.graphicsLayer {
+                    val k = smooth((rise() - (.35f + .12f * i)) / .5f)
+                    alpha = k * (1f - smooth(pull(vm.addF.value) * 2.2f)) * (vm.addFade.value * 1.7f - .7f).coerceIn(0f, 1f)
+                    translationY = (1f - k) * 28.dp.toPx()
+                }
                 Column(
                     Modifier.fillMaxWidth().wrapContentHeight(Alignment.Top, unbounded = true)
                         .onSizeChanged { contentH = it.height.toFloat() }
-                        .graphicsLayer {
-                            alpha = (1f - smooth(pull(vm.addF.value) * 2.2f)) * (vm.addFade.value * 1.7f - .7f).coerceIn(0f, 1f)
-                        }
                         .padding(start = 16.dp, end = 16.dp, bottom = 24.dp + sab)
                 ) {
-                    Box(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 18.dp), Alignment.Center) {
+                    Box(stag(0).fillMaxWidth().padding(top = 14.dp, bottom = 18.dp), Alignment.Center) {
                         Box(Modifier.width(40.dp).height(5.dp).clip(RoundedCornerShape(3.dp)).background(pal.ol))
                     }
-                    T("Tambah catatan", 26f, 1000, pal.os, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 14.dp), ls = -.01f)
-                    Opt(1, "txt", "Tulis catatan", "Ketuk, atau tarik kartu ini ke atas") { openNew() }
-                    Opt(2, "up", "Impor berkas", "Berkas .md atau .txt") {
-                        if (!vm.addHand) { vm.addOn = false; act.importMd() }
+                    T("Tambah catatan", 26f, 1000, pal.os, stag(1).padding(start = 12.dp, end = 12.dp, bottom = 14.dp), ls = -.01f)
+                    Box(stag(2)) { Opt(1, "txt", "Tulis catatan", "Ketuk, atau tarik kartu ini ke atas") { openNew() } }
+                    Box(stag(3)) {
+                        Opt(2, "up", "Impor berkas", "Berkas .md atau .txt") {
+                            if (!vm.addHand) { vm.addOn = false; act.importMd() }
+                        }
                     }
                 }
             }
@@ -405,7 +412,33 @@ fun NoteLabelsPage(vm: AppVM, nav: Nav, id: String) {
 }
 
 // ======================================================================================
-// Bilah "cari dalam catatan" (menggantikan bilah atas editor)
+// Lencana label di atas judul editor
+// ======================================================================================
+@Composable
+fun LabelBadge(name: String, onClick: () -> Unit) {
+    val pal = LocalPal.current
+    val inK = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(Unit) { inK.animateTo(1f, spring(.6f, 420f)) }
+    val src = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val pr by src.collectIsPressedAsState()
+    val r by androidx.compose.animation.core.animateDpAsState(if (pr) 10.dp else 18.dp, spring(.6f, 500f), label = "lr")
+    Row(
+        Modifier
+            .graphicsLayer { val k = inK.value; alpha = k.coerceIn(0f, 1f); scaleX = .7f + .3f * k; scaleY = .7f + .3f * k }
+            .clip(RoundedCornerShape(r)).background(pal.pc)
+            .clickable(interactionSource = src, indication = androidx.compose.foundation.LocalIndication.current, onClick = onClick)
+            .padding(start = 10.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Ic("label", pal.opc, 15.dp)
+        Spacer(Modifier.width(6.dp))
+        T(name, 13f, 700, pal.opc, maxLines = 1)
+    }
+}
+
+// ======================================================================================
+// Bilah "cari dalam catatan" (menggantikan bilah atas editor). Pil tumbuh dari tombol titik tiga
+// ke kiri; isinya (kolom, hitungan, panah) muncul belakangan dan memudar lebih dulu saat menutup.
 // ======================================================================================
 @Composable
 fun FindBar(ed: Ed, fa: Float) {
@@ -413,35 +446,54 @@ fun FindBar(ed: Ed, fa: Float) {
     val fr = remember { FocusRequester() }
     val focusMgr = LocalFocusManager.current
     val kb = LocalSoftwareKeyboardController.current
-    // tunggu halaman opsi selesai bergeser keluar, baru fokus + keyboard
-    LaunchedEffect(Unit) { delay(430); try { fr.requestFocus() } catch (e: Exception) { } }
-    val n = ed.hitList().size
-    val cur = if (n == 0) 0 else ed.findI.coerceIn(0, n - 1) + 1
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
-            .graphicsLayer { alpha = fa; translationY = (1f - fa) * 10.dp.toPx() },
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        IconBtn("back", pal.os, { ed.closeFind(); focusMgr.clearFocus(); kb?.hide() })
-        Box(Modifier.weight(1f).height(52.dp).padding(start = 4.dp), contentAlignment = Alignment.CenterEnd) {
+    // buka: tunggu halaman opsi selesai bergeser keluar, baru fokus + keyboard. tutup: keyboard turun bersamaan dengan pil menguncup
+    LaunchedEffect(ed.findOn) {
+        if (ed.findOn) { delay(430); try { fr.requestFocus() } catch (e: Exception) { } }
+        else { focusMgr.clearFocus(); kb?.hide() }
+    }
+    // hitungan dibekukan saat menutup (hitList kosong begitu findOn = false), supaya tidak berkedip "0/0"
+    val keep = remember { intArrayOf(0, 0) }
+    if (ed.findOn) {
+        val nn = ed.hitList().size
+        keep[0] = nn
+        keep[1] = if (nn == 0) 0 else ed.findI.coerceIn(0, nn - 1) + 1
+    }
+    val n = keep[0]
+    val cur = keep[1]
+    val inK = smooth((fa - .4f) / .5f)
+    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+        Spacer(Modifier.width(52.dp))
+        Box(Modifier.weight(1f).height(52.dp), contentAlignment = Alignment.CenterEnd) {
             Row(
-                Modifier.fillMaxWidth(.35f + .65f * fa).fillMaxHeight().clip(RoundedCornerShape(28.dp)).background(pal.c3)
-                    .padding(start = 18.dp, end = 12.dp),
+                Modifier
+                    .layout { m, c ->
+                        val minW = 52.dp.toPx()
+                        val w = (minW + (c.maxWidth - minW) * fa).roundToInt().coerceIn(0, c.maxWidth)
+                        val p = m.measure(Constraints.fixed(w, c.maxHeight))
+                        layout(w, c.maxHeight) { p.place(0, 0) }
+                    }
+                    .graphicsLayer { shape = RoundedCornerShape(26.dp); clip = true; alpha = smooth(fa / .45f) }
+                    .background(pal.c3),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                BasicTextField(
-                    value = ed.findQ, onValueChange = { ed.findQ = it; ed.findI = 0 },
-                    modifier = Modifier.weight(1f).focusRequester(fr),
-                    textStyle = TextStyle(color = pal.os, fontFamily = LocalFF.current, fontSize = 17.sp, fontWeight = FontWeight(500)),
-                    singleLine = true, cursorBrush = SolidColor(pal.p),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { ed.findStep(1) }),
-                    decorationBox = { inner -> Box { if (ed.findQ.isEmpty()) T("Cari dalam catatan", 17f, 500, pal.osv, maxLines = 1); inner() } }
-                )
-                if (ed.findQ.isNotBlank()) T("$cur/$n", 14f, 700, if (n == 0) pal.osv else pal.p, Modifier.padding(start = 8.dp), maxLines = 1)
+                Row(
+                    Modifier.fillMaxSize().graphicsLayer { alpha = inK }.padding(start = 18.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    BasicTextField(
+                        value = ed.findQ, onValueChange = { ed.findQ = it; ed.findI = 0 },
+                        modifier = Modifier.weight(1f).focusRequester(fr),
+                        textStyle = TextStyle(color = pal.os, fontFamily = LocalFF.current, fontSize = 17.sp, fontWeight = FontWeight(500)),
+                        singleLine = true, cursorBrush = SolidColor(pal.p),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { ed.findStep(1) }),
+                        decorationBox = { inner -> Box { if (ed.findQ.isEmpty()) T("Cari dalam catatan", 17f, 500, pal.osv, maxLines = 1); inner() } }
+                    )
+                    if (ed.findQ.isNotBlank()) T("$cur/$n", 13f, 700, if (n == 0) pal.osv else pal.p, Modifier.padding(horizontal = 6.dp), maxLines = 1)
+                    IconBtn("aup", if (n > 0) pal.os else pal.osv.copy(alpha = .4f), { ed.findStep(-1) }, size = 40.dp, enabled = n > 0 && ed.findOn)
+                    IconBtn("adn", if (n > 0) pal.os else pal.osv.copy(alpha = .4f), { ed.findStep(1) }, size = 40.dp, enabled = n > 0 && ed.findOn)
+                }
             }
         }
-        IconBtn("aup", if (n > 0) pal.os else pal.osv.copy(alpha = .4f), { ed.findStep(-1) }, size = 44.dp, enabled = n > 0)
-        IconBtn("adn", if (n > 0) pal.os else pal.osv.copy(alpha = .4f), { ed.findStep(1) }, size = 44.dp, enabled = n > 0)
     }
 }
