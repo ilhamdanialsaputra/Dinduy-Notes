@@ -1332,10 +1332,17 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
             ) {
                 IconBtn("back", pal.os, { if (ed.findOn) { ed.closeFind() } else act.back() })
                 Spacer(Modifier.weight(1f))
-                Box(Modifier.graphicsLayer {
+                Row(Modifier.graphicsLayer {
                     val k = (((1f - fa) - .3f) / .7f).coerceIn(0f, 1f)
                     alpha = k; scaleX = .6f + .4f * k; scaleY = .6f + .4f * k
+                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(1f, .5f)
                 }) {
+                    // pengingat: lonceng terisi bila sudah diatur, lonceng + bila belum (seperti Google Keep)
+                    val hasRem = (vm.note(ed.noteId)?.rm ?: 0L) > 0L
+                    IconBtn(if (hasRem) "bell" else "bellplus", if (hasRem) pal.p else pal.os, {
+                        ed.flush(); focusMgr.clearFocus(); kb?.hide()
+                        vm.remDlg = ed.noteId
+                    }, enabled = !ed.findOn)
                     IconBtn("more", pal.os, {
                         ed.flush(); focusMgr.clearFocus(); kb?.hide()
                         vm.nav.push(Scr.NoteMenu(ed.noteId))
@@ -1421,12 +1428,21 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                     Column(Modifier.fillMaxWidth()) {
                         val firstText = { ed.blocks.firstOrNull { it.isText }?.let { ed.focusAt(it.id, 0) } }
                         // lencana label di atas judul; ketuk untuk membuka halaman label
-                        val noteLb = vm.note(ed.noteId)?.lb ?: emptyList()
+                        val headNote = vm.note(ed.noteId)
+                        val noteLb = headNote?.lb ?: emptyList()
+                        val remOn = headNote != null && headNote.rm > 0L
                         Row(
                             Modifier.fillMaxWidth().animateContentSize(spring(.8f, 400f)).horizontalScroll(rememberScrollState())
-                                .padding(top = if (noteLb.isEmpty()) 0.dp else 6.dp),
+                                .padding(top = if (noteLb.isEmpty() && !remOn) 0.dp else 6.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            // lencana pengingat di depan lencana label; ketuk untuk mengubah atau menghapusnya
+                            if (remOn && headNote != null) key("rem") {
+                                ReminderBadge(Rem.stamp(headNote), Rem.overdue(headNote), headNote.rr.isNotEmpty()) {
+                                    ed.flush(); focusMgr.clearFocus(); kb?.hide()
+                                    vm.remDlg = ed.noteId
+                                }
+                            }
                             noteLb.forEach { n ->
                                 key(n) {
                                     LabelBadge(n) {
