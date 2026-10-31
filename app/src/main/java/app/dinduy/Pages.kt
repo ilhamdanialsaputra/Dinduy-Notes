@@ -147,7 +147,7 @@ fun AddNoteLayer(vm: AppVM, act: Actions) {
         vm.addHand = true
         vm.addOn = false
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-        vm.nav.openNote(n.id, Morph(0f, top, boxW, boxH, rad, colorNow(), floatArrayOf(rad, rad, 0f, 0f)), true)
+        vm.nav.openNote(n.id, Morph(0f, top, boxW, boxH, rad, colorNow(), floatArrayOf(rad, rad, 0f, 0f), card = true, up = true), true)
         scope.launch {
             vm.addFade.animateTo(0f, tween(240))
             vm.addF.snapTo(0f); vm.addFade.snapTo(1f)
