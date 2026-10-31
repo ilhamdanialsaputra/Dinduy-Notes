@@ -266,9 +266,9 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
         val gn = if (g != null) vm.openId?.let { vm.note(it) } else null
         if (morph != null && g != null && gn != null) {
             val dn = androidx.compose.ui.platform.LocalDensity.current
+            val scrW = LocalConfiguration.current.screenWidthDp * dn.density
             Box(
-                Modifier.offset { vm.morphTick; val mm = vm.morph ?: morph; androidx.compose.ui.unit.IntOffset(mm.l.roundToInt(), mm.t.roundToInt()) }
-                    .layout { meas, c ->
+                Modifier.layout { meas, c ->
                         vm.morphTick
                         val mm = vm.morph ?: morph
                         val wpx = (mm.r - mm.l).roundToInt().coerceAtLeast(1)
@@ -277,6 +277,16 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
                     }
                     .wrapContentHeight(Alignment.Top, unbounded = true)
                     .graphicsLayer {
+                        // teks menempel di sudut kiri-atas wadah yang sama dengan yang digambar di atas (rumus identik, fase draw yang sama),
+                        // jadi bergerak serempak dengan bentuknya, bukan diam di posisi kartu lalu "menyusul"
+                        val tt = vm.openP.value.coerceIn(0f, 1f)
+                        vm.morphTick
+                        val mm = vm.morph ?: morph
+                        val narrow = (mm.r - mm.l) < scrW * .7f
+                        val tx = if (narrow) tt else (tt * 1.12f).coerceIn(0f, 1f)
+                        translationX = lerp(mm.l, 0f, tx)
+                        translationY = lerp(mm.t, 0f, tt)
+                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
                         val x = (1f - (vm.openP.value - .02f) / .3f).coerceIn(0f, 1f)
                         alpha = x * x * (3f - 2f * x)
                     }
@@ -298,7 +308,7 @@ suspend fun followCard(vm: AppVM) {
         last = now
         val live = vm.openId?.let { vm.cardMorph[it] } ?: continue
         val cur = vm.morph ?: live
-        val k = 1f - kotlin.math.exp(-dt * 14f)
+        val k = 1f - kotlin.math.exp(-dt * 20f)
         fun f(a: Float, b: Float) = a + (b - a) * k
         val r4a = cur.r4
         val r4b = live.r4
