@@ -173,6 +173,16 @@ fun styled(rt: Rt, text: String, off: Int, pal: Pal, fs: Float): AnnotatedString
     }
 }
 
+/** Sorot kecocokan "cari dalam catatan": yang aktif berwarna primer penuh, sisanya wadah tersier. off = awalan tak terlihat. */
+fun AnnotatedString.Builder.addFind(pal: Pal, hits: List<FHit>, cur: FHit?, off: Int, n: Int) {
+    for (h in hits) {
+        val a = (h.s + off).coerceIn(0, n)
+        val b = (h.e + off).coerceIn(0, n)
+        if (b <= a) continue
+        addStyle(if (h == cur) SpanStyle(background = pal.p, color = pal.op) else SpanStyle(background = pal.tc, color = pal.otc), a, b)
+    }
+}
+
 fun baseStyle(pal: Pal, dm: Dm, color: Color = pal.os, size: Float = dm.fs, w: Int = 400, lhEm: Float = dm.lh, ls: Float = 0f) =
     TextStyle(color = color, fontFamily = dm.ff, fontSize = size.sp, fontWeight = FontWeight(w), lineHeight = (lhEm * size).sp, letterSpacing = ls.em)
 
@@ -250,11 +260,14 @@ fun TF(
     val fs = base.fontSize.value
     if (ed.reading) {
         val sr = if (ed.selOn) ed.selRangeOf(key) else null
-        val ann = remember(rt, pal, fs, sr, fold) {
+        val fh = if (ed.findOn) ed.hitsOf(key) else emptyList()
+        val fc = if (fh.isEmpty()) null else ed.curHit()?.takeIf { it.key == key }
+        val ann = remember(rt, pal, fs, sr, fold, fh, fc) {
             val a = styled(rt, rt.t, 0, pal, fs)
-            val a2 = if (sr == null) a else buildAnnotatedString {
+            val a2 = if (sr == null && fh.isEmpty()) a else buildAnnotatedString {
                 append(a)
-                addStyle(SpanStyle(background = pal.p.copy(alpha = .32f)), sr.first, sr.second)
+                if (sr != null) addStyle(SpanStyle(background = pal.p.copy(alpha = .32f)), sr.first, sr.second)
+                addFind(pal, fh, fc, 0, rt.t.length)
             }
             if (fold == null) a2 else fold.applyTo(a2, 0)
         }
@@ -310,14 +323,19 @@ fun TF(
             }
         }
         val sr = if (ed.selOn) ed.selRangeOf(key) else null
-        val vt = remember(rt, pal, fs, fold, sr) {
+        val fh = if (ed.findOn) ed.hitsOf(key) else emptyList()
+        val fc = if (fh.isEmpty()) null else ed.curHit()?.takeIf { it.key == key }
+        val vt = remember(rt, pal, fs, fold, sr, fh, fc) {
             VisualTransformation { t ->
                 val a0 = styled(rt, t.text, 1, pal, fs)
-                val a = if (sr == null) a0 else buildAnnotatedString {
+                val a = if (sr == null && fh.isEmpty()) a0 else buildAnnotatedString {
                     append(a0)
-                    val s0 = (sr.first + 1).coerceIn(0, t.text.length)
-                    val e0 = (sr.second + 1).coerceIn(0, t.text.length)
-                    if (e0 > s0) addStyle(SpanStyle(background = pal.p.copy(alpha = .32f)), s0, e0)
+                    if (sr != null) {
+                        val s0 = (sr.first + 1).coerceIn(0, t.text.length)
+                        val e0 = (sr.second + 1).coerceIn(0, t.text.length)
+                        if (e0 > s0) addStyle(SpanStyle(background = pal.p.copy(alpha = .32f)), s0, e0)
+                    }
+                    addFind(pal, fh, fc, 1, t.text.length)
                 }
                 if (fold == null) TransformedText(a, OffsetMapping.Identity)
                 else {
@@ -1294,14 +1312,32 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
 
     @Composable
     fun TopBar() {
-        Row(
-            Modifier.fillMaxWidth().background(pal.s).windowInsetsPadding(WindowInsets.statusBars)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconBtn("back", pal.os, { act.back() })
-            Spacer(Modifier.weight(1f))
-            IconBtn("more", pal.os, { ed.flush(); vm.sheet = Sheet.Doc(ed.noteId) })
+        // bilah cari menggantikan bilah biasa dengan geser + pudar (mode "cari dalam catatan")
+        val fa by animateFloatAsState(if (ed.findOn) 1f else 0f, tween(380, easing = Emph), label = "fa")
+        Box(Modifier.fillMaxWidth().background(pal.s).windowInsetsPadding(WindowInsets.statusBars)) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
+                    .graphicsLayer { alpha = 1f - fa; translationY = -10.dp.toPx() * fa },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconBtn("back", pal.os, { act.back() }, enabled = !ed.findOn)
+                Spacer(Modifier.weight(1f))
+                IconBtn("more", pal.os, {
+                    ed.flush(); focusMgr.clearFocus(); kb?.hide()
+                    vm.nav.push(Scr.NoteMenu(ed.noteId))
+                }, enabled = !ed.findOn)
+            }
+            if (fa > .01f) FindBar(ed, fa)
+        }
+    }
+
+    // judul ikut disorot saat mode cari dalam catatan
+    val tFh = if (ed.findOn) ed.hitsOf("@t") else emptyList()
+    val tFc = if (tFh.isEmpty()) null else ed.curHit()?.takeIf { it.key == "@t" }
+    val titleVt = remember(tFh, tFc, pal) {
+        if (tFh.isEmpty()) VisualTransformation.None
+        else VisualTransformation { t ->
+            TransformedText(buildAnnotatedString { append(t.text); addFind(pal, tFh, tFc, 0, t.text.length) }, OffsetMapping.Identity)
         }
     }
 
@@ -1311,6 +1347,30 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
         ed.scroll = scroll
         ed.dens = density.density
         ed.buzz = { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
+    }
+
+    // gulir otomatis ke kecocokan aktif bila belum terlihat
+    val hitNow = if (ed.findOn) ed.curHit() else null
+    LaunchedEffect(hitNow) {
+        val h = hitNow ?: return@LaunchedEffect
+        if (h.key == "@t") { scroll.animateScrollTo(0, tween(380, easing = Emph)); return@LaunchedEffect }
+        repeat(8) {
+            val lay = ed.lays[h.key]
+            val pos = ed.kpos[h.key]
+            if (lay != null && pos != null && lay.layoutInput.text.isNotEmpty()) {
+                val o = ed.toLay(h.key, h.s).coerceIn(0, lay.layoutInput.text.length - 1)
+                val r = lay.getBoundingBox(o)
+                val y = pos.y + r.top
+                val yb = pos.y + r.bottom
+                val topV = scroll.value + 24f * ed.dens
+                val botV = scroll.value + ed.viewH - 160f * ed.dens
+                if (y < topV || yb > botV) {
+                    scroll.animateScrollTo((y - ed.viewH * .3f).toInt().coerceIn(0, scroll.maxValue), tween(380, easing = Emph))
+                }
+                return@LaunchedEffect
+            }
+            delay(50)
+        }
     }
 
     Column(Modifier.fillMaxSize().background(pal.s)) {
@@ -1353,6 +1413,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                                 value = ed.title,
                                 onValueChange = { v -> val nl = v.contains('\n'); ed.titleChanged(v); if (nl) firstText() },
                                 readOnly = ed.reading,
+                                visualTransformation = titleVt,
                                 textStyle = TextStyle(
                                     color = pal.p, fontFamily = dm.ff, fontSize = 34.sp, fontWeight = FontWeight(1000),
                                     lineHeight = (34 * 1.1f).sp, letterSpacing = (-.02f).em
@@ -1411,7 +1472,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                     SelBubble(ed, vm, act, scroll.value)   // selalu ada di komposisi supaya bisa animasi keluar
                 }
             }
-            BottomBars(ed, vm, act, (!ed.reading || ed.selEdit) && !ed.titleFocus, imeOpen)
+            BottomBars(ed, vm, act, (!ed.reading || ed.selEdit) && !ed.titleFocus && !ed.findOn, imeOpen)
         }
     }
 }
