@@ -391,6 +391,12 @@ fun SwipeCard(enabled: Boolean, shape: androidx.compose.ui.graphics.Shape, onArc
     var dir by remember { mutableStateOf(1) }
     val dens = androidx.compose.ui.platform.LocalDensity.current.density
     val p = (Math.abs(off.value) / (w * .34f)).coerceIn(0f, 1f)
+    val errC = if (pal.dark) Color(0xFFF2B8B5) else Color(0xFFB3261E)
+    val pop = remember { Animatable(0f) }
+    val wig = remember { Animatable(1f) }
+    // pegas kurang teredam: melompat melewati nilai akhir lalu berosilasi mengendap = efek "pop" dan goyangan
+    LaunchedEffect(hit) { pop.animateTo(if (hit) 1f else 0f, spring(.4f, 450f)) }
+    LaunchedEffect(hit) { if (hit) { wig.snapTo(0f); wig.animateTo(1f, spring(.22f, 240f)) } else wig.snapTo(1f) }
     Box(
         Modifier.fillMaxWidth().onSizeChanged { w = it.width.toFloat().coerceAtLeast(1f) }
             .layout { m, c ->
@@ -423,17 +429,39 @@ fun SwipeCard(enabled: Boolean, shape: androidx.compose.ui.graphics.Shape, onArc
                 }
             )
     ) {
-        val reveal = (Math.abs(off.value) / (20f * dens)).coerceIn(0f, 1f)
+        // tanpa latar: hanya ikon yang menyusul tepi kartu, lalu "menyala" saat melewati ambang
+        val reveal = (Math.abs(off.value) / (14f * dens)).coerceIn(0f, 1f)
         if (reveal > 0f) {
             val r = dir > 0
-            Box(
-                Modifier.matchParentSize().graphicsLayer { alpha = reveal }.clip(shape).background(if (r) pal.p else pal.ec)
-                    .padding(horizontal = 34.dp),
-                contentAlignment = if (r) Alignment.CenterStart else Alignment.CenterEnd
-            ) {
-                val s = if (p >= 1f) 1.25f else .55f + p * .6f
-                Box(Modifier.graphicsLayer { scaleX = s; scaleY = s }) {
-                    Ic(if (r) "arc" else "del", if (r) pal.op else pal.oec, 32.dp)
+            val tint = if (r) pal.p else errC
+            val e = p * (2f - p)   // ease-out
+            Box(Modifier.matchParentSize().graphicsLayer { alpha = reveal * col.value.coerceIn(0f, 1f) }) {
+                Column(
+                    Modifier.align(if (r) Alignment.CenterStart else Alignment.CenterEnd)
+                        .offset {
+                            // ikon berada di tengah celah yang terbuka, lalu berhenti 56dp dari tepi layar
+                            val c = minOf(Math.abs(off.value) / 2f, 56.dp.toPx())
+                            val x = (c - 28.dp.toPx()).roundToInt()
+                            IntOffset(if (r) x else -x, 0)
+                        }
+                        .width(56.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        Modifier.size(56.dp).graphicsLayer {
+                            val s = (.4f + .6f * e) * (1f + .32f * pop.value)
+                            scaleX = s; scaleY = s
+                            // melewati ambang: tong sampah bergoyang meredam, arsip melompat naik lalu mendarat
+                            val w0 = 1f - wig.value
+                            rotationZ = if (r) 0f else -24f * w0
+                            translationY = if (r) -16.dp.toPx() * w0 else 0f
+                        },
+                        Alignment.Center
+                    ) { Ic(if (r) "arc" else "del", tint.copy(alpha = .5f + .5f * e), 30.dp) }
+                    T(
+                        if (r) "Arsip" else "Hapus", 12f, 800, tint,
+                        Modifier.graphicsLayer { alpha = pop.value.coerceIn(0f, 1f); translationY = (1f - pop.value) * 6.dp.toPx() }
+                    )
                 }
             }
         }
@@ -651,6 +679,35 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         androidx.compose.runtime.snapshotFlow { state.canScrollBackward }.collect { back -> if (!back) onSmall(false) }
     }
     LaunchedEffect(vm.filter) { try { state.scrollToItem(0) } catch (e: Exception) { } }
+    // setelah catatan ditutup, kartunya (yang naik ke atas karena baru diedit) harus terlihat: gulir mulus ke atas,
+    // bersamaan dengan morph yang menguncup ke kartu itu
+    LaunchedEffect(vm.revealTick) {
+        if (vm.revealTick == 0) return@LaunchedEffect
+        val id = vm.revealId ?: return@LaunchedEffect
+        val lv = vm.sorted(vm.liveF())
+        val npin = lv.count { it.p }
+        val sec = npin > 0 && npin < lv.size
+        val pin = if (sec) lv.filter { it.p } else lv
+        val oth = if (sec) lv.filter { !it.p } else emptyList()
+        var idx = pin.indexOfFirst { it.id == id }
+        if (idx >= 0) { if (sec) idx += 1 }
+        else {
+            val j = oth.indexOfFirst { it.id == id }
+            if (j < 0) return@LaunchedEffect
+            idx = 1 + pin.size + 1 + j
+        }
+        try {
+            val topPx = with(dens) { (sat + 72.dp).toPx() }
+            val botPx = state.layoutInfo.viewportEndOffset - with(dens) { 24.dp.toPx() }
+            val info = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id }
+            val ok = info != null && info.offset.y >= topPx - 2f && info.offset.y + info.size.height <= botPx
+            if (!ok) {
+                // jauh di atas: lompat dekat dulu (tersembunyi di balik editor yang masih besar), lalu geser mulus
+                if (info == null && state.firstVisibleItemIndex > idx + 8) state.scrollToItem(idx + 8)
+                state.animateScrollToItem(idx)
+            }
+        } catch (e: Exception) { }
+    }
     LaunchedEffect(vm.searchOn) {
         if (vm.searchOn) {
             delay(60); try { fr.requestFocus() } catch (e: Exception) { }
@@ -665,6 +722,14 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         val imeH = with(dens) { WindowInsets.ime.getBottom(dens).toDp() }
         val hPx = with(dens) { maxHeight.toPx() }
         val wPx = with(dens) { maxWidth.toPx() }
+        // perkiraan slot kartu paling atas: titik awal morph menutup saat kartu tujuan belum tampil di layar
+        run {
+            val gap = 12f * dens.density
+            val padS = 16f * dens.density
+            val cw = if (cols == 2) (wPx - 2 * padS - gap) / 2f else wPx - 2 * padS
+            val t0 = with(dens) { (sat + 78.dp).toPx() }
+            vm.topSlot = Morph(padS, t0, padS + cw, t0 + 92f * dens.density, 28f * dens.density, pal.pc)
+        }
         val livePanelH = (maxHeight - imeH - (sat + 8.dp) - 10.dp).coerceAtLeast(160.dp)
         // saat menutup, tinggi panel dibekukan agar tidak ikut naik-turun mengikuti keyboard yang menghilang
         val panelHold = remember { arrayOf(livePanelH) }
