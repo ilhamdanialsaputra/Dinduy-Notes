@@ -50,6 +50,7 @@ class Morph(
     val l: Float, val t: Float, val r: Float, val b: Float, val rad: Float, val color: Color,
     val r4: FloatArray? = null,  // radius 4 sudut (kiri-atas, kanan-atas, kanan-bawah, kiri-bawah) dalam px
     val ghost: Ghost? = null,    // gaya teks kartu, supaya teks kartu bisa pudar-silang dengan isi catatan saat morph
+    val up: Boolean = false,     // true = kartu "Tambah catatan" dari bawah layar (skala isi mengikuti tinggi, bukan lebar)
     val card: Boolean = false    // true = asalnya kartu catatan / tombol Baru (wadah + isi mengecil ke dalamnya); false = kartu "Tambah catatan" atau posisi tengah
 )
 
