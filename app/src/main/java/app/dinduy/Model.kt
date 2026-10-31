@@ -195,7 +195,10 @@ data class Note(
     val a: Boolean = false,
     val p: Boolean = false,
     val dt: Long = 0L,
-    val lb: List<String> = emptyList()   // nama label catatan
+    val lb: List<String> = emptyList(),  // nama label catatan
+    val rm: Long = 0L,                   // pengingat: waktu bunyi pertama (epoch ms), 0 = tanpa pengingat
+    val rr: String = "",                 // ulangi pengingat: "" tidak / d harian / w mingguan / m bulanan / y tahunan
+    val rd: Long = 0L                    // waktu pengingat tidak-berulang yang sudah dibunyikan (supaya tidak dobel setelah HP menyala ulang)
 )
 
 @Serializable
