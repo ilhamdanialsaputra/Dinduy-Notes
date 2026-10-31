@@ -20,6 +20,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.draggable
@@ -197,6 +198,8 @@ fun Modifier.makeRoom(vm: AppVM, id: String, idx: Int, openIdx: () -> Int, h: Fl
     if (p <= 0.001f || oid == null || m == null || oid == id) return@graphicsLayer
     val oi = openIdx()
     if (oi < 0) return@graphicsLayer
+    // 2 kolom: morph dari kartu "Tambah catatan" (lebar penuh) atau menguncup ke tombol Baru tidak boleh menggeser kartu lain
+    if (cols == 2 && w > 0f && !vm.searchOn && ((m.r - m.l) >= w * .7f || vm.note(oid) == null)) return@graphicsLayer
     val wave = minOf(Math.abs(idx - oi), 5) * 10f * dens
     val me = if (cols == 2 && w > 0f && !vm.searchOn && (m.r - m.l) < w * .7f) vm.cardMorph[id] else null
     if (me != null) {
@@ -265,12 +268,12 @@ fun NoteCard(
     }
     val shape = RoundedCornerShape(cr(0), cr(1), cr(2), cr(3))
     // 2 kolom: sudut besar memotong teks di pojok, jadi teks digeser menjauhi lengkungan (kiri-atas untuk judul, kiri-bawah untuk lencana/footer)
-    val insTL = if (c2) ((cr(0).value - 40f).coerceAtLeast(0f) * .45f).dp else 0.dp
+    val insTL = if (c2) ((sh[0] - 40f).coerceAtLeast(0f) * .45f).dp else 0.dp
     // sudut kiri-bawah memakai bentuk statis (bukan yang beranimasi saat ditekan) supaya tata letak tidak bergetar; ambangnya
     // lebih rendah daripada kiri-atas karena baris teks terakhir (descender, footer) menempel di dasar kartu
     val insBL = if (c2) ((sh[3] - 28f).coerceAtLeast(0f) * .5f).dp else 0.dp
-    val padV by animateDpAsState(if (selected) (if (c2) 20.dp else 26.dp) else if (c2) 16.dp else if (kind == "t") 22.dp else if (kind == "s") 20.dp else 24.dp, spring(.7f, 400f), label = "pv")
-    val padH by animateDpAsState(if (selected) (if (c2) 20.dp else 32.dp) else if (c2) 16.dp else 24.dp, spring(.7f, 400f), label = "ph")
+    val padV by animateDpAsState(if (selected) (if (c2) 16.dp else 26.dp) else if (c2) 16.dp else if (kind == "t") 22.dp else if (kind == "s") 20.dp else 24.dp, spring(.7f, 400f), label = "pv")
+    val padH by animateDpAsState(if (selected) (if (c2) 16.dp else 32.dp) else if (c2) 16.dp else 24.dp, spring(.7f, 400f), label = "ph")
     var rect by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
     val dens = LocalDensity.current.density
     val haptic = LocalHapticFeedback.current
@@ -671,8 +674,14 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
     val fr = remember { FocusRequester() }
     val sel = vm.sel
     val selMode = sel.isNotEmpty()
-    val live = vm.sorted(vm.liveF())
     val cols = vm.pr.cols.coerceIn(1, 2)
+    val live = vm.sorted(vm.liveF()).let { l ->
+        // 2 kolom: catatan kosong yang sedang dibuka disembunyikan dari grid supaya lajur kartu lain tidak bergeser
+        if (cols != 2) l else l.filterNot { d ->
+            d.t.isBlank() && d.x.isBlank() && d.bl.none { it.isObj && it.ty != "hr" } &&
+                vm.openId == d.id && vm.nav.stack.any { s -> s is Scr.Note && s.id == d.id }
+        }
+    }
     val pos = remember(live) { live.withIndex().associate { it.value.id to it.index } }
 
     LaunchedEffect(state) {
@@ -701,9 +710,21 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
             val botPx = state.layoutInfo.viewportEndOffset - with(dens) { 24.dp.toPx() }
             val info = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id }
             val ok = info != null && info.offset.y >= topPx - 2f && info.offset.y + info.size.height <= botPx
-            if (!ok) {
-                // jauh di atas: lompat dekat dulu (tersembunyi di balik editor yang masih besar), lalu geser mulus
-                if (info == null && state.firstVisibleItemIndex > idx + 8) state.scrollToItem(idx + 8)
+            if (info != null) {
+                // kartu sudah tampil tapi terpotong: geser seminimal mungkin sampai utuh (atas maupun bawah), bukan lompat ke puncak
+                if (!ok) {
+                    val top = info.offset.y.toFloat()
+                    val bot = (info.offset.y + info.size.height).toFloat()
+                    val d = when {
+                        top < topPx -> top - topPx
+                        info.size.height <= botPx - topPx -> bot - botPx
+                        else -> top - topPx
+                    }
+                    if (d != 0f) state.animateScrollBy(d, tween(320, easing = Emph))
+                }
+            } else {
+                // kartu di luar layar: lompat dekat dulu (tersembunyi di balik editor yang masih besar), lalu geser mulus
+                if (state.firstVisibleItemIndex > idx + 8) state.scrollToItem(idx + 8)
                 state.animateScrollToItem(idx)
             }
         } catch (e: Exception) { }
