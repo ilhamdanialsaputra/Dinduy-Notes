@@ -131,6 +131,14 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     var fabMorph: Morph? = null                // posisi tombol Baru, untuk morph catatan baru
     var pending by mutableStateOf<Pending?>(null)
 
+    // penutupan catatan: kartu tujuan bisa sedang bergerak (daftar digulir otomatis), jadi morph mengikutinya
+    var closing = false                        // true selama morph keluar mengikuti kartu yang bergerak
+    var revealId: String? = null               // catatan yang kartunya harus terlihat setelah menutup
+    var revealTick by mutableStateOf(0)        // dinaikkan tiap menutup supaya beranda menggulir ke kartu itu
+    var topSlot: Morph? = null                 // perkiraan posisi kartu paling atas, dipakai saat kartu tujuan belum tampil
+    var morphTick by mutableStateOf(0)         // dinaikkan tiap frame saat morph bergerak (hanya dibaca di lambda gambar)
+    var ghostVer by mutableStateOf(0)          // berubah saat bayangan teks kartu baru tersedia
+
     // kartu "Tambah catatan" (muncul dari bawah, bisa ditarik ke atas jadi catatan baru)
     var addOn by mutableStateOf(false)         // kartu diminta tampil
     val addF = Animatable(0f)                  // pecahan tinggi layar yang tertutup kartu (0 = tersembunyi, 1 = layar penuh)
