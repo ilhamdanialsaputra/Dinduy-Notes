@@ -67,6 +67,9 @@ data class Pt(val key: String, val off: Int)
 class Mv(val bid: String, val imgId: String, val row: Boolean, val top: Float, val h: Float)
 
 class Req(val key: String, val pos: Int, val n: Int, val sel: TextRange? = null)
+
+/** Satu kecocokan pada mode "cari dalam catatan". key "@t" = judul, selain itu kunci kolom teks. */
+data class FHit(val key: String, val s: Int, val e: Int)
 class Snap(val bl: List<Blk>, val key: String?, val sel: TextRange)
 
 fun keyBlock(k: String) = k.substringBefore(':')
@@ -1479,6 +1482,60 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     fun leave() {
         flush()
         vm.dropIfEmpty(noteId, title, blocks)
+    }
+
+    // ---------- cari dalam catatan ----------
+    var findOn by mutableStateOf(false)
+    var findQ by mutableStateOf("")
+    var findI by mutableStateOf(0)
+    private var hitsFor: List<Blk>? = null
+    private var hitsT = ""
+    private var hitsQ = ""
+    private var hitsC: List<FHit> = emptyList()
+
+    /** Semua kecocokan (judul dulu, lalu isi menurut urutan dokumen). Membaca state, jadi pemanggil ikut berlangganan. */
+    fun hitList(): List<FHit> {
+        val q = findQ
+        val bl = blocks
+        val tt = title
+        if (!findOn || q.isBlank()) return emptyList()
+        if (hitsFor === bl && hitsQ == q && hitsT == tt) return hitsC
+        val out = ArrayList<FHit>()
+        fun scan(key: String, t: String) {
+            var i = t.indexOf(q, 0, ignoreCase = true)
+            while (i >= 0) {
+                out.add(FHit(key, i, i + q.length))
+                i = t.indexOf(q, i + q.length, ignoreCase = true)
+            }
+        }
+        scan("@t", tt)
+        for (k in selKeys()) scan(k, rtOf(k).t)
+        hitsFor = bl; hitsQ = q; hitsT = tt; hitsC = out
+        return out
+    }
+
+    fun hitsOf(key: String): List<FHit> = hitList().filter { it.key == key }
+
+    fun curHit(): FHit? {
+        val l = hitList()
+        return if (l.isEmpty()) null else l[findI.coerceIn(0, l.size - 1)]
+    }
+
+    fun findStep(d: Int) {
+        val n = hitList().size
+        if (n == 0) return
+        findI = ((findI.coerceIn(0, n - 1) + d) % n + n) % n
+    }
+
+    fun openFind() {
+        if (selOn) clearSel()
+        selImg = null; pickQuote = false; miniBar = false
+        findQ = ""; findI = 0
+        findOn = true
+    }
+
+    fun closeFind() {
+        findOn = false; findQ = ""; findI = 0
     }
 
     fun enterReading() {
