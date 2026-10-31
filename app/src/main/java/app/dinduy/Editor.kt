@@ -6,7 +6,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.LayoutCoordinates
@@ -98,7 +97,6 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     var widthDp by mutableStateOf(340f)
     var barH by mutableStateOf(0f)        // tinggi kapsul alat (px) yang melayang di atas keyboard
     var barOn by mutableStateOf(false)    // kapsul alat sedang tampil
-    val frs = HashMap<String, FocusRequester>()   // FocusRequester tiap kolom teks, supaya fokus bisa dipindah sebelum kolom lama dihapus
 
     // penanda konversi otomatis (mis. "1. " -> nomor), untuk menahan IME yang mengembalikan teks penanda
     private var convKey: String? = null
@@ -451,8 +449,6 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
                     focusAt(k, pv.tb[r][c].t.length)
                 }
                 else -> {
-                    // fokus pindah dulu ke kolom tujuan sebelum kolom lama hilang, supaya keyboard tidak menutup
-                    try { frs[pv.id]?.requestFocus() } catch (e: Exception) { }
                     val at = pv.r.t.length
                     val merged = pv.r + b.r
                     blocks = blocks.toMutableList().also { it[i - 1] = pv.copy(r = merged); it.removeAt(i) }
