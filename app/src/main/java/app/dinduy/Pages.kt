@@ -328,11 +328,17 @@ fun NoteMenuPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
     val d = vm.note(id)
     val pinned = d?.p == true
     val archived = d?.a == true
+    val hasRem = (d?.rm ?: 0L) > 0L
     PageScaffold("Opsi catatan", d?.t?.ifEmpty { null } ?: "Tanpa judul", { nav.pop() }) {
         SGroup("Catatan ini", 0) {
             MRow(POS_TOP, "search", "Cari dalam catatan", "Temukan dan sorot kata di catatan ini") {
                 nav.pop(); vm.ed?.openFind()
             }
+            MRow(
+                POS_MID, if (hasRem) "bell" else "bellplus", "Pengingat",
+                if (hasRem && d != null) Rem.stamp(d) + (if (d.rr.isNotEmpty()) " · " + Rem.repeatName(d.rr) else "") else "Ingatkan saya di tanggal dan waktu tertentu",
+                chevron = true
+            ) { vm.remDlg = id }
             MRow(POS_MID, "pin", if (pinned) "Lepas sematan" else "Sematkan", "Catatan yang disematkan tampil di bagian atas") {
                 vm.mark(listOf(id), if (pinned) "Sematan dilepas" else "Catatan disematkan") { it.copy(p = !it.p) }
             }
