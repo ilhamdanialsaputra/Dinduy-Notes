@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
@@ -1313,21 +1314,27 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     @Composable
     fun TopBar() {
         // bilah cari menggantikan bilah biasa dengan geser + pudar (mode "cari dalam catatan")
-        val fa by animateFloatAsState(if (ed.findOn) 1f else 0f, tween(380, easing = Emph), label = "fa")
+        // pil pencarian tumbuh dari tombol titik tiga ke kiri dan menguncup kembali ke sana; tombol kembali satu-satunya
+        // dan tidak pernah memudar, jadi tidak ada kedipan saat bilah berganti
+        val fa by animateFloatAsState(if (ed.findOn) 1f else 0f, spring(.9f, 380f), label = "fa")
         Box(Modifier.fillMaxWidth().background(pal.s).windowInsetsPadding(WindowInsets.statusBars)) {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
-                    .graphicsLayer { alpha = 1f - fa; translationY = -10.dp.toPx() * fa },
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconBtn("back", pal.os, { act.back() }, enabled = !ed.findOn)
+                IconBtn("back", pal.os, { if (ed.findOn) { ed.closeFind() } else act.back() })
                 Spacer(Modifier.weight(1f))
-                IconBtn("more", pal.os, {
-                    ed.flush(); focusMgr.clearFocus(); kb?.hide()
-                    vm.nav.push(Scr.NoteMenu(ed.noteId))
-                }, enabled = !ed.findOn)
+                Box(Modifier.graphicsLayer {
+                    val k = (((1f - fa) - .3f) / .7f).coerceIn(0f, 1f)
+                    alpha = k; scaleX = .6f + .4f * k; scaleY = .6f + .4f * k
+                }) {
+                    IconBtn("more", pal.os, {
+                        ed.flush(); focusMgr.clearFocus(); kb?.hide()
+                        vm.nav.push(Scr.NoteMenu(ed.noteId))
+                    }, enabled = !ed.findOn)
+                }
             }
-            if (fa > .01f) FindBar(ed, fa)
+            if (fa > .005f || ed.findOn) FindBar(ed, fa.coerceIn(0f, 1f))
         }
     }
 
@@ -1405,6 +1412,22 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                 ) {
                     Column(Modifier.fillMaxWidth()) {
                         val firstText = { ed.blocks.firstOrNull { it.isText }?.let { ed.focusAt(it.id, 0) } }
+                        // lencana label di atas judul; ketuk untuk membuka halaman label
+                        val noteLb = vm.note(ed.noteId)?.lb ?: emptyList()
+                        Row(
+                            Modifier.fillMaxWidth().animateContentSize(spring(.8f, 400f)).horizontalScroll(rememberScrollState())
+                                .padding(top = if (noteLb.isEmpty()) 0.dp else 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            noteLb.forEach { n ->
+                                key(n) {
+                                    LabelBadge(n) {
+                                        ed.flush(); focusMgr.clearFocus(); kb?.hide()
+                                        vm.nav.push(Scr.NoteLabels(ed.noteId))
+                                    }
+                                }
+                            }
+                        }
                         Box(Modifier.padding(top = 6.dp, bottom = 12.dp)) {
                             if (ed.title.isEmpty()) {
                                 T("Judul", 34f, 1000, pal.osv, alpha = .5f, ls = -.02f)
