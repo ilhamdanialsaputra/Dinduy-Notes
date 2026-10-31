@@ -302,10 +302,6 @@ fun TF(
         )
     } else {
         val fr = remember { FocusRequester() }
-        androidx.compose.runtime.DisposableEffect(key) {
-            ed.frs[key] = fr
-            onDispose { if (ed.frs[key] === fr) ed.frs.remove(key) }
-        }
         val bring = remember { BringIntoViewRequester() }
         var lay by remember { mutableStateOf<TextLayoutResult?>(null) }
         var foc by remember { mutableStateOf(false) }
