@@ -202,7 +202,7 @@ fun Modifier.makeRoom(vm: AppVM, id: String, idx: Int, openIdx: () -> Int, h: Fl
     // beranda (1 atau 2 kolom; w > 0 hanya diisi HomeCard): posisi kartu dibaca langsung, bukan sekadar urutan
     val grid = w > 0f && !vm.searchOn
     // morph dari kartu "Tambah catatan" (lebar penuh) atau menguncup ke tombol Baru tidak boleh menggeser kartu lain
-    if (grid && (!m.card || vm.note(oid) == null)) return@graphicsLayer
+    if (grid && (!m.card || m.up || vm.note(oid) == null)) return@graphicsLayer
     val wave = minOf(Math.abs(idx - oi), 5) * 10f * dens
     val me = if (grid) vm.cardMorph[id] else null
     if (me != null) {
