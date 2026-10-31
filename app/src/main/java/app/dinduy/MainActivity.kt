@@ -107,6 +107,8 @@ sealed class Scr {
     object Settings : Scr()
     object Archive : Scr()
     object Trash : Scr()
+    class NoteMenu(val id: String) : Scr()     // halaman titik tiga di editor
+    class NoteLabels(val id: String) : Scr()   // halaman label untuk satu catatan
 }
 
 class Nav(private val vm: AppVM) {
@@ -176,8 +178,10 @@ fun ViewLayer(on: Boolean, under: Boolean, keep: Boolean = false, base: Boolean 
 }
 
 @Composable
-fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, content: @Composable () -> Unit) {
+fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, content: @Composable () -> Unit) {
     val pal = LocalPal.current
+    // sama dengan ViewLayer: saat halaman opsi menutupi editor, editor bergeser pelan + meredup
+    val u by animateFloatAsState(if (under) 1f else 0f, tween(460, easing = Emph), label = "nu")
     // satu progres bersama (vm.openP): morph kartu <-> layar penuh DAN kartu lain yang memberi ruang membaca nilai yang sama,
     // jadi selalu sinkron. Spring spatial M3 Expressive: membuka sedikit lentur, menutup lebih rapat (tanpa overshoot keluar layar).
     LaunchedEffect(on) {
@@ -186,7 +190,7 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, content: @Composable () -> 
     val t0 = vm.openP.value
     if (!on && t0 <= .01f) return
     Box(
-        Modifier.fillMaxSize().pointerInput(Unit) { }.drawWithContent {
+        Modifier.fillMaxSize().graphicsLayer { translationX = -u * size.width * .26f }.pointerInput(Unit) { }.drawWithContent {
             val tt = vm.openP.value.coerceIn(0f, 1f)
             val m = morph ?: Morph(size.width * .12f, size.height * .4f, size.width * .88f, size.height * .6f, 32.dp.toPx(), pal.s)
             // tepi kiri/kanan sedikit lebih cepat dari tepi atas/bawah: wadah terasa "meregang" ke bawah/atas di akhir
@@ -234,6 +238,7 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, content: @Composable () -> 
                     }
             ) { GhostCard(gn, g) }
         }
+        if (u > .001f) Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = (if (pal.dark) .16f else .05f) * u)))
     }
 }
 
@@ -327,13 +332,21 @@ fun AppRoot(vm: AppVM, act: Actions) {
             val top = nav.top
             val isHome = top is Scr.Home
             val isNote = top is Scr.Note
+            // catatan tetap "terbuka" selama halaman titik tiga / label ada di atasnya
+            val inNote = isNote || top is Scr.NoteMenu || top is Scr.NoteLabels
             val reading = vm.ed?.reading == true && isNote
             val imgSel = vm.ed?.selImg != null && isNote
             val selE = vm.ed?.selEdit == true && isNote
+            val finding = vm.ed?.findOn == true && isNote
+            val pageIds = remember { arrayOfNulls<String>(2) }
+            (top as? Scr.NoteMenu)?.let { pageIds[0] = it.id }
+            (top as? Scr.NoteLabels)?.let { pageIds[1] = it.id }
 
-            BackHandler(enabled = nav.stack.size > 1 || drawer.isOpen || vm.sel.isNotEmpty() || vm.searchOn || (isHome && vm.filter != null) || reading || imgSel || selE) {
+            BackHandler(enabled = nav.stack.size > 1 || drawer.isOpen || vm.addOn || vm.sel.isNotEmpty() || vm.searchOn || (isHome && vm.filter != null) || reading || imgSel || selE || finding) {
                 when {
                     drawer.isOpen -> scope.launch { drawer.close() }
+                    vm.addOn -> vm.addOn = false
+                    isNote && finding -> vm.ed?.closeFind()
                     isHome && vm.sel.isNotEmpty() -> vm.sel.clear()
                     isHome && vm.searchOn -> vm.searchOn = false
                     isHome && vm.filter != null -> vm.filter = null
@@ -346,7 +359,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
 
             ModalNavigationDrawer(
                 drawerState = drawer,
-                gesturesEnabled = isHome && vm.sel.isEmpty() && !vm.searchOn,
+                gesturesEnabled = isHome && vm.sel.isEmpty() && !vm.searchOn && !vm.addOn,
                 scrimColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = .5f),
                 drawerContent = {
                     val w = minOf(360.dp, (LocalConfiguration.current.screenWidthDp * .84f).dp)
@@ -369,7 +382,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     ) {
                         HomeScreen(vm, nav, act, openDrawer = { scope.launch { drawer.open() } }, onSmall = { fabSmall = it })
                     }
-                    ViewLayer(on = top is Scr.Archive || (isNote && nav.stack.any { it is Scr.Archive }), under = false) {
+                    ViewLayer(on = top is Scr.Archive || (inNote && nav.stack.any { it is Scr.Archive }), under = false) {
                         ListScreen(
                             vm, "Arsip", vm.archived(), "Catatan yang diarsipkan tidak muncul di beranda.", "Arsip kosong", false,
                             onBack = { nav.pop() }, onClick = { vm.sheet = Sheet.Arc(it.id) }
@@ -385,7 +398,8 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     ViewLayer(on = top is Scr.Settings, under = false) {
                         SettingsScreen(vm, act, onBack = { nav.pop() })
                     }
-                    NoteLayer(vm, on = isNote, morph = vm.morph) {
+                    AddScrim(vm)
+                    NoteLayer(vm, on = inNote, morph = vm.morph, under = top is Scr.NoteMenu || top is Scr.NoteLabels) {
                         val id = nav.noteId
                         if (id != null) {
                             val sc = rememberCoroutineScope()
@@ -399,12 +413,21 @@ fun AppRoot(vm: AppVM, act: Actions) {
                         }
                     }
 
+                    // halaman titik tiga & label: satu halaman penuh bergaya Pengaturan, di atas editor
+                    ViewLayer(on = top is Scr.NoteMenu, under = top is Scr.NoteLabels) {
+                        pageIds[0]?.let { NoteMenuPage(vm, nav, act, it) }
+                    }
+                    ViewLayer(on = top is Scr.NoteLabels, under = false) {
+                        pageIds[1]?.let { NoteLabelsPage(vm, nav, it) }
+                    }
+
                     SelBar(vm)
                     Fab(
-                        vm, small = fabSmall, hide = !isHome || vm.sel.isNotEmpty() || vm.searchOn,
+                        vm, small = fabSmall, hide = !isHome || vm.sel.isNotEmpty() || vm.searchOn || vm.addOn,
                         lift = if (vm.snack != null) 76.dp else 0.dp
-                    ) { vm.sheet = Sheet.Add }
-                    SnackHost(vm, if (isNote) 84.dp else 20.dp + sabDp(), isNote)
+                    ) { vm.addOn = true }
+                    SnackHost(vm, if (inNote) 84.dp else 20.dp + sabDp(), inNote)
+                    AddNoteLayer(vm, act)
                     SheetHost(vm, nav, act)
                     LabelDialogHost(vm)
                 }
@@ -504,6 +527,24 @@ class MainActivity : ComponentActivity(), Actions {
     override fun saveMd(name: String, text: String) {
         pendingMd = text
         mdSaver.launch(name)
+    }
+
+    override fun shareMd(name: String, text: String) {
+        lifecycleScope.launch {
+            val f = withContext(Dispatchers.IO) {
+                val file = File(cacheDir, name)
+                file.writeText(text, Charsets.UTF_8)
+                file
+            }
+            val uri = FileProvider.getUriForFile(this@MainActivity, "$packageName.fileprovider", f)
+            val i = Intent(Intent.ACTION_SEND).apply {
+                type = "text/markdown"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, name.removeSuffix(".md"))
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(i, "Bagikan catatan"))
+        }
     }
 
     override fun copyText(t: String) {
