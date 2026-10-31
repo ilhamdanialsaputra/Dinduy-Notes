@@ -236,13 +236,27 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
         Box(
             Modifier.fillMaxSize().graphicsLayer {
                 // isi catatan mulai muncul lebih awal dan bertumpang dengan teks kartu (pudar-silang), bukan menunggu kartu hilang dulu
+                val tt = vm.openP.value.coerceIn(0f, 1f)
+                vm.morphTick
+                val mm = vm.morph
                 val x = ((vm.openP.value - .2f) / .5f).coerceIn(0f, 1f)
                 val a = x * x * (3f - 2f * x)
                 alpha = a
-                translationY = (1f - a) * 24.dp.toPx()
-                val s = .96f + .04f * a
-                scaleX = s; scaleY = s
-                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(.5f, 0f)
+                if (mm != null && (mm.r - mm.l) < size.width * .7f) {
+                    // kartu sempit (2 kolom): isi editor ikut mengecil ke dalam kartu lalu tumbuh bersama wadah (container transform)
+                    val l = lerp(mm.l, 0f, tt)
+                    val r = lerp(mm.r, size.width, tt)
+                    val tp = lerp(mm.t, 0f, tt)
+                    val sc = ((r - l) / size.width).coerceIn(.05f, 1f)
+                    scaleX = sc; scaleY = sc
+                    translationX = l; translationY = tp
+                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
+                } else {
+                    translationY = (1f - a) * 24.dp.toPx()
+                    val s = .96f + .04f * a
+                    scaleX = s; scaleY = s
+                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(.5f, 0f)
+                }
             }
         ) { content() }
         // teks kartu ikut melebur: tetap di posisi aslinya di dalam wadah yang membesar/mengecil, lalu pudar seiring isi catatan muncul.
