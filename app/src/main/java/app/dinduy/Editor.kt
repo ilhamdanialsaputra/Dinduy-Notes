@@ -1534,8 +1534,9 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         findOn = true
     }
 
+    /** Teks pencarian sengaja tidak dihapus: bilah cari masih terlihat selama animasi keluar. Direset saat openFind(). */
     fun closeFind() {
-        findOn = false; findQ = ""; findI = 0
+        findOn = false
     }
 
     fun enterReading() {
