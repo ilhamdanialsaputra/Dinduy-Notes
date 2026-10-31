@@ -255,9 +255,12 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
                     val l = lerp(mm.l, 0f, tt)
                     val r = lerp(mm.r, size.width, tt)
                     val tp = lerp(mm.t, 0f, tt)
-                    val sc = ((r - l) / size.width).coerceIn(.05f, 1f)
+                    val b = lerp(mm.b, size.height, tt)
+                    // kartu "Tambah catatan": skala mengikuti tinggi wadah yang naik, isi tetap di tengah
+                    val sc = (if (mm.up) (b - tp) / size.height else (r - l) / size.width).coerceIn(.05f, 1f)
                     scaleX = sc; scaleY = sc
-                    translationX = l; translationY = tp
+                    translationX = if (mm.up) l + ((r - l) - sc * size.width) / 2f else l
+                    translationY = tp
                     transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
                 } else {
                     translationY = (1f - a) * 24.dp.toPx()
@@ -317,7 +320,7 @@ fun effMorph(vm: AppVM): Morph? {
     val tt = vm.openP.value.coerceIn(0f, 1f)
     return Morph(
         live.l + e[0] * tt, live.t + e[1] * tt, live.r + e[2] * tt, live.b + e[3] * tt,
-        live.rad, live.color, live.r4, live.ghost, live.card
+        live.rad, live.color, live.r4, live.ghost, card = live.card, up = live.up
     )
 }
 
