@@ -59,10 +59,7 @@ class Ghost(
 )
 
 sealed class Sheet {
-    class Lbl(val id: String) : Sheet()          // pilih label untuk satu catatan
     class LblEdit(val name: String) : Sheet()    // ganti nama / hapus label
-    object Add : Sheet()
-    class Doc(val id: String) : Sheet()
     class Arc(val id: String) : Sheet()
     class Trs(val id: String) : Sheet()
     object Bk : Sheet()
@@ -133,6 +130,12 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     val cardMorph = HashMap<String, Morph>()   // posisi kartu beranda terkini, untuk morph keluar
     var fabMorph: Morph? = null                // posisi tombol Baru, untuk morph catatan baru
     var pending by mutableStateOf<Pending?>(null)
+
+    // kartu "Tambah catatan" (muncul dari bawah, bisa ditarik ke atas jadi catatan baru)
+    var addOn by mutableStateOf(false)         // kartu diminta tampil
+    val addF = Animatable(0f)                  // pecahan tinggi layar yang tertutup kartu (0 = tersembunyi, 1 = layar penuh)
+    val addFade = Animatable(1f)               // 1 = normal, menuju 0 saat morph catatan sudah mengambil alih bentuk kartu
+    var addHand by mutableStateOf(false)       // true selama kartu menyerahkan bentuknya ke morph catatan
     var lastBk by mutableStateOf(sp.getLong("bk", 0L))
 
     // state beranda (dihoist supaya BackHandler di root bisa mengaturnya)
