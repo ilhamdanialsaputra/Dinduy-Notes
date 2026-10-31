@@ -49,7 +49,8 @@ class Snack(val msg: String, val undo: (() -> Unit)?, val id: Long = System.nano
 class Morph(
     val l: Float, val t: Float, val r: Float, val b: Float, val rad: Float, val color: Color,
     val r4: FloatArray? = null,  // radius 4 sudut (kiri-atas, kanan-atas, kanan-bawah, kiri-bawah) dalam px
-    val ghost: Ghost? = null     // gaya teks kartu, supaya teks kartu bisa pudar-silang dengan isi catatan saat morph
+    val ghost: Ghost? = null,    // gaya teks kartu, supaya teks kartu bisa pudar-silang dengan isi catatan saat morph
+    val card: Boolean = false    // true = asalnya kartu catatan / tombol Baru (wadah + isi mengecil ke dalamnya); false = kartu "Tambah catatan" atau posisi tengah
 )
 
 class Ghost(
@@ -131,6 +132,12 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     var fabMorph: Morph? = null                // posisi tombol Baru, untuk morph catatan baru
     var pending by mutableStateOf<Pending?>(null)
 
+    // pengingat
+    var remDlg by mutableStateOf<String?>(null)   // id catatan yang sedang diatur pengingatnya (lembar bawah)
+    var remFilter by mutableStateOf(false)        // true = beranda hanya menampilkan catatan berpengingat
+    var permTick by mutableStateOf(0)             // dinaikkan saat status izin notifikasi mungkin berubah
+    private val scheduled = HashMap<String, Long>()   // id catatan -> waktu alarm yang sudah dipasang
+
     // penutupan catatan: kartu tujuan bisa sedang bergerak (daftar digulir otomatis), jadi morph mengikutinya
     var closing = false                        // true selama morph keluar mengikuti kartu yang bergerak
     var revealId: String? = null               // catatan yang kartunya harus terlihat setelah menutup
@@ -156,7 +163,19 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     private val now get() = System.currentTimeMillis()
 
     init {
+        Rem.hook = this
         load()
+        syncReminders()
+    }
+
+    override fun onCleared() {
+        if (Rem.hook === this) Rem.hook = null
+        super.onCleared()
+    }
+
+    /** Samakan alarm sistem dengan data catatan (dipasang, diganti, atau dibatalkan seperlunya). */
+    fun syncReminders() {
+        try { Rem.sync(ctx, docs.toList(), scheduled) } catch (e: Exception) { }
     }
 
     private fun load() {
@@ -184,6 +203,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         saveJob?.cancel()
         saveJob = viewModelScope.launch {
             delay(200)
+            syncReminders()
             val db = Db(pr, docs.toList(), labels.toList())
             withContext(Dispatchers.IO) { write(db) }
         }
@@ -191,6 +211,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     fun saveNow() {
         saveJob?.cancel()
+        syncReminders()
         write(Db(pr, docs.toList(), labels.toList()))
     }
 
@@ -234,13 +255,14 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     fun dropIfEmpty(id: String, title: String, bl: List<Blk>) {
         if (title.isBlank() && plainOf(bl).isEmpty() && bl.none { it.isObj && it.ty != "hr" }) {
-            docs.removeAll { it.id == id }; save()
+            // catatan kosong yang diberi pengingat tetap disimpan (seperti Google Keep)
+            if (docs.removeAll { it.id == id && it.rm == 0L }) save()
         }
     }
 
     fun live() = docs.filter { !it.a && it.dt == 0L }
     /** Catatan beranda setelah disaring label aktif. */
-    fun liveF() = live().filter { filter == null || filter in it.lb }
+    fun liveF() = live().filter { (filter == null || filter in it.lb) && (!remFilter || it.rm > 0L) }
 
     // ---------- label ----------
     fun sortedLabels() = labels.sortedBy { it.lowercase() }
@@ -295,7 +317,9 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     fun archived() = docs.filter { it.a && it.dt == 0L }.sortedByDescending { it.u }
     fun trashed() = docs.filter { it.dt != 0L }.sortedByDescending { it.dt }
     fun sortKey(n: Note) = if (pr.sort == "c") (if (n.c != 0L) n.c else n.u) else n.u
-    fun sorted(l: List<Note>) = l.sortedWith(compareByDescending<Note> { it.p }.thenByDescending { sortKey(it) })
+    fun sorted(l: List<Note>): List<Note> =
+        if (remFilter) l.sortedBy { Rem.sortKey(it) }   // tampilan Pengingat: urut menurut waktu bunyi, yang terlewat di atas
+        else l.sortedWith(compareByDescending<Note> { it.p }.thenByDescending { sortKey(it) })
 
     fun show(msg: String, undo: (() -> Unit)? = null) {
         snack = Snack(msg, undo)
@@ -307,10 +331,23 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         show(msg) { prev.forEach { p -> upd(p.id) { p } } }
     }
 
+    // ---------- pengingat ----------
+    fun setReminder(id: String, at: Long, rr: String) {
+        val prev = note(id) ?: return
+        upd(id) { it.copy(rm = at, rr = rr, rd = 0L) }
+        show("Pengingat diatur: " + Rem.fmt(at)) { upd(id) { it.copy(rm = prev.rm, rr = prev.rr, rd = prev.rd) } }
+    }
+
+    fun clearReminder(id: String) {
+        val prev = note(id) ?: return
+        upd(id) { it.copy(rm = 0L, rr = "", rd = 0L) }
+        show("Pengingat dihapus") { upd(id) { it.copy(rm = prev.rm, rr = prev.rr, rd = prev.rd) } }
+    }
+
     fun duplicate(id: String) {
         val d = note(id) ?: return
         val t = now
-        docs.add(0, d.copy(id = uid(), t = (d.t.ifEmpty { "Tanpa judul" }) + " (salinan)", u = t, c = t, p = false, a = false))
+        docs.add(0, d.copy(id = uid(), t = (d.t.ifEmpty { "Tanpa judul" }) + " (salinan)", u = t, c = t, p = false, a = false, rm = 0L, rr = "", rd = 0L))
         save(); show("Catatan digandakan")
     }
 
