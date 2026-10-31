@@ -98,6 +98,8 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.layout.layout
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -126,9 +128,19 @@ class Nav(private val vm: AppVM) {
                 vm.ed?.leave()
                 // morph keluar selalu menuju posisi kartu saat ini (bukan posisi saat dibuka),
                 // jadi tetap konsisten walau catatan sudah pindah urutan setelah lama diedit
-                val live = vm.note(t.id)?.let { !it.a && it.dt == 0L } == true
+                val ex = vm.note(t.id)
+                val live = ex?.let { !it.a && it.dt == 0L } == true
                 vm.openId = t.id
-                vm.morph = vm.cardMorph[t.id] ?: (if (live) vm.fabMorph else null)
+                if (ex == null) {
+                    // catatan kosong tidak jadi dibuat: menguncup kembali menjadi tombol Baru (+)
+                    vm.closing = false
+                    vm.morph = vm.fabMorph
+                } else {
+                    vm.morph = vm.cardMorph[t.id] ?: (if (live) vm.topSlot else null)
+                    // kartu tujuan bisa di luar layar (daftar sedang digulir) atau berpindah urutan: morph mengikutinya
+                    vm.closing = live && !vm.searchOn
+                    if (vm.closing) { vm.revealId = t.id; vm.revealTick++ }
+                }
             }
             stack.removeAt(stack.size - 1)
         }
@@ -185,14 +197,25 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
     // satu progres bersama (vm.openP): morph kartu <-> layar penuh DAN kartu lain yang memberi ruang membaca nilai yang sama,
     // jadi selalu sinkron. Spring spatial M3 Expressive: membuka sedikit lentur, menutup lebih rapat (tanpa overshoot keluar layar).
     LaunchedEffect(on) {
-        vm.openP.animateTo(if (on) 1f else 0f, if (on) spring(.86f, 320f) else spring(.92f, 400f))
+        if (on) {
+            vm.closing = false
+            vm.openP.animateTo(1f, spring(.86f, 320f))
+        } else {
+            val follow = vm.closing
+            val job = if (follow) launch { followCard(vm) } else null
+            vm.openP.animateTo(0f, if (follow) spring(.9f, 330f) else spring(.92f, 400f))
+            job?.cancel()
+            vm.closing = false
+        }
     }
     val t0 = vm.openP.value
     if (!on && t0 <= .01f) return
+    vm.ghostVer
     Box(
         Modifier.fillMaxSize().graphicsLayer { translationX = -u * size.width * .26f }.pointerInput(Unit) { }.drawWithContent {
             val tt = vm.openP.value.coerceIn(0f, 1f)
-            val m = morph ?: Morph(size.width * .12f, size.height * .4f, size.width * .88f, size.height * .6f, 32.dp.toPx(), pal.s)
+            vm.morphTick
+            val m = vm.morph ?: Morph(size.width * .12f, size.height * .4f, size.width * .88f, size.height * .6f, 32.dp.toPx(), pal.s)
             // tepi kiri/kanan sedikit lebih cepat dari tepi atas/bawah: wadah terasa "meregang" ke bawah/atas di akhir
             // kartu sempit (grid 2 kolom): semua tepi bergerak serempak supaya tidak miring/melar; kartu lebar: tepi kiri-kanan sedikit lebih cepat
             val narrow = (m.r - m.l) < size.width * .7f
@@ -224,13 +247,20 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
         ) { content() }
         // teks kartu ikut melebur: tetap di posisi aslinya di dalam wadah yang membesar/mengecil, lalu pudar seiring isi catatan muncul.
         // Saat menutup urutannya terbalik, jadi begitu wadah sampai di kartu, teksnya sudah identik dengan kartu asli (tidak ada lompatan).
+        val morph = vm.morph
         val g = morph?.ghost
         val gn = if (g != null) vm.openId?.let { vm.note(it) } else null
         if (morph != null && g != null && gn != null) {
             val dn = androidx.compose.ui.platform.LocalDensity.current
             Box(
-                Modifier.offset { androidx.compose.ui.unit.IntOffset(morph.l.roundToInt(), morph.t.roundToInt()) }
-                    .width(with(dn) { (morph.r - morph.l).toDp() })
+                Modifier.offset { vm.morphTick; val mm = vm.morph ?: morph; androidx.compose.ui.unit.IntOffset(mm.l.roundToInt(), mm.t.roundToInt()) }
+                    .layout { meas, c ->
+                        vm.morphTick
+                        val mm = vm.morph ?: morph
+                        val wpx = (mm.r - mm.l).roundToInt().coerceAtLeast(1)
+                        val pl = meas.measure(c.copy(minWidth = wpx, maxWidth = wpx, minHeight = 0, maxHeight = androidx.compose.ui.unit.Constraints.Infinity))
+                        layout(wpx, pl.height) { pl.place(0, 0) }
+                    }
                     .wrapContentHeight(Alignment.Top, unbounded = true)
                     .graphicsLayer {
                         val x = (1f - (vm.openP.value - .02f) / .3f).coerceIn(0f, 1f)
@@ -239,6 +269,33 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
             ) { GhostCard(gn, g) }
         }
         if (u > .001f) Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = (if (pal.dark) .16f else .05f) * u)))
+    }
+}
+
+/**
+ * Selama morph menutup, mengejar posisi kartu tujuan yang terkini (kartu bisa bergerak karena daftar digulir otomatis
+ * atau karena catatan pindah urutan). Dikejar dengan peluruhan eksponensial supaya tidak melompat saat kartu baru muncul di layar.
+ */
+suspend fun followCard(vm: AppVM) {
+    var last = withFrameNanos { it }
+    while (true) {
+        val now = withFrameNanos { it }
+        val dt = ((now - last) / 1e9f).coerceIn(0f, .05f)
+        last = now
+        val live = vm.openId?.let { vm.cardMorph[it] } ?: continue
+        val cur = vm.morph ?: live
+        val k = 1f - kotlin.math.exp(-dt * 14f)
+        fun f(a: Float, b: Float) = a + (b - a) * k
+        val r4a = cur.r4
+        val r4b = live.r4
+        val r4 = if (r4a != null && r4b != null) FloatArray(4) { f(r4a[it], r4b[it]) } else r4b ?: r4a
+        val hadGhost = cur.ghost != null
+        vm.morph = Morph(
+            f(cur.l, live.l), f(cur.t, live.t), f(cur.r, live.r), f(cur.b, live.b), f(cur.rad, live.rad),
+            androidx.compose.ui.graphics.lerp(cur.color, live.color, k), r4, live.ghost
+        )
+        if (!hadGhost && live.ghost != null) vm.ghostVer++
+        vm.morphTick++
     }
 }
 
