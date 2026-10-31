@@ -153,6 +153,7 @@ interface Actions {
     fun saveMd(name: String, text: String)
     fun shareMd(name: String, text: String)
     fun copyText(t: String)
+    fun askNotif()   // minta / arahkan ke izin notifikasi supaya pengingat bisa muncul
     fun back()
 }
 
@@ -198,20 +199,23 @@ fun Modifier.makeRoom(vm: AppVM, id: String, idx: Int, openIdx: () -> Int, h: Fl
     if (p <= 0.001f || oid == null || m == null || oid == id) return@graphicsLayer
     val oi = openIdx()
     if (oi < 0) return@graphicsLayer
-    // 2 kolom: morph dari kartu "Tambah catatan" (lebar penuh) atau menguncup ke tombol Baru tidak boleh menggeser kartu lain
-    if (cols == 2 && w > 0f && !vm.searchOn && ((m.r - m.l) >= w * .7f || vm.note(oid) == null)) return@graphicsLayer
+    // beranda (1 atau 2 kolom; w > 0 hanya diisi HomeCard): posisi kartu dibaca langsung, bukan sekadar urutan
+    val grid = w > 0f && !vm.searchOn
+    // morph dari kartu "Tambah catatan" (lebar penuh) atau menguncup ke tombol Baru tidak boleh menggeser kartu lain
+    if (grid && (!m.card || vm.note(oid) == null)) return@graphicsLayer
     val wave = minOf(Math.abs(idx - oi), 5) * 10f * dens
-    val me = if (cols == 2 && w > 0f && !vm.searchOn && (m.r - m.l) < w * .7f) vm.cardMorph[id] else null
+    val me = if (grid) vm.cardMorph[id] else null
     if (me != null) {
-        // 2 kolom: kartu di samping terdorong ke kiri/kanan menjauhi kartu yang melebar,
-        // kartu di atas ke atas, kartu di bawah ke bawah (bukan satu aliran vertikal seperti 1 kolom)
+        // kartu di atas terdorong ke atas, kartu di bawah ke bawah; di 2 kolom kartu di samping juga terdorong
+        // ke kiri/kanan menjauhi kartu yang melebar (bukan satu aliran vertikal)
         val eps = 4f * dens
         val above = me.b <= m.t + eps
         val below = me.t >= m.b - eps
-        if (!above && !below) {
+        if (!above && !below && cols == 2) {
             translationX = if (me.r <= m.l + eps || (me.l + me.r) < (m.l + m.r)) -(me.r + 8f * dens) * p else (w - me.l + 8f * dens) * p
         } else {
-            translationY = if (above) -(maxOf(m.t, 0f) + wave) * p else (maxOf(h - m.b, 0f) + wave) * p
+            val up = if (!above && !below) idx < oi else above
+            translationY = if (up) -(maxOf(m.t, 0f) + wave) * p else (maxOf(h - m.b, 0f) + wave) * p
         }
     } else {
         translationY = if (idx < oi) -(maxOf(m.t, 0f) + wave) * p else (maxOf(h - m.b, 0f) + wave) * p
@@ -284,7 +288,7 @@ fun NoteCard(
         return Morph(
             rc.left, rc.top, rc.right, rc.bottom, sh.average().toFloat() * dens, cs.first,
             FloatArray(4) { (if (live) cr(it).value else sh[it]) * dens },
-            Ghost(kind, c2, cs.second, padH, padV, insTL, insBL)
+            Ghost(kind, c2, cs.second, padH, padV, insTL, insBL), card = true
         )
     }
     // posisi dilaporkan ulang setelah layar selesai bergeser masuk (arsip/sampah), supaya morph keluar akurat
@@ -325,8 +329,9 @@ fun CardBody(d: Note, kind: String, c2: Boolean, fg: Color, padH: Dp, padV: Dp, 
         verticalArrangement = Arrangement.spacedBy(if (kind == "t") 0.dp else if (kind == "s") 6.dp else 10.dp)
     ) {
         // elemen terakhir yang menempel di pojok kiri-bawah ikut digeser menjauhi lengkungan (trik yang sama dengan kiri-atas)
-        val titleLast = kind == "t" && d.lb.isEmpty()
-        val bodyLast = kind == "s" && d.lb.isEmpty()
+        val remOn = d.rm > 0L && d.dt == 0L
+        val titleLast = kind == "t" && d.lb.isEmpty() && !remOn
+        val bodyLast = kind == "s" && d.lb.isEmpty() && !remOn
         T(
             d.t.ifEmpty { "Tanpa judul" }, if (c2) 16f else if (kind == "s") 19f else 21f, 900, fg,
             Modifier.padding(
@@ -341,6 +346,13 @@ fun CardBody(d: Note, kind: String, c2: Boolean, fg: Color, padH: Dp, padV: Dp, 
                 modifier = Modifier.padding(start = if (bodyLast) insBL else 0.dp, bottom = if (bodyLast) insBL else 0.dp),
                 maxLines = if (kind == "s") (if (c2) 2 else 1) else (if (c2) 4 else 3), lh = 1.45f, alpha = .8f
             )
+        }
+        if (remOn) {
+            // chip pengingat (seperti Google Keep): jam bunyi berikutnya, dicoret bila sudah terlewat
+            Box(
+                Modifier.padding(top = if (kind == "t") 8.dp else 0.dp)
+                    .padding(start = if (d.lb.isEmpty()) insBL else 0.dp, bottom = if (d.lb.isEmpty() && kind != "f") insBL else 0.dp)
+            ) { RemChip(Rem.stamp(d), fg, Rem.overdue(d), d.rr.isNotEmpty()) }
         }
         if (d.lb.isNotEmpty()) {
             val maxShow = if (c2) 1 else 2
@@ -590,14 +602,18 @@ fun DrawerContent(vm: AppVM, close: () -> Unit, go: (Scr) -> Unit) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             T("Dinduy", 28f, 800, pal.p, Modifier.padding(start = 16.dp, top = 28.dp, bottom = 24.dp), ls = -.01f)
             // sorotan (highlight) menandai posisi pengguna: "Catatan" = semua, atau satu label
-            DrawerItem("bulb", "Catatan", selected = vm.filter == null) { vm.filter = null; close() }
+            DrawerItem("bulb", "Catatan", selected = vm.filter == null && !vm.remFilter) { vm.filter = null; vm.remFilter = false; close() }
+            DrawerItem(
+                "bell", "Pengingat", selected = vm.remFilter,
+                trailing = vm.live().count { it.rm > 0L }.takeIf { it > 0 }?.toString()
+            ) { vm.filter = null; vm.remFilter = true; close() }
             T("Label", 14f, 700, pal.osv, Modifier.padding(start = 26.dp, top = 16.dp, bottom = 6.dp))
             vm.sortedLabels().forEach { n ->
                 DrawerItem(
                     "label", n, selected = vm.filter == n,
                     trailing = vm.labelCount(n).takeIf { it > 0 }?.toString(),
                     onLong = { vm.sheet = Sheet.LblEdit(n) }
-                ) { vm.filter = n; close() }
+                ) { vm.remFilter = false; vm.filter = n; close() }
             }
             DrawerItem("plus", "Buat label baru") { close(); vm.lblDlg = LblDlg(null, null) }
             Divider()
@@ -676,9 +692,9 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
     val selMode = sel.isNotEmpty()
     val cols = vm.pr.cols.coerceIn(1, 2)
     val live = vm.sorted(vm.liveF()).let { l ->
-        // 2 kolom: catatan kosong yang sedang dibuka disembunyikan dari grid supaya lajur kartu lain tidak bergeser
-        if (cols != 2) l else l.filterNot { d ->
-            d.t.isBlank() && d.x.isBlank() && d.bl.none { it.isObj && it.ty != "hr" } &&
+        // 1 & 2 kolom: catatan kosong yang sedang dibuka disembunyikan dari grid supaya kartu lain tidak bergeser
+        l.filterNot { d ->
+            d.t.isBlank() && d.x.isBlank() && d.bl.none { it.isObj && it.ty != "hr" } && d.rm == 0L &&
                 vm.openId == d.id && vm.nav.stack.any { s -> s is Scr.Note && s.id == d.id }
         }
     }
@@ -687,7 +703,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
     LaunchedEffect(state) {
         androidx.compose.runtime.snapshotFlow { state.canScrollBackward }.collect { back -> if (!back) onSmall(false) }
     }
-    LaunchedEffect(vm.filter) { try { state.scrollToItem(0) } catch (e: Exception) { } }
+    LaunchedEffect(vm.filter, vm.remFilter) { try { state.scrollToItem(0) } catch (e: Exception) { } }
     // setelah catatan ditutup, kartunya (yang naik ke atas karena baru diedit) harus terlihat: gulir mulus ke atas,
     // bersamaan dengan morph yang menguncup ke kartu itu
     LaunchedEffect(vm.revealTick) {
@@ -695,7 +711,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         val id = vm.revealId ?: return@LaunchedEffect
         val lv = vm.sorted(vm.liveF())
         val npin = lv.count { it.p }
-        val sec = npin > 0 && npin < lv.size
+        val sec = !vm.remFilter && npin > 0 && npin < lv.size
         val pin = if (sec) lv.filter { it.p } else lv
         val oth = if (sec) lv.filter { !it.p } else emptyList()
         var idx = pin.indexOfFirst { it.id == id }
@@ -749,7 +765,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
             val padS = 16f * dens.density
             val cw = if (cols == 2) (wPx - 2 * padS - gap) / 2f else wPx - 2 * padS
             val t0 = with(dens) { (sat + 78.dp).toPx() }
-            vm.topSlot = Morph(padS, t0, padS + cw, t0 + 92f * dens.density, 28f * dens.density, pal.pc)
+            vm.topSlot = Morph(padS, t0, padS + cw, t0 + 92f * dens.density, 28f * dens.density, pal.pc, card = true)
         }
         val livePanelH = (maxHeight - imeH - (sat + 8.dp) - 10.dp).coerceAtLeast(160.dp)
         // saat menutup, tinggi panel dibekukan agar tidak ikut naik-turun mengikuti keyboard yang menghilang
@@ -759,7 +775,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
 
         // daftar (grid 1 atau 2 kolom)
         val np = live.count { it.p }
-        val sections = np > 0 && np < live.size
+        val sections = !vm.remFilter && np > 0 && np < live.size
         val pinned = if (sections) live.filter { it.p } else live
         val others = if (sections) live.filter { !it.p } else emptyList()
         val full = StaggeredGridItemSpan.FullLine
@@ -773,7 +789,8 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
             if (live.isEmpty()) {
                 item(key = "empty", span = full) {
                     T(
-                        if (vm.filter != null) "Belum ada catatan berlabel" else "Ketuk Baru untuk memulai", 17f, 600, pal.osv,
+                        if (vm.remFilter) "Belum ada pengingat. Buka catatan, lalu ketuk ikon lonceng."
+                        else if (vm.filter != null) "Belum ada catatan berlabel" else "Ketuk Baru untuk memulai", 17f, 600, pal.osv,
                         Modifier.fillMaxWidth().padding(vertical = 48.dp), align = androidx.compose.ui.text.style.TextAlign.Center
                     )
                 }
@@ -827,7 +844,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(onSearch = { focusMgr.clearFocus() }),
                         decorationBox = { inner ->
-                            Box { if (vm.query.isEmpty()) T(vm.filter?.let { "Cari di $it" } ?: "Cari catatan", 17f, 500, pal.osv, maxLines = 1); inner() }
+                            Box { if (vm.query.isEmpty()) T(if (vm.remFilter) "Cari di Pengingat" else vm.filter?.let { "Cari di $it" } ?: "Cari catatan", 17f, 500, pal.osv, maxLines = 1); inner() }
                         }
                     )
                     Box(Modifier.graphicsLayer { alpha = sa; scaleX = .4f + .6f * sa; scaleY = .4f + .6f * sa }) {
@@ -923,7 +940,7 @@ fun Fab(vm: AppVM, small: Boolean, hide: Boolean, lift: Dp, onClick: () -> Unit)
             Modifier.offset(y = -ly)
                 .onGloballyPositioned { c ->
                     val b = c.boundsInWindow()
-                    if (!hide && b.width > 0f) vm.fabMorph = Morph(b.left, b.top, b.right, b.bottom, 26f * dens, pal.pc)
+                    if (!hide && b.width > 0f) vm.fabMorph = Morph(b.left, b.top, b.right, b.bottom, 26f * dens, pal.pc, card = true)
                 }
                 .graphicsLayer { scaleX = sc; scaleY = sc; alpha = al; transformOrigin = TransformOrigin(1f, 1f) }
                 .shadow(
@@ -1178,6 +1195,7 @@ fun SGroup(title: String, wait: Int, content: @Composable androidx.compose.found
 fun SCard(
     pos: Int, onClick: (() -> Unit)? = null,
     pad: PaddingValues = PaddingValues(horizontal = 20.dp, vertical = 18.dp),
+    bg: Color? = null,
     content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit
 ) {
     val pal = LocalPal.current
@@ -1190,7 +1208,7 @@ fun SCard(
     val br by animateFloatAsState(if (press) 28f else bot, spring(.6f, 500f), label = "br")
     val shape = RoundedCornerShape(tr.coerceAtLeast(0f).dp, tr.coerceAtLeast(0f).dp, br.coerceAtLeast(0f).dp, br.coerceAtLeast(0f).dp)
     Column(
-        Modifier.fillMaxWidth().clip(shape).background(pal.c2)
+        Modifier.fillMaxWidth().clip(shape).background(bg ?: pal.c2)
             .then(if (onClick != null) Modifier.clickable(interactionSource = src, indication = LocalIndication.current, onClick = onClick) else Modifier)
             .animateContentSize(SizeSpring).padding(pad),
         content = content
