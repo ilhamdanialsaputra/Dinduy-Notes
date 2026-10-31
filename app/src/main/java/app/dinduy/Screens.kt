@@ -150,6 +150,7 @@ interface Actions {
     fun shareBackup()
     fun restoreBackup()
     fun saveMd(name: String, text: String)
+    fun shareMd(name: String, text: String)
     fun copyText(t: String)
     fun back()
 }
@@ -220,7 +221,8 @@ fun Modifier.makeRoom(vm: AppVM, id: String, idx: Int, openIdx: () -> Int, h: Fl
 @Composable
 fun NoteCard(
     d: Note, i: Int, kind: String, selected: Boolean, modifier: Modifier = Modifier,
-    delTime: Long = 0L, onLong: (() -> Unit)? = null, track: ((Morph) -> Unit)? = null, tick: Int = 0, cols: Int = 1, onClick: (Morph) -> Unit
+    delTime: Long = 0L, onLong: (() -> Unit)? = null, track: ((Morph) -> Unit)? = null, tick: Int = 0, cols: Int = 1,
+    paper: Boolean = false, onClick: (Morph) -> Unit
 ) {
     val pal = LocalPal.current
     val c2 = cols == 2
@@ -244,7 +246,10 @@ fun NoteCard(
     val mx = mixA.value
     val csA = scheme(fromI)
     val csB = scheme(toI)
-    val cs = androidx.compose.ui.graphics.lerp(csA.first, csB.first, mx) to androidx.compose.ui.graphics.lerp(csA.second, csB.second, mx)
+    // paper = true (dipakai di panel pencarian): kartu polos berwarna sama dengan kertas editor, bukan warna-warni,
+    // supaya kontras dengan wadah pencarian yang sedang aktif
+    val cs = if (paper) pal.s to pal.os
+    else androidx.compose.ui.graphics.lerp(csA.first, csB.first, mx) to androidx.compose.ui.graphics.lerp(csA.second, csB.second, mx)
     val shA = SH[fromI % 5]
     val shB = SH[toI % 5]
     val sh = FloatArray(4) { shA[it] + (shB[it] - shA[it]) * mx }
@@ -261,7 +266,9 @@ fun NoteCard(
     val shape = RoundedCornerShape(cr(0), cr(1), cr(2), cr(3))
     // 2 kolom: sudut besar memotong teks di pojok, jadi teks digeser menjauhi lengkungan (kiri-atas untuk judul, kiri-bawah untuk lencana/footer)
     val insTL = if (c2) ((cr(0).value - 40f).coerceAtLeast(0f) * .45f).dp else 0.dp
-    val insBL = if (c2) ((cr(3).value - 40f).coerceAtLeast(0f) * .45f).dp else 0.dp
+    // sudut kiri-bawah memakai bentuk statis (bukan yang beranimasi saat ditekan) supaya tata letak tidak bergetar; ambangnya
+    // lebih rendah daripada kiri-atas karena baris teks terakhir (descender, footer) menempel di dasar kartu
+    val insBL = if (c2) ((sh[3] - 28f).coerceAtLeast(0f) * .5f).dp else 0.dp
     val padV by animateDpAsState(if (selected) (if (c2) 20.dp else 26.dp) else if (c2) 16.dp else if (kind == "t") 22.dp else if (kind == "s") 20.dp else 24.dp, spring(.7f, 400f), label = "pv")
     val padH by animateDpAsState(if (selected) (if (c2) 20.dp else 32.dp) else if (c2) 16.dp else 24.dp, spring(.7f, 400f), label = "ph")
     var rect by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
@@ -314,14 +321,21 @@ fun CardBody(d: Note, kind: String, c2: Boolean, fg: Color, padH: Dp, padV: Dp, 
         Modifier.fillMaxWidth().padding(horizontal = padH, vertical = padV).let { if (kind == "f") it.defaultMinSize(minHeight = if (c2) 96.dp else 102.dp) else it },
         verticalArrangement = Arrangement.spacedBy(if (kind == "t") 0.dp else if (kind == "s") 6.dp else 10.dp)
     ) {
+        // elemen terakhir yang menempel di pojok kiri-bawah ikut digeser menjauhi lengkungan (trik yang sama dengan kiri-atas)
+        val titleLast = kind == "t" && d.lb.isEmpty()
+        val bodyLast = kind == "s" && d.lb.isEmpty()
         T(
             d.t.ifEmpty { "Tanpa judul" }, if (c2) 16f else if (kind == "s") 19f else 21f, 900, fg,
-            Modifier.padding(start = insTL, top = insTL, end = if (c2) 30.dp else 44.dp), ls = -.015f, lh = 1.1f,
+            Modifier.padding(
+                start = if (titleLast) maxOf(insTL, insBL) else insTL, top = insTL, end = if (c2) 30.dp else 44.dp,
+                bottom = if (titleLast) insBL else 0.dp
+            ), ls = -.015f, lh = 1.1f,
             maxLines = if (c2) 3 else Int.MAX_VALUE
         )
         if (kind != "t") {
             T(
                 d.x.replace(Regex("\\s+"), " ").trim().take(150).ifEmpty { "Kosong" }, if (c2) 13.5f else 15f, 450, fg,
+                modifier = Modifier.padding(start = if (bodyLast) insBL else 0.dp, bottom = if (bodyLast) insBL else 0.dp),
                 maxLines = if (kind == "s") (if (c2) 2 else 1) else (if (c2) 4 else 3), lh = 1.45f, alpha = .8f
             )
         }
@@ -751,7 +765,8 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                         val ri = res.indexOf(d)
                         NoteCard(
                             d, pos[d.id] ?: ri, vm.pr.cd, false,
-                            flowItem().makeRoom(vm, d.id, ri, { res.indexOfFirst { it.id == vm.openId } }, hPx, dens.density)
+                            flowItem().makeRoom(vm, d.id, ri, { res.indexOfFirst { it.id == vm.openId } }, hPx, dens.density),
+                            paper = true
                         ) { m ->
                             focusMgr.clearFocus(); vm.cardMorph[d.id] = m; nav.openNote(d.id, m)
                         }
@@ -948,10 +963,10 @@ fun ListScreen(
 }
 
 // ---------- pengaturan: gaya aplikasi Google (Pixel Settings + Material 3 Expressive) ----------
-private const val POS_ONE = 0
-private const val POS_TOP = 1
-private const val POS_MID = 2
-private const val POS_BOT = 3
+const val POS_ONE = 0
+const val POS_TOP = 1
+const val POS_MID = 2
+const val POS_BOT = 3
 
 /** Pegas tinggi untuk semua kartu di Pengaturan: tinggi berubah mengikuti isi dengan gerak lembut tanpa memantul. */
 val SizeSpring = spring<androidx.compose.ui.unit.IntSize>(dampingRatio = .9f, stiffness = 420f)
@@ -1367,58 +1382,10 @@ fun SheetHost(vm: AppVM, nav: Nav, act: Actions) {
         Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 24.dp).navigationBarsPadding()) {
             fun title(id: String) = vm.note(id)?.t?.ifEmpty { "Tanpa judul" } ?: "Tanpa judul"
             when (s) {
-                is Sheet.Lbl -> {
-                    val d = vm.note(s.id)
-                    T("Label", 26f, 1000, pal.os, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 14.dp), ls = -.01f)
-                    Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState())) {
-                        vm.sortedLabels().forEachIndexed { ix, n ->
-                            Opt(ix + 1, "label", n, null, d != null && n in d.lb) { vm.toggleLabel(s.id, n) }
-                        }
-                    }
-                    Opt(2, "plus", "Label baru") { vm.lblDlg = LblDlg(null, s.id) }
-                }
                 is Sheet.LblEdit -> {
                     T(s.name, 26f, 1000, pal.os, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 14.dp), ls = -.01f)
                     Opt(1, "pen", "Ganti nama") { close(); vm.lblDlg = LblDlg(s.name, null) }
                     Opt(2, "del", "Hapus label", "Catatan tidak ikut terhapus") { close(); vm.deleteLabel(s.name) }
-                }
-                is Sheet.Add -> {
-                    T("Tambah catatan", 26f, 1000, pal.os, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 14.dp), ls = -.01f)
-                    Opt(1, "txt", "Tulis catatan", "Mulai dari halaman kosong") {
-                        close(); val n = vm.newNote(); nav.openNote(n.id, vm.fabMorph, true)
-                    }
-                    Opt(2, "up", "Impor berkas", "Berkas .md atau .txt") { close(); act.importMd() }
-                }
-                is Sheet.Doc -> {
-                    val d = vm.note(s.id)
-                    T(title(s.id), 26f, 1000, pal.os, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 14.dp), ls = -.01f)
-                    Opt(1, "pin", if (d?.p == true) "Lepas sematan" else "Sematkan") {
-                        close(); vm.mark(listOf(s.id), if (d?.p == true) "Sematan dilepas" else "Catatan disematkan") { it.copy(p = !it.p) }
-                    }
-                    Opt(2, "label", "Label", d?.lb?.joinToString(", ")?.ifEmpty { null }) { vm.sheet = Sheet.Lbl(s.id) }
-                    Opt(3, if (d?.a == true) "unarc" else "arc", if (d?.a == true) "Keluarkan dari arsip" else "Arsipkan") {
-                        close()
-                        if (d?.a == true) vm.mark(listOf(s.id), "Dikeluarkan dari arsip") { it.copy(a = false) }
-                        else { act.back(); vm.mark(listOf(s.id), "Catatan diarsipkan") { it.copy(a = true, p = false) } }
-                    }
-                    Opt(4, "dup", "Salin") {
-                        close()
-                        d?.let { act.copyText((if (it.t.isNotEmpty()) "# " + it.t + "\n\n" else "") + toMd(it.bl)) }
-                        vm.show("Disalin ke papan klip")
-                    }
-                    Opt(5, "lib", "Gandakan") { close(); vm.duplicate(s.id) }
-                    Opt(6, "dl", "Unduh sebagai .md") {
-                        close()
-                        d?.let {
-                            act.saveMd(
-                                (it.t.replace(Regex("[^\\w\\- ]+"), "").trim().ifEmpty { "catatan" }) + ".md",
-                                (if (it.t.isNotEmpty()) "# " + it.t + "\n\n" else "") + toMd(it.bl)
-                            )
-                        }
-                    }
-                    Opt(7, "del", "Hapus catatan") {
-                        close(); act.back(); vm.mark(listOf(s.id), "Dipindah ke sampah") { it.copy(dt = System.currentTimeMillis()) }
-                    }
                 }
                 is Sheet.Arc -> {
                     T(title(s.id), 26f, 1000, pal.os, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 14.dp), ls = -.01f)
