@@ -302,6 +302,10 @@ fun TF(
         )
     } else {
         val fr = remember { FocusRequester() }
+        androidx.compose.runtime.DisposableEffect(key) {
+            ed.frs[key] = fr
+            onDispose { if (ed.frs[key] === fr) ed.frs.remove(key) }
+        }
         val bring = remember { BringIntoViewRequester() }
         var lay by remember { mutableStateOf<TextLayoutResult?>(null) }
         var foc by remember { mutableStateOf(false) }
@@ -416,9 +420,10 @@ fun BlockView(ed: Ed, vm: AppVM, b: Blk, ordN: Int, dm: Dm, fold: Fold? = null, 
     val fs = dm.fs
     val bottom = (fs * 1.1f).dp
     when (b.ty) {
-        "p" -> {
-            val only = ed.blocks.size == 1 && b.r.t.isEmpty()
-            TF(ed, b.id, baseStyle(pal, dm), Modifier.fillMaxWidth().padding(bottom = bottom), hint = if (only) "Tulis catatan…" else null, fold = fold)
+        "p", "li" -> {
+            // paragraf dan poin memakai satu composable yang sama: mengubah poin <-> paragraf tidak membuat TextField baru (keyboard tetap)
+            val only = b.ty == "p" && ed.blocks.size == 1 && b.r.t.isEmpty()
+            ParaRow(ed, b, ordN, dm, pal, fold, mk, if (only) "Tulis catatan…" else null)
         }
         "h" -> {
             val st = when (b.lv) {
@@ -429,7 +434,6 @@ fun BlockView(ed: Ed, vm: AppVM, b: Blk, ordN: Int, dm: Dm, fold: Fold? = null, 
             }
             TF(ed, b.id, st, Modifier.fillMaxWidth().padding(top = (fs * .4f).dp, bottom = (fs * .5f).dp))
         }
-        "li" -> ListItem(ed, b, ordN, dm, pal, fold, mk)
         "q" -> {
             val q = qs(b.k, pal)
             Box(
@@ -482,46 +486,54 @@ fun BlockView(ed: Ed, vm: AppVM, b: Blk, ordN: Int, dm: Dm, fold: Fold? = null, 
 }
 
 @Composable
-fun ListItem(ed: Ed, b: Blk, ordN: Int, dm: Dm, pal: Pal, fold: Fold? = null, mk: Float = 0f) {
+fun ParaRow(ed: Ed, b: Blk, ordN: Int, dm: Dm, pal: Pal, fold: Fold?, mk: Float, hint: String?) {
     val fs = dm.fs
+    val li = b.ty == "li"
     val lineH = fs * dm.lh
     val mw = when (b.lt) { "o" -> 2.2f; "c" -> 1.9f; else -> 1.7f } * fs
-    val done = b.lt == "c" && b.x
-    Row(Modifier.fillMaxWidth().padding(start = (b.d * 1.4f * fs).dp, bottom = (fs * .5f).dp)) {
-        // penanda dipusatkan secara vertikal pada tinggi baris, lalu sedikit dinaikkan agar sejajar dengan x-height teks
-        Box(
-            Modifier.offset(mk.dp, 0.dp).width(mw.dp).height(lineH.dp).then(
-                if (b.lt == "c") Modifier.clickable(
-                    interactionSource = remember { MutableInteractionSource() }, indication = null
-                ) { ed.toggleCheck(b.id) } else Modifier
-            ),
-            contentAlignment = Alignment.CenterStart
-        ) {
-            when (b.lt) {
-                "o" -> Box(
-                    Modifier.offset(0.dp, (-.04f * fs).dp).size((1.55f * fs).dp).clip(CircleShape).background(pal.p),
-                    Alignment.Center
-                ) { T(ordN.toString(), fs * .85f, 900, pal.op) }
-                "c" -> {
-                    val sz = (1.15f * fs).dp
-                    val shape = RoundedCornerShape((.3f * 1.15f * fs).dp)
-                    Box(
-                        Modifier.offset((.1f * fs).dp, (-.04f * fs).dp).size(sz).clip(shape)
-                            .then(if (done) Modifier.background(pal.p) else Modifier.border((.14f * fs).dp, pal.p, shape)),
+    val done = li && b.lt == "c" && b.x
+    Row(
+        Modifier.fillMaxWidth().padding(
+            start = if (li) (b.d * 1.4f * fs).dp else 0.dp,
+            bottom = (if (li) fs * .5f else fs * 1.1f).dp
+        )
+    ) {
+        if (li) {
+            // penanda dipusatkan secara vertikal pada tinggi baris, lalu sedikit dinaikkan agar sejajar dengan x-height teks
+            Box(
+                Modifier.offset(mk.dp, 0.dp).width(mw.dp).height(lineH.dp).then(
+                    if (b.lt == "c") Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() }, indication = null
+                    ) { ed.toggleCheck(b.id) } else Modifier
+                ),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                when (b.lt) {
+                    "o" -> Box(
+                        Modifier.offset(0.dp, (-.04f * fs).dp).size((1.55f * fs).dp).clip(CircleShape).background(pal.p),
                         Alignment.Center
-                    ) { if (done) Ic("ok", Color.White, sz * .78f) }
+                    ) { T(ordN.toString(), fs * .85f, 900, pal.op) }
+                    "c" -> {
+                        val sz = (1.15f * fs).dp
+                        val shape = RoundedCornerShape((.3f * 1.15f * fs).dp)
+                        Box(
+                            Modifier.offset((.1f * fs).dp, (-.04f * fs).dp).size(sz).clip(shape)
+                                .then(if (done) Modifier.background(pal.p) else Modifier.border((.14f * fs).dp, pal.p, shape)),
+                            Alignment.Center
+                        ) { if (done) Ic("ok", Color.White, sz * .78f) }
+                    }
+                    else -> Box(
+                        Modifier.offset((.3f * fs).dp, (-.04f * fs).dp).size((.5f * fs).dp).clip(
+                            RoundedCornerShape(topStartPercent = 40, topEndPercent = 60, bottomEndPercent = 55, bottomStartPercent = 45)
+                        ).background(pal.p)
+                    )
                 }
-                else -> Box(
-                    Modifier.offset((.3f * fs).dp, (-.04f * fs).dp).size((.5f * fs).dp).clip(
-                        RoundedCornerShape(topStartPercent = 40, topEndPercent = 60, bottomEndPercent = 55, bottomStartPercent = 45)
-                    ).background(pal.p)
-                )
             }
         }
         val st = baseStyle(pal, dm).let {
             if (done) it.copy(color = it.color.copy(alpha = .6f), textDecoration = TextDecoration.LineThrough) else it
         }
-        TF(ed, b.id, st, Modifier.weight(1f), fold = fold)
+        TF(ed, b.id, st, Modifier.weight(1f), hint = hint, fold = fold)
     }
 }
 
