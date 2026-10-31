@@ -199,12 +199,14 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
     LaunchedEffect(on) {
         if (on) {
             vm.closing = false
+            CloseFx.err = null
             vm.openP.animateTo(1f, spring(.86f, 320f))
         } else {
             val follow = vm.closing
             val job = if (follow) launch { followCard(vm) } else null
             vm.openP.animateTo(0f, if (follow) spring(.9f, 330f) else spring(.92f, 400f))
             job?.cancel()
+            CloseFx.err = null
             vm.closing = false
         }
     }
@@ -215,7 +217,7 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
         Modifier.fillMaxSize().graphicsLayer { translationX = -u * size.width * .26f }.pointerInput(Unit) { }.drawWithContent {
             val tt = vm.openP.value.coerceIn(0f, 1f)
             vm.morphTick
-            val m = vm.morph ?: Morph(size.width * .12f, size.height * .4f, size.width * .88f, size.height * .6f, 32.dp.toPx(), pal.s)
+            val m = effMorph(vm) ?: Morph(size.width * .12f, size.height * .4f, size.width * .88f, size.height * .6f, 32.dp.toPx(), pal.s)
             // tepi kiri/kanan sedikit lebih cepat dari tepi atas/bawah: wadah terasa "meregang" ke bawah/atas di akhir
             // kartu sempit (grid 2 kolom): semua tepi bergerak serempak supaya tidak miring/melar; kartu lebar: tepi kiri-kanan sedikit lebih cepat
             val narrow = (m.r - m.l) < size.width * .7f
@@ -238,7 +240,7 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
                 // isi catatan mulai muncul lebih awal dan bertumpang dengan teks kartu (pudar-silang), bukan menunggu kartu hilang dulu
                 val tt = vm.openP.value.coerceIn(0f, 1f)
                 vm.morphTick
-                val mm = vm.morph
+                val mm = effMorph(vm)
                 val x = ((vm.openP.value - .2f) / .5f).coerceIn(0f, 1f)
                 val a = x * x * (3f - 2f * x)
                 alpha = a
@@ -270,7 +272,7 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
             Box(
                 Modifier.layout { meas, c ->
                         vm.morphTick
-                        val mm = vm.morph ?: morph
+                        val mm = effMorph(vm) ?: morph
                         val wpx = (mm.r - mm.l).roundToInt().coerceAtLeast(1)
                         val pl = meas.measure(c.copy(minWidth = wpx, maxWidth = wpx, minHeight = 0, maxHeight = androidx.compose.ui.unit.Constraints.Infinity))
                         layout(wpx, pl.height) { pl.place(0, 0) }
@@ -281,7 +283,7 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
                         // jadi bergerak serempak dengan bentuknya, bukan diam di posisi kartu lalu "menyusul"
                         val tt = vm.openP.value.coerceIn(0f, 1f)
                         vm.morphTick
-                        val mm = vm.morph ?: morph
+                        val mm = effMorph(vm) ?: morph
                         val narrow = (mm.r - mm.l) < scrW * .7f
                         val tx = if (narrow) tt else (tt * 1.12f).coerceIn(0f, 1f)
                         translationX = lerp(mm.l, 0f, tx)
@@ -296,29 +298,43 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
     }
 }
 
+/** Selisih posisi awal morph terhadap kartu tujuan; mengecil linear mengikuti progres menutup (tanpa pengejaran ekstra). */
+object CloseFx {
+    @JvmField var err: FloatArray? = null
+}
+
 /**
- * Selama morph menutup, mengejar posisi kartu tujuan yang terkini (kartu bisa bergerak karena daftar digulir otomatis
- * atau karena catatan pindah urutan). Dikejar dengan peluruhan eksponensial supaya tidak melompat saat kartu baru muncul di layar.
+ * Posisi morph yang dipakai menggambar. Saat menutup dan kartu tujuan sedang tampil, bentuk = posisi kartu SAAT INI
+ * (dibaca langsung di fase gambar, jadi tidak tertinggal satu frame walau daftar sedang bergulir) ditambah selisih awal
+ * yang meluruh bersama openP. Hanya satu animasi (spring openP) yang menggerakkan bentuk, jadi mulus.
+ */
+fun effMorph(vm: AppVM): Morph? {
+    val m = vm.morph ?: return null
+    val e = CloseFx.err ?: return m
+    val live = vm.openId?.let { vm.cardMorph[it] } ?: return m
+    val tt = vm.openP.value.coerceIn(0f, 1f)
+    return Morph(
+        live.l + e[0] * tt, live.t + e[1] * tt, live.r + e[2] * tt, live.b + e[3] * tt,
+        live.rad, live.color, live.r4, live.ghost
+    )
+}
+
+/**
+ * Selama morph menutup: begitu kartu tujuan tampil (mungkin setelah daftar digulir otomatis), catat selisihnya dari posisi
+ * morph saat itu supaya tidak melompat, lalu hanya memicu gambar ulang tiap frame.
  */
 suspend fun followCard(vm: AppVM) {
-    var last = withFrameNanos { it }
+    CloseFx.err = null
     while (true) {
-        val now = withFrameNanos { it }
-        val dt = ((now - last) / 1e9f).coerceIn(0f, .05f)
-        last = now
-        val live = vm.openId?.let { vm.cardMorph[it] } ?: continue
-        val cur = vm.morph ?: live
-        val k = 1f - kotlin.math.exp(-dt * 20f)
-        fun f(a: Float, b: Float) = a + (b - a) * k
-        val r4a = cur.r4
-        val r4b = live.r4
-        val r4 = if (r4a != null && r4b != null) FloatArray(4) { f(r4a[it], r4b[it]) } else r4b ?: r4a
-        val hadGhost = cur.ghost != null
-        vm.morph = Morph(
-            f(cur.l, live.l), f(cur.t, live.t), f(cur.r, live.r), f(cur.b, live.b), f(cur.rad, live.rad),
-            androidx.compose.ui.graphics.lerp(cur.color, live.color, k), r4, live.ghost
-        )
-        if (!hadGhost && live.ghost != null) vm.ghostVer++
+        withFrameNanos { }
+        val live = vm.openId?.let { vm.cardMorph[it] }
+        if (live != null && CloseFx.err == null) {
+            val cur = vm.morph ?: live
+            val k = vm.openP.value.coerceIn(.05f, 1f)
+            CloseFx.err = floatArrayOf((cur.l - live.l) / k, (cur.t - live.t) / k, (cur.r - live.r) / k, (cur.b - live.b) / k)
+            if (cur.ghost == null && live.ghost != null) vm.ghostVer++
+        }
+        effMorph(vm)?.let { vm.morph = it }
         vm.morphTick++
     }
 }
