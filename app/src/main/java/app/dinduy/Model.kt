@@ -184,6 +184,15 @@ data class Blk(
     val isMulti: Boolean get() = ty == "q" || ty == "code"
 }
 
+/** Rekaman suara pada catatan. File: filesDir/audio/<id>.m4a. tr = hasil transkripsi (kosong = belum). */
+@Serializable
+data class Aud(
+    val id: String,
+    val du: Long = 0L,       // durasi (ms)
+    val tr: String = "",     // transkripsi
+    val at: Long = 0L        // waktu dibuat
+)
+
 @Serializable
 data class Note(
     val id: String,
@@ -198,7 +207,8 @@ data class Note(
     val lb: List<String> = emptyList(),  // nama label catatan
     val rm: Long = 0L,                   // pengingat: waktu bunyi pertama (epoch ms), 0 = tanpa pengingat
     val rr: String = "",                 // ulangi pengingat: "" tidak / d harian / w mingguan / m bulanan / y tahunan
-    val rd: Long = 0L                    // waktu pengingat tidak-berulang yang sudah dibunyikan (supaya tidak dobel setelah HP menyala ulang)
+    val rd: Long = 0L,                   // waktu pengingat tidak-berulang yang sudah dibunyikan (supaya tidak dobel setelah HP menyala ulang)
+    val au: List<Aud> = emptyList()      // rekaman suara (ditampilkan di bawah catatan)
 )
 
 @Serializable
@@ -211,7 +221,8 @@ data class Prefs(
     val cd: String = "f",
     val ff: String = "def",  // jenis huruf: def / flex / times
     val cols: Int = 1,       // jumlah kolom kartu di beranda (1 / 2)
-    val dyn: Boolean = true  // true = warna mengikuti perangkat (Material You, Android 12+); false = warna kustom (seed)
+    val dyn: Boolean = true, // true = warna mengikuti perangkat (Material You, Android 12+); false = warna kustom (seed)
+    val wm: String = "base"  // model transkripsi aktif: base / small
 )
 
 @Serializable
