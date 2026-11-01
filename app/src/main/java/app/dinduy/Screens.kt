@@ -154,6 +154,8 @@ interface Actions {
     fun shareMd(name: String, text: String)
     fun copyText(t: String)
     fun askNotif()   // minta / arahkan ke izin notifikasi supaya pengingat bisa muncul
+    fun requestMic(onGranted: () -> Unit)   // minta izin mikrofon saat dibutuhkan; onGranted dipanggil bila diizinkan
+    fun saveAudio(aud: Aud, name: String)   // simpan berkas suara lewat pemilih berkas sistem (tanpa izin penyimpanan)
     fun back()
 }
 
@@ -342,7 +344,7 @@ fun CardBody(d: Note, kind: String, c2: Boolean, fg: Color, padH: Dp, padV: Dp, 
         )
         if (kind != "t") {
             T(
-                d.x.replace(Regex("\\s+"), " ").trim().take(150).ifEmpty { "Kosong" }, if (c2) 13.5f else 15f, 450, fg,
+                d.x.replace(Regex("\\s+"), " ").trim().take(150).ifEmpty { if (d.au.isNotEmpty()) "Catatan suara" else "Kosong" }, if (c2) 13.5f else 15f, 450, fg,
                 modifier = Modifier.padding(start = if (bodyLast) insBL else 0.dp, bottom = if (bodyLast) insBL else 0.dp),
                 maxLines = if (kind == "s") (if (c2) 2 else 1) else (if (c2) 4 else 3), lh = 1.45f, alpha = .8f
             )
@@ -694,7 +696,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
     val live = vm.sorted(vm.liveF()).let { l ->
         // 1 & 2 kolom: catatan kosong yang sedang dibuka disembunyikan dari grid supaya kartu lain tidak bergeser
         l.filterNot { d ->
-            d.t.isBlank() && d.x.isBlank() && d.bl.none { it.isObj && it.ty != "hr" } && d.rm == 0L &&
+            d.t.isBlank() && d.x.isBlank() && d.bl.none { it.isObj && it.ty != "hr" } && d.rm == 0L && d.au.isEmpty() &&
                 vm.openId == d.id && vm.nav.stack.any { s -> s is Scr.Note && s.id == d.id }
         }
     }
@@ -1404,15 +1406,23 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                 SGroup("Cadangan", 180) {
                     val n = vm.docs.size
                     val ni = vm.imgIds().size
+                    val na = vm.docs.sumOf { it.au.size }
                     val old = vm.lastBk != 0L && System.currentTimeMillis() - vm.lastBk > 7 * 86400000L
-                    val info = "$n catatan, $ni foto. " + (if (vm.lastBk != 0L) {
+                    val info = "$n catatan, $ni foto, $na suara. " + (if (vm.lastBk != 0L) {
                         "Cadangan terakhir: " + SimpleDateFormat("d MMM yyyy, HH.mm", Locale("id", "ID")).format(Date(vm.lastBk)) +
                             (if (old) ". Sudah lebih dari seminggu, cadangkan lagi." else ".")
                     } else "Belum pernah dicadangkan.") + " Berkas cadangan disimpan di perangkat, tanpa server."
                     SCard(POS_TOP) { T(info, 14f, 400, pal.osv, lh = 1.5f) }
-                    SActionRow(POS_MID, "dl", "Simpan cadangan", "Satu berkas .dinduy berisi catatan dan foto") { act.saveBackup() }
+                    SActionRow(POS_MID, "dl", "Simpan cadangan", "Satu berkas .dinduy berisi catatan, foto, dan suara") { act.saveBackup() }
                     SActionRow(POS_MID, "up", "Bagikan cadangan", "Kirim lewat WhatsApp, Berkas, dan lainnya") { act.shareBackup() }
                     SActionRow(POS_BOT, "restore", "Pulihkan cadangan", "Pilih berkas .dinduy dari perangkat (termasuk dari versi web)") { act.restoreBackup() }
+                }
+                SGroup("Suara", 240) {
+                    val ready = vm.models.list.filter { it.status == 2 }.joinToString { it.info.name }
+                    SActionRow(
+                        POS_ONE, "mic", "Unduh model transkripsi",
+                        if (ready.isEmpty()) "Dibutuhkan untuk mengubah suara jadi teks tanpa internet" else "Siap dipakai: $ready"
+                    ) { vm.nav.push(Scr.Models) }
                 }
             }
         }
@@ -1506,7 +1516,7 @@ fun SheetHost(vm: AppVM, nav: Nav, act: Actions) {
                     val p = vm.pending
                     T("Pulihkan cadangan", 26f, 1000, pal.os, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp), ls = -.01f)
                     if (p != null) T(
-                        "${p.notes.size} catatan, ${p.nImg} foto, dibuat " + SimpleDateFormat("d MMM yyyy, HH.mm", Locale("id", "ID")).format(Date(p.at)),
+                        "${p.notes.size} catatan, ${p.nImg} foto, " + (if (p.aids.isNotEmpty()) "${p.aids.size} suara, " else "") + "dibuat " + SimpleDateFormat("d MMM yyyy, HH.mm", Locale("id", "ID")).format(Date(p.at)),
                         14f, 400, pal.osv, Modifier.padding(start = 4.dp, bottom = 12.dp)
                     )
                     Opt(1, "lib", "Gabungkan", "Tambahkan dari cadangan, catatan yang ada tetap aman") { close(); vm.applyBackup(false) }
