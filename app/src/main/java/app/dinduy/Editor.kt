@@ -213,6 +213,13 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     fun onText(key: String, v0: TextFieldValue) {
         val old = tf[key] ?: return
         if (v0.text == old.text) {
+            val whole = v0.text.isNotEmpty() && !v0.selection.collapsed &&
+                v0.selection.min <= 1 && v0.selection.max >= v0.text.length
+            if (whole) {
+                // "Pilih semua" (Gboard / keyboard) memilih seluruh kolom: naikkan jadi seleksi seluruh catatan
+                if (!selOn) selectAllKey(key)
+                return
+            }
             val v = clampSel(v0)
             tf[key] = v
             if (v.selection != old.selection) { if (selEdit) dropSel(); caretMoved(key) }
@@ -394,8 +401,10 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     private fun split(i: Int, pos: Int, nty: String) {
         val b = blocks[i]
-        val left = b.r.slice(0, pos)
-        val right = b.r.slice(pos, b.r.t.length)
+        var left = b.r.slice(0, pos)
+        var right = b.r.slice(pos, b.r.t.length)
+        if (right.t.startsWith("\n")) right = right.slice(1, right.t.length)
+        if (left.t.endsWith("\n")) left = left.slice(0, left.t.length - 1)
         val nb = if (nty == "li") Blk(ty = "li", lt = b.lt, d = b.d, r = right) else Blk(ty = "p", r = right)
         blocks = blocks.toMutableList().also { it[i] = b.copy(r = left); it.add(i + 1, nb) }
         tf[b.id] = TextFieldValue(Z + left.t, TextRange(left.t.length + 1))
@@ -466,7 +475,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (i < 0) return
         val b = blocks[i]
         commit()
-        val ns = md(s.trimEnd('\n'))
+        val ns = md(s.trimEnd('\n'), true)
         if (ns.isEmpty()) return
         val l = blocks.toMutableList()
         val rt = b.r
@@ -540,11 +549,50 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         req = Req(key, 0, ++rq, keepSel)
     }
 
-    fun setHead(lv: Int) = convertFocused { b ->
+    /** Paragraf berisi beberapa baris (\n) dipecah jadi satu blok per baris; kembalikan kunci blok di baris kursor. */
+    private fun explodeLines(key: String): String {
+        val i = idx(key)
+        if (i < 0 || isCellKey(key)) return key
+        val b = blocks[i]
+        if ((b.ty != "p" && b.ty != "li") || !b.r.t.contains('\n')) return key
+        val cur = ((tf[key]?.selection?.min ?: 1) - 1).coerceIn(0, b.r.t.length)
+        commit()
+        val parts = ArrayList<Blk>()
+        var start = 0
+        var target: Blk? = null
+        var off = 0
+        for ((n, ln) in b.r.t.split('\n').withIndex()) {
+            val end = start + ln.length
+            val r = b.r.slice(start, end)
+            val nb = if (n == 0) b.copy(r = r)
+                else if (b.ty == "li") Blk(ty = "li", lt = b.lt, d = b.d, r = r) else Blk(ty = "p", r = r)
+            if (target == null && cur <= end) { target = nb; off = (cur - start).coerceAtLeast(0) }
+            parts.add(nb)
+            start = end + 1
+        }
+        val tg = target ?: parts.last()
+        blocks = blocks.toMutableList().also { it[i] = parts[0]; it.addAll(i + 1, parts.drop(1)) }
+        parts.forEach { seed(it) }
+        tf[tg.id] = tf[tg.id]!!.copy(selection = TextRange(off + 1))
+        focus = tg.id
+        return tg.id
+    }
+
+    fun setHead(lv: Int) {
+        if (!selOn) focus?.let { explodeLines(it) }
+        setHeadRaw(lv)
+    }
+
+    private fun setHeadRaw(lv: Int) = convertFocused { b ->
         if (b.ty == "h" && b.lv == lv) b.copy(ty = "p") else b.copy(ty = "h", lv = lv, r = flat(b.r))
     }
 
-    fun setList(t: String) = convertFocused { b ->
+    fun setList(t: String) {
+        if (!selOn) focus?.let { explodeLines(it) }
+        setListRaw(t)
+    }
+
+    private fun setListRaw(t: String) = convertFocused { b ->
         if (b.ty == "li" && b.lt == t) b.copy(ty = "p")
         else b.copy(ty = "li", lt = t, d = if (b.ty == "li") b.d else 0, r = flat(b.r))
     }
@@ -1249,6 +1297,90 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
                 delay(16)
             }
         }
+    }
+
+    // ---------- keyboard: pilih semua, panah, shift+panah (panel "pengeditan teks" Gboard / keyboard fisik) ----------
+    fun selectAllKey(key: String) {
+        if (selOn) { selAll(); return }
+        val v = tf[key]
+        val len = rtOf(key).t.length
+        val caret = ((v?.selection?.end ?: 1) - 1).coerceIn(0, len)
+        commit()
+        selBack = Pt(key, caret)
+        selWho = 0; selDrag = false
+        selImg = null; pickQuote = false; miniBar = false
+        selAll()
+        if (v != null) tf[key] = v.copy(selection = TextRange(caret + 1))
+        caretMoved(key)
+    }
+
+    private fun stepPt(p: Pt, dir: Int): Pt? {
+        ordRefresh()
+        val i = ordMap[p.key] ?: return null
+        val len = rtOf(p.key).t.length
+        if (dir == 0) return if (p.off > 0) Pt(p.key, p.off - 1) else ordList.getOrNull(i - 1)?.let { Pt(it, rtOf(it).t.length) }
+        if (dir == 1) return if (p.off < len) Pt(p.key, p.off + 1) else ordList.getOrNull(i + 1)?.let { Pt(it, 0) }
+        val up = dir == 2
+        val lay = lays[p.key]
+        val pos = kpos[p.key]
+        val r = ptRect(p)
+        if (lay != null && pos != null && r != null) {
+            val ln = lay.getLineForOffset(toLay(p.key, p.off).coerceIn(0, lay.layoutInput.text.length))
+            if (if (up) ln > 0 else ln < lay.lineCount - 1) {
+                val local = Offset(r.left - pos.x, if (up) r.top - pos.y - 2f else r.bottom - pos.y + 2f)
+                return Pt(p.key, fromLay(p.key, lay.getOffsetForPosition(local)).coerceIn(0, len))
+            }
+            val nk = ordList.getOrNull(if (up) i - 1 else i + 1) ?: return Pt(p.key, if (up) 0 else len)
+            val l2 = lays[nk]
+            val p2 = kpos[nk]
+            val n2 = rtOf(nk).t.length
+            if (l2 == null || p2 == null) return Pt(nk, if (up) n2 else 0)
+            val local = Offset(r.left - p2.x, if (up) l2.size.height - 1f else 0f)
+            return Pt(nk, fromLay(nk, l2.getOffsetForPosition(local)).coerceIn(0, n2))
+        }
+        val nk = ordList.getOrNull(if (up) i - 1 else i + 1) ?: return Pt(p.key, if (up) 0 else len)
+        return Pt(nk, if (up) rtOf(nk).t.length else 0)
+    }
+
+    /** dir: 0 kiri, 1 kanan, 2 atas, 3 bawah. true = tombol sudah ditangani (field tidak perlu memprosesnya). */
+    fun navKey(key: String, dir: Int, shift: Boolean): Boolean {
+        if (selOn) {
+            val (lo, hi) = selSpan() ?: return false
+            if (shift) {
+                val np = stepPt(pf ?: return false, dir)
+                if (np != null) pf = np
+                return true
+            }
+            val t = if (dir == 0 || dir == 2) lo else hi
+            dropSel()
+            focusAt(t.key, t.off)
+            return true
+        }
+        val v = tf[key] ?: return false
+        val len = rtOf(key).t.length
+        if (!shift && !v.selection.collapsed) return false
+        val caret = (v.selection.end - 1).coerceIn(0, len)
+        val anchor = (v.selection.start - 1).coerceIn(0, len)
+        val edge = when (dir) {
+            0 -> caret <= 0
+            1 -> caret >= len
+            else -> {
+                val lay = lays[key] ?: return false
+                val ln = lay.getLineForOffset(toLay(key, caret).coerceIn(0, lay.layoutInput.text.length))
+                if (dir == 2) ln == 0 else ln == lay.lineCount - 1
+            }
+        }
+        if (!edge) return false
+        val from = Pt(key, caret)
+        val to = stepPt(from, dir) ?: return true
+        if (to == from) return true
+        if (shift) {
+            commit()
+            selBack = from; selWho = 0; selDrag = false
+            selImg = null; pickQuote = false; miniBar = false
+            pa = Pt(key, anchor); pf = to; selOn = true
+        } else focusAt(to.key, to.off)
+        return true
     }
 
     fun selAll() {
