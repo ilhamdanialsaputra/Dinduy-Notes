@@ -579,7 +579,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             p(c.get(java.util.Calendar.MINUTE)) + ".dinduy"
     }
 
-    /** Format baru: ZIP berisi data.json + img/*.jpg + audio/*.m4a. Format lama (DINDUY01) tetap bisa dibaca saat memulihkan. */
+    /** Format baru: ZIP berisi data.json, folder img (foto), dan folder audio (suara). Format lama (DINDUY01) tetap bisa dibaca saat memulihkan. */
     fun writeBackup(os: OutputStream) {
         val imgs = imgIds().filter { id -> File(imgDir, "$id.jpg").let { it.exists() && it.length() > 0L } }
         val auds = audIds().filter { id -> AudioFiles.file(ctx, id).let { it.exists() && it.length() > 0L } }
