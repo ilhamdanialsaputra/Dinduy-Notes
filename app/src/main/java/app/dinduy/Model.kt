@@ -189,8 +189,9 @@ data class Blk(
 data class Aud(
     val id: String,
     val du: Long = 0L,       // durasi (ms)
-    val tr: String = "",     // transkripsi
-    val at: Long = 0L        // waktu dibuat
+    val tr: String = "",     // (lama) transkripsi; sekarang transkrip ditulis sebagai blok di isi catatan
+    val at: Long = 0L,       // waktu dibuat
+    val tb: List<String> = emptyList()   // id blok "Transkrip N" di isi catatan (untuk diganti saat transkripsi diulang)
 )
 
 @Serializable
@@ -222,7 +223,11 @@ data class Prefs(
     val ff: String = "def",  // jenis huruf: def / flex / times
     val cols: Int = 1,       // jumlah kolom kartu di beranda (1 / 2)
     val dyn: Boolean = true, // true = warna mengikuti perangkat (Material You, Android 12+); false = warna kustom (seed)
-    val wm: String = "base"  // model transkripsi aktif: base / small
+    val wm: String = "base", // model offline aktif: base / small
+    val eng: String = "groq",// mesin transkripsi pilihan: groq (API key, online) / off (model offline)
+    val gl: String = "",     // bahasa ucapan: "" otomatis, atau kode ISO (id, en)
+    val gf: Boolean = true   // rapikan transkrip Groq jadi Markdown (kata tidak diubah, dicek otomatis)
+    // CATATAN KEAMANAN: API key TIDAK PERNAH disimpan di sini (Prefs ikut masuk ke berkas cadangan).
 )
 
 @Serializable
