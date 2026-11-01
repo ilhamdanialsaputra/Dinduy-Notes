@@ -365,7 +365,7 @@ fun TF(
         @Suppress("DEPRECATION")
         val clipM = androidx.compose.ui.platform.LocalClipboardManager.current
         val hideNative = ed.selOn   // seleksi editor aktif: sembunyikan kursor + pegangan bawaan field supaya tidak dobel
-        val cols = if (hideNative) androidx.compose.foundation.text.selection.TextSelectionColors(Color.Transparent, selCols.backgroundColor) else selCols
+        val cols = if (hideNative) androidx.compose.foundation.text.selection.TextSelectionColors(Color.Transparent, Color.Transparent) else selCols
         CompositionLocalProvider(
             LocalViewConfiguration provides vcNoLong,
             androidx.compose.foundation.text.selection.LocalTextSelectionColors provides cols
