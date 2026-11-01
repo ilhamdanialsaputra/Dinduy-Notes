@@ -220,6 +220,20 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
                 if (!selOn) selectAllKey(key)
                 return
             }
+            // tombol "lompat ke awal/akhir teks" Gboard saat menyeleksi = setSelection(jangkar, ujung blok): perluas ke ujung catatan
+            if (!v0.selection.collapsed && !isCellKey(key)) {
+                val vl = v0.text.length
+                val toEnd = v0.selection.end >= vl && old.selection.end < vl - 1
+                val toStart = v0.selection.end <= 0 && old.selection.end > 1
+                if (toEnd || toStart) {
+                    ordRefresh()
+                    val k = (if (toEnd) ordList.lastOrNull() else ordList.firstOrNull())
+                    if (k != null && k != key) {
+                        extendJump(key, (v0.selection.start - 1).coerceAtLeast(0), (old.selection.end - 1).coerceAtLeast(0), Pt(k, if (toEnd) rtOf(k).t.length else 0))
+                        return
+                    }
+                }
+            }
             val v = clampSel(v0)
             tf[key] = v
             if (v.selection != old.selection) { if (selEdit) dropSel(); caretMoved(key) }
@@ -1341,6 +1355,20 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         }
         val nk = ordList.getOrNull(if (up) i - 1 else i + 1) ?: return Pt(p.key, if (up) 0 else len)
         return Pt(nk, if (up) rtOf(nk).t.length else 0)
+    }
+
+    private fun extendJump(key: String, anchor: Int, oldCaret: Int, to: Pt) {
+        val len = rtOf(key).t.length
+        if (selOn) pf = to
+        else {
+            commit()
+            selBack = Pt(key, oldCaret.coerceIn(0, len)); selWho = 0; selDrag = false
+            selImg = null; pickQuote = false; miniBar = false
+            pa = Pt(key, anchor.coerceIn(0, len)); pf = to; selOn = true
+        }
+        tf[key]?.let { tf[key] = it.copy(selection = if (len > 0) TextRange(1, len + 1) else TextRange(0, 1)) }
+        caretMoved(key)
+        revealPf()
     }
 
     /** Gulir supaya titik lawan seleksi (pf) terlihat. */
