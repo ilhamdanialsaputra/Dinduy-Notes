@@ -504,9 +504,6 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     ViewLayer(on = top is Scr.Settings || modelsOnSettings, under = modelsOnSettings) {
                         SettingsScreen(vm, act, onBack = { nav.pop() })
                     }
-                    ViewLayer(on = top is Scr.Models, under = false) {
-                        ModelsScreen(vm, onBack = { nav.pop() })
-                    }
                     AddScrim(vm)
                     NoteLayer(vm, on = inNote, morph = vm.morph, under = top is Scr.NoteMenu || top is Scr.NoteLabels || modelsOnNote) {
                         val id = nav.noteId
@@ -528,6 +525,10 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     }
                     ViewLayer(on = top is Scr.NoteLabels, under = false) {
                         pageIds[1]?.let { NoteLabelsPage(vm, nav, it) }
+                    }
+                    // halaman transkripsi: digambar PALING ATAS (di atas editor), kalau tidak tersembunyi di balik lapisan catatan
+                    ViewLayer(on = top is Scr.Models, under = false) {
+                        ModelsScreen(vm, onBack = { nav.pop() })
                     }
 
                     SelBar(vm)
