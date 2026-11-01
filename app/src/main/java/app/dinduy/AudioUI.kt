@@ -1,5 +1,3 @@
-@file:OptIn(ExperimentalMaterial3ExpressiveApi::class)
-
 package app.dinduy
 
 import androidx.compose.animation.AnimatedVisibility
@@ -42,8 +40,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -197,6 +193,33 @@ fun GBtn(
     }
 }
 
+/** Indikator memuat ala Material 3 Expressive: bentuk bergelombang yang berputar dan berdenyut (digambar sendiri). */
+@Composable
+fun LoadingBlob(modifier: Modifier = Modifier) {
+    val pal = LocalPal.current
+    val tr = rememberInfiniteTransition(label = "blob")
+    val rot by tr.animateFloat(0f, 360f, infiniteRepeatable(tween(2400, easing = LinearEasing)), label = "rot")
+    val pul by tr.animateFloat(0f, 1f, infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Reverse), label = "pul")
+    Canvas(modifier) {
+        val c = Offset(size.width / 2f, size.height / 2f)
+        val rr = size.minDimension / 2f * .86f
+        val lobes = 8
+        val depth = .10f + .10f * pul
+        val path = Path()
+        val steps = 96
+        for (i in 0..steps) {
+            val th = 2.0 * PI * i / steps
+            val rad = rr * (1f - depth + depth * kotlin.math.cos(lobes * th).toFloat())
+            val a = th + rot * PI / 180.0
+            val x = c.x + rad * kotlin.math.cos(a).toFloat()
+            val y = c.y + rad * sin(a).toFloat()
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        path.close()
+        drawPath(path, pal.p)
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Kartu rekaman (melayang di atas kapsul alat, ikut menggeser area gulir supaya tidak menutupi kursor)
 // ---------------------------------------------------------------------------------------------
@@ -335,7 +358,7 @@ fun AudioCard(vm: AppVM, noteId: String, a: Aud, idx: Int, total: Int, title: St
                         .padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    LoadingIndicator(modifier = Modifier.size(44.dp))
+                    LoadingBlob(Modifier.size(44.dp))
                     Spacer(Modifier.width(10.dp))
                     val st = when (vm.trStage) {
                         0 -> "Menyiapkan suara…"
