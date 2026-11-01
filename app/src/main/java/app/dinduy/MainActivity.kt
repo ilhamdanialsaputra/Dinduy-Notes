@@ -528,7 +528,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     }
                     // halaman transkripsi: digambar PALING ATAS (di atas editor), kalau tidak tersembunyi di balik lapisan catatan
                     ViewLayer(on = top is Scr.Models, under = false) {
-                        ModelsScreen(vm, onBack = { nav.pop() })
+                        ModelsScreen(vm, act, onBack = { nav.pop() })
                     }
 
                     SelBar(vm)
@@ -677,10 +677,16 @@ class MainActivity : ComponentActivity(), Actions {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        Bg.fg = true
+    }
+
     override fun onStop() {
         super.onStop()
+        Bg.fg = false
         vm.player.pause()
-        if (vm.rec.active) vm.stopRec()   // perekam tidak boleh jalan di latar belakang: simpan apa yang sudah direkam
+        if (vm.rec.active && !Bg.running) vm.stopRec()   // rekaman lanjut di latar belakang lewat layanan; kalau layanan tak jalan, simpan yang sudah direkam
         vm.ed?.flush()
         vm.saveNow()
     }
