@@ -292,7 +292,7 @@ object WavDecoder {
         }
     }
 
-    private fun header(dataBytes: Long): ByteArray {
+    fun header(dataBytes: Long): ByteArray {
         val b = java.nio.ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
         b.put("RIFF".toByteArray()); b.putInt((36 + dataBytes).toInt())
         b.put("WAVE".toByteArray()); b.put("fmt ".toByteArray())
