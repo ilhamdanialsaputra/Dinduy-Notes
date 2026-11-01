@@ -1310,7 +1310,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         selWho = 0; selDrag = false
         selImg = null; pickQuote = false; miniBar = false
         selAll()
-        if (v != null) tf[key] = v.copy(selection = TextRange(caret + 1))
+        // seleksi field dibiarkan tidak kosong: Gboard menonaktifkan (abu-abu) tombol Salin/Potong kalau menganggap tak ada seleksi
+        if (v != null) tf[key] = v.copy(selection = if (len > 0) TextRange(1, len + 1) else TextRange(0, 1))
         caretMoved(key)
     }
 
@@ -1342,13 +1343,55 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         return Pt(nk, if (up) rtOf(nk).t.length else 0)
     }
 
+    /** Gulir supaya titik lawan seleksi (pf) terlihat. */
+    private fun revealPf() {
+        scope.launch {
+            delay(32)
+            val sc = scroll ?: return@launch
+            val r = pf?.let { ptRect(it) } ?: return@launch
+            if (viewH <= 0f) return@launch
+            val m = 56f * dens
+            val top = sc.value.toFloat()
+            val d = when {
+                r.bottom > top + viewH - m -> r.bottom - (top + viewH - m)
+                r.top < top + m -> r.top - (top + m)
+                else -> 0f
+            }
+            if (d != 0f) sc.scrollBy(d)
+        }
+    }
+
+    /** Home/End (ctrl = awal/akhir seluruh teks). Saat seleksi aktif selalu lompat ke awal/akhir seluruh teks. */
+    fun jumpKey(key: String, toEnd: Boolean, ctrl: Boolean, shift: Boolean): Boolean {
+        if (!selOn && !ctrl) return false
+        ordRefresh()
+        val k = (if (toEnd) ordList.lastOrNull() else ordList.firstOrNull()) ?: return false
+        val to = Pt(k, if (toEnd) rtOf(k).t.length else 0)
+        if (selOn) {
+            if (shift) { pf = to; revealPf() } else { dropSel(); focusAt(to.key, to.off) }
+            return true
+        }
+        val v = tf[key] ?: return false
+        val len = rtOf(key).t.length
+        val caret = (v.selection.end - 1).coerceIn(0, len)
+        val anchor = (v.selection.start - 1).coerceIn(0, len)
+        if (shift) {
+            commit()
+            selBack = Pt(key, caret); selWho = 0; selDrag = false
+            selImg = null; pickQuote = false; miniBar = false
+            pa = Pt(key, anchor); pf = to; selOn = true
+            revealPf()
+        } else focusAt(to.key, to.off)
+        return true
+    }
+
     /** dir: 0 kiri, 1 kanan, 2 atas, 3 bawah. true = tombol sudah ditangani (field tidak perlu memprosesnya). */
     fun navKey(key: String, dir: Int, shift: Boolean): Boolean {
         if (selOn) {
             val (lo, hi) = selSpan() ?: return false
             if (shift) {
                 val np = stepPt(pf ?: return false, dir)
-                if (np != null) pf = np
+                if (np != null) { pf = np; revealPf() }
                 return true
             }
             val t = if (dir == 0 || dir == 2) lo else hi
@@ -1379,6 +1422,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             selBack = from; selWho = 0; selDrag = false
             selImg = null; pickQuote = false; miniBar = false
             pa = Pt(key, anchor); pf = to; selOn = true
+            revealPf()
         } else focusAt(to.key, to.off)
         return true
     }
