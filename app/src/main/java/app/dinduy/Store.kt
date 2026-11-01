@@ -180,7 +180,13 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     var audVer by mutableStateOf(0)                // dinaikkan saat berkas suara berubah (rekam / pulihkan)
     var trId by mutableStateOf<String?>(null)      // id suara yang sedang ditranskripsi
     var trStage by mutableStateOf(0)               // 0 menyiapkan suara, 1 memuat model, 2 menranskripsi, 3 membatalkan
-    var needModel by mutableStateOf(false)         // dialog "model belum diunduh"
+    var needModel by mutableStateOf(false)         // dialog "belum ada model / API key"
+    var trInfo by mutableStateOf("")               // keterangan tambahan tahap (mis. "Bagian 2 dari 5")
+    val vault = KeyVault(ctx)
+    var gqSet by mutableStateOf(vault.has())       // ada API key Groq tersimpan
+    var gqHint by mutableStateOf("")               // key yang disamarkan untuk ditampilkan (gsk_••••1a2b)
+    var gqState by mutableStateOf(0)               // 0 diam, 1 menguji, 2 berhasil, 3 gagal
+    var gqMsg by mutableStateOf("")
     private var trJob: Job? = null
 
     private var saveJob: Job? = null
@@ -192,6 +198,10 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         syncReminders()
         player.onError = { m -> show(m) }
         gcAudio()
+        if (gqSet) viewModelScope.launch {
+            val k = withContext(Dispatchers.IO) { vault.load() }
+            if (k == null) gqSet = false else gqHint = KeyVault.mask(k)
+        }
     }
 
     override fun onCleared() {
@@ -448,14 +458,120 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         if (trId != null) {
             trStage = 3
             trJob?.cancel()
+            Groq.abort()
         }
     }
 
-    /** m4a -> WAV sementara -> Whisper. Model hanya dimuat selama transkripsi, lalu dilepas. */
+    // ---------- API key Groq (terenkripsi, tidak pernah masuk cadangan) ----------
+    fun saveGroqKey(raw: String) {
+        if (gqState == 1) return
+        val k = KeyVault.clean(raw)
+        if (k == null) {
+            gqState = 3
+            gqMsg = "Bentuk key tidak dikenali. Key Groq diawali gsk_ dan tanpa spasi. Coba salin ulang dari halaman Groq."
+            return
+        }
+        gqState = 1
+        gqMsg = "Menghubungi Groq…"
+        viewModelScope.launch {
+            val err = withContext(Dispatchers.IO) { Groq.test(k) }
+            if (err != null) {
+                gqState = 3
+                gqMsg = err
+            } else {
+                val ok = withContext(Dispatchers.IO) { vault.save(k) }
+                if (ok) {
+                    gqSet = true
+                    gqHint = KeyVault.mask(k)
+                    gqState = 2
+                    gqMsg = "Terhubung ke Groq. Key tersimpan terenkripsi di perangkat ini."
+                    if (pr.eng != "groq") setPr(pr.copy(eng = "groq"))
+                } else {
+                    gqState = 3
+                    gqMsg = "Key valid, tetapi gagal menyimpannya dengan aman di perangkat ini."
+                }
+            }
+        }
+    }
+
+    fun testSavedKey() {
+        if (gqState == 1) return
+        gqState = 1
+        gqMsg = "Menghubungi Groq…"
+        viewModelScope.launch {
+            val k = withContext(Dispatchers.IO) { vault.load() }
+            if (k == null) {
+                gqSet = false; gqHint = ""
+                gqState = 3
+                gqMsg = "Key tidak ditemukan di perangkat ini. Masukkan lagi."
+            } else {
+                val err = withContext(Dispatchers.IO) { Groq.test(k) }
+                if (err == null) { gqState = 2; gqMsg = "Key berfungsi. Groq siap dipakai." } else { gqState = 3; gqMsg = err }
+            }
+        }
+    }
+
+    fun removeGroqKey() {
+        vault.clear()
+        gqSet = false; gqHint = ""; gqState = 0; gqMsg = ""
+        show("API key dihapus dari perangkat ini")
+    }
+
+    /** "groq", "off", atau "" (belum ada mesin yang siap). Mengikuti pilihan pengguna, jatuh ke yang tersedia. */
+    fun engineNow(): String {
+        val g = gqSet
+        val o = models.anyReady()
+        return when {
+            pr.eng == "off" && o -> "off"
+            g -> "groq"
+            o -> "off"
+            else -> ""
+        }
+    }
+
+    private suspend fun groqSegs(src: File, audId: String, key: String, temps: MutableList<File>): List<TSeg> {
+        val parts = withContext(Dispatchers.IO) { Groq.prepare(ctx, src, audId, temps) { ensureActive() } }
+        val segs = ArrayList<TSeg>()
+        for ((i, p) in parts.withIndex()) {
+            trStage = 4
+            trInfo = if (parts.size > 1) "Bagian ${i + 1} dari ${parts.size}" else ""
+            val f = p.first
+            val off = p.second
+            val mime = if (f.extension == "m4a") "audio/mp4" else "audio/wav"
+            val r = withContext(Dispatchers.IO) { Groq.transcribe(key, f, mime, pr.gl) }
+            for (s in r) segs.add(TSeg(s.st + off, s.en + off, s.tx))
+        }
+        return segs
+    }
+
+    private suspend fun offlineSegs(src: File, mf: File, temps: MutableList<File>): List<TSeg> {
+        val w = File(ctx.cacheDir, "tr_" + src.nameWithoutExtension + ".wav")
+        temps.add(w)
+        withContext(Dispatchers.IO) { WavDecoder.decode(src, w) { ensureActive() } }
+        trStage = 1
+        val model = withContext(Dispatchers.Default) { Whisper.loadModel(ctx, mf.absolutePath) }
+        try {
+            trStage = 2
+            val lang = if (pr.gl.isEmpty()) "auto" else pr.gl
+            val res = withContext(Dispatchers.Default) {
+                Whisper.transcribe(model, w.absolutePath, WhisperConfig(language = lang))
+            }
+            val out = ArrayList<TSeg>()
+            for (s in res.segments) out.add(TSeg(s.startMs / 1000.0, s.endMs / 1000.0, s.text.trim()))
+            if (out.isEmpty() && res.text.isNotBlank()) out.add(TSeg(0.0, 0.0, res.text.trim()))
+            return out
+        } finally {
+            withContext(NonCancellable) {
+                try { Whisper.releaseModel(model) } catch (e: Throwable) { }
+            }
+        }
+    }
+
+    /** Suara -> teks. Groq (online, prioritas) atau Whisper offline; hasilnya jadi blok "Transkrip N" di isi catatan. */
     fun transcribe(noteId: String, audId: String) {
         if (trId != null) return
-        val mf = models.readyFile(pr.wm)
-        if (mf == null) {
+        val eng = engineNow()
+        if (eng.isEmpty()) {
             needModel = true
             return
         }
@@ -464,41 +580,75 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             show("Berkas suara tidak ditemukan")
             return
         }
+        val mf = if (eng == "off") models.readyFile(pr.wm) else null
+        if (eng == "off" && mf == null) {
+            needModel = true
+            return
+        }
         trId = audId
         trStage = 0
+        trInfo = ""
         trJob = viewModelScope.launch {
-            val w = File(ctx.cacheDir, "tr_$audId.wav")
+            val temps = ArrayList<File>()
             try {
-                withContext(Dispatchers.IO) { WavDecoder.decode(src, w) { ensureActive() } }
-                trStage = 1
-                val model = withContext(Dispatchers.Default) { Whisper.loadModel(ctx, mf.absolutePath) }
-                try {
-                    trStage = 2
-                    val res = withContext(Dispatchers.Default) {
-                        Whisper.transcribe(model, w.absolutePath, WhisperConfig(language = "auto"))
+                var key: String? = null
+                val segs: List<TSeg>
+                if (eng == "groq") {
+                    val k = withContext(Dispatchers.IO) { vault.load() }
+                        ?: throw GroqException("API key tidak ditemukan. Masukkan lagi di Model transkripsi.")
+                    key = k
+                    segs = groqSegs(src, audId, k, temps)
+                } else {
+                    segs = offlineSegs(src, mf!!, temps)
+                }
+                val paras = Paras.build(segs)
+                if (paras.isEmpty()) {
+                    show("Tidak ada ucapan yang terdeteksi")
+                } else {
+                    var chunks: List<Chunk>? = null
+                    if (key != null && pr.gf) {
+                        trStage = 5
+                        trInfo = ""
+                        val kk: String = key
+                        chunks = withContext(Dispatchers.IO) { Groq.format(kk, paras) { ensureActive() } }
                     }
-                    val text = res.text.trim()
-                    if (text.isEmpty()) {
-                        show("Tidak ada ucapan yang terdeteksi")
-                    } else {
-                        upd(noteId) { n -> n.copy(au = n.au.map { if (it.id == audId) it.copy(tr = text) else it }, u = now) }
-                    }
-                } finally {
-                    withContext(NonCancellable) {
-                        try { Whisper.releaseModel(model) } catch (e: Throwable) { }
-                    }
+                    applyTranscript(noteId, audId) { n -> Paras.blocks("Transkrip $n", paras, chunks) }
+                    show("Transkrip ditambahkan ke catatan")
                 }
             } catch (e: CancellationException) {
                 show("Transkripsi dibatalkan")
                 throw e
             } catch (e: Throwable) {
-                show("Transkripsi gagal: " + (e.message ?: "kesalahan tidak dikenal"))
+                if (trStage == 3) show("Transkripsi dibatalkan")
+                else show("Transkripsi gagal: " + (e.message ?: "kesalahan tidak dikenal"))
             } finally {
-                withContext(NonCancellable) { w.delete() }
+                withContext(NonCancellable) { temps.forEach { try { it.delete() } catch (x: Exception) { } } }
+                Groq.abort()
                 trId = null
                 trStage = 0
+                trInfo = ""
             }
         }
+    }
+
+    private fun applyTranscript(noteId: String, audId: String, make: (Int) -> List<Blk>) {
+        val n = note(noteId) ?: return
+        val i = n.au.indexOfFirst { it.id == audId }
+        if (i < 0) return
+        val a = n.au[i]
+        val blocks = make(i + 1)
+        val ids = blocks.map { it.id }
+        val e = ed
+        val open = e != null && e.noteId == noteId && nav.stack.any { s -> s is Scr.Note && s.id == noteId }
+        if (open && e != null) {
+            e.putTranscript(a.tb, blocks)   // editor yang terbuka memegang isi catatan; ia yang menyimpannya
+        } else {
+            upd(noteId) { nn ->
+                val nb = putBlocks(nn.bl, a.tb, blocks)
+                nn.copy(bl = nb, x = plainOf(nb), u = now)
+            }
+        }
+        upd(noteId) { nn -> nn.copy(au = nn.au.map { if (it.id == audId) it.copy(tb = ids) else it }) }
     }
 
     fun addMd(title: String, body: String): Note {
