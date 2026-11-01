@@ -2,6 +2,13 @@ package app.dinduy
 
 import android.app.Activity
 import android.view.WindowManager
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -91,6 +98,9 @@ fun ModelsScreen(vm: AppVM, onBack: () -> Unit) {
     var keyText by remember { mutableStateOf("") }
     var focused by remember { mutableStateOf(false) }
     var infoOpen by remember { mutableStateOf(false) }
+    var changing by remember { mutableStateOf(false) }   // mengganti key yang sudah tersimpan
+    val enter = fadeIn(tween(260)) + expandVertically(spring(.85f, 380f))
+    val exit = fadeOut(tween(140)) + shrinkVertically(spring(.95f, 520f))
 
     // selama mengisi key: layar tidak bisa di-screenshot / muncul di aplikasi terbaru
     DisposableEffect(focused) {
@@ -99,7 +109,7 @@ fun ModelsScreen(vm: AppVM, onBack: () -> Unit) {
         onDispose { w?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
     }
     LaunchedEffect(vm.gqState, vm.gqSet) {
-        if (vm.gqState == 2 && vm.gqSet) keyText = ""   // key sudah tersimpan terenkripsi; jangan biarkan tersisa di layar
+        if (vm.gqState == 2 && vm.gqSet) { keyText = ""; changing = false }   // key sudah tersimpan terenkripsi; jangan biarkan tersisa di layar
     }
 
     val readyNames = vm.models.list.filter { it.status == 2 }.joinToString { it.info.name }
@@ -117,9 +127,14 @@ fun ModelsScreen(vm: AppVM, onBack: () -> Unit) {
                 "Tanpa internet, tetapi jauh lebih lambat.",
                 if (readyNames.isEmpty()) "Belum ada model diunduh" else "Siap · $readyNames"
             ) { vm.setPr(vm.pr.copy(eng = "off")) }
+            T(
+                "Ketuk untuk memilih. Hanya pilihanmu yang ditampilkan di bawah; yang lain tetap tersimpan dan bisa diganti kapan saja.",
+                13f, 400, pal.osv, Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp), lh = 1.4f
+            )
         }
 
-        SGroup("API key Groq", 60) {
+        AnimatedVisibility(visible = grOn, enter = enter, exit = exit) {
+        SGroup("API key Groq", 0) {
             SCard(POS_TOP, onClick = { infoOpen = !infoOpen }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     T("Apa itu API key, dan kenapa lebih baik?", 16f, 600, pal.os, Modifier.weight(1f))
@@ -149,43 +164,57 @@ fun ModelsScreen(vm: AppVM, onBack: () -> Unit) {
                 }
             }
             SCard(POS_MID) {
-                T("Langkah 1", 13f, 700, pal.p)
-                T("Buat API key di Groq", 16f, 500, pal.os)
-                Spacer(Modifier.height(10.dp))
-                GBtn(3, "up", "Buka halaman Groq", pal.sc, pal.osc, modifier = Modifier.fillMaxWidth()) {
-                    try { uri.openUri("https://console.groq.com/keys") } catch (e: Exception) { vm.show("Tidak ada peramban untuk membuka tautan") }
-                }
-                Spacer(Modifier.height(18.dp))
-                T("Langkah 2", 13f, 700, pal.p)
-                T(if (vm.gqSet) "Ganti API key (opsional)" else "Tempel API key di sini", 16f, 500, pal.os)
-                Spacer(Modifier.height(10.dp))
-                Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(pal.c4).padding(horizontal = 16.dp, vertical = 14.dp)) {
-                    if (keyText.isEmpty()) T(if (vm.gqSet) vm.gqHint + " (tersimpan)" else "gsk_…", 16f, 400, pal.osv)
-                    BasicTextField(
-                        value = keyText,
-                        onValueChange = { v -> keyText = v.filter { c -> !c.isWhitespace() }.take(200) },
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        textStyle = TextStyle(color = pal.os, fontSize = 16.sp, fontFamily = LocalFF.current),
-                        cursorBrush = SolidColor(pal.p),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(onDone = { if (keyText.isNotBlank()) vm.saveGroqKey(keyText) }),
-                        modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused }
-                    )
-                }
-                Spacer(Modifier.height(10.dp))
-                GBtn(
-                    3, "ok", "Simpan & tes", pal.p, pal.op,
-                    enabled = keyText.isNotBlank() && vm.gqState != 1, modifier = Modifier.fillMaxWidth()
-                ) {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    vm.saveGroqKey(keyText)
-                }
-                if (vm.gqSet) {
-                    Spacer(Modifier.height(6.dp))
+                if (vm.gqSet && !changing) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Box(Modifier.size(44.dp).clip(CircleShape).background(pal.pc), Alignment.Center) { Ic("ok", pal.opc, 24.dp) }
+                        Column(Modifier.weight(1f)) {
+                            T("Siap dipakai", 17f, 600, pal.os)
+                            T("Key tersimpan · " + vm.gqHint, 14f, 400, pal.osv)
+                        }
+                    }
+                    Spacer(Modifier.height(14.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                        GBtn(0, "restore", "Tes key", pal.c4, pal.os, enabled = vm.gqState != 1, modifier = Modifier.weight(1f)) { vm.testSavedKey() }
-                        GBtn(2, "del", "Hapus key", pal.ec, pal.oec, modifier = Modifier.weight(1f)) { vm.removeGroqKey() }
+                        GBtn(0, "restore", "Tes", pal.c4, pal.os, enabled = vm.gqState != 1, modifier = Modifier.weight(1f)) { vm.testSavedKey() }
+                        GBtn(1, "pen", "Ganti", pal.c4, pal.os, modifier = Modifier.weight(1f)) { vm.gqState = 0; changing = true }
+                        GBtn(2, "del", "Hapus", pal.ec, pal.oec, modifier = Modifier.weight(1f)) { vm.removeGroqKey() }
+                    }
+                } else {
+                    T("Langkah 1", 13f, 700, pal.p)
+                    T("Buat API key di Groq", 16f, 500, pal.os)
+                    Spacer(Modifier.height(10.dp))
+                    GBtn(3, "up", "Buka halaman Groq", pal.sc, pal.osc, modifier = Modifier.fillMaxWidth()) {
+                        try { uri.openUri("https://console.groq.com/keys") } catch (e: Exception) { vm.show("Tidak ada peramban untuk membuka tautan") }
+                    }
+                    Spacer(Modifier.height(18.dp))
+                    T("Langkah 2", 13f, 700, pal.p)
+                    T("Tempel API key di sini", 16f, 500, pal.os)
+                    Spacer(Modifier.height(10.dp))
+                    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(pal.c4).padding(horizontal = 16.dp, vertical = 14.dp)) {
+                        if (keyText.isEmpty()) T("gsk_…", 16f, 400, pal.osv)
+                        BasicTextField(
+                            value = keyText,
+                            onValueChange = { v -> keyText = v.filter { c -> !c.isWhitespace() }.take(200) },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            textStyle = TextStyle(color = pal.os, fontSize = 16.sp, fontFamily = LocalFF.current),
+                            cursorBrush = SolidColor(pal.p),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { if (keyText.isNotBlank()) vm.saveGroqKey(keyText) }),
+                            modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused }
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        if (vm.gqSet) {
+                            GBtn(0, "x", "Batal", pal.c4, pal.os, modifier = Modifier.weight(1f)) { keyText = ""; changing = false; vm.gqState = 0 }
+                        }
+                        GBtn(
+                            if (vm.gqSet) 2 else 3, "ok", "Simpan & tes", pal.p, pal.op,
+                            enabled = keyText.isNotBlank() && vm.gqState != 1, modifier = Modifier.weight(1f)
+                        ) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            vm.saveGroqKey(keyText)
+                        }
                     }
                 }
                 if (vm.gqState != 0) {
@@ -213,37 +242,10 @@ fun ModelsScreen(vm: AppVM, onBack: () -> Unit) {
                 Bullet("Saran: buat key khusus untuk Dinduy. Kalau HP hilang, hapus key itu di console.groq.com.")
             }
         }
-
-        SGroup("Hasil transkrip", 120) {
-            SCard(POS_TOP) {
-                T("Bahasa ucapan", 16f, 500, pal.os, Modifier.padding(bottom = 12.dp))
-                SegPill(3, LANGS.indexOfFirst { it.first == vm.pr.gl }.coerceAtLeast(0), { vm.setPr(vm.pr.copy(gl = LANGS[it].first)) }) { i, fg ->
-                    T(LANGS[i].second, 15f, 500, fg)
-                }
-                T(
-                    "Memilih bahasa yang tepat membuat hasil lebih akurat. Otomatis cocok untuk campuran bahasa.",
-                    13f, 400, pal.osv, Modifier.padding(top = 10.dp), lh = 1.4f
-                )
-            }
-            SCard(POS_BOT, onClick = { vm.setPr(vm.pr.copy(gf = !vm.pr.gf)) }) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Column(Modifier.weight(1f)) {
-                        T("Rapikan jadi Markdown", 16f, 500, pal.os)
-                        T(
-                            "Khusus Groq: tebal, miring, dan paragraf otomatis. Kata-katamu tidak diubah, dicek otomatis; kalau ada yang berbeda, dipakai versi polos.",
-                            13f, 400, pal.osv, lh = 1.4f
-                        )
-                    }
-                    MorphSwitch(vm.pr.gf)
-                }
-            }
-            T(
-                "Hasilnya masuk ke catatan sebagai bagian \"Transkrip 1\", \"Transkrip 2\", dan seterusnya, dan bisa kamu edit. Kartu suara tetap di bawah.",
-                13f, 400, pal.osv, Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp), lh = 1.4f
-            )
         }
 
-        SGroup("Model offline", 180) {
+        AnimatedVisibility(visible = !grOn, enter = enter, exit = exit) {
+        SGroup("Model offline", 0) {
             val list = vm.models.list
             SCard(POS_TOP) {
                 T(
@@ -313,6 +315,38 @@ fun ModelsScreen(vm: AppVM, onBack: () -> Unit) {
                     }
                 }
             }
+        }
+        }
+
+        SGroup("Hasil transkrip", 120) {
+            SCard(if (grOn) POS_TOP else POS_ONE) {
+                T("Bahasa ucapan", 16f, 500, pal.os, Modifier.padding(bottom = 12.dp))
+                SegPill(3, LANGS.indexOfFirst { it.first == vm.pr.gl }.coerceAtLeast(0), { vm.setPr(vm.pr.copy(gl = LANGS[it].first)) }) { i, fg ->
+                    T(LANGS[i].second, 15f, 500, fg)
+                }
+                T(
+                    "Memilih bahasa yang tepat membuat hasil lebih akurat. Otomatis cocok untuk campuran bahasa.",
+                    13f, 400, pal.osv, Modifier.padding(top = 10.dp), lh = 1.4f
+                )
+            }
+            AnimatedVisibility(visible = grOn, enter = enter, exit = exit) {
+            SCard(POS_BOT, onClick = { vm.setPr(vm.pr.copy(gf = !vm.pr.gf)) }) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        T("Rapikan jadi Markdown", 16f, 500, pal.os)
+                        T(
+                            "Khusus Groq: tebal, miring, dan paragraf otomatis. Kata-katamu tidak diubah, dicek otomatis; kalau ada yang berbeda, dipakai versi polos.",
+                            13f, 400, pal.osv, lh = 1.4f
+                        )
+                    }
+                    MorphSwitch(vm.pr.gf)
+                }
+            }
+            }
+            T(
+                "Hasilnya masuk ke catatan sebagai bagian \"Transkrip 1\", \"Transkrip 2\", dan seterusnya, dan bisa kamu edit. Kartu suara tetap di bawah.",
+                13f, 400, pal.osv, Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp), lh = 1.4f
+            )
         }
     }
 }
