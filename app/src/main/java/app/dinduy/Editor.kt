@@ -1479,8 +1479,18 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         vm.saveNote(noteId, title, blocks)
     }
 
+    /** Rekaman suara sedang berjalan untuk catatan ini. */
+    val recActive: Boolean get() = vm.rec.noteId == noteId
+
+    fun startVoice() {
+        flush()
+        vm.startRec(noteId)
+    }
+
     fun leave() {
         flush()
+        if (vm.rec.noteId == noteId) vm.stopRec()   // keluar dari catatan = menyelesaikan rekaman
+        vm.player.stop()                             // lepaskan pemutar
         vm.dropIfEmpty(noteId, title, blocks)
     }
 
