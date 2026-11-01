@@ -288,8 +288,15 @@ object Groq {
         chatList?.let { return it }
         val ids = listModels(key)
         val l = ArrayList<String>()
-        for (m in listOf("llama-3.3-70b-versatile", "llama-3.1-8b-instant")) if (m in ids) l.add(m)
-        if (l.isEmpty()) ids.firstOrNull { it.startsWith("llama") && !it.contains("guard") && !it.contains("prompt") }?.let { l.add(it) }
+        val pref = listOf(
+            "llama-3.3-70b-versatile", "openai/gpt-oss-120b", "meta-llama/llama-4-scout-17b-16e-instruct",
+            "openai/gpt-oss-20b", "llama-3.1-8b-instant"
+        )
+        for (m in pref) if (m in ids) l.add(m)
+        if (l.isEmpty()) {
+            val skip = listOf("whisper", "guard", "tts", "orpheus", "playai", "compound", "safeguard", "embed", "qwen", "prompt")
+            ids.filter { id -> skip.none { id.contains(it) } }.take(2).forEach { l.add(it) }
+        }
         chatList = l
         return l
     }
