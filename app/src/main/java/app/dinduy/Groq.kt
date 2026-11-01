@@ -22,7 +22,7 @@ data class TSeg(val st: Double, val en: Double, val tx: String)
 class Chunk(val paras: List<String>, val md: String?)
 
 /** Pesan galat yang aman ditampilkan (tidak pernah memuat API key). */
-class GroqException(msg: String) : IOException(msg)
+class GroqException(msg: String, val code: Int = 0) : IOException(msg)
 
 /**
  * Klien Groq (Speech-to-Text). Aturan keamanan:
@@ -38,7 +38,6 @@ object Groq {
     private const val NET = "Tidak bisa menghubungi Groq. Periksa koneksi internet lalu coba lagi."
 
     @Volatile private var live: HttpURLConnection? = null
-    @Volatile private var chatModel: String? = null
 
     /** Putuskan permintaan yang sedang berjalan (tombol Batal). */
     fun abort() {
@@ -87,7 +86,7 @@ object Groq {
         live = c
         try {
             val r = finish(c)
-            if (r.code !in 200..299) throw GroqException(explain(r))
+            if (r.code !in 200..299) throw GroqException(explain(r), r.code)
             val arr = J.parseToJsonElement(r.body).jsonObject["data"]?.jsonArray ?: JsonArray(emptyList())
             return arr.mapNotNull { it.jsonObject["id"]?.jsonPrimitive?.content }
         } catch (e: GroqException) {
@@ -116,6 +115,12 @@ object Groq {
     // Transkripsi
     // ------------------------------------------------------------------------------------------
 
+    private fun promptFor(lang: String): String = when (lang) {
+        "id" -> "Halo, selamat pagi. Hari ini kita akan membahas beberapa hal, yaitu tugas, jadwal, dan rencana minggu depan. Baik, mari kita mulai."
+        "en" -> "Hello, good morning. Today we will talk about a few things: the assignment, the schedule, and next week's plan. All right, let's begin."
+        else -> "Halo, selamat pagi. Hello, good morning. Hari ini kita bahas beberapa hal: tugas, jadwal, dan rencana. Okay, let's begin."
+    }
+
     fun transcribe(key: String, f: File, mime: String, lang: String): List<TSeg> {
         val b = "----dinduy" + java.lang.Long.toHexString(System.nanoTime())
         val nl = "\r\n"
@@ -125,6 +130,7 @@ object Groq {
         head.append(field("response_format", "verbose_json"))
         head.append(field("temperature", "0"))
         if (lang.isNotEmpty()) head.append(field("language", lang))
+        head.append(field("prompt", promptFor(lang)))   // contoh gaya tulis berpunctuation: membuat koma & titik lebih tepat
         head.append("--$b$nl")
         head.append("Content-Disposition: form-data; name=\"file\"; filename=\"${f.name}\"$nl")
         head.append("Content-Type: $mime$nl$nl")
@@ -142,7 +148,7 @@ object Groq {
                 o.write(tb)
             }
             val r = finish(c)
-            if (r.code !in 200..299) throw GroqException(explain(r))
+            if (r.code !in 200..299) throw GroqException(explain(r), r.code)
             return parse(r.body)
         } catch (e: GroqException) {
             throw e
@@ -257,30 +263,45 @@ object Groq {
     // ------------------------------------------------------------------------------------------
 
     private const val SYS =
-        "Kamu adalah pemformat Markdown untuk TRANSKRIP SUARA. Tugasmu hanya satu: menambahkan format Markdown ke teks yang diberikan.\n" +
-            "ATURAN KETAT:\n" +
-            "1. Jangan menambah, menghapus, mengganti, menerjemahkan, memperbaiki ejaan, atau mengubah urutan kata apa pun. " +
-            "Setiap kata harus tetap identik dan berurutan seperti aslinya.\n" +
-            "2. Jangan merangkum, menyimpulkan, membuat poin atau daftar, judul, komentar, atau kalimat pembuka/penutup.\n" +
-            "3. Yang boleh: **tebal** untuk nama, istilah, angka, atau hal terpenting; *miring* untuk penekanan atau kata asing; " +
-            "pertahankan paragraf yang ada (dipisah baris kosong); baris berisi --- hanya saat pergantian topik besar, sangat jarang.\n" +
-            "4. Keluarkan HANYA teks hasilnya."
+        "Kamu editor transkrip suara. Tugasmu: merapikan teks hasil transkripsi menjadi Markdown yang enak dibaca TANPA mengubah isinya.\n" +
+            "BOLEH:\n" +
+            "- Memperbaiki tanda baca: titik, koma, tanda tanya, tanda seru, titik dua; dan huruf kapital di awal kalimat serta nama orang, tempat, dan merek.\n" +
+            "- Memecah atau menggabungkan paragraf di pergantian ide (pisahkan dengan satu baris kosong).\n" +
+            "- **Tebal** untuk 1 sampai 3 frasa terpenting di tiap paragraf: nama, istilah penting, angka, tanggal, keputusan, tenggat.\n" +
+            "- *Miring* untuk kata asing atau bahasa daerah, judul karya, dan penekanan.\n" +
+            "- Satu baris berisi --- (dengan baris kosong sebelum dan sesudahnya) hanya saat pindah topik besar.\n" +
+            "DILARANG KERAS:\n" +
+            "- Menambah, menghapus, mengganti, atau menukar urutan kata apa pun. Jangan benahi ejaan, kata tidak baku (gak, nih, banget), pengulangan, atau kata ragu (eh, hmm).\n" +
+            "- Mengubah angka atau menerjemahkan.\n" +
+            "- Merangkum, menyimpulkan, membuat judul, daftar, poin, kutipan, tabel, atau komentar.\n" +
+            "Keluarkan HANYA teks hasilnya."
 
-    private fun pickChat(key: String): String? {
-        chatModel?.let { return it }
+    private const val EX_IN =
+        "halo semuanya hari ini kita bahas rapat tanggal 12 november jam 9 pagi di ruang meeting lantai 3 pak budi bilang tugas harus kelar sebelum jumat nah menurut saya itu cukup mepet sih tapi ya kita coba aja"
+    private const val EX_OUT =
+        "Halo semuanya. Hari ini kita bahas **rapat tanggal 12 November jam 9 pagi** di ruang meeting lantai 3.\n\n" +
+            "**Pak Budi** bilang tugas harus kelar **sebelum Jumat**. Nah, menurut saya itu cukup *mepet* sih, tapi ya kita coba aja."
+
+    @Volatile private var chatList: List<String>? = null
+
+    private fun chatModels(key: String): List<String> {
+        chatList?.let { return it }
         val ids = listModels(key)
-        val m = listOf("llama-3.3-70b-versatile", "llama-3.1-8b-instant").firstOrNull { it in ids }
-            ?: ids.firstOrNull { it.startsWith("llama") && !it.contains("guard") && !it.contains("prompt") }
-        chatModel = m
-        return m
+        val l = ArrayList<String>()
+        for (m in listOf("llama-3.3-70b-versatile", "llama-3.1-8b-instant")) if (m in ids) l.add(m)
+        if (l.isEmpty()) ids.firstOrNull { it.startsWith("llama") && !it.contains("guard") && !it.contains("prompt") }?.let { l.add(it) }
+        chatList = l
+        return l
     }
 
-    private fun fmtChunk(key: String, model: String, text: String): String? {
+    private fun fmtChunk(key: String, model: String, text: String, temp: Double): String? {
         val body = buildJsonObject {
             put("model", model)
-            put("temperature", 0)
+            put("temperature", temp)
             put("messages", JsonArray(listOf(
                 buildJsonObject { put("role", "system"); put("content", SYS) },
+                buildJsonObject { put("role", "user"); put("content", EX_IN) },
+                buildJsonObject { put("role", "assistant"); put("content", EX_OUT) },
                 buildJsonObject { put("role", "user"); put("content", text) }
             )))
         }.toString().toByteArray(Charsets.UTF_8)
@@ -292,7 +313,7 @@ object Groq {
             c.setFixedLengthStreamingMode(body.size)
             c.outputStream.use { o: OutputStream -> o.write(body) }
             val r = finish(c)
-            if (r.code !in 200..299) throw GroqException(explain(r))
+            if (r.code !in 200..299) throw GroqException(explain(r), r.code)
             val o = J.parseToJsonElement(r.body).jsonObject
             return o["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content
         } catch (e: GroqException) {
@@ -323,34 +344,94 @@ object Groq {
         return true
     }
 
-    /** Rapikan per bagian (~3000 huruf). Gagal / tidak lolos pengecekan -> bagian itu dipakai polos. Null bila fitur tak tersedia. */
-    fun format(key: String, paras: List<String>, check: () -> Unit): List<Chunk>? {
-        val model = (try { pickChat(key) } catch (e: GroqException) { null }) ?: return null
+    private fun unfence(s: String): String {
+        var t = s.trim()
+        if (t.startsWith("```")) {
+            t = t.substringAfter("\n", "")
+            t = t.trimEnd().removeSuffix("```")
+        }
+        return t.trim()
+    }
+
+    /** Garis --- harus berdiri sendiri (kalau menempel di teks, Markdown menganggapnya judul). */
+    private fun spaceRules(s: String): String {
+        val o = StringBuilder()
+        for (ln in s.split("\n")) {
+            if (ln.trim() == "---") o.append("\n\n---\n\n") else o.append(ln).append("\n")
+        }
+        return o.toString().replace(Regex("\n{3,}"), "\n\n").trim()
+    }
+
+    private fun sleepCk(ms: Long, check: () -> Unit) {
+        var t = 0L
+        while (t < ms) { check(); Thread.sleep(250); t += 250 }
+    }
+
+    /** Hasil Markdown yang lolos cek, atau null bila jawaban model mengubah kata. Melempar GroqException bila semua model gagal. */
+    private fun tryFormat(key: String, models: List<String>, text: String, check: () -> Unit): String? {
+        var last: GroqException? = null
+        for (m in models) {
+            var wait = 0
+            var att = 0
+            while (true) {
+                check()
+                try {
+                    val r = fmtChunk(key, m, text, if (att == 0) 0.0 else 0.3)?.let { spaceRules(unfence(it)) }
+                    if (r != null && safe(text, r)) return r
+                    att++
+                    if (att >= 2) return null
+                } catch (e: GroqException) {
+                    last = e
+                    if (e.code == 429 && wait == 0) { wait++; sleepCk(3500L, check); continue }
+                    break
+                }
+            }
+        }
+        if (last != null) throw last
+        return null
+    }
+
+    class FmtRes(val chunks: List<Chunk>, val ok: Int, val err: String?)
+
+    /** Rapikan per bagian (~1800 huruf). Bagian yang gagal dicoba per paragraf; tetap gagal -> dipakai polos. Null bila fitur tak tersedia. */
+    fun format(key: String, paras: List<String>, check: () -> Unit): FmtRes? {
+        val models = (try { chatModels(key) } catch (e: GroqException) { null }) ?: return null
+        if (models.isEmpty()) return null
         val groups = ArrayList<List<String>>()
         var cur = ArrayList<String>()
         var n = 0
         for (p in paras) {
-            if (n + p.length > 3000 && cur.isNotEmpty()) { groups.add(cur); cur = ArrayList(); n = 0 }
+            if (n + p.length > 1800 && cur.isNotEmpty()) { groups.add(cur); cur = ArrayList(); n = 0 }
             cur.add(p); n += p.length
         }
         if (cur.isNotEmpty()) groups.add(cur)
         val out = ArrayList<Chunk>()
-        var broken = false
+        var err: String? = null
+        var ok = 0
         for (g in groups) {
             check()
-            val plain = g.joinToString("\n\n")
             var md: String? = null
-            if (!broken) {
+            if (err == null) {
                 try {
-                    val r = fmtChunk(key, model, plain)?.trim()
-                    if (r != null && safe(plain, r)) md = r
+                    md = tryFormat(key, models, g.joinToString("\n\n"), check)
+                    if (md == null && g.size > 1) {
+                        val parts = ArrayList<String>()
+                        var any = false
+                        for (p in g) {
+                            val r = tryFormat(key, models, p, check)
+                            if (r != null) any = true
+                            parts.add(r ?: p)
+                        }
+                        if (any) md = parts.joinToString("\n\n")
+                    }
                 } catch (e: GroqException) {
-                    broken = true   // mis. batas pemakaian: sisanya langsung polos
+                    err = e.message ?: "gagal"   // mis. batas pemakaian: sisanya langsung polos
                 }
             }
+            if (md != null) ok++
             out.add(Chunk(g, md))
         }
-        return out
+        return FmtRes(out, ok, err)
     }
 }
 
