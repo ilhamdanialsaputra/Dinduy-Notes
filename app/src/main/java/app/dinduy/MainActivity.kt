@@ -115,6 +115,7 @@ sealed class Scr {
     object Trash : Scr()
     class NoteMenu(val id: String) : Scr()     // halaman titik tiga di editor
     class NoteLabels(val id: String) : Scr()   // halaman label untuk satu catatan
+    object Models : Scr()                      // unduh model transkripsi
 }
 
 class Nav(private val vm: AppVM) {
@@ -435,7 +436,9 @@ fun AppRoot(vm: AppVM, act: Actions) {
             val isHome = top is Scr.Home
             val isNote = top is Scr.Note
             // catatan tetap "terbuka" selama halaman titik tiga / label ada di atasnya
-            val inNote = isNote || top is Scr.NoteMenu || top is Scr.NoteLabels
+            val modelsOnNote = top is Scr.Models && nav.stack.any { it is Scr.Note }
+            val modelsOnSettings = top is Scr.Models && !modelsOnNote
+            val inNote = isNote || top is Scr.NoteMenu || top is Scr.NoteLabels || modelsOnNote
             val reading = vm.ed?.reading == true && isNote
             val imgSel = vm.ed?.selImg != null && isNote
             val selE = vm.ed?.selEdit == true && isNote
@@ -498,11 +501,14 @@ fun AppRoot(vm: AppVM, act: Actions) {
                             onClear = { vm.sheet = Sheet.EmptyTrash }
                         )
                     }
-                    ViewLayer(on = top is Scr.Settings, under = false) {
+                    ViewLayer(on = top is Scr.Settings || modelsOnSettings, under = modelsOnSettings) {
                         SettingsScreen(vm, act, onBack = { nav.pop() })
                     }
+                    ViewLayer(on = top is Scr.Models, under = false) {
+                        ModelsScreen(vm, onBack = { nav.pop() })
+                    }
                     AddScrim(vm)
-                    NoteLayer(vm, on = inNote, morph = vm.morph, under = top is Scr.NoteMenu || top is Scr.NoteLabels) {
+                    NoteLayer(vm, on = inNote, morph = vm.morph, under = top is Scr.NoteMenu || top is Scr.NoteLabels || modelsOnNote) {
                         val id = nav.noteId
                         if (id != null) {
                             val sc = rememberCoroutineScope()
@@ -534,6 +540,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     SheetHost(vm, nav, act)
                     ReminderHost(vm, act)
                     LabelDialogHost(vm)
+                    ModelDialogHost(vm)
                 }
             }
         }
@@ -571,6 +578,27 @@ class MainActivity : ComponentActivity(), Actions {
     private val bkOpener = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) lifecycleScope.launch {
             if (vm.stageBackup(uri)) vm.sheet = Sheet.Bk else vm.show("Berkas bukan cadangan Dinduy yang valid")
+        }
+    }
+    private var micCb: (() -> Unit)? = null
+    private val micPerm = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        val cb = micCb
+        micCb = null
+        if (ok) cb?.invoke() else vm.show("Izin mikrofon ditolak, suara tidak bisa direkam")
+    }
+    private var pendingAud: Aud? = null
+    private val audSaver = registerForActivityResult(ActivityResultContracts.CreateDocument("audio/mp4")) { uri ->
+        val a = pendingAud
+        pendingAud = null
+        if (uri != null && a != null) lifecycleScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                try {
+                    val src = AudioFiles.file(this@MainActivity, a.id)
+                    contentResolver.openOutputStream(uri)?.use { os -> src.inputStream().use { it.copyTo(os) } }
+                    true
+                } catch (e: Exception) { false }
+            }
+            vm.show(if (ok) "Suara tersimpan" else "Gagal menyimpan suara")
         }
     }
     private val notifPerm = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
@@ -650,8 +678,35 @@ class MainActivity : ComponentActivity(), Actions {
 
     override fun onStop() {
         super.onStop()
+        vm.player.pause()
+        if (vm.rec.active) vm.stopRec()   // perekam tidak boleh jalan di latar belakang: simpan apa yang sudah direkam
         vm.ed?.flush()
         vm.saveNow()
+    }
+
+    override fun requestMic(onGranted: () -> Unit) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            onGranted()
+            return
+        }
+        val sp = getSharedPreferences("dinduy", 0)
+        val asked = sp.getBoolean("mp", false)
+        if (asked && !shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)) {
+            // ditolak permanen: arahkan ke Pengaturan aplikasi
+            vm.show("Izin mikrofon dimatikan. Aktifkan lewat Pengaturan aplikasi.")
+            try {
+                startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+            } catch (e: Exception) { }
+            return
+        }
+        sp.edit().putBoolean("mp", true).apply()
+        micCb = onGranted
+        micPerm.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    override fun saveAudio(aud: Aud, name: String) {
+        pendingAud = aud
+        audSaver.launch(name)
     }
 
     override fun pickImages() {
