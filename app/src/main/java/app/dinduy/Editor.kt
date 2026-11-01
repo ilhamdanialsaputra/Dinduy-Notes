@@ -1479,6 +1479,17 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         vm.saveNote(noteId, title, blocks)
     }
 
+    /** Ganti blok transkrip lama dengan yang baru (atau sisipkan di akhir isi catatan). */
+    fun putTranscript(old: List<String>, nw: List<Blk>) {
+        commit()
+        if (focus != null && keyBlock(focus!!) in old) focus = null
+        blocks = putBlocks(blocks, old, nw)
+        old.forEach { tf.remove(it) }
+        nw.forEach { seed(it) }
+        norm()
+        afterStructural()
+    }
+
     /** Rekaman suara sedang berjalan untuk catatan ini. */
     val recActive: Boolean get() = vm.rec.noteId == noteId
 
