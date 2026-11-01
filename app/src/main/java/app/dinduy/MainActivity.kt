@@ -624,6 +624,16 @@ class MainActivity : ComponentActivity(), Actions {
         if (Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
         setContent { AppRoot(vm, this) }
         Rem.ensureChannel(this)
+        // minta izin notifikasi sekali saat pertama kali aplikasi dibuka (tanpa mengarahkan ke Pengaturan)
+        if (savedInstanceState == null && Build.VERSION.SDK_INT >= 33) {
+            val sp0 = getSharedPreferences("dinduy", 0)
+            if (!sp0.getBoolean("np", false) &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                sp0.edit().putBoolean("np", true).apply()
+                notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
         openFromIntent(intent)
     }
 
