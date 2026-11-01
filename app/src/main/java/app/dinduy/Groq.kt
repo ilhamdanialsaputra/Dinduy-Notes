@@ -395,8 +395,8 @@ object Groq {
 
     /** Rapikan per bagian (~1800 huruf). Bagian yang gagal dicoba per paragraf; tetap gagal -> dipakai polos. Null bila fitur tak tersedia. */
     fun format(key: String, paras: List<String>, check: () -> Unit): FmtRes? {
-        val models = (try { chatModels(key) } catch (e: GroqException) { null }) ?: return null
-        if (models.isEmpty()) return null
+        val models = try { chatModels(key) } catch (e: GroqException) { return FmtRes(emptyList(), 0, e.message ?: "Groq tidak bisa dihubungi") }
+        if (models.isEmpty()) return FmtRes(emptyList(), 0, "model perapi Groq tidak tersedia di akun ini")
         val groups = ArrayList<List<String>>()
         var cur = ArrayList<String>()
         var n = 0
@@ -431,6 +431,7 @@ object Groq {
             if (md != null) ok++
             out.add(Chunk(g, md))
         }
+        if (ok == 0 && err == null) err = "Groq mengubah isi katanya, jadi dipakai versi polos"
         return FmtRes(out, ok, err)
     }
 }
