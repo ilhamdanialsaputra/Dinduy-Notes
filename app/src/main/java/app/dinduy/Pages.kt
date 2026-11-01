@@ -138,7 +138,7 @@ fun AddNoteLayer(vm: AppVM, act: Actions) {
         }
     }
 
-    fun openNew() {
+    fun openNew(voice: Boolean = false) {
         if (vm.addHand || boxH <= 0f) return
         val f = vm.addF.value
         val top = boxH * (1f - f)
@@ -147,7 +147,8 @@ fun AddNoteLayer(vm: AppVM, act: Actions) {
         vm.addHand = true
         vm.addOn = false
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-        vm.nav.openNote(n.id, Morph(0f, top, boxW, boxH, rad, colorNow(), floatArrayOf(rad, rad, 0f, 0f), card = true, up = true), true)
+        vm.nav.openNote(n.id, Morph(0f, top, boxW, boxH, rad, colorNow(), floatArrayOf(rad, rad, 0f, 0f), card = true, up = true), !voice)
+        if (voice) vm.startRec(n.id)   // izin mikrofon sudah didapat sebelum catatan dibuat
         scope.launch {
             vm.addFade.animateTo(0f, tween(240))
             vm.addF.snapTo(0f); vm.addFade.snapTo(1f)
@@ -228,6 +229,11 @@ fun AddNoteLayer(vm: AppVM, act: Actions) {
                     Box(stag(3)) {
                         Opt(2, "up", "Impor berkas", "Berkas .md atau .txt") {
                             if (!vm.addHand) { vm.addOn = false; act.importMd() }
+                        }
+                    }
+                    Box(stag(4)) {
+                        Opt(3, "mic", "Voice note", "Catatan baru, langsung merekam suara") {
+                            if (!vm.addHand) act.requestMic { if (vm.addOn && !vm.addHand) openNew(true) }
                         }
                     }
                 }
