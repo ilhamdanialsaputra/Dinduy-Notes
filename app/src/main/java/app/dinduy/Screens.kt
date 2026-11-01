@@ -1420,8 +1420,10 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                 SGroup("Suara", 240) {
                     val ready = vm.models.list.filter { it.status == 2 }.joinToString { it.info.name }
                     SActionRow(
-                        POS_ONE, "mic", "Unduh model transkripsi",
-                        if (ready.isEmpty()) "Dibutuhkan untuk mengubah suara jadi teks tanpa internet" else "Siap dipakai: $ready"
+                        POS_ONE, "mic", "Transkripsi suara",
+                        if (vm.gqSet) "API key Groq tersimpan" + (if (ready.isNotEmpty()) " · model offline: $ready" else "")
+                        else if (ready.isNotEmpty()) "Model offline siap: $ready"
+                        else "Atur API key Groq (cepat) atau unduh model offline"
                     ) { vm.nav.push(Scr.Models) }
                 }
             }
