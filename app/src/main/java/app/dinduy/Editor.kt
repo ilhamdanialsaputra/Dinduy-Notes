@@ -217,7 +217,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
                 v0.selection.min <= 1 && v0.selection.max >= v0.text.length
             if (whole) {
                 // "Pilih semua" (Gboard / keyboard) memilih seluruh kolom: naikkan jadi seleksi seluruh catatan
-                if (!selOn) selectAllKey(key)
+                if (!selOn) selectAllKey(key) else selAll()
                 return
             }
             // tombol "lompat ke awal/akhir teks" Gboard saat menyeleksi = setSelection(jangkar, ujung blok): perluas ke ujung catatan
@@ -1236,7 +1236,10 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             commit()
             selBack = Pt(b.key, b.off)
             selImg = null; pickQuote = false; miniBar = false
-            focusAt(b.key, b.off)   // tetap di mode ketik: keyboard terbuka, ketikan langsung mengganti seleksi
+            // tetap di mode ketik: keyboard terbuka, ketikan langsung mengganti seleksi.
+            // Seleksi field = kata itu (tidak kosong) supaya tombol Salin / Pilih semua / lompat Gboard aktif.
+            if (a.key == b.key && b.off > a.off) req = Req(b.key, b.off, ++rq, TextRange(a.off + 1, b.off + 1))
+            else focusAt(b.key, b.off)
         }
         wordA = a; wordB = b; selWho = 0
         pa = a; pf = b
@@ -1601,7 +1604,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         selBack = b; wordA = a; wordB = b; selWho = 0
         pa = a; pf = b; selOn = true; selDrag = false
         selImg = null; pickQuote = false; miniBar = false
-        tf[key]?.let { tf[key] = it.copy(selection = TextRange(r + 1)) }
+        // seleksi field ikut tidak kosong supaya Salin / Pilih semua / lompat Gboard aktif
+        tf[key]?.let { tf[key] = it.copy(selection = TextRange(l + 1, r + 1)) }
         caretMoved(key)
         buzz?.invoke()
     }
