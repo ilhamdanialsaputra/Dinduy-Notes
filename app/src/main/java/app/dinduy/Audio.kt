@@ -421,7 +421,8 @@ class Models(
     private val ctx: Context,
     private val scope: CoroutineScope,
     private val onMsg: (String) -> Unit,
-    private val onReady: (String) -> Unit
+    private val onReady: (String) -> Unit,
+    private val onBusy: () -> Unit = { }
 ) {
     val list: List<MS> = listOf(
         MInfo("base", "ggml-base.bin", "Base", "~142 MB", 147951465L, "Cepat dan hemat memori. Cocok untuk sebagian besar catatan suara."),
@@ -474,6 +475,7 @@ class Models(
         if (m.status != 0) return
         m.err = null
         m.status = 1
+        onBusy()
         val g = ++m.gen
         val prev = m.job
         m.job = scope.launch {
