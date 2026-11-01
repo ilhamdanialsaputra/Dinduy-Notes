@@ -176,7 +176,10 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     // ---------- suara (rekam, putar, model, transkripsi) ----------
     val rec = Rec(ctx, viewModelScope)
     val player = Player(ctx, viewModelScope)
-    val models = Models(ctx, viewModelScope, { m -> show(m) }, { k -> onModelReady(k) })
+    val models = Models(ctx, viewModelScope,
+        { m -> show(m); Bg.done(ctx, "Unduhan terhenti", "Buka Dinduy lalu ketuk Lanjutkan.") },
+        { k -> onModelReady(k) },
+        { bgSync() })
     var audVer by mutableStateOf(0)                // dinaikkan saat berkas suara berubah (rekam / pulihkan)
     var trId by mutableStateOf<String?>(null)      // id suara yang sedang ditranskripsi
     var trStage by mutableStateOf(0)               // 0 menyiapkan suara, 1 memuat model, 2 menranskripsi, 3 membatalkan
@@ -194,6 +197,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     init {
         Rem.hook = this
+        Bg.onStopRec = { stopRec() }
         load()
         syncReminders()
         player.onError = { m -> show(m) }
@@ -206,6 +210,8 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         if (Rem.hook === this) Rem.hook = null
+        Bg.onStopRec = null
+        Bg.stop(ctx)
         rec.cancel()
         player.stop()
         super.onCleared()
@@ -415,10 +421,50 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ---------- kerja latar belakang: notifikasi + layanan foreground ----------
+    private var bgJob: Job? = null
+
+    private fun bgSnap(): Bg.Snap? {
+        val dl = models.list.firstOrNull { it.status == 1 }
+        val tr = trId
+        if (rec.active) return Bg.Snap("Merekam suara", fmtTime(rec.ms), -2, true, true)
+        if (dl != null) {
+            val p = if (dl.total > 0L) (dl.got * 100L / dl.total).toInt().coerceIn(0, 100) else -1
+            val txt = if (p >= 0) "$p% · " + (dl.got / 1048576L) + " dari " + (dl.total / 1048576L) + " MB" else "Menyiapkan unduhan…"
+            return Bg.Snap("Mengunduh model " + modelLabel(dl.info.key), txt, p, false, false)
+        }
+        if (tr != null) {
+            val st = when (trStage) {
+                0 -> "Menyiapkan suara…"
+                1 -> "Memuat model…"
+                2 -> "Mengubah suara jadi teks…"
+                4 -> "Mengirim ke Groq…"
+                5 -> "Merapikan format…"
+                else -> "Membatalkan…"
+            }
+            return Bg.Snap("Transkripsi berjalan", if (trInfo.isNotEmpty()) st + " " + trInfo else st, -1, false, false)
+        }
+        return null
+    }
+
+    /** Menyalakan notifikasi berjalan selama ada unduhan / rekaman / transkripsi; mati sendiri saat semuanya selesai. */
+    fun bgSync() {
+        if (bgJob?.isActive == true) return
+        bgJob = viewModelScope.launch {
+            while (true) {
+                val sn = bgSnap() ?: break
+                Bg.push(ctx, sn)
+                kotlinx.coroutines.delay(1000)
+            }
+            bgJob = null
+            Bg.stop(ctx)
+        }
+    }
+
     fun startRec(noteId: String): Boolean {
         player.stop()
         val ok = rec.start(noteId)
-        if (!ok) show("Perekaman tidak bisa dimulai")
+        if (!ok) show("Perekaman tidak bisa dimulai") else bgSync()
         return ok
     }
 
@@ -452,6 +498,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         val cur = models.list.firstOrNull { it.info.key == pr.wm }
         if (cur == null || cur.status != 2) setPr(pr.copy(wm = key))
         show("Model transkripsi siap dipakai")
+        Bg.done(ctx, "Model transkripsi siap", "Sekarang bisa dipakai tanpa internet.")
     }
 
     fun cancelTranscribe() {
@@ -588,6 +635,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         trId = audId
         trStage = 0
         trInfo = ""
+        bgSync()
         trJob = viewModelScope.launch {
             val temps = ArrayList<File>()
             try {
@@ -606,21 +654,37 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                     show("Tidak ada ucapan yang terdeteksi")
                 } else {
                     var chunks: List<Chunk>? = null
+                    var fmtErr: String? = null
+                    var fmtOk = 0
                     if (key != null && pr.gf) {
                         trStage = 5
                         trInfo = ""
                         val kk: String = key
-                        chunks = withContext(Dispatchers.IO) { Groq.format(kk, paras) { ensureActive() } }
+                        val fr = withContext(Dispatchers.IO) { Groq.format(kk, paras) { ensureActive() } }
+                        chunks = fr?.chunks; fmtErr = fr?.err; fmtOk = fr?.ok ?: 0
                     }
                     applyTranscript(noteId, audId) { n -> Paras.blocks("Transkrip $n", paras, chunks) }
-                    show("Transkrip ditambahkan ke catatan")
+                    val fe = fmtErr
+                    show(
+                        when {
+                            key == null || !pr.gf -> "Transkrip ditambahkan ke catatan"
+                            fe != null -> "Transkrip ditambahkan. Format otomatis dilewati: " + fe
+                            fmtOk == 0 -> "Transkrip ditambahkan tanpa format otomatis"
+                            else -> "Transkrip ditambahkan ke catatan"
+                        }
+                    )
+                    Bg.done(ctx, "Transkrip siap", "Teks suaramu sudah masuk ke catatan.")
                 }
             } catch (e: CancellationException) {
                 show("Transkripsi dibatalkan")
                 throw e
             } catch (e: Throwable) {
                 if (trStage == 3) show("Transkripsi dibatalkan")
-                else show("Transkripsi gagal: " + (e.message ?: "kesalahan tidak dikenal"))
+                else {
+                    val em = e.message ?: "kesalahan tidak dikenal"
+                    show("Transkripsi gagal: " + em)
+                    Bg.done(ctx, "Transkripsi gagal", em)
+                }
             } finally {
                 withContext(NonCancellable) { temps.forEach { try { it.delete() } catch (x: Exception) { } } }
                 Groq.abort()
