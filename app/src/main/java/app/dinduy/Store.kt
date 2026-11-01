@@ -661,7 +661,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                         trInfo = ""
                         val kk: String = key
                         val fr = withContext(Dispatchers.IO) { Groq.format(kk, paras) { ensureActive() } }
-                        chunks = fr?.chunks; fmtErr = fr?.err; fmtOk = fr?.ok ?: 0
+                        chunks = fr?.chunks?.ifEmpty { null }; fmtErr = fr?.err; fmtOk = fr?.ok ?: 0
                     }
                     applyTranscript(noteId, audId) { n -> Paras.blocks("Transkrip $n", paras, chunks) }
                     val fe = fmtErr
