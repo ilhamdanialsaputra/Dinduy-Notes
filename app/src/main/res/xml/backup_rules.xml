@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 ke bawah (auto-backup Google Drive): jangan ikutkan API key terenkripsi dan model transkripsi (ratusan MB). -->
+<full-backup-content>
+    <exclude domain="file" path="secure" />
+    <exclude domain="file" path="models" />
+</full-backup-content>
