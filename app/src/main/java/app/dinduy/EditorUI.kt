@@ -116,6 +116,13 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -355,6 +362,8 @@ fun TF(
             object : ViewConfiguration by vcBase { override val longPressTimeoutMillis: Long get() = 60_000L }
         }
         val selCols = androidx.compose.foundation.text.selection.LocalTextSelectionColors.current
+        @Suppress("DEPRECATION")
+        val clipM = androidx.compose.ui.platform.LocalClipboardManager.current
         val hideNative = ed.selOn   // seleksi editor aktif: sembunyikan kursor + pegangan bawaan field supaya tidak dobel
         val cols = if (hideNative) androidx.compose.foundation.text.selection.TextSelectionColors(Color.Transparent, selCols.backgroundColor) else selCols
         CompositionLocalProvider(
@@ -364,6 +373,28 @@ fun TF(
             BasicTextField(
                 value = v, onValueChange = { ed.onText(key, it) },
                 modifier = modifier.focusRequester(fr).bringIntoViewRequester(bring).trackPos(ed, key)
+                    .onPreviewKeyEvent { e ->
+                        if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                        val ctrl = e.isCtrlPressed
+                        when {
+                            ctrl && e.key == Key.A -> { ed.selectAllKey(key); true }
+                            (ctrl && e.key == Key.C) || e.key == Key.Copy ->
+                                if (ed.selOn) { clipM.setText(androidx.compose.ui.text.AnnotatedString(ed.selText())); true } else false
+                            (ctrl && e.key == Key.X) || e.key == Key.Cut ->
+                                if (ed.selOn) { clipM.setText(androidx.compose.ui.text.AnnotatedString(ed.selText())); ed.selDelete(); true } else false
+                            (ctrl && e.key == Key.V) || e.key == Key.Paste ->
+                                if (ed.selOn) {
+                                    val s = clipM.getText()?.text
+                                    if (!s.isNullOrEmpty()) ed.selPaste(s)
+                                    true
+                                } else false
+                            e.key == Key.DirectionLeft -> ed.navKey(key, 0, e.isShiftPressed)
+                            e.key == Key.DirectionRight -> ed.navKey(key, 1, e.isShiftPressed)
+                            e.key == Key.DirectionUp -> ed.navKey(key, 2, e.isShiftPressed)
+                            e.key == Key.DirectionDown -> ed.navKey(key, 3, e.isShiftPressed)
+                            else -> false
+                        }
+                    }
                     .onFocusChanged { foc = it.isFocused; if (it.isFocused) ed.onFocus(key) }
                     .wordTap(
                         onTap = { if (ed.selEdit) ed.dropSel() },
