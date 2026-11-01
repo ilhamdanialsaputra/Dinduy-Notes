@@ -85,7 +85,7 @@ android {
 }
 
 dependencies {
-    // BOM 2025.09.00 = Compose 1.9 + Material3 1.4.0 (komponen Expressive: LoadingIndicator, LinearWavyProgressIndicator)
+    // BOM 2025.09.00 = Compose 1.9 + Material3 terbaru
     implementation(platform("androidx.compose:compose-bom:2025.09.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
