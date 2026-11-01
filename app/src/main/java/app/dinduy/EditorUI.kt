@@ -388,6 +388,10 @@ fun TF(
                                     if (!s.isNullOrEmpty()) ed.selPaste(s)
                                     true
                                 } else false
+                            e.key == Key.MoveHome -> ed.jumpKey(key, false, ctrl, e.isShiftPressed)
+                            e.key == Key.MoveEnd -> ed.jumpKey(key, true, ctrl, e.isShiftPressed)
+                            e.key == Key.PageUp -> ed.selOn && ed.jumpKey(key, false, true, e.isShiftPressed)
+                            e.key == Key.PageDown -> ed.selOn && ed.jumpKey(key, true, true, e.isShiftPressed)
                             e.key == Key.DirectionLeft -> ed.navKey(key, 0, e.isShiftPressed)
                             e.key == Key.DirectionRight -> ed.navKey(key, 1, e.isShiftPressed)
                             e.key == Key.DirectionUp -> ed.navKey(key, 2, e.isShiftPressed)
