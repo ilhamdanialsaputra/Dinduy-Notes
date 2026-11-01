@@ -1145,6 +1145,7 @@ fun EdBar(ed: Ed, act: Actions, imeOpen: Boolean) {
     val blkOff = cell || selMode
     val convOff = cell || ty == "img"   // teks samping gambar tidak bisa diubah jadi judul/daftar
     val capShape = RoundedCornerShape(30.dp)
+    val haptic = LocalHapticFeedback.current
     Column(
         Modifier.widthIn(max = 560.dp).fillMaxWidth().padding(horizontal = 10.dp)
     ) {
@@ -1267,6 +1268,12 @@ fun EdBar(ed: Ed, act: Actions, imeOpen: Boolean) {
                 I("pre", "pre", ty == "code", convOff) { ed.setCode() }
                 I("table", "table", off = blkOff) { ed.insTable() }
                 I("img", "img", off = blkOff) { act.pickImages() }
+                I("mic", "mic", ed.recActive, ed.recActive || selMode) {
+                    act.requestMic {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        ed.startVoice()
+                    }
+                }
                 I("hr", "hr", off = blkOff) { ed.insHr() }
             }
             Box(Modifier.width(10.dp * (1f - f)).clipToBounds().wrapContentWidth(Alignment.Start, unbounded = true)) { Sep() }
@@ -1365,6 +1372,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
 
     val imeOpen = WindowInsets.ime.getBottom(density) > 0
     val haptic = LocalHapticFeedback.current
+    val hasAu = vm.note(ed.noteId)?.au?.isNotEmpty() == true
     SideEffect {
         ed.scroll = scroll
         ed.dens = density.density
@@ -1503,7 +1511,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                             bi0 += 1 + plan.let { it?.parts?.size ?: 0 }
                         }
                         Box(
-                            Modifier.fillMaxWidth().height(220.dp).pointerInput(ed.reading, ed.selOn) {
+                            Modifier.fillMaxWidth().height(if (hasAu) 28.dp else 220.dp).pointerInput(ed.reading, ed.selOn) {
                                 detectTapGestures {
                                     if (ed.selOn) ed.clearSel()
                                     else {
@@ -1517,6 +1525,24 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                     }
                     if (ed.selOn) SelHandles(ed)
                     SelBubble(ed, vm, act, scroll.value)   // selalu ada di komposisi supaya bisa animasi keluar
+                }
+                // kartu suara + transkrip: selalu di bawah isi catatan (editor dan mode baca), di luar area seleksi teks
+                if (hasAu) {
+                    Box(Modifier.widthIn(max = 700.dp).fillMaxWidth().padding(horizontal = 24.dp)) {
+                        AudioSection(vm, ed.noteId, act)
+                    }
+                    Box(
+                        Modifier.widthIn(max = 700.dp).fillMaxWidth().height(220.dp).pointerInput(ed.reading, ed.selOn) {
+                            detectTapGestures {
+                                if (ed.selOn) ed.clearSel()
+                                else {
+                                    val l = ed.blocks.lastOrNull { it.isText }
+                                    if (l != null) ed.focusAt(l.id, l.r.t.length)
+                                    else if (ed.reading) ed.exitReading()
+                                }
+                            }
+                        }
+                    )
                 }
             }
             BottomBars(ed, vm, act, (!ed.reading || ed.selEdit) && !ed.titleFocus && !ed.findOn, imeOpen)
@@ -1699,22 +1725,33 @@ fun SelHandles(ed: Ed) {
 /** Dipisah dari NoteScreen supaya tidak terjebak receiver ColumnScope milik Column di luarnya. */
 @Composable
 fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boolean) {
-    SideEffect { ed.barOn = showBar }
+    val recOn = ed.recActive
+    SideEffect { ed.barOn = showBar || recOn }
     Box(Modifier.fillMaxSize()) {
-        // kapsul penuh: gerak kecil + pudar, karena keyboard sudah ikut bergerak sendiri
-        AnimatedVisibility(
-            visible = showBar,
-            modifier = Modifier.align(Alignment.BottomCenter),
-            enter = fadeIn(tween(260, easing = Emph)) + slideInVertically(tween(320, easing = Emph)) { it / 3 } +
-                expandVertically(tween(320, easing = Emph)),
-            exit = fadeOut(tween(180)) + slideOutVertically(tween(260, easing = Emph)) { it / 4 } +
-                shrinkVertically(tween(300, easing = Emph))
-        ) {
-            Box(
-                Modifier.onSizeChanged { ed.barH = it.height.toFloat() }.padding(bottom = 10.dp).fillMaxWidth(),
-                contentAlignment = Alignment.Center
+        // kartu rekaman + kapsul alat dalam satu kolom yang diukur bersama (barH), jadi teks / kursor tidak pernah tertutup
+        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().onSizeChanged { ed.barH = it.height.toFloat() }) {
+            AnimatedVisibility(
+                visible = recOn,
+                enter = fadeIn(tween(220, easing = Emph)) +
+                    scaleIn(spring(.8f, 380f), .86f, TransformOrigin(.9f, 1f)) +
+                    expandVertically(tween(300, easing = Emph)),
+                exit = fadeOut(tween(160)) +
+                    scaleOut(tween(220, easing = Emph), .9f, TransformOrigin(.9f, 1f)) +
+                    shrinkVertically(tween(260, easing = Emph))
             ) {
-                EdBar(ed, act, imeOpen)
+                RecordCard(vm)
+            }
+            // kapsul penuh: gerak kecil + pudar, karena keyboard sudah ikut bergerak sendiri
+            AnimatedVisibility(
+                visible = showBar,
+                enter = fadeIn(tween(260, easing = Emph)) + slideInVertically(tween(320, easing = Emph)) { it / 3 } +
+                    expandVertically(tween(320, easing = Emph)),
+                exit = fadeOut(tween(180)) + slideOutVertically(tween(260, easing = Emph)) { it / 4 } +
+                    shrinkVertically(tween(300, easing = Emph))
+            ) {
+                Box(Modifier.padding(bottom = 10.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    EdBar(ed, act, imeOpen)
+                }
             }
         }
     }
