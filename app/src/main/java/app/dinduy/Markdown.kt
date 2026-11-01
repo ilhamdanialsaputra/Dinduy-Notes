@@ -118,7 +118,7 @@ private val VK = mapOf(
 
 private fun isBl(l: String) = RX_BLK.containsMatchIn(l) || RX_ROW.matches(l)
 
-fun md(src: String): List<Blk> {
+fun md(src: String, lineBlocks: Boolean = false): List<Blk> {
     val refs = HashMap<String, String>()
     val L = src.replace("\r", "").split("\n").filter {
         val m = RX_REFDEF.find(it)
@@ -195,7 +195,8 @@ fun md(src: String): List<Blk> {
         }
         val c = ArrayList<String>()
         while (i < L.size && L[i].isNotBlank() && (c.isEmpty() || !isBl(L[i]))) c.add(L[i++])
-        o.add(Blk(ty = "p", r = inl(c.joinToString("\n"), refs)))
+        if (lineBlocks) c.forEach { o.add(Blk(ty = "p", r = inl(it.trim(), refs))) }
+        else o.add(Blk(ty = "p", r = inl(c.joinToString("\n"), refs)))
     }
     return o.ifEmpty { listOf(Blk()) }
 }
