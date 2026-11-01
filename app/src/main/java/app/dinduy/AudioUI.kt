@@ -364,9 +364,14 @@ fun AudioCard(vm: AppVM, noteId: String, a: Aud, idx: Int, total: Int, title: St
                         0 -> "Menyiapkan suara…"
                         1 -> "Memuat model…"
                         2 -> "Menranskripsi…"
+                        4 -> "Mengirim ke Groq…"
+                        5 -> "Merapikan format…"
                         else -> "Membatalkan…"
                     }
-                    T(st, 15f, 600, pal.opc, Modifier.weight(1f), maxLines = 1)
+                    Column(Modifier.weight(1f)) {
+                        T(st, 15f, 600, pal.opc, maxLines = 1)
+                        if (vm.trInfo.isNotEmpty()) T(vm.trInfo, 12f, 500, pal.opc, alpha = .8f, maxLines = 1)
+                    }
                     GBtn(3, null, "Batal", pal.c1, pal.os, enabled = vm.trStage != 3) { vm.cancelTranscribe() }
                 }
             }
@@ -375,21 +380,10 @@ fun AudioCard(vm: AppVM, noteId: String, a: Aud, idx: Int, total: Int, title: St
                     val name = (title.ifBlank { "Suara" }) + (if (total > 1) "-${idx + 1}" else "") + ".m4a"
                     act.saveAudio(a, name)
                 }
-                GBtn(1, "notes", if (a.tr.isEmpty()) "Transkripsi" else "Ulangi", pal.sc, pal.osc, enabled = exists && !busy && !otherBusy, modifier = Modifier.weight(1f)) {
+                GBtn(1, "notes", if (a.tb.isEmpty()) "Transkripsi" else "Ulangi", pal.sc, pal.osc, enabled = exists && !busy && !otherBusy, modifier = Modifier.weight(1f)) {
                     vm.transcribe(noteId, a.id)
                 }
                 GBtn(2, "del", null, pal.ec, pal.oec) { vm.removeAudio(noteId, a.id) }
-            }
-        }
-        if (a.tr.isNotEmpty()) {
-            Column(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(pal.c1)
-                    .animateContentSize(spring(.8f, 400f)).padding(horizontal = 18.dp, vertical = 14.dp)
-            ) {
-                T("Transkrip", 13f, 700, pal.p, Modifier.padding(bottom = 6.dp))
-                SelectionContainer {
-                    T(a.tr, vm.pr.fs.toFloat() * .92f, 400, pal.os, lh = vm.pr.lh)
-                }
             }
         }
     }
@@ -407,13 +401,18 @@ fun ModelDialogHost(vm: AppVM) {
         onDismissRequest = { vm.needModel = false },
         containerColor = pal.c3,
         shape = RoundedCornerShape(28.dp),
-        title = { T("Unduh model?", 24f, 400, pal.os) },
-        text = { T("Model transkripsi suara ke teks belum diunduh. Unduh dulu?", 15f, 400, pal.osv, lh = 1.4f) },
+        title = { T("Belum ada model", 24f, 400, pal.os) },
+        text = {
+            T(
+                "Anda belum menerapkan model apa pun. Pilih API key Groq (online, cepat) atau unduh model offline di halaman berikutnya.",
+                15f, 400, pal.osv, lh = 1.4f
+            )
+        },
         confirmButton = {
             TextButton(onClick = {
                 vm.needModel = false
                 if (vm.nav.top !is Scr.Models) vm.nav.push(Scr.Models)
-            }) { T("Unduh", 15f, 600, pal.p) }
+            }) { T("Atur model", 15f, 600, pal.p) }
         },
         dismissButton = { TextButton(onClick = { vm.needModel = false }) { T("Batal", 15f, 500, pal.osv) } }
     )
