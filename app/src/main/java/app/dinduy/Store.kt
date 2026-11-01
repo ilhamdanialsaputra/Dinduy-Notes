@@ -19,8 +19,13 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import dev.ffmpegkit.whisper.Whisper
+import dev.ffmpegkit.whisper.WhisperConfig
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -37,12 +42,17 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.zip.Deflater
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 
 class Snack(val msg: String, val undo: (() -> Unit)?, val id: Long = System.nanoTime())
 
@@ -68,7 +78,10 @@ sealed class Sheet {
     object EmptyTrash : Sheet()
 }
 
-class Pending(val notes: List<Note>, val pr: Prefs?, val nImg: Int, val at: Long, val dir: File, val ids: List<String>, val lbl: List<String> = emptyList())
+class Pending(
+    val notes: List<Note>, val pr: Prefs?, val nImg: Int, val at: Long, val dir: File, val ids: List<String>,
+    val lbl: List<String> = emptyList(), val aids: List<String> = emptyList()
+)
 
 /** Dialog nama label. old == null: label baru; forNote != null: langsung dipasang ke catatan itu. */
 class LblDlg(val old: String?, val forNote: String?)
@@ -160,6 +173,16 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     val sel = mutableStateListOf<String>()
     val seen = HashSet<String>()
 
+    // ---------- suara (rekam, putar, model, transkripsi) ----------
+    val rec = Rec(ctx, viewModelScope)
+    val player = Player(ctx, viewModelScope)
+    val models = Models(ctx, viewModelScope, { m -> show(m) }, { k -> onModelReady(k) })
+    var audVer by mutableStateOf(0)                // dinaikkan saat berkas suara berubah (rekam / pulihkan)
+    var trId by mutableStateOf<String?>(null)      // id suara yang sedang ditranskripsi
+    var trStage by mutableStateOf(0)               // 0 menyiapkan suara, 1 memuat model, 2 menranskripsi, 3 membatalkan
+    var needModel by mutableStateOf(false)         // dialog "model belum diunduh"
+    private var trJob: Job? = null
+
     private var saveJob: Job? = null
     private val now get() = System.currentTimeMillis()
 
@@ -167,10 +190,14 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         Rem.hook = this
         load()
         syncReminders()
+        player.onError = { m -> show(m) }
+        gcAudio()
     }
 
     override fun onCleared() {
         if (Rem.hook === this) Rem.hook = null
+        rec.cancel()
+        player.stop()
         super.onCleared()
     }
 
@@ -257,7 +284,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     fun dropIfEmpty(id: String, title: String, bl: List<Blk>) {
         if (title.isBlank() && plainOf(bl).isEmpty() && bl.none { it.isObj && it.ty != "hr" }) {
             // catatan kosong yang diberi pengingat tetap disimpan (seperti Google Keep)
-            if (docs.removeAll { it.id == id && it.rm == 0L }) save()
+            if (docs.removeAll { it.id == id && it.rm == 0L && it.au.isEmpty() }) save()
         }
     }
 
@@ -353,11 +380,125 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     }
 
     fun purge(id: String) {
-        docs.removeAll { it.id == id }; save(); show("Dihapus permanen")
+        docs.removeAll { it.id == id }; save(); gcAudio(); show("Dihapus permanen")
     }
 
     fun purgeAll() {
-        docs.removeAll { it.dt != 0L }; save(); show("Sampah dikosongkan")
+        docs.removeAll { it.dt != 0L }; save(); gcAudio(); show("Sampah dikosongkan")
+    }
+
+    // ---------- suara ----------
+    fun audIds(): Set<String> {
+        val s = LinkedHashSet<String>()
+        docs.forEach { d -> d.au.forEach { s.add(it.id) } }
+        return s
+    }
+
+    /** Hapus berkas suara yang tidak dipakai catatan mana pun (sisa rekaman batal, catatan terhapus, dll). */
+    fun gcAudio() {
+        if (rec.active) return
+        val keep = audIds()
+        viewModelScope.launch(Dispatchers.IO) {
+            AudioFiles.dir(ctx).listFiles()?.forEach { f ->
+                if (f.isFile && f.extension == "m4a" && f.nameWithoutExtension !in keep) f.delete()
+            }
+        }
+    }
+
+    fun startRec(noteId: String): Boolean {
+        player.stop()
+        val ok = rec.start(noteId)
+        if (!ok) show("Perekaman tidak bisa dimulai")
+        return ok
+    }
+
+    fun stopRec() {
+        val nid = rec.noteId ?: return
+        val a = rec.finish()
+        if (a == null) {
+            show("Rekaman terlalu singkat atau gagal")
+            return
+        }
+        upd(nid) { it.copy(au = it.au + a, u = now) }
+        audVer++
+    }
+
+    fun cancelRec() {
+        rec.cancel()
+    }
+
+    fun removeAudio(noteId: String, audId: String) {
+        val prev = note(noteId) ?: return
+        val a = prev.au.firstOrNull { it.id == audId } ?: return
+        if (trId == audId) cancelTranscribe()
+        player.stopIf(audId)
+        upd(noteId) { it.copy(au = it.au.filter { x -> x.id != audId }) }
+        show("Suara dihapus") {
+            upd(noteId) { n -> if (n.au.any { it.id == audId }) n else n.copy(au = (n.au + a).sortedBy { it.at }) }
+        }
+    }
+
+    private fun onModelReady(key: String) {
+        val cur = models.list.firstOrNull { it.info.key == pr.wm }
+        if (cur == null || cur.status != 2) setPr(pr.copy(wm = key))
+        show("Model transkripsi siap dipakai")
+    }
+
+    fun cancelTranscribe() {
+        if (trId != null) {
+            trStage = 3
+            trJob?.cancel()
+        }
+    }
+
+    /** m4a -> WAV sementara -> Whisper. Model hanya dimuat selama transkripsi, lalu dilepas. */
+    fun transcribe(noteId: String, audId: String) {
+        if (trId != null) return
+        val mf = models.readyFile(pr.wm)
+        if (mf == null) {
+            needModel = true
+            return
+        }
+        val src = AudioFiles.file(ctx, audId)
+        if (!src.exists()) {
+            show("Berkas suara tidak ditemukan")
+            return
+        }
+        trId = audId
+        trStage = 0
+        trJob = viewModelScope.launch {
+            val w = File(ctx.cacheDir, "tr_$audId.wav")
+            try {
+                withContext(Dispatchers.IO) { WavDecoder.decode(src, w) { ensureActive() } }
+                trStage = 1
+                val model = withContext(Dispatchers.Default) { Whisper.loadModel(ctx, mf.absolutePath) }
+                try {
+                    trStage = 2
+                    val res = withContext(Dispatchers.Default) {
+                        Whisper.transcribe(model, w.absolutePath, WhisperConfig(language = "auto"))
+                    }
+                    val text = res.text.trim()
+                    if (text.isEmpty()) {
+                        show("Tidak ada ucapan yang terdeteksi")
+                    } else {
+                        upd(noteId) { n -> n.copy(au = n.au.map { if (it.id == audId) it.copy(tr = text) else it }, u = now) }
+                    }
+                } finally {
+                    withContext(NonCancellable) {
+                        try { Whisper.releaseModel(model) } catch (e: Throwable) { }
+                    }
+                }
+            } catch (e: CancellationException) {
+                show("Transkripsi dibatalkan")
+                throw e
+            } catch (e: Throwable) {
+                show("Transkripsi gagal: " + (e.message ?: "kesalahan tidak dikenal"))
+            } finally {
+                withContext(NonCancellable) { w.delete() }
+                trId = null
+                trStage = 0
+            }
+        }
     }
 
     fun addMd(title: String, body: String): Note {
@@ -429,7 +570,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         return s
     }
 
-    // ---------- cadangan: DINDUY01 + panjang header (LE) + header JSON + biner foto ----------
+    // ---------- cadangan: ZIP (data.json + img/ + audio/); format lama DINDUY01 tetap terbaca ----------
     fun backupName(): String {
         val c = java.util.Calendar.getInstance()
         fun p(n: Int) = n.toString().padStart(2, '0')
@@ -438,25 +579,38 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             p(c.get(java.util.Calendar.MINUTE)) + ".dinduy"
     }
 
+    /** Format baru: ZIP berisi data.json + img/*.jpg + audio/*.m4a. Format lama (DINDUY01) tetap bisa dibaca saat memulihkan. */
     fun writeBackup(os: OutputStream) {
-        val files = imgIds().map { it to File(imgDir, "$it.jpg") }.filter { it.second.exists() && it.second.length() > 0 }
+        val imgs = imgIds().filter { id -> File(imgDir, "$id.jpg").let { it.exists() && it.length() > 0L } }
+        val auds = audIds().filter { id -> AudioFiles.file(ctx, id).let { it.exists() && it.length() > 0L } }
         val head = buildJsonObject {
             put("app", "dinduy")
-            put("v", 2)
+            put("v", 3)
             put("at", now)
             put("pr", J.encodeToJsonElement(pr))
             put("docs", J.encodeToJsonElement(docs.toList()))
             put("lbl", J.encodeToJsonElement(labels.toList()))
-            put("img", JsonArray(files.map { (id, f) ->
-                buildJsonObject { put("id", id); put("n", f.length()); put("t", "image/jpeg") }
-            }))
+            put("img", JsonArray(imgs.map { JsonPrimitive(it) }))
+            put("aud", JsonArray(auds.map { JsonPrimitive(it) }))
         }
-        val hb = head.toString().toByteArray(Charsets.UTF_8)
-        os.write("DINDUY01".toByteArray())
-        os.write(ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(hb.size).array())
-        os.write(hb)
-        for ((_, f) in files) f.inputStream().use { it.copyTo(os) }
-        os.flush()
+        val zos = ZipOutputStream(BufferedOutputStream(os, 65536))
+        zos.setLevel(Deflater.DEFAULT_COMPRESSION)
+        zos.putNextEntry(ZipEntry("data.json"))
+        zos.write(head.toString().toByteArray(Charsets.UTF_8))
+        zos.closeEntry()
+        zos.setLevel(Deflater.NO_COMPRESSION)   // foto & suara sudah terkompresi
+        for (id in imgs) {
+            zos.putNextEntry(ZipEntry("img/$id.jpg"))
+            File(imgDir, "$id.jpg").inputStream().use { it.copyTo(zos) }
+            zos.closeEntry()
+        }
+        for (id in auds) {
+            zos.putNextEntry(ZipEntry("audio/$id.m4a"))
+            AudioFiles.file(ctx, id).inputStream().use { it.copyTo(zos) }
+            zos.closeEntry()
+        }
+        zos.finish()
+        zos.flush()
     }
 
     fun markBackedUp() {
@@ -497,43 +651,104 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         try {
             val dir = File(ctx.cacheDir, "bk")
             dir.deleteRecursively(); dir.mkdirs()
-            ctx.contentResolver.openInputStream(uri)?.use { raw ->
-                val ins = BufferedInputStream(raw)
-                val h0 = ByteArray(12)
-                ins.readFully(h0)
-                if (String(h0, 0, 8) != "DINDUY01") return@withContext false
-                val hl = ByteBuffer.wrap(h0, 8, 4).order(ByteOrder.LITTLE_ENDIAN).int
-                if (hl < 2 || hl > 64 * 1024 * 1024) return@withContext false
-                val hb = ByteArray(hl)
-                ins.readFully(hb)
-                val m = J.parseToJsonElement(String(hb, Charsets.UTF_8)).jsonObject
-                if ((m["app"] as? JsonPrimitive)?.content != "dinduy") return@withContext false
-                val notes = m["docs"]!!.jsonArray.mapNotNull { (it as? JsonObject)?.let { o -> docFrom(o) } }
-                val ids = ArrayList<String>()
-                val buf = ByteArray(65536)
-                for (e in (m["img"] as? JsonArray) ?: JsonArray(emptyList())) {
-                    val o = e as JsonObject
-                    val id = (o["id"] as JsonPrimitive).content
-                    var n = o.num("n")
-                    if (!Regex("[\\w-]{1,40}").matches(id) || n < 0) return@withContext false
-                    FileOutputStream(File(dir, "$id.jpg")).use { fo ->
-                        while (n > 0) {
-                            val r = ins.read(buf, 0, minOf(buf.size.toLong(), n).toInt())
-                            if (r < 0) throw java.io.IOException("eof")
-                            fo.write(buf, 0, r); n -= r
-                        }
-                    }
-                    ids.add(id)
+            val p: Pending? = ctx.contentResolver.openInputStream(uri)?.use { raw ->
+                val ins = BufferedInputStream(raw, 65536)
+                ins.mark(16)
+                val h = ByteArray(8)
+                var n = 0
+                while (n < 8) {
+                    val r = ins.read(h, n, 8 - n)
+                    if (r < 0) break
+                    n += r
                 }
-                val prf = try { m["pr"]?.let { J.decodeFromJsonElement<Prefs>(it) } } catch (e: Exception) { null }
-                val lbl = (m["lbl"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content } ?: emptyList()
-                val p = Pending(notes, prf, ids.size, m.num("at").let { if (it == 0L) now else it }, dir, ids, lbl)
+                ins.reset()
+                if (n >= 8 && String(h, 0, 8) == "DINDUY01") stageLegacy(ins, dir)
+                else if (n >= 4 && h[0] == 'P'.code.toByte() && h[1] == 'K'.code.toByte()) stageZip(ins, dir)
+                else null
+            }
+            if (p == null) false else {
                 withContext(Dispatchers.Main) { pending = p }
                 true
-            } ?: false
+            }
         } catch (e: Exception) {
             false
         }
+    }
+
+    private val idRe = Regex("[\\w-]{1,40}")
+
+    private fun prefsOf(m: JsonObject): Prefs? = try { m["pr"]?.let { J.decodeFromJsonElement<Prefs>(it) } } catch (e: Exception) { null }
+
+    /** Cadangan lama: DINDUY01 + panjang header (LE) + header JSON + biner foto. */
+    private fun stageLegacy(ins: InputStream, dir: File): Pending? {
+        val h0 = ByteArray(12)
+        ins.readFully(h0)
+        if (String(h0, 0, 8) != "DINDUY01") return null
+        val hl = ByteBuffer.wrap(h0, 8, 4).order(ByteOrder.LITTLE_ENDIAN).int
+        if (hl < 2 || hl > 64 * 1024 * 1024) return null
+        val hb = ByteArray(hl)
+        ins.readFully(hb)
+        val m = J.parseToJsonElement(String(hb, Charsets.UTF_8)).jsonObject
+        if ((m["app"] as? JsonPrimitive)?.content != "dinduy") return null
+        val notes = m["docs"]!!.jsonArray.mapNotNull { (it as? JsonObject)?.let { o -> docFrom(o) } }
+        val ids = ArrayList<String>()
+        val buf = ByteArray(65536)
+        for (e in (m["img"] as? JsonArray) ?: JsonArray(emptyList())) {
+            val o = e as JsonObject
+            val id = (o["id"] as JsonPrimitive).content
+            var n = o.num("n")
+            if (!idRe.matches(id) || n < 0) return null
+            FileOutputStream(File(dir, "$id.jpg")).use { fo ->
+                while (n > 0) {
+                    val r = ins.read(buf, 0, minOf(buf.size.toLong(), n).toInt())
+                    if (r < 0) throw java.io.IOException("eof")
+                    fo.write(buf, 0, r); n -= r
+                }
+            }
+            ids.add(id)
+        }
+        val lbl = (m["lbl"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content } ?: emptyList()
+        return Pending(notes, prefsOf(m), ids.size, m.num("at").let { if (it == 0L) now else it }, dir, ids, lbl)
+    }
+
+    /** Cadangan baru: ZIP (data.json, img/, audio/). Nama berkas dibentuk sendiri dari id yang divalidasi. */
+    private fun stageZip(raw: InputStream, dir: File): Pending? {
+        val zin = ZipInputStream(raw)
+        var json: String? = null
+        val imgs = ArrayList<String>()
+        val auds = ArrayList<String>()
+        val buf = ByteArray(65536)
+        while (true) {
+            val e = zin.nextEntry ?: break
+            if (e.isDirectory) continue
+            val name = e.name
+            if (name == "data.json") {
+                json = String(zin.readBytes(), Charsets.UTF_8)
+            } else if (name.startsWith("img/") && name.endsWith(".jpg")) {
+                val id = name.substring(4, name.length - 4)
+                if (!idRe.matches(id)) continue
+                FileOutputStream(File(dir, "$id.jpg")).use { fo ->
+                    var r = zin.read(buf)
+                    while (r >= 0) { fo.write(buf, 0, r); r = zin.read(buf) }
+                }
+                imgs.add(id)
+            } else if (name.startsWith("audio/") && name.endsWith(".m4a")) {
+                val id = name.substring(6, name.length - 4)
+                if (!idRe.matches(id)) continue
+                FileOutputStream(File(dir, "$id.m4a")).use { fo ->
+                    var r = zin.read(buf)
+                    while (r >= 0) { fo.write(buf, 0, r); r = zin.read(buf) }
+                }
+                auds.add(id)
+            }
+        }
+        val j = json ?: return null
+        val m = J.parseToJsonElement(j).jsonObject
+        if ((m["app"] as? JsonPrimitive)?.content != "dinduy") return null
+        val arr = m["docs"] as? JsonArray ?: return null
+        val notes = arr.mapNotNull { (it as? JsonObject)?.let { o -> docFrom(o) } }
+        val lbl = (m["lbl"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content } ?: emptyList()
+        return Pending(notes, prefsOf(m), imgs.size, m.num("at").let { if (it == 0L) now else it }, dir, imgs, lbl, auds)
     }
 
     fun applyBackup(replace: Boolean) {
@@ -543,7 +758,13 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             withContext(Dispatchers.IO) {
                 imgDir.mkdirs()
                 p.ids.forEach { File(p.dir, "$it.jpg").copyTo(File(imgDir, "$it.jpg"), overwrite = true) }
+                if (p.aids.isNotEmpty()) {
+                    AudioFiles.dir(ctx).mkdirs()
+                    p.aids.forEach { File(p.dir, "$it.m4a").copyTo(AudioFiles.file(ctx, it), overwrite = true) }
+                }
             }
+            player.stop()
+            audVer++
             if (replace) {
                 docs.clear(); docs.addAll(p.notes)
                 labels.clear(); labels.addAll(p.lbl)
@@ -558,7 +779,8 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             }
             syncLabels()
             save()
-            show(p.notes.size.toString() + " catatan dan " + p.nImg + " foto dipulihkan")
+            if (replace) gcAudio()
+            show(p.notes.size.toString() + " catatan, " + p.nImg + " foto, dan " + p.aids.size + " suara dipulihkan")
         }
     }
 }
