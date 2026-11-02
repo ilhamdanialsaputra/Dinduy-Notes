@@ -24,6 +24,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
+import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.Canvas
@@ -379,13 +380,15 @@ fun TF(
             }
         }
         val clear = if (ed.barOn) ed.barH + 16f * ed.dens else 0f   // tinggi kapsul (termasuk jarak bawahnya) + sedikit ruang napas
-        val imeB = WindowInsets.ime.getBottom(dn)   // berubah selama keyboard naik: kursor dicek lagi setelah layar menyempit
-        LaunchedEffect(v.selection, v.text.length, foc, clear, imeB) {
+        LaunchedEffect(v.selection, v.text.length, foc, clear) {
             if (foc && v.selection.collapsed) {
-                delay(60)
-                lay?.let { l ->
-                    val o = (fold?.o2t(v.selection.start, 1) ?: v.selection.start).coerceIn(0, l.layoutInput.text.length)
-                    try { bring.bringIntoView(l.getCursorRect(o).let { c -> c.copy(bottom = c.bottom + clear) }) } catch (e: Exception) { }
+                // tinggi keyboard dipantau di sini (bukan di komposisi), jadi hanya kolom yang fokus yang bereaksi dan tidak ada recompose per frame
+                androidx.compose.runtime.snapshotFlow { WindowInsets.ime.getBottom(dn) }.collectLatest {
+                    delay(60)
+                    lay?.let { l ->
+                        val o = (fold?.o2t(v.selection.start, 1) ?: v.selection.start).coerceIn(0, l.layoutInput.text.length)
+                        try { bring.bringIntoView(l.getCursorRect(o).let { c -> c.copy(bottom = c.bottom + clear) }) } catch (e: Exception) { }
+                    }
                 }
             }
         }
