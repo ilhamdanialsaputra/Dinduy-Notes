@@ -24,6 +24,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -173,6 +175,27 @@ fun spanStyle(k: Int, pal: Pal, fs: Float): SpanStyle = when (k) {
     else -> SpanStyle(color = pal.p, fontWeight = FontWeight(700), textDecoration = TextDecoration.Underline)
 }
 
+/** Warna seleksi teks. Bagian yang bertanda stabilo dicampur ke warna stabilonya, jadi stabilo tetap kelihatan. off = awalan tak terlihat. */
+fun AnnotatedString.Builder.addSel(pal: Pal, rt: Rt, a0: Int, b0: Int, off: Int, n: Int) {
+    val a = a0.coerceIn(0, n); val b = b0.coerceIn(0, n)
+    if (b <= a) return
+    val sel = pal.p.copy(alpha = .32f)
+    val onMark = Color(
+        red = sel.red * sel.alpha + pal.pc.red * (1f - sel.alpha),
+        green = sel.green * sel.alpha + pal.pc.green * (1f - sel.alpha),
+        blue = sel.blue * sel.alpha + pal.pc.blue * (1f - sel.alpha)
+    )
+    var cur = a
+    for ((ms, me) in rt.sp.filter { it.k == K.M }.map { (it.s + off).coerceIn(0, n) to (it.e + off).coerceIn(0, n) }.sortedBy { it.first }) {
+        val s = maxOf(ms, cur); val e = minOf(me, b)
+        if (e <= s) continue
+        if (s > cur) addStyle(SpanStyle(background = sel), cur, s)
+        addStyle(SpanStyle(background = onMark), s, e)
+        cur = e
+    }
+    if (cur < b) addStyle(SpanStyle(background = sel), cur, b)
+}
+
 fun styled(rt: Rt, text: String, off: Int, pal: Pal, fs: Float): AnnotatedString = buildAnnotatedString {
     append(text)
     val n = text.length
@@ -309,7 +332,7 @@ fun TF(
             val a = styled(rt, rt.t, 0, pal, fs)
             val a2 = if (sr == null && fh.isEmpty()) a else buildAnnotatedString {
                 append(a)
-                if (sr != null) addStyle(SpanStyle(background = pal.p.copy(alpha = .32f)), sr.first, sr.second)
+                if (sr != null) addSel(pal, rt, sr.first, sr.second, 0, rt.t.length)
                 addFind(pal, fh, fc, 0, rt.t.length)
             }
             if (fold == null) (if (just && jw > 0) justifySpans(a2, base2, jw, tm, dn) else a2) else fold.applyTo(a2, 0)
@@ -374,9 +397,7 @@ fun TF(
                 val a = if (sr == null && fh.isEmpty()) a0 else buildAnnotatedString {
                     append(a0)
                     if (sr != null) {
-                        val s0 = (sr.first + 1).coerceIn(0, t.text.length)
-                        val e0 = (sr.second + 1).coerceIn(0, t.text.length)
-                        if (e0 > s0) addStyle(SpanStyle(background = pal.p.copy(alpha = .32f)), s0, e0)
+                        addSel(pal, rt, sr.first + 1, sr.second + 1, 1, t.text.length)
                     }
                     addFind(pal, fh, fc, 1, t.text.length)
                 }
@@ -960,6 +981,12 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
         }
         if (selected && !ed.reading && ed.mv == null) {
             Box(Modifier.matchParentSize().border(2.dp, pal.p, shape))
+            // centang tutup mode edit gambar: menempel di gambarnya, bukan di toolbar
+            Box(
+                Modifier.align(Alignment.TopEnd).padding(8.dp).size(34.dp).clip(CircleShape).background(pal.p)
+                    .clickable { ed.closeImg() },
+                Alignment.Center
+            ) { Ic("ok", pal.op, 20.dp) }
             val right = m.al != "r"
             val gx = if (right) 1f else -1f
             val kk = if (m.al == "c") 2f else 1f
@@ -1490,6 +1517,22 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
         }
     }
 
+    // gulir otomatis ke kursor: geser seminimal mungkin, jadi kursor berhenti tepat di atas kapsul alat
+    // (bawaan Compose melempar target ke bagian atas layar). Blok yang lebih tinggi dari layar tidak diratakan ke atas.
+    val cursorSpec = remember {
+        object : BringIntoViewSpec {
+            override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+                val trail = offset + size
+                return when {
+                    size > containerSize -> 0f
+                    offset >= 0f && trail <= containerSize -> 0f
+                    offset < 0f -> offset
+                    else -> trail - containerSize
+                }
+            }
+        }
+    }
+
     Column(Modifier.fillMaxSize().background(pal.s)) {
         TopBar()
         // area catatan berhenti tepat di atas keyboard / navbar; kapsul melayang di atasnya tanpa latar
@@ -1499,6 +1542,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                 .clipToBounds()
                 .inkPinch(ed, scroll)
         ) {
+            CompositionLocalProvider(LocalBringIntoViewSpec provides cursorSpec) {
             Column(Modifier.fillMaxSize().inkZoom(ed).verticalScroll(scroll), horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(
                     Modifier.widthIn(max = 700.dp).fillMaxWidth().padding(horizontal = 24.dp)
@@ -1635,6 +1679,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                         }
                     )
                 }
+            }
             }
             InkFrame(ed)
             BottomBars(ed, vm, act, (!ed.reading || ed.selEdit) && !ed.titleFocus && !ed.findOn && !ed.ink.on, imeOpen)
