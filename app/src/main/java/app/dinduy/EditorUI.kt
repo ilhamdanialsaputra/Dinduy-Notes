@@ -234,8 +234,13 @@ private fun Modifier.trackPos(ed: Ed, key: String): Modifier = onGloballyPositio
  * Rata kiri-kanan buatan sendiri (justify bawaan Android tidak jalan di sebagian HP / font).
  * Ukur teks dengan rata kiri, lalu tiap baris (kecuali yang terakhir) dilebarkan dengan menambah jarak huruf
  * pada spasi di baris itu sampai pas selebar kolom. Teks tidak diubah, jadi kursor dan seleksi tetap benar.
+ * Teks yang mengelilingi gambar (Fold) juga dirata: baris sempit di samping gambar dan baris lebar di bawahnya sama-sama pas ke tepinya,
+ * hanya baris terakhir paragraf yang dibiarkan rata kiri.
  */
-private fun justifySpans(a: AnnotatedString, style: TextStyle, w: Int, tm: androidx.compose.ui.text.TextMeasurer, d: androidx.compose.ui.unit.Density): AnnotatedString {
+private fun justifySpans(
+    a: AnnotatedString, style: TextStyle, w: Int, tm: androidx.compose.ui.text.TextMeasurer, d: androidx.compose.ui.unit.Density,
+    cutR: Float = 0f
+): AnnotatedString {
     if (w <= 0 || a.length < 2) return a
     val r = tm.measure(a, style = style, constraints = androidx.compose.ui.unit.Constraints(maxWidth = w))
     if (r.lineCount < 2) return a
@@ -246,7 +251,10 @@ private fun justifySpans(a: AnnotatedString, style: TextStyle, w: Int, tm: andro
         for (i in 0 until r.lineCount - 1) {
             val s = r.getLineStart(i)
             val en = r.getLineEnd(i, visibleEnd = true).coerceAtMost(txt.length)
-            val slack = w - (r.getLineRight(i) - r.getLineLeft(i))
+            // baris yang berakhir pemisah baris buatan (teks mengelilingi gambar di kanan) lebih sempit dari kolom: ratakan ke tepi gambar, bukan ke tepi kolom
+            val hard = r.getLineEnd(i).let { it in 1..txt.length && txt[it - 1] == '\n' }
+            val tw = if (hard && cutR > 0f) w - cutR else w.toFloat()
+            val slack = tw - (r.getLineRight(i) - r.getLineLeft(i))
             var n = 0
             for (k in s until en) if (txt[k] == ' ') n++
             if (n == 0 || slack <= 1f) continue
@@ -320,7 +328,7 @@ fun TF(
     val v = ed.tf[key] ?: return
     val rt = ed.rtOf(key)
     val fs = base.fontSize.value
-    val just = base.textAlign == androidx.compose.ui.text.style.TextAlign.Justify && fold == null
+    val just = base.textAlign == androidx.compose.ui.text.style.TextAlign.Justify
     val base2 = if (base.textAlign == androidx.compose.ui.text.style.TextAlign.Justify)
         base.copy(textAlign = androidx.compose.ui.text.style.TextAlign.Start, lineBreak = androidx.compose.ui.text.style.LineBreak.Simple) else base
     val tm = androidx.compose.ui.text.rememberTextMeasurer()
@@ -337,7 +345,8 @@ fun TF(
                 if (sr != null) addSel(pal, rt, sr.first, sr.second, 0, rt.t.length)
                 addFind(pal, fh, fc, 0, rt.t.length)
             }
-            if (fold == null) (if (just && jw > 0) justifySpans(a2, base2, jw, tm, dn) else a2) else fold.applyTo(a2, 0)
+            if (fold == null) (if (just && jw > 0) justifySpans(a2, base2, jw, tm, dn) else a2)
+            else fold.applyTo(a2, 0).let { fa -> if (just && jw > 0) justifySpans(fa, base2, jw, tm, dn, fold.cutR) else fa }
         }
         val uri = LocalUriHandler.current
         var lay by remember { mutableStateOf<TextLayoutResult?>(null) }
@@ -412,7 +421,8 @@ fun TF(
                 else {
                     val n = t.text.length
                     val tn = n + fold.total
-                    TransformedText(fold.applyTo(a, 1), object : OffsetMapping {
+                    val fa = fold.applyTo(a, 1)
+                    TransformedText(if (just && jw > 0) justifySpans(fa, base2, jw, tm, dn, fold.cutR) else fa, object : OffsetMapping {
                         override fun originalToTransformed(offset: Int): Int = fold.o2t(offset, 1).coerceIn(0, tn)
                         override fun transformedToOriginal(offset: Int): Int = fold.t2o(offset, 1).coerceIn(0, n)
                     })
@@ -901,7 +911,7 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
             }
             .zIndex(if (liftedRow) 2f else 0f)
             .graphicsLayer {
-                if (liftedRow) translationX = ed.mvX
+                if (liftedRow) { translationX = ed.mvX; translationY = ed.mvY }
                 scaleX = lift; scaleY = lift
                 alpha = if (liftedRow) .94f else 1f
             }
@@ -979,8 +989,18 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
                 }
             }
         }
-        if (liftedBlk) {
-            val t = when (ed.mvAl) { "l" -> "Kiri · teks di kanan"; "r" -> "Kanan · teks di kiri"; else -> "Tengah" }
+        // gambar lain yang sedang ditimpa gambar seretan: sorot, dan tandai sisi masuknya (kiri / kanan)
+        val mt = ed.mergeT
+        if (mt != null && mt.imgId == m.id) {
+            Box(Modifier.matchParentSize().clip(shape).background(pal.p.copy(alpha = .22f)).border(3.dp, pal.p, shape))
+            Box(
+                Modifier.align(if (mt.after) Alignment.CenterEnd else Alignment.CenterStart).padding(horizontal = 6.dp)
+                    .size(7.dp, 64.dp).clip(CircleShape).background(pal.p)
+            )
+        }
+        val merging = ed.mergeT != null
+        if (liftedBlk || (liftedRow && merging)) {
+            val t = if (merging) "Lepas untuk jadi kolase" else when (ed.mvAl) { "l" -> "Kiri · teks di kanan"; "r" -> "Kanan · teks di kiri"; else -> "Tengah" }
             Box(
                 Modifier.align(Alignment.TopCenter).padding(top = 10.dp).clip(RoundedCornerShape(14.dp)).background(pal.p)
                     .padding(horizontal = 12.dp, vertical = 6.dp)
@@ -1139,7 +1159,7 @@ private fun planFloat(ed: Ed, i: Int, dm: Dm, pal: Pal, tm: TextMeasurer, dn: De
                     val ls = (indPx - n * em) / n
                     mk = gapDp
                     Fold(cuts, n, k - 1, with(dn) { ls.toSp() }.value)
-                } else Fold(cuts, 0, 0, 0f)
+                } else Fold(cuts, 0, 0, 0f, if (!left) indent * d else 0f)
             }
         }
         val narrow = fold == null
@@ -1634,9 +1654,10 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                             val plan = plans[b.id]
                             key(b.id) {
                                 val lifted = ed.mv?.let { it.bid == b.id && !it.row } == true
+                                val dragging = ed.mv?.bid == b.id
                                 Box(
                                     Modifier
-                                        .zIndex(if (lifted) 3f else 0f)
+                                        .zIndex(if (dragging) 3f else 0f)
                                         .onGloballyPositioned { c -> ed.setPos(b.id, c.positionInParent().y, c.size.height.toFloat()) }
                                         .graphicsLayer {
                                             if (lifted && plan == null) {
