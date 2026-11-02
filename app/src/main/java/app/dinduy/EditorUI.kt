@@ -652,7 +652,7 @@ fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal) {
     ) {
         Column {
             b.tb.forEachIndexed { r, row ->
-                Row {
+                Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {   // tinggi sel sebaris sama, supaya garis kolom tidak putus
                     row.forEachIndexed { c, _ ->
                         val k = "${b.id}:$r:$c"
                         val focused = ed.focus == k && !ed.reading
@@ -660,8 +660,12 @@ fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal) {
                         val bg = if (focused) pal.pc else if (head) pal.sc else Color.Transparent
                         val fg = if (focused) pal.opc else if (head) pal.osc else pal.os
                         Box(
-                            Modifier.width(colW).background(bg)
-                                .drawBehind { if (r > 0) drawLine(pal.ol, androidx.compose.ui.geometry.Offset(0f, 0f), androidx.compose.ui.geometry.Offset(size.width, 0f), 1.dp.toPx()) }
+                            Modifier.width(colW).fillMaxHeight().background(bg)
+                                .drawBehind {
+                                    val o = androidx.compose.ui.geometry.Offset
+                                    if (r > 0) drawLine(pal.ol, o(0f, 0f), o(size.width, 0f), 1.dp.toPx())   // garis pemisah baris
+                                    if (c > 0) drawLine(pal.ol, o(0f, 0f), o(0f, size.height), 1.dp.toPx())   // garis pemisah kolom
+                                }
                                 .padding(horizontal = 16.dp, vertical = 12.dp)
                         ) {
                             val al = when (b.ca.getOrNull(c)) {
