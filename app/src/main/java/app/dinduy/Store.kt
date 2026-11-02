@@ -760,9 +760,21 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                 ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, o) }
                 var s = 1
                 while (maxOf(o.outWidth, o.outHeight) / (s * 2) >= 1600) s *= 2
-                ctx.contentResolver.openInputStream(uri)?.use {
+                val raw = ctx.contentResolver.openInputStream(uri)?.use {
                     BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = s })
                 } ?: return@withContext null
+                // BitmapFactory tidak memutar gambar sesuai EXIF (foto kamera potret jadi miring), jadi diputar di sini
+                val deg = try {
+                    ctx.contentResolver.openInputStream(uri)?.use { st ->
+                        when (android.media.ExifInterface(st).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, android.media.ExifInterface.ORIENTATION_NORMAL)) {
+                            android.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+                            android.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+                            android.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+                            else -> 0f
+                        }
+                    } ?: 0f
+                } catch (e: Exception) { 0f }
+                if (deg != 0f) Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, android.graphics.Matrix().apply { postRotate(deg) }, true) else raw
             }
             val out = Bitmap.createBitmap(bm.width, bm.height, Bitmap.Config.ARGB_8888)
             val cv = android.graphics.Canvas(out)
