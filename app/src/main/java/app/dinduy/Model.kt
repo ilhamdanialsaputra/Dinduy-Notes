@@ -163,6 +163,18 @@ data class Img(
     val z: Float = 1f       // zoom pangkas (1 = pas bingkai)
 )
 
+/** Satu goresan coretan. t: 0 pulpen, 1 stabilo. c: indeks warna 0..4 (mengikuti tema). w: tebal (dp).
+ *  p: daftar tiga-tiga (x = pecahan lebar konten, y = dp dari atas blok induk, k = faktor tebal). */
+@Serializable
+data class Ink(
+    val id: String = uid(),
+    val t: Int = 0,
+    val c: Int = 0,
+    val w: Float = 3f,
+    val p: List<Float> = emptyList(),
+    val sh: Boolean = false   // bentuk dirapikan: sudut tajam, tanpa penghalusan
+)
+
 /** ty: p, h, li, q, code, tbl, hr, img */
 @Serializable
 data class Blk(
@@ -177,7 +189,8 @@ data class Blk(
     val r: Rt = Rt(),
     val tb: List<List<Rt>> = emptyList(),
     val ca: List<String> = emptyList(),
-    val im: List<Img> = emptyList()
+    val im: List<Img> = emptyList(),
+    val ik: List<Ink> = emptyList()   // coretan yang menempel pada blok ini (koordinat relatif terhadap blok)
 ) {
     val isText: Boolean get() = ty == "p" || ty == "h" || ty == "li" || ty == "q" || ty == "code"
     val isObj: Boolean get() = ty == "tbl" || ty == "img" || ty == "hr"
@@ -226,7 +239,13 @@ data class Prefs(
     val wm: String = "base", // model offline aktif: base / small
     val eng: String = "groq",// mesin transkripsi pilihan: groq (API key, online) / off (model offline)
     val gl: String = "",     // bahasa ucapan: "" otomatis, atau kode ISO (id, en)
-    val gf: Boolean = true   // rapikan transkrip Groq jadi Markdown (kata tidak diubah, dicek otomatis)
+    val gf: Boolean = true,  // rapikan transkrip Groq jadi Markdown (kata tidak diubah, dicek otomatis)
+    val ts: String = "auto", // sentuhan coret: auto / stylus / finger
+    val ic: List<Int> = listOf(0, 0, 0),              // warna terakhir per alat (pulpen, stabilo, penghapus)
+    val iw: List<Float> = listOf(3f, 16f, 18f),       // ukuran terakhir per alat (dp)
+    val isd: String = "r",   // sisi toolbar coret: r kanan / l kiri
+    val iat: Int = 0,        // detik sampai mode coret mati sendiri (0 = tidak)
+    val isn: Boolean = false // Rapihkan otomatis saat ujung goresan ditahan
     // CATATAN KEAMANAN: API key TIDAK PERNAH disimpan di sini (Prefs ikut masuk ke berkas cadangan).
 )
 
