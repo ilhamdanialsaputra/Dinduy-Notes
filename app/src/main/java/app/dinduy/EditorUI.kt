@@ -999,8 +999,9 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
             )
         }
         val merging = ed.mergeT != null
-        if (liftedBlk || (liftedRow && merging)) {
-            val t = if (merging) "Lepas untuk jadi kolase" else when (ed.mvAl) { "l" -> "Kiri · teks di kanan"; "r" -> "Kanan · teks di kiri"; else -> "Tengah" }
+        val leaving = liftedRow && !merging && ed.dropAt >= 0
+        if (liftedBlk || (liftedRow && (merging || leaving))) {
+            val t = if (merging) "Lepas untuk jadi kolase" else if (leaving) "Lepas untuk keluar dari kolase" else when (ed.mvAl) { "l" -> "Kiri · teks di kanan"; "r" -> "Kanan · teks di kiri"; else -> "Tengah" }
             Box(
                 Modifier.align(Alignment.TopCenter).padding(top = 10.dp).clip(RoundedCornerShape(14.dp)).background(pal.p)
                     .padding(horizontal = 12.dp, vertical = 6.dp)
