@@ -900,8 +900,12 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
     Box(
         modifier
             .holdDrag(
-                !ed.reading,
-                onStart = { ed.mvBegin(bS.id, mS.id); true },
+                true,
+                // mode baca: tahan lama pada foto langsung masuk mode edit dan foto terangkat (bisa diseret)
+                onStart = {
+                    if (ed.reading) { if (ed.ink.on) return@holdDrag false; ed.exitReading() }
+                    ed.mvBegin(bS.id, mS.id); true
+                },
                 onMove = { _, d -> ed.mvDrag(d.x, d.y) },
                 onEnd = { ok -> ed.mvEnd(ok) }
             )
