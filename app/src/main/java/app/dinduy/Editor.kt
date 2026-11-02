@@ -100,6 +100,9 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     val ink = InkCtl()                    // keadaan mode coret (lihat Ink.kt)
     var sheet by mutableStateOf(0)        // sheet bawah: 0 tutup, 1 Sisipkan, 2 Format
     var sub by mutableStateOf(0)          // sub-bilah toolbar: 0 tutup, 1 perataan, 2 poin
+    var sheetPage by mutableStateOf(0)    // halaman dalam sheet Sisipkan: 0 daftar, 1 pengaturan tabel
+    var tbR by mutableStateOf(3)          // jumlah baris tabel yang akan disisipkan
+    var tbC by mutableStateOf(3)          // jumlah kolom
 
     // penanda konversi otomatis (mis. "1. " -> nomor), untuk menahan IME yang mengembalikan teks penanda
     private var convKey: String? = null
@@ -121,6 +124,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         blocks.forEach { seed(it) }
         norm()
         hist.add(Snap(blocks, null, TextRange.Zero))
+        // catatan yang sudah ada isinya dibuka di tampilan penuh; hanya catatan baru (kosong) langsung ke editor
+        if (title.isNotBlank() || plainOf(blocks).isNotEmpty() || blocks.any { it.isObj || it.ik.isNotEmpty() }) reading = true
     }
 
     /** Catatan lama menyimpan teks "di samping gambar" di blok gambar; sekarang jadi paragraf biasa tepat setelah gambar. */
@@ -668,7 +673,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         afterStructural()
     }
 
-    fun insTable() = insertObjs(listOf(Blk(ty = "tbl", tb = grid(3, 3), ca = listOf("left", "left", "left"))))
+    fun insTable(r: Int = 3, c: Int = 3) = insertObjs(listOf(Blk(ty = "tbl", tb = grid(c, r), ca = List(c) { "left" })))
     fun insHr() = insertObjs(listOf(Blk(ty = "hr")))
     fun addImages(imgs: List<Img>) {
         if (imgs.isNotEmpty()) insertObjs(imgs.map { Blk(ty = "img", im = listOf(it)) })
@@ -1207,7 +1212,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         commit()
         selOn = true
         pa = a; pf = b
-        reading = true; selImg = null; pickQuote = false; miniBar = false; sheet = 0; sub = 0; clearReq++
+        reading = true; selImg = null; pickQuote = false; miniBar = false; clearReq++
     }
 
     fun clearSel() {
@@ -1777,7 +1782,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     fun enterReading() {
         commit()
-        reading = true; selImg = null; pickQuote = false; miniBar = false; sheet = 0; sub = 0; clearReq++
+        if (ink.on) ink.toggle(this); reading = true; selImg = null; pickQuote = false; miniBar = false; sheet = 0; sub = 0; sheetPage = 0; clearReq++
     }
 
     fun exitReading(key: String? = null, off: Int = 0) {
