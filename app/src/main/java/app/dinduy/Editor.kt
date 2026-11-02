@@ -97,6 +97,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     var widthDp by mutableStateOf(340f)
     var barH by mutableStateOf(0f)        // tinggi kapsul alat (px) yang melayang di atas keyboard
     var barOn by mutableStateOf(false)    // kapsul alat sedang tampil
+    val ink = InkCtl()                    // keadaan mode coret (lihat Ink.kt)
 
     // penanda konversi otomatis (mis. "1. " -> nomor), untuk menahan IME yang mengembalikan teks penanda
     private var convKey: String? = null
@@ -326,26 +327,26 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         var len = 0
         if (b.ty == "p") {
             var m = Regex("^([-*•+])\\s").find(tx)
-            if (m != null && c == m.value.length) { nb = Blk(id = b.id, ty = "li", lt = "b"); len = m.value.length }
+            if (m != null && c == m.value.length) { nb = Blk(id = b.id, ik = b.ik, ty = "li", lt = "b"); len = m.value.length }
             if (nb == null) {
                 m = Regex("^\\d{1,3}[.)]\\s").find(tx)
-                if (m != null && c == m.value.length) { nb = Blk(id = b.id, ty = "li", lt = "o"); len = m.value.length }
+                if (m != null && c == m.value.length) { nb = Blk(id = b.id, ik = b.ik, ty = "li", lt = "o"); len = m.value.length }
             }
             if (nb == null && Regex("^-\\p{L}").containsMatchIn(tx) && c >= 2 && c <= 1 + df.ins) {
-                nb = Blk(id = b.id, ty = "li", lt = "b"); len = 1
+                nb = Blk(id = b.id, ik = b.ik, ty = "li", lt = "b"); len = 1
             }
             if (nb == null) {
                 m = Regex("^>\\s").find(tx)
-                if (m != null && c == 2) { nb = Blk(id = b.id, ty = "q", k = "quote"); len = 2 }
+                if (m != null && c == 2) { nb = Blk(id = b.id, ik = b.ik, ty = "q", k = "quote"); len = 2 }
             }
             if (nb == null) {
                 m = Regex("^(#{1,2})\\s").find(tx)
-                if (m != null && c == m.value.length) { nb = Blk(id = b.id, ty = "h", lv = m.groupValues[1].length); len = m.value.length }
+                if (m != null && c == m.value.length) { nb = Blk(id = b.id, ik = b.ik, ty = "h", lv = m.groupValues[1].length); len = m.value.length }
             }
         } else if (b.ty == "li" && b.lt == "b") {
             val m = Regex("^\\[([ xX]?)]\\s").find(tx)
             if (m != null && c == m.value.length) {
-                nb = Blk(id = b.id, ty = "li", lt = "c", d = b.d, x = m.groupValues[1].isNotBlank()); len = m.value.length
+                nb = Blk(id = b.id, ik = b.ik, ty = "li", lt = "c", d = b.d, x = m.groupValues[1].isNotBlank()); len = m.value.length
             }
         }
         if (nb == null) return false
@@ -848,7 +849,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val rest = b.im.filterIndexed { j, _ -> j != s.second }
         if (rest.isEmpty()) {
             // teks di sisi gambar tidak ikut hilang: jadi paragraf biasa
-            if (b.r.t.isNotEmpty()) setBlock(i, Blk(id = b.id, ty = "p", r = b.r))
+            if (b.r.t.isNotEmpty()) setBlock(i, Blk(id = b.id, ik = b.ik, ty = "p", r = b.r))
             else blocks = blocks.filterIndexed { j, _ -> j != i }
         } else if (rest.size == 1) setBlock(i, b.copy(im = listOf(rest[0].copy(a = rest[0].o, w = 0.6f, al = "c"))))
         else setBlock(i, b.copy(im = rest))
@@ -1632,6 +1633,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     fun commit() {
         cJob?.cancel()
         typed = 0
+        if (!ink.noRescue) blocks = inkRescue(hist[hi].bl, blocks, bpos, dens)   // coretan dari blok yang hilang dipindah, bukan dibuang
         if (hist[hi].bl == blocks) return
         while (hist.size > hi + 1) hist.removeAt(hist.size - 1)
         hist.add(Snap(blocks, focus, focus?.let { tf[it]?.selection } ?: TextRange.Zero))
