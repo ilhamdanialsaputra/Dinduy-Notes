@@ -448,6 +448,7 @@ fun TF(
                     ),
                 textStyle = base2, cursorBrush = SolidColor(if (hideNative) Color.Transparent else pal.p), visualTransformation = vt,
                 onTextLayout = { lay = it; jw = it.layoutInput.constraints.maxWidth },
+                readOnly = ed.sheet != 0,      // sheet bawah aktif: ketuk / seleksi teks tetap bisa, tapi keyboard tidak muncul
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 decorationBox = { inner ->
                     Box {
@@ -1381,6 +1382,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     // Tombol back Android: tutup yang paling atas dulu. Mode ketik -> mode baca (tampilan penuh) -> baru keluar catatan.
     BackHandler(true) {
         when {
+            ed.sheet != 0 && ed.sheetPage != 0 -> ed.sheetPage = 0
             ed.sheet != 0 -> ed.sheet = 0
             ed.sub != 0 -> ed.sub = 0
             ed.ink.on -> ed.ink.toggle(ed)
@@ -1611,7 +1613,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                             }
                         )
                     }
-                    InkLayers(ed, vm)
+                    InkLayers(ed, vm, scroll)
                     if (ed.selOn) SelHandles(ed)
                     SelBubble(ed, vm, act, scroll.value)   // selalu ada di komposisi supaya bisa animasi keluar
                 }
@@ -1818,7 +1820,6 @@ fun SelHandles(ed: Ed) {
 fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boolean) {
     val recOn = ed.recActive
     SideEffect { ed.barOn = showBar || recOn || ed.sheet != 0 }
-    LaunchedEffect(imeOpen) { if (imeOpen && ed.sheet != 0) ed.sheet = 0 }   // ketuk teks: keyboard muncul, sheet menutup
     Box(Modifier.fillMaxSize()) {
         // kartu rekaman + kapsul alat dalam satu kolom yang diukur bersama (barH), jadi teks / kursor tidak pernah tertutup
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().onSizeChanged { ed.barH = it.height.toFloat() }) {
