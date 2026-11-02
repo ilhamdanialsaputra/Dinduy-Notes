@@ -61,7 +61,6 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
-import androidx.compose.ui.graphics.layer.toImageBitmap
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
