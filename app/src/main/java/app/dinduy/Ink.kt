@@ -123,7 +123,7 @@ class LiveInk(val tool: Int, val color: Int, val wDp: Float, val stylus: Boolean
     }
 }
 
-class CS(val top: Float, val w: Float, val d: Float, val path: Path)
+class CS(val src: Ink, val top: Float, val w: Float, val d: Float, val path: Path)
 
 class InkCtl {
     var on by mutableStateOf(false)
@@ -856,22 +856,8 @@ fun Modifier.inkInput(ed: Ed, vm: AppVM, scroll: ScrollState): Modifier {
                     when (gm) {
                         3 -> if (hypot(dx, dy) > 14f * dens) gTap = false
                         1 -> {
-                            var mx = dx; var my = dy
-                            val mg = 8f * dens                       // magnet ke tepi konten dan tepi blok teks
-                            if (abs(box.left + mx) < mg) mx = -box.left
-                            else if (abs(box.right + mx - W) < mg) mx = W - box.right
-                            var bestE = mg; var adj = 0f
-                            for (b in ed.blocks) {
-                                val bp = ed.bpos[b.id] ?: continue
-                                for (e in floatArrayOf(bp[0], bp[0] + bp[1])) {
-                                    val t1 = e - (box.top + my); val t2 = e - (box.bottom + my)
-                                    if (abs(t1) < bestE) { bestE = abs(t1); adj = t1 }
-                                    if (abs(t2) < bestE) { bestE = abs(t2); adj = t2 }
-                                }
-                            }
-                            my += adj
-                            gxf = floatArrayOf(mx, my, 1f)
-                            ik.xf = floatArrayOf(mx, my, 1f, box.left, box.top); ik.tick++
+                            gxf = floatArrayOf(dx, dy, 1f)
+                            ik.xf = floatArrayOf(dx, dy, 1f, box.left, box.top); ik.tick++
                         }
                         else -> {                                    // gedein / kecilin kotak dari salah satu sudut
                             val minS = 48f * dens
@@ -1008,8 +994,8 @@ fun BoxScope.InkLayers(ed: Ed, vm: AppVM, scroll: ScrollState) {
             for (s in b.ik) {
                 seen.add(s.id)
                 var cs = ik.cache[s.id]
-                if (cs == null || cs.top != top || cs.w != W || cs.d != d) {
-                    cs = CS(top, W, d, storedPath(s, top, W, d)); ik.cache[s.id] = cs
+                if (cs == null || cs.src !== s || cs.top != top || cs.w != W || cs.d != d) {
+                    cs = CS(s, top, W, d, storedPath(s, top, W, d)); ik.cache[s.id] = cs
                 }
                 val a = if (s.id in er) .22f else 1f
                 val col = inkColor(pal, s.c, s.t == 1)
@@ -1158,7 +1144,6 @@ fun BoxScope.InkBar(ed: Ed, vm: AppVM) {
     val pal = LocalPal.current
     val ik = ed.ink
     val pr = vm.pr
-    val left = pr.isd == "l"
     val density = LocalDensity.current.density
 
     LaunchedEffect(ik.on, ik.stamp, pr.iat) {
@@ -1170,13 +1155,13 @@ fun BoxScope.InkBar(ed: Ed, vm: AppVM) {
 
     AnimatedVisibility(
         visible = ik.on,
-        modifier = Modifier.align(if (left) Alignment.BottomStart else Alignment.BottomEnd),
+        modifier = Modifier.align(Alignment.BottomCenter),
         enter = fadeIn(tween(220)) + slideInVertically(tween(300)) { it / 2 },
         exit = fadeOut(tween(160)) + slideOutVertically(tween(240)) { it / 2 }
     ) {
         Column(
-            Modifier.padding(horizontal = 10.dp).padding(bottom = 10.dp),
-            horizontalAlignment = if (left) Alignment.Start else Alignment.End
+            Modifier.padding(horizontal = 10.dp).padding(bottom = 40.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             val tool = ik.tool
             AnimatedVisibility(ik.pop && tool <= 2, enter = fadeIn(tween(180)) + slideInVertically(tween(240)) { it / 3 }, exit = fadeOut(tween(120))) {
@@ -1224,29 +1209,11 @@ fun BoxScope.InkBar(ed: Ed, vm: AppVM) {
                 }
             }
             val cap = RoundedCornerShape(30.dp)
-            var drag by remember { mutableStateOf(0f) }
             Row(
-                Modifier.shadow(if (pal.dark) 6.dp else 2.dp, cap).clip(cap).background(pal.c3).padding(horizontal = 4.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
+                Modifier.shadow(if (pal.dark) 6.dp else 2.dp, cap).clip(cap).background(pal.c3).padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                // gagang: geser ke kiri / kanan untuk memindah sisi toolbar (pemakai kidal)
-                Box(
-                    Modifier.width(22.dp).height(46.dp).pointerInput(left) {
-                        detectHorizontalDragGestures(
-                            onDragStart = { drag = 0f },
-                            onDragEnd = {
-                                if (drag < -48f * density && !left) vm.setPr(pr.copy(isd = "l"))
-                                else if (drag > 48f * density && left) vm.setPr(pr.copy(isd = "r"))
-                                drag = 0f
-                            }
-                        ) { _, dx -> drag += dx }
-                    },
-                    Alignment.Center
-                ) {
-                    Canvas(Modifier.size(width = 8.dp, height = 20.dp)) {
-                        for (r in 0..2) for (c in 0..1) drawCircle(pal.osv, 1.3f * density, Offset(size.width * (.2f + .6f * c), size.height * (.15f + .35f * r)))
-                    }
-                }
                 for (t in 0..3) {
                     Box(contentAlignment = Alignment.BottomCenter) {
                         Tbn({ InkToolIcon(t, it) }, tool == t, true) {
