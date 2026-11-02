@@ -463,7 +463,7 @@ fun BlockView(ed: Ed, vm: AppVM, b: Blk, ordN: Int, dm: Dm, fold: Fold? = null, 
                 3 -> baseStyle(pal, dm, pal.p, fs * 1.45f, 1000, 1.02f, -.02f)
                 else -> baseStyle(pal, dm, pal.os, fs * 1.15f, 1000, 1.02f, -.02f)
             }
-            TF(ed, b.id, st, Modifier.fillMaxWidth().padding(top = (fs * .4f).dp, bottom = (fs * .5f).dp))
+            TF(ed, b.id, st.copy(textAlign = taOf(b)), Modifier.fillMaxWidth().padding(top = (fs * .4f).dp, bottom = (fs * .5f).dp))
         }
         "q" -> {
             val q = qs(b.k, pal)
@@ -480,7 +480,7 @@ fun BlockView(ed: Ed, vm: AppVM, b: Blk, ordN: Int, dm: Dm, fold: Fold? = null, 
                             Modifier.padding(bottom = (fs * .45f * .7f).dp), ls = .12f, alpha = if (b.k == "def") 1f else .85f
                         )
                     }
-                    TF(ed, b.id, baseStyle(pal, dm, q.fg, fs * 1.05f, 500), Modifier.fillMaxWidth())
+                    TF(ed, b.id, baseStyle(pal, dm, q.fg, fs * 1.05f, 500).copy(textAlign = taOf(b)), Modifier.fillMaxWidth())
                 }
             }
         }
@@ -563,7 +563,7 @@ fun ParaRow(ed: Ed, b: Blk, ordN: Int, dm: Dm, pal: Pal, fold: Fold?, mk: Float,
         }
         val st = baseStyle(pal, dm).let {
             if (done) it.copy(color = it.color.copy(alpha = .6f), textDecoration = TextDecoration.LineThrough) else it
-        }
+        }.copy(textAlign = taOf(b))
         TF(ed, b.id, st, Modifier.weight(1f), hint = hint, fold = fold)
     }
 }
@@ -1374,8 +1374,9 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconBtn("back", pal.os, { if (ed.findOn) { ed.closeFind() } else act.back() })
+                DocTopLeft(ed, act)
                 Spacer(Modifier.weight(1f))
+                DocTopActions(ed)
                 Row(Modifier.graphicsLayer {
                     val k = (((1f - fa) - .3f) / .7f).coerceIn(0f, 1f)
                     alpha = k; scaleX = .6f + .4f * k; scaleY = .6f + .4f * k
@@ -1769,8 +1770,10 @@ fun SelHandles(ed: Ed) {
 @Composable
 fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boolean) {
     val recOn = ed.recActive
-    SideEffect { ed.barOn = showBar || recOn }
+    SideEffect { ed.barOn = showBar || recOn || ed.sheet != 0 }
+    LaunchedEffect(imeOpen) { if (imeOpen && ed.sheet != 0) ed.sheet = 0 }   // ketuk teks: keyboard muncul, sheet menutup
     Box(Modifier.fillMaxSize()) {
+        if (ed.sheet != 0) Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { ed.sheet = 0 } })
         // kartu rekaman + kapsul alat dalam satu kolom yang diukur bersama (barH), jadi teks / kursor tidak pernah tertutup
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().onSizeChanged { ed.barH = it.height.toFloat() }) {
             AnimatedVisibility(
@@ -1784,17 +1787,16 @@ fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boole
             ) {
                 RecordCard(vm)
             }
-            // kapsul penuh: gerak kecil + pudar, karena keyboard sudah ikut bergerak sendiri
+            DocSheet(ed, act)
+            // bilah datar: gerak kecil + pudar, karena keyboard sudah ikut bergerak sendiri
             AnimatedVisibility(
-                visible = showBar,
+                visible = showBar && ed.sheet == 0,
                 enter = fadeIn(tween(260, easing = Emph)) + slideInVertically(tween(320, easing = Emph)) { it / 3 } +
                     expandVertically(tween(320, easing = Emph)),
                 exit = fadeOut(tween(180)) + slideOutVertically(tween(260, easing = Emph)) { it / 4 } +
                     shrinkVertically(tween(300, easing = Emph))
             ) {
-                Box(Modifier.padding(bottom = 10.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    EdBar(ed, act, imeOpen)
-                }
+                DocBar(ed, act)
             }
         }
     }
