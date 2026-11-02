@@ -29,8 +29,15 @@ const val SIDE_W = 0.5f
  * [ls] = letter-spacing (sp) agar lebar penggeser pas selebar gambar.
  * Hanya tampilan: teks aslinya tidak berubah.
  */
-class Fold(val cuts: IntArray, val padLen: Int, val padCnt: Int, val ls: Float) {
+class Fold(val cuts: IntArray, val padLen: Int, val padCnt: Int, val ls: Float, val cutR: Float = 0f) {
     private val sp = if (padLen > 0) padLen else 0
+
+    // [cutR] = px yang dikurangkan dari lebar kolom untuk baris sempit TANPA penggeser (gambar di kanan); dipakai rata kiri-kanan.
+    override fun equals(other: Any?): Boolean =
+        other is Fold && padLen == other.padLen && padCnt == other.padCnt && ls == other.ls && cutR == other.cutR &&
+            cuts.contentEquals(other.cuts)
+
+    override fun hashCode(): Int = ((cuts.contentHashCode() * 31 + padLen) * 31 + padCnt) * 31 + ls.hashCode() + cutR.hashCode()
     private fun cum(m: Int) = m + padLen * minOf(m, padCnt)
     val total: Int = sp + cum(cuts.size)
 
@@ -67,6 +74,9 @@ data class Pt(val key: String, val off: Int)
 class Mv(val bid: String, val imgId: String, val row: Boolean, val top: Float, val h: Float)
 
 class Req(val key: String, val pos: Int, val n: Int, val sel: TextRange? = null)
+
+/** Sasaran kolase saat gambar diseret ke atas gambar lain: gambar [imgId] di blok [bid]; [after] = true bila gambar yang diseret masuk di kanannya. */
+class MergeT(val bid: String, val imgId: String, val after: Boolean)
 
 /** Satu kecocokan pada mode "cari dalam catatan". key "@t" = judul, selain itu kunci kolom teks. */
 data class FHit(val key: String, val s: Int, val e: Int)
@@ -941,6 +951,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     var mvY by mutableStateOf(0f)
     var mvAl by mutableStateOf("c")
     var dropAt by mutableStateOf(-1)
+    var mergeT by mutableStateOf<MergeT?>(null)   // gambar yang sedang diseret berada di atas gambar lain: lepas = jadi kolase
+    var replT: Pair<String, Int>? = null          // gambar yang akan diganti (dicatat saat tombol Ganti diketuk)
     var dens = 1f
     var viewH = 0f
     var scroll: ScrollState? = null
@@ -964,7 +976,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             widthDp * m0.w.coerceIn(.2f, 1f) / m0.a.coerceIn(.2f, 5f) * dens
         } else p[1]
         mv = Mv(bid, imgId, b.im.size > 1, p[0], hh)
-        mvX = 0f; mvY = 0f; dropAt = -1; mvDir = 0
+        mvX = 0f; mvY = 0f; dropAt = -1; mvDir = 0; mergeT = null
         mvAl = b.im.firstOrNull()?.al ?: "c"
         buzz?.invoke()
         autoJob?.cancel()
@@ -972,7 +984,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             while (mv != null) {
                 val m = mv
                 val sc = scroll
-                if (m != null && sc != null && !m.row && mvDir != 0 && viewH > 0f) {
+                if (m != null && sc != null && mvDir != 0 && viewH > 0f) {
                     val cy = m.top + m.h / 2f + mvY - sc.value
                     val z = viewH * .2f
                     val v = when {
@@ -994,7 +1006,10 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val m = mv ?: return
         mvX += dx; mvY += dy
         if (dy > .5f) mvDir = 1 else if (dy < -.5f) mvDir = -1
-        if (m.row) rowDragStep(m) else mvRecalc()
+        if (m.row) {
+            if (mergeT == null) rowDragStep(m)   // di atas gambar lain: jangan tukar urutan di barisnya sendiri
+            mergeCheck()
+        } else mvRecalc()
     }
 
     private fun rowDragStep(m: Mv) {
@@ -1021,6 +1036,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val m = mv ?: return
         val i = idx(m.bid)
         if (i < 0) return
+        mergeCheck()
+        if (m.row) return
         val cy = m.top + m.h / 2f + mvY
         var gap = blocks.size
         for ((j, b) in blocks.withIndex()) {
@@ -1028,7 +1045,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             val q = bpos[b.id] ?: continue
             if (q[0] + q[1] / 2f >= cy) { gap = j; break }
         }
-        val nd = if (gap == i || gap == i + 1) -1 else gap
+        val nd = if (mergeT != null || gap == i || gap == i + 1) -1 else gap
         if (nd != dropAt) { dropAt = nd; if (nd >= 0) buzz?.invoke() }
         val b = blocks[i]
         if (b.im.size == 1) {
@@ -1049,8 +1066,10 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val to = dropAt
         val al = mvAl
         val anchor = if (to in 0 until blocks.size) blocks[to].id else null
-        mv = null; mvX = 0f; mvY = 0f; dropAt = -1
+        val mt = mergeT
+        mv = null; mvX = 0f; mvY = 0f; dropAt = -1; mergeT = null
         if (!apply || i < 0) return
+        if (mt != null) { mergeImg(m.bid, m.imgId, mt); return }   // dilepas di atas gambar lain: otomatis jadi kolase
         var b = blocks[i]
         if (!m.row && b.im.size == 1 && al != b.im[0].al) {
             val mi = b.im[0]
@@ -1068,6 +1087,121 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         releaseSide(b.id)
         selImg = b.id to maxOf(0, b.im.indexOfFirst { it.id == m.imgId })
         norm(); afterStructural()
+    }
+
+    // ---------- gambar: kolase otomatis saat dijatuhkan di atas gambar lain ----------
+    /** Kotak gambar ke-[ix] di blok [b] pada ruang konten (px). Dihitung dari model + posisi blok, jadi tidak ikut bergeser oleh gestur angkat. */
+    private fun imgRect(b: Blk, ix: Int): Rect? {
+        val top = bpos[b.id]?.get(0) ?: return null
+        val w = widthDp * dens
+        if (w <= 0f || ix !in b.im.indices) return null
+        val n = b.im.size
+        if (n == 1) {
+            val m = b.im[0]
+            val wp = w * m.w.coerceIn(.2f, 1f)
+            val x = when (m.al) { "l" -> 0f; "r" -> w - wp; else -> (w - wp) / 2f }
+            return Rect(x, top, x + wp, top + wp / m.a.coerceIn(.2f, 5f))
+        }
+        val sum = b.im.sumOf { it.a.toDouble() }.toFloat().coerceAtLeast(.1f)
+        val u = w * (1f - (n - 1) * GAP)
+        val gap = w * GAP
+        var x = 0f
+        for (j in 0 until ix) x += u * b.im[j].a / sum + gap
+        val cw = u * b.im[ix].a / sum
+        return Rect(x, top, x + cw, top + u / sum)
+    }
+
+    /** Titik tengah gambar yang sedang diseret di ruang konten (px). */
+    private fun mvCenter(m: Mv): Offset? {
+        val b = blocks.firstOrNull { it.id == m.bid } ?: return null
+        val ix = b.im.indexOfFirst { it.id == m.imgId }
+        val r = imgRect(b, ix) ?: return null
+        return Offset(r.center.x + mvX, r.center.y + mvY)
+    }
+
+    /** Cari gambar lain yang sedang ditimpa gambar seretan (titik tengahnya masuk kotak gambar itu). Baris yang sudah 3 gambar tidak bisa ditambah. */
+    private fun mergeCheck() {
+        val m = mv
+        var found: MergeT? = null
+        val c = if (m == null) null else mvCenter(m)
+        if (m != null && c != null) {
+            val pad = 10f * dens
+            loop@ for (b in blocks) {
+                if (b.ty != "img" || b.id == m.bid || b.im.isEmpty() || b.im.size >= 3) continue
+                for (j in b.im.indices) {
+                    val r = imgRect(b, j) ?: continue
+                    if (c.x >= r.left - pad && c.x <= r.right + pad && c.y >= r.top - pad && c.y <= r.bottom + pad) {
+                        found = MergeT(b.id, b.im[j].id, c.x > r.center.x)
+                        break@loop
+                    }
+                }
+            }
+        }
+        val o = mergeT
+        if (found?.bid != o?.bid || found?.imgId != o?.imgId || found?.after != o?.after) {
+            mergeT = found
+            if (found != null) buzz?.invoke()
+        }
+        if (found != null && dropAt != -1) dropAt = -1
+    }
+
+    /** Samakan tinggi semua gambar dalam satu baris kolase (lebar = bobot rasio), dengan tinggi dibatasi 120..520 dp. */
+    private fun fitRow(l: List<Img>): List<Img> {
+        val n = l.size
+        val sum = l.sumOf { it.a.toDouble() }.toFloat().coerceAtLeast(.1f)
+        val u = widthDp * (1f - (n - 1) * GAP)
+        val h = u / sum
+        val h2 = h.coerceIn(120f, 520f)
+        val k = if (h2 != h) h / h2 else 1f
+        return l.map { it.copy(a = it.a * k, al = "c", w = 1f) }
+    }
+
+    /** Gambar [imgId] dari blok [srcBid] disatukan ke baris kolase gambar sasaran [t]. Sumbernya dilepas dari tempat lamanya. */
+    private fun mergeImg(srcBid: String, imgId: String, t: MergeT) {
+        val si = idx(srcBid)
+        val ti = idx(t.bid)
+        if (si < 0 || ti < 0 || si == ti) return
+        val src = blocks[si]
+        val tgt = blocks[ti]
+        val mi = src.im.firstOrNull { it.id == imgId } ?: return
+        if (tgt.im.size >= 3) { vm.show("Satu baris kolase maksimal 3 foto"); return }
+        val tx = tgt.im.indexOfFirst { it.id == t.imgId }.coerceAtLeast(0)
+        val ins = if (t.after) tx + 1 else tx
+        val row = tgt.im.toMutableList().also { it.add(ins, mi) }
+        val l = blocks.toMutableList()
+        l[ti] = tgt.copy(im = fitRow(row))
+        if (src.im.size > 1) {
+            // sumber adalah kolase: hanya satu gambarnya yang pindah, sisanya tetap dengan ukuran tampil yang sama
+            val n = src.im.size
+            val sum = src.im.sumOf { it.a.toDouble() }.toFloat().coerceAtLeast(.1f)
+            val rest = src.im.filter { it.id != imgId }
+            l[si] = if (rest.size == 1) {
+                val r0 = rest[0]
+                src.copy(im = listOf(r0.copy(w = (r0.a / sum * (1f - (n - 1) * GAP)).coerceIn(.2f, 1f), al = "c")))
+            } else src.copy(im = rest)
+        } else {
+            l.removeAt(si)
+            if (si > 0 && si < l.size && isEmptyP(l[si - 1]) && isEmptyP(l[si])) l.removeAt(si)
+        }
+        blocks = l
+        selImg = t.bid to ins
+        focus = null; clearReq++
+        norm(); afterStructural()
+        buzz?.invoke()
+    }
+
+    // ---------- gambar: ganti foto (bingkai tetap) ----------
+    /** Isi bingkai gambar terpilih dengan foto lain: ukuran bingkai, perataan, dan posisinya tidak berubah; pangkas diatur ulang. */
+    fun replaceImg(n: Img) {
+        val s = replT ?: selImg
+        replT = null
+        if (s == null) return
+        val i = idx(s.first)
+        if (i < 0 || s.second !in blocks[i].im.indices) return
+        commit()
+        imgSet(s.first, s.second) { it.copy(id = n.id, o = n.o, px = .5f, py = .5f, z = 1f) }
+        selImg = s
+        dirty(); commit()
     }
 
     // ---------- seleksi lintas blok ----------
