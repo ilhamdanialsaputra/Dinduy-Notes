@@ -1376,6 +1376,29 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                         }
                     }
                 }
+                SGroup("Coretan", 90) {
+                    SCard(POS_TOP) {
+                        T("Sentuhan", 16f, 500, pal.os, Modifier.padding(bottom = 14.dp))
+                        val tsl = listOf("auto" to "Otomatis", "stylus" to "Hanya stylus", "finger" to "Jari juga")
+                        SegPill(3, tsl.indexOfFirst { it.first == pr.ts }.coerceAtLeast(0), { vm.setPr(pr.copy(ts = tsl[it].first)) }) { i, fg ->
+                            T(tsl[i].second, 14f, 500, fg)
+                        }
+                        Crossfade(
+                            when (pr.ts) {
+                                "stylus" -> "Hanya stylus yang menggambar; jari tetap untuk teks dan gulir"
+                                "finger" -> "Stylus dan jari menggambar; satu jari menggambar, dua jari menggulir"
+                                else -> "Ada stylus: hanya stylus yang menggambar. Tanpa stylus: satu jari menggambar, dua jari menggulir"
+                            }, Modifier.padding(top = 12.dp, start = 4.dp), tween(200), label = "tscap"
+                        ) { T(it, 14f, 400, pal.osv) }
+                    }
+                    SCard(POS_BOT) {
+                        T("Kembali ke mode teks otomatis", 16f, 500, pal.os, Modifier.padding(bottom = 14.dp))
+                        val atl = listOf(0 to "Mati", 5 to "5 dtk", 10 to "10 dtk", 30 to "30 dtk")
+                        SegPill(4, atl.indexOfFirst { it.first == pr.iat }.coerceAtLeast(0), { vm.setPr(pr.copy(iat = atl[it].first)) }) { i, fg ->
+                            T(atl[i].second, 14f, 500, fg)
+                        }
+                    }
+                }
                 SGroup("Teks", 120) {
                     SCard(POS_TOP) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
