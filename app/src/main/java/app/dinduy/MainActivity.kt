@@ -558,6 +558,52 @@ class MainActivity : ComponentActivity(), Actions {
             if (imgs.isEmpty()) vm.show("Gambar gagal dimuat") else vm.ed?.addImages(imgs)
         }
     }
+    // ganti foto: satu gambar dari galeri mengisi bingkai gambar yang terpilih (ukuran bingkai tetap)
+    private val replPicker = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri == null) {
+            vm.ed?.replT = null
+            return@registerForActivityResult
+        }
+        lifecycleScope.launch {
+            val img = vm.importImage(uri)
+            if (img == null) vm.show("Gambar gagal dimuat") else vm.ed?.replaceImg(img)
+        }
+    }
+
+    // kamera: izin diminta saat dipakai; fotonya ditulis ke cache, diperkecil seperti gambar galeri, lalu langsung jadi gambar di catatan
+    private var camCb: (() -> Unit)? = null
+    private val camPerm = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        val cb = camCb
+        camCb = null
+        if (ok) cb?.invoke() else vm.show("Izin kamera ditolak, foto tidak bisa diambil")
+    }
+    private var camFile: File? = null
+    private var camRepl = false
+    private val camShot = registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        val sp = getSharedPreferences("dinduy", 0)
+        // kalau proses sempat dimatikan sistem selama kamera terbuka, jalur berkas diambil dari penyimpanan kecil
+        val f = camFile ?: sp.getString("cf", null)?.let { File(it) }
+        val repl = camRepl
+        camFile = null
+        camRepl = false
+        sp.edit().remove("cf").apply()
+        if (!ok || f == null || !f.exists() || f.length() == 0L) {
+            f?.delete()
+            if (repl) vm.ed?.replT = null
+            return@registerForActivityResult
+        }
+        lifecycleScope.launch {
+            val img = vm.importImage(FileProvider.getUriForFile(this@MainActivity, "$packageName.fileprovider", f))
+            withContext(Dispatchers.IO) { f.delete() }
+            val ed = vm.ed
+            when {
+                img == null -> vm.show("Foto gagal dimuat")
+                ed == null -> vm.show("Catatan tidak terbuka, foto tidak disisipkan")
+                repl -> ed.replaceImg(img)
+                else -> ed.addImages(listOf(img))
+            }
+        }
+    }
     private val mdPicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) lifecycleScope.launch {
             val ns = vm.importMd(uris)
@@ -719,6 +765,47 @@ class MainActivity : ComponentActivity(), Actions {
         sp.edit().putBoolean("mp", true).apply()
         micCb = onGranted
         micPerm.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    private fun requestCamera(onGranted: () -> Unit) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            onGranted()
+            return
+        }
+        val sp = getSharedPreferences("dinduy", 0)
+        val asked = sp.getBoolean("cp", false)
+        if (asked && !shouldShowRequestPermissionRationale(Manifest.permission.CAMERA)) {
+            // ditolak permanen: arahkan ke Pengaturan aplikasi
+            vm.show("Izin kamera dimatikan. Aktifkan lewat Pengaturan aplikasi.")
+            try {
+                startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+            } catch (e: Exception) { }
+            return
+        }
+        sp.edit().putBoolean("cp", true).apply()
+        camCb = onGranted
+        camPerm.launch(Manifest.permission.CAMERA)
+    }
+
+    override fun takePhoto(replace: Boolean) {
+        requestCamera {
+            try {
+                cacheDir.listFiles { f -> f.name.startsWith("cam_") }?.forEach { it.delete() }   // sisa foto lama yang tak sempat diproses
+                val f = File(cacheDir, "cam_" + System.currentTimeMillis() + ".jpg")
+                val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", f)
+                camFile = f
+                camRepl = replace
+                getSharedPreferences("dinduy", 0).edit().putString("cf", f.absolutePath).apply()
+                camShot.launch(uri)
+            } catch (e: Exception) {
+                camFile = null
+                vm.show("Kamera tidak bisa dibuka")
+            }
+        }
+    }
+
+    override fun replaceImage() {
+        replPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
     }
 
     override fun saveAudio(aud: Aud, name: String) {
