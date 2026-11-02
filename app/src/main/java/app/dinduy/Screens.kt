@@ -146,6 +146,8 @@ import kotlin.math.roundToInt
 
 interface Actions {
     fun pickImages()
+    fun replaceImage()                      // pilih satu foto dari galeri untuk mengisi bingkai gambar yang terpilih (ukuran bingkai tetap)
+    fun takePhoto(replace: Boolean)         // buka kamera (minta izin bila perlu); hasilnya jadi gambar baru, atau mengisi bingkai terpilih bila replace
     fun importMd()
     fun saveBackup()
     fun shareBackup()
