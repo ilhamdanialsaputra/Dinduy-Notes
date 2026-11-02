@@ -98,6 +98,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     var barH by mutableStateOf(0f)        // tinggi kapsul alat (px) yang melayang di atas keyboard
     var barOn by mutableStateOf(false)    // kapsul alat sedang tampil
     val ink = InkCtl()                    // keadaan mode coret (lihat Ink.kt)
+    var sheet by mutableStateOf(0)        // sheet bawah: 0 tutup, 1 Sisipkan, 2 Format
+    var sub by mutableStateOf(0)          // sub-bilah toolbar: 0 tutup, 1 perataan, 2 poin
 
     // penanda konversi otomatis (mis. "1. " -> nomor), untuk menahan IME yang mengembalikan teks penanda
     private var convKey: String? = null
@@ -420,7 +422,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         var right = b.r.slice(pos, b.r.t.length)
         if (right.t.startsWith("\n")) right = right.slice(1, right.t.length)
         if (left.t.endsWith("\n")) left = left.slice(0, left.t.length - 1)
-        val nb = if (nty == "li") Blk(ty = "li", lt = b.lt, d = b.d, r = right) else Blk(ty = "p", r = right)
+        val nb = if (nty == "li") Blk(ty = "li", lt = b.lt, d = b.d, r = right, ta = b.ta) else Blk(ty = "p", r = right, ta = b.ta)
         blocks = blocks.toMutableList().also { it[i] = b.copy(r = left); it.add(i + 1, nb) }
         tf[b.id] = TextFieldValue(Z + left.t, TextRange(left.t.length + 1))
         seed(nb)
@@ -617,6 +619,9 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     }
 
     fun setPlain() = convertFocused { b -> b.copy(ty = "p") }
+
+    /** Perataan paragraf: "" kiri, c tengah, r kanan, j rata kiri-kanan. Tidak berlaku untuk blok kode. */
+    fun setAlign(a: String) = convertFocused { b -> if (b.isText && b.ty != "code") b.copy(ta = a) else b }
 
     fun setCode() = convertFocused { b ->
         if (b.ty == "code") b.copy(ty = "p") else b.copy(ty = "code", r = Rt(b.r.t))
@@ -1202,7 +1207,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         commit()
         selOn = true
         pa = a; pf = b
-        reading = true; selImg = null; pickQuote = false; miniBar = false; clearReq++
+        reading = true; selImg = null; pickQuote = false; miniBar = false; sheet = 0; sub = 0; clearReq++
     }
 
     fun clearSel() {
@@ -1772,7 +1777,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     fun enterReading() {
         commit()
-        reading = true; selImg = null; pickQuote = false; miniBar = false; clearReq++
+        reading = true; selImg = null; pickQuote = false; miniBar = false; sheet = 0; sub = 0; clearReq++
     }
 
     fun exitReading(key: String? = null, off: Int = 0) {
