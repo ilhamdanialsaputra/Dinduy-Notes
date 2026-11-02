@@ -114,6 +114,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -356,6 +357,7 @@ fun TF(
                     else detectTapGestures(
                         // mode baca: ketuk sekali di teks mana pun = langsung mengedit di situ (ketuk tautan = buka tautan)
                         onTap = { pos ->
+                            if (ed.ink.on) return@detectTapGestures
                             val l = lay ?: return@detectTapGestures
                             val o0 = l.getOffsetForPosition(pos)
                             val o = fold?.t2o(o0, 0) ?: o0
@@ -433,7 +435,7 @@ fun TF(
         ) {
             BasicTextField(
                 value = v, onValueChange = { ed.onText(key, it) },
-                modifier = modifier.focusRequester(fr).bringIntoViewRequester(bring).trackPos(ed, key)
+                modifier = modifier.focusProperties { canFocus = !ed.ink.on }.focusRequester(fr).bringIntoViewRequester(bring).trackPos(ed, key)
                     .onPreviewKeyEvent { e ->
                         if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                         val ctrl = e.isCtrlPressed
@@ -1556,7 +1558,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                         .inkInput(ed, vm, scroll)
                         .holdDrag(
                             true,
-                            onStart = { pos -> !ed.ink.busy && ed.selLong(pos, pos.y - scroll.value) },
+                            onStart = { pos -> !ed.ink.on && !ed.ink.busy && ed.selLong(pos, pos.y - scroll.value) },
                             onMove = { pos, _ -> ed.selMove(pos, pos.y - scroll.value) },
                             onEnd = { ed.selEnd() },
                             lead = 70L
@@ -1615,7 +1617,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                                 cursorBrush = SolidColor(pal.p),
                                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
                                 keyboardActions = KeyboardActions(onNext = { firstText() }),
-                                modifier = Modifier.fillMaxWidth().focusRequester(titleFr)
+                                modifier = Modifier.fillMaxWidth().focusProperties { canFocus = !ed.ink.on }.focusRequester(titleFr)
                                     .onFocusChanged { ed.titleFocus = it.isFocused; if (it.isFocused) ed.selImg = null }
                                     .then(
                                         if (ed.reading) Modifier.wordTap(
