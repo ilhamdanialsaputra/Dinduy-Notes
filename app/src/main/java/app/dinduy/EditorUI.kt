@@ -1119,7 +1119,7 @@ fun FloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<String, Int>,
                             .onGloballyPositioned { c ->
                                 val cc = ed.contentCoords
                                 if (cc != null && cc.isAttached && c.isAttached) {
-                                    ed.bpos[x.id] = floatArrayOf(cc.localPositionOf(c, Offset.Zero).y, c.size.height.toFloat())
+                                    ed.setPos(x.id, cc.localPositionOf(c, Offset.Zero).y, c.size.height.toFloat())
                                 }
                             }
                     ) { BlockView(ed, vm, x, od[x.id] ?: 1, dm, sp.fold, sp.mk) }
@@ -1313,6 +1313,7 @@ fun EdBar(ed: Ed, act: Actions, imeOpen: Boolean) {
             }
             Box(Modifier.width(10.dp * (1f - f)).clipToBounds().wrapContentWidth(Alignment.Start, unbounded = true)) { Sep() }
             // keyboard terbuka: ">" menciutkan kapsul ke kanan; "<" mengembangkannya lagi; keyboard tertutup: panah bawah = mode baca
+            Tbn({ Ic("pen", it) }, false, !ed.reading) { ed.ink.toggle(ed) }
             Tbn({ Ic(if (ed.miniBar) "chl" else if (imeOpen) "chr" else "hide", it) }, false, true) {
                 if (ed.selOn) ed.clearSel()
                 else if (ed.miniBar) ed.miniBar = false
@@ -1341,6 +1342,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     val pal = LocalPal.current
     val dm = Dm(vm.pr.fs.toFloat(), vm.pr.lh, LocalFF.current)
     val scroll = rememberScrollState()
+    InkSetup(ed)
     val focusMgr = LocalFocusManager.current
     val kb = LocalSoftwareKeyboardController.current
     val density = LocalDensity.current
@@ -1444,21 +1446,24 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
         Box(
             Modifier.weight(1f).fillMaxWidth().windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
                 .onSizeChanged { ed.viewH = it.height.toFloat() }
+                .clipToBounds()
+                .inkPinch(ed, scroll)
         ) {
-            Column(Modifier.fillMaxSize().verticalScroll(scroll), horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(Modifier.fillMaxSize().inkZoom(ed).verticalScroll(scroll), horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(
                     Modifier.widthIn(max = 700.dp).fillMaxWidth().padding(horizontal = 24.dp)
                         .onSizeChanged { ed.widthDp = with(density) { it.width.toDp().value } }
                         .onGloballyPositioned { ed.contentCoords = it }
+                        .inkInput(ed, vm, scroll)
                         .holdDrag(
                             true,
-                            onStart = { pos -> ed.selLong(pos, pos.y - scroll.value) },
+                            onStart = { pos -> !ed.ink.busy && ed.selLong(pos, pos.y - scroll.value) },
                             onMove = { pos, _ -> ed.selMove(pos, pos.y - scroll.value) },
                             onEnd = { ed.selEnd() },
                             lead = 70L
                         )
                         .drawWithContent {
-                            drawContent()
+                            inkContent(ed.ink)
                             val at = ed.dropAt
                             if (at >= 0) {
                                 val th = 4.dp.toPx()
@@ -1531,7 +1536,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                                 Box(
                                     Modifier
                                         .zIndex(if (lifted) 3f else 0f)
-                                        .onGloballyPositioned { c -> ed.bpos[b.id] = floatArrayOf(c.positionInParent().y, c.size.height.toFloat()) }
+                                        .onGloballyPositioned { c -> ed.setPos(b.id, c.positionInParent().y, c.size.height.toFloat()) }
                                         .graphicsLayer {
                                             if (lifted && plan == null) {
                                                 translationX = ed.mvX; translationY = ed.mvY
@@ -1558,6 +1563,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                             }
                         )
                     }
+                    InkLayers(ed, vm)
                     if (ed.selOn) SelHandles(ed)
                     SelBubble(ed, vm, act, scroll.value)   // selalu ada di komposisi supaya bisa animasi keluar
                 }
@@ -1580,7 +1586,9 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                     )
                 }
             }
-            BottomBars(ed, vm, act, (!ed.reading || ed.selEdit) && !ed.titleFocus && !ed.findOn, imeOpen)
+            InkFrame(ed)
+            BottomBars(ed, vm, act, (!ed.reading || ed.selEdit) && !ed.titleFocus && !ed.findOn && !ed.ink.on, imeOpen)
+            InkBar(ed, vm)
         }
     }
 }
