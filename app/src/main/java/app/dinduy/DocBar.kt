@@ -1,6 +1,13 @@
 package app.dinduy
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.expandHorizontally
@@ -71,36 +78,53 @@ fun taOf(b: Blk): TextAlign = when (b.ta) {
 }
 
 // ------------------------------------------------------------------ bilah atas
+/** Gaya teks + perataan. Rata kiri-kanan (Justify) dikerjakan sendiri oleh TF, lihat justifySpans di EditorUI. */
+fun TextStyle.aligned(b: Blk): TextStyle = copy(textAlign = taOf(b))
+
+/** Kiri: panah kembali berubah menjadi pil centang (mode ketik) dengan pegas, ikonnya berputar dan memudar silang. */
 @Composable
 fun DocTopLeft(ed: Ed, act: Actions) {
     val pal = LocalPal.current
     val editing = !ed.reading && !ed.findOn
-    Crossfade(editing, animationSpec = tween(200), label = "topleft") { e ->
-        if (e) Box(
-            Modifier.height(44.dp).width(64.dp).clip(RoundedCornerShape(22.dp)).background(pal.p)
-                .clickable { ed.enterReading() },
-            Alignment.Center
-        ) { Ic("ok", pal.op) }
-        else IconBtn("back", pal.os, { if (ed.findOn) ed.closeFind() else act.back() })
+    val p by animateFloatAsState(if (editing) 1f else 0f, spring(dampingRatio = .7f, stiffness = 360f), label = "topleft")
+    val h = (52f - 8f * p).dp
+    Box(
+        Modifier.width((52f + 14f * p).dp).height(h).clip(RoundedCornerShape(h / 2))
+            .background(pal.p.copy(alpha = p.coerceIn(0f, 1f)))
+            .clickable { if (editing) ed.enterReading() else if (ed.findOn) ed.closeFind() else act.back() },
+        Alignment.Center
+    ) {
+        Ic("back", pal.os, modifier = Modifier.graphicsLayer {
+            alpha = (1f - p * 1.7f).coerceIn(0f, 1f); rotationZ = -50f * p
+            scaleX = 1f - .35f * p; scaleY = 1f - .35f * p
+        })
+        Ic("ok", pal.op, modifier = Modifier.graphicsLayer {
+            alpha = ((p - .3f) / .6f).coerceIn(0f, 1f); rotationZ = 40f * (1f - p)
+            scaleX = .45f + .55f * p; scaleY = .45f + .55f * p
+        })
     }
 }
 
+/** Undo, redo, "+": ruang dibuka dengan pegas, ketiga ikon muncul berurutan dari kanan (plus dulu) sambil membesar. */
 @Composable
 fun DocTopActions(ed: Ed) {
     val pal = LocalPal.current
     val kb = LocalSoftwareKeyboardController.current
-    AnimatedVisibility(
-        visible = !ed.reading && !ed.findOn,
-        enter = fadeIn(tween(220)) + expandHorizontally(tween(280, easing = Emph), expandFrom = Alignment.End),
-        exit = fadeOut(tween(120)) + shrinkHorizontally(tween(220, easing = Emph), shrinkTowards = Alignment.End)
-    ) {
-        Row {
-            IconBtn("undo", pal.os, { ed.undo() }, enabled = ed.canUndo && !ed.selOn)
-            IconBtn("redo", pal.os, { ed.redo() }, enabled = ed.canRedo && !ed.selOn)
+    val editing = !ed.reading && !ed.findOn
+    val p by animateFloatAsState(if (editing) 1f else 0f, spring(dampingRatio = .78f, stiffness = 300f), label = "topacts")
+    if (p < .01f && !editing) return
+    fun step(i: Int): Modifier {                   // i = 0 paling kanan
+        val a = ((p - i * .14f) / .6f).coerceIn(0f, 1f)
+        return Modifier.graphicsLayer { alpha = a; scaleX = .55f + .45f * a; scaleY = .55f + .45f * a }
+    }
+    Box(Modifier.width((156f * p.coerceAtLeast(0f)).dp).clipToBounds()) {
+        Row(Modifier.wrapContentWidth(Alignment.End, unbounded = true).align(Alignment.CenterEnd)) {
+            IconBtn("undo", pal.os, { ed.undo() }, step(2), enabled = ed.canUndo && !ed.selOn)
+            IconBtn("redo", pal.os, { ed.redo() }, step(1), enabled = ed.canRedo && !ed.selOn)
             IconBtn("plus", if (ed.sheet == 1) pal.p else pal.os, {
                 kb?.hide(); ed.sub = 0; ed.pickQuote = false
                 ed.sheet = if (ed.sheet == 1) 0 else 1
-            })
+            }, step(0))
         }
     }
 }
@@ -326,7 +350,7 @@ fun DocSheet(ed: Ed, act: Actions) {
                             ed.startVoice()
                         }
                     }
-                    SRow(icon = { Ic("pen", pal.os) }, label = { T("Coretan", 17f, 500, pal.os) }) {
+                    SRow(icon = { InkToolIcon(4, pal.os) }, label = { T("Coretan", 17f, 500, pal.os) }) {
                         ed.sheet = 0; ed.ink.toggle(ed)
                     }
                     SRow(enabled = !convOff, icon = { Ic("quote", pal.os) }, label = { T("Kutipan", 17f, 500, pal.os) }) {
