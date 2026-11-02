@@ -1,6 +1,17 @@
 package app.dinduy
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.shape.RoundedCornerShape as RCS
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.graphics.drawscope.Stroke
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.layout.wrapContentWidth
@@ -81,50 +92,67 @@ fun taOf(b: Blk): TextAlign = when (b.ta) {
 /** Gaya teks + perataan. Rata kiri-kanan (Justify) dikerjakan sendiri oleh TF, lihat justifySpans di EditorUI. */
 fun TextStyle.aligned(b: Blk): TextStyle = copy(textAlign = taOf(b))
 
-/** Kiri: panah kembali berubah menjadi pil centang (mode ketik) dengan pegas, ikonnya berputar dan memudar silang. */
+/** Kiri: panah kembali dan pil centang bertukar dengan gerak "pop": pil membesar dari titik tengah, ikon berputar dan membesar / mengecil dengan pegas. */
 @Composable
 fun DocTopLeft(ed: Ed, act: Actions) {
     val pal = LocalPal.current
     val editing = !ed.reading && !ed.findOn
-    val p by animateFloatAsState(if (editing) 1f else 0f, spring(dampingRatio = .7f, stiffness = 360f), label = "topleft")
-    val h = (52f - 8f * p).dp
+    val p by animateFloatAsState(if (editing) 1f else 0f, spring(dampingRatio = .6f, stiffness = 420f), label = "topleft")
     Box(
-        Modifier.width((52f + 14f * p).dp).height(h).clip(RoundedCornerShape(h / 2))
-            .background(pal.p.copy(alpha = p.coerceIn(0f, 1f)))
-            .clickable { if (editing) ed.enterReading() else if (ed.findOn) ed.closeFind() else act.back() },
+        Modifier.width((52f + 14f * p.coerceIn(0f, 1f)).dp).height(52.dp)
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                if (editing) ed.enterReading() else if (ed.findOn) ed.closeFind() else act.back()
+            },
         Alignment.Center
     ) {
+        Box(
+            Modifier.width(64.dp).height(44.dp)
+                .graphicsLayer { val s = p.coerceAtLeast(0f); scaleX = s; scaleY = s }
+                .clip(RoundedCornerShape(22.dp)).background(pal.p)
+        )
         Ic("back", pal.os, modifier = Modifier.graphicsLayer {
-            alpha = (1f - p * 1.7f).coerceIn(0f, 1f); rotationZ = -50f * p
-            scaleX = 1f - .35f * p; scaleY = 1f - .35f * p
+            val s = (1f - p * 2f).coerceIn(0f, 1f); scaleX = s; scaleY = s; rotationZ = -80f * p
         })
         Ic("ok", pal.op, modifier = Modifier.graphicsLayer {
-            alpha = ((p - .3f) / .6f).coerceIn(0f, 1f); rotationZ = 40f * (1f - p)
-            scaleX = .45f + .55f * p; scaleY = .45f + .55f * p
+            val s = ((p - .4f) / .6f).coerceIn(0f, 1.2f); scaleX = s; scaleY = s; rotationZ = 70f * (1f - p)
         })
     }
 }
 
-/** Undo, redo, "+": ruang dibuka dengan pegas, ketiga ikon muncul berurutan dari kanan (plus dulu) sambil membesar. */
+/** Undo, redo, "+": masing-masing membuka ruangnya dan "melompat" masuk dengan pegas, berurutan dari kanan. */
 @Composable
 fun DocTopActions(ed: Ed) {
     val pal = LocalPal.current
     val kb = LocalSoftwareKeyboardController.current
     val editing = !ed.reading && !ed.findOn
-    val p by animateFloatAsState(if (editing) 1f else 0f, spring(dampingRatio = .78f, stiffness = 300f), label = "topacts")
-    if (p < .01f && !editing) return
-    fun step(i: Int): Modifier {                   // i = 0 paling kanan
-        val a = ((p - i * .14f) / .6f).coerceIn(0f, 1f)
-        return Modifier.graphicsLayer { alpha = a; scaleX = .55f + .45f * a; scaleY = .55f + .45f * a }
+    val anims = remember { List(3) { Animatable(0f) } }          // 0 = "+" (paling kanan), 1 = redo, 2 = undo
+    LaunchedEffect(editing) {
+        anims.forEachIndexed { i, a ->
+            launch {
+                delay(if (editing) i * 55L else (2 - i) * 35L)
+                a.animateTo(if (editing) 1f else 0f, spring(dampingRatio = .55f, stiffness = 400f))
+            }
+        }
     }
-    Box(Modifier.width((156f * p.coerceAtLeast(0f)).dp).clipToBounds()) {
-        Row(Modifier.wrapContentWidth(Alignment.End, unbounded = true).align(Alignment.CenterEnd)) {
-            IconBtn("undo", pal.os, { ed.undo() }, step(2), enabled = ed.canUndo && !ed.selOn)
-            IconBtn("redo", pal.os, { ed.redo() }, step(1), enabled = ed.canRedo && !ed.selOn)
+    if (!editing && anims.all { it.value < .001f }) return
+    @Composable
+    fun Pop(i: Int, content: @Composable () -> Unit) {
+        val s = anims[i].value
+        Box(Modifier.width((52f * s.coerceIn(0f, 1f)).dp), Alignment.Center) {
+            Box(
+                Modifier.wrapContentWidth(Alignment.CenterHorizontally, unbounded = true)
+                    .graphicsLayer { val k = s.coerceAtLeast(0f); scaleX = k; scaleY = k; rotationZ = (1f - s) * -60f }
+            ) { content() }
+        }
+    }
+    Row {
+        Pop(2) { IconBtn("undo", pal.os, { ed.undo() }, enabled = ed.canUndo && !ed.selOn) }
+        Pop(1) { IconBtn("redo", pal.os, { ed.redo() }, enabled = ed.canRedo && !ed.selOn) }
+        Pop(0) {
             IconBtn("plus", if (ed.sheet == 1) pal.p else pal.os, {
-                kb?.hide(); ed.sub = 0; ed.pickQuote = false
+                kb?.hide(); ed.sub = 0; ed.pickQuote = false; ed.sheetPage = 0
                 ed.sheet = if (ed.sheet == 1) 0 else 1
-            }, step(0))
+            })
         }
     }
 }
@@ -305,11 +333,25 @@ private fun SRow(on: Boolean = false, enabled: Boolean = true, icon: @Composable
 }
 
 @Composable
+private fun Stepper(label: String, v: Int, lo: Int, hi: Int, onChange: (Int) -> Unit) {
+    val pal = LocalPal.current
+    Row(Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+        T(label, 17f, 500, pal.os, Modifier.weight(1f))
+        Chip("−", pal.c4, pal.os, CircleShape, 44.dp, 44.dp) { if (v > lo) onChange(v - 1) }
+        Box(Modifier.width(56.dp), Alignment.Center) { T("$v", 20f, 800, pal.os) }
+        Chip("+", pal.c4, pal.os, CircleShape, 44.dp, 44.dp) { if (v < hi) onChange(v + 1) }
+    }
+}
+
+@Composable
 fun DocSheet(ed: Ed, act: Actions) {
     val pal = LocalPal.current
     val haptic = LocalHapticFeedback.current
     var shown by remember { mutableStateOf(1) }
     SideEffect { if (ed.sheet != 0) shown = ed.sheet }
+    LaunchedEffect(ed.sheet) {                                   // kembali ke daftar setelah sheet selesai menutup
+        if (ed.sheet == 0) { delay(380); if (ed.sheet == 0) ed.sheetPage = 0 }
+    }
     val selMode = ed.selOn
     val key = if (selMode) null else ed.focus
     val blk = key?.let { ed.blockOfKey(it) }
@@ -324,59 +366,90 @@ fun DocSheet(ed: Ed, act: Actions) {
         enter = fadeIn(tween(200)) + slideInVertically(tween(340, easing = Emph)) { it },
         exit = fadeOut(tween(140)) + slideOutVertically(tween(240, easing = Emph)) { it }
     ) {
-        val shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
-        Column(Modifier.fillMaxWidth().shadow(if (pal.dark) 10.dp else 6.dp, shape).clip(shape).background(pal.c3)) {
-            Box(Modifier.fillMaxWidth().padding(top = 10.dp), Alignment.Center) {
-                Box(Modifier.size(width = 36.dp, height = 4.dp).clip(CircleShape).background(pal.osv.copy(alpha = .4f)))
-            }
-            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                T(if (shown == 1) "Sisipkan" else "Format", 20f, 800, pal.os, Modifier.weight(1f).padding(vertical = 8.dp))
-                IconBtn("x", pal.os, { ed.sheet = 0 })
-            }
-            Box(Modifier.fillMaxWidth().height(1.dp).background(pal.ol.copy(alpha = .35f)))
-            // tinggi dibatasi dan bisa digulir: daftar boleh bertambah tanpa membuat sheet memanjang
-            Column(Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState())) {
-                if (shown == 1) {
-                    SRow(enabled = !blkOff, icon = { Ic("img", pal.os) }, label = { T("Gambar", 17f, 500, pal.os) }) {
-                        ed.sheet = 0; act.pickImages()
+        // kotak penuh: tanpa sudut bundar, tanpa pegangan
+        Column(Modifier.fillMaxWidth().shadow(if (pal.dark) 10.dp else 6.dp, RectangleShape).background(pal.c3)) {
+            val page = if (shown == 2) 2 else if (ed.sheetPage == 1) 1 else 0     // 0 Sisipkan, 1 Tabel, 2 Format
+            AnimatedContent(
+                targetState = page,
+                transitionSpec = {
+                    val fwd = targetState > initialState
+                    (slideInHorizontally(tween(320, easing = Emph)) { if (fwd) it else -it } + fadeIn(tween(160)))
+                        .togetherWith(slideOutHorizontally(tween(260, easing = Emph)) { if (fwd) -it / 3 else it / 3 } + fadeOut(tween(120)))
+                },
+                label = "sheetpage"
+            ) { pg ->
+                Column(Modifier.fillMaxWidth()) {
+                    Row(Modifier.fillMaxWidth().padding(start = if (pg == 1) 6.dp else 20.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (pg == 1) IconBtn("chl", pal.os, { ed.sheetPage = 0 })
+                        T(if (pg == 2) "Format" else if (pg == 1) "Tabel" else "Sisipkan", 20f, 800, pal.os, Modifier.weight(1f).padding(vertical = 12.dp))
+                        IconBtn("x", pal.os, { ed.sheet = 0 })
                     }
-                    SRow(enabled = !blkOff, icon = { Ic("table", pal.os) }, label = { T("Tabel", 17f, 500, pal.os) }) {
-                        ed.sheet = 0; ed.insTable()
-                    }
-                    SRow(enabled = !ed.recActive && !selMode, icon = { Ic("mic", pal.os) }, label = { T("Voice note", 17f, 500, pal.os) }) {
-                        ed.sheet = 0
-                        act.requestMic {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            ed.startVoice()
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(pal.ol.copy(alpha = .35f)))
+                    // tinggi dibatasi dan bisa digulir: daftar boleh bertambah tanpa membuat sheet memanjang
+                    Column(Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState())) {
+                        when (pg) {
+                            0 -> {
+                                SRow(enabled = !blkOff, icon = { Ic("img", pal.os) }, label = { T("Gambar", 17f, 500, pal.os) }) {
+                                    ed.sheet = 0; act.pickImages()
+                                }
+                                SRow(enabled = !blkOff, icon = { Ic("table", pal.os) }, label = { T("Tabel", 17f, 500, pal.os) }) {
+                                    ed.sheetPage = 1                       // geser ke pengaturan baris dan kolom
+                                }
+                                SRow(enabled = !ed.recActive && !selMode, icon = { Ic("mic", pal.os) }, label = { T("Voice note", 17f, 500, pal.os) }) {
+                                    ed.sheet = 0
+                                    act.requestMic {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        ed.startVoice()
+                                    }
+                                }
+                                SRow(icon = { InkToolIcon(4, pal.os) }, label = { T("Coretan", 17f, 500, pal.os) }) {
+                                    ed.sheet = 0; ed.ink.toggle(ed)
+                                }
+                                SRow(enabled = !convOff, icon = { Ic("quote", pal.os) }, label = { T("Kutipan", 17f, 500, pal.os) }) {
+                                    ed.sheet = 0; if (ed.focus != null) ed.pickQuote = true
+                                }
+                                SRow(enabled = !convOff, icon = { Ic("pre", pal.os) }, label = { T("Kode", 17f, 500, pal.os) }) {
+                                    ed.sheet = 0; ed.setCode()
+                                }
+                                SRow(enabled = !blkOff, icon = { Ic("hr", pal.os) }, label = { T("Garis horizontal", 17f, 500, pal.os) }) {
+                                    ed.sheet = 0; ed.insHr()
+                                }
+                            }
+                            1 -> {
+                                Stepper("Baris", ed.tbR, 1, 20) { ed.tbR = it }
+                                Stepper("Kolom", ed.tbC, 1, 6) { ed.tbC = it }
+                                Box(Modifier.fillMaxWidth().padding(vertical = 6.dp), Alignment.Center) {
+                                    Canvas(Modifier.size(width = 150.dp, height = 64.dp)) {   // pratinjau kisi
+                                        val st = Stroke(1.5f * density)
+                                        drawRect(pal.osv, style = st)
+                                        for (r in 1 until ed.tbR) { val y = size.height * r / ed.tbR; drawLine(pal.osv, Offset(0f, y), Offset(size.width, y), 1.2f * density) }
+                                        for (c in 1 until ed.tbC) { val x = size.width * c / ed.tbC; drawLine(pal.osv, Offset(x, 0f), Offset(x, size.height), 1.2f * density) }
+                                    }
+                                }
+                                Box(Modifier.fillMaxWidth().padding(vertical = 10.dp), Alignment.Center) {
+                                    Chip("Sisipkan tabel", pal.p, pal.op, RoundedCornerShape(26.dp), 52.dp, 220.dp) {
+                                        ed.sheet = 0; ed.insTable(ed.tbR, ed.tbC)
+                                    }
+                                }
+                            }
+                            else -> {
+                                SRow(on = ty == "p", enabled = !convOff, icon = { T("T", 20f, 700, pal.os) }, label = { T("Teks biasa", 17f, 500, pal.os) }) {
+                                    ed.sheet = 0; ed.setPlain()
+                                }
+                                listOf(1 to 26f, 2 to 23f, 3 to 20f, 4 to 18f).forEach { (lv, sz) ->
+                                    SRow(on = ty == "h" && blk?.lv == lv, enabled = !convOff, icon = { T("H$lv", 15f, 900, pal.p) },
+                                        label = { T(if (lv == 4) "Sub-judul" else "Judul $lv", sz, 900, pal.os) }) {
+                                        ed.sheet = 0; ed.setHead(lv)
+                                    }
+                                }
+                                SRow(on = K.S in fl, enabled = ty != "code", icon = { Ic("s", pal.os) }, label = { T("Coret", 17f, 500, pal.os) }) {
+                                    ed.sheet = 0; ed.toggleFmt(K.S)
+                                }
+                                SRow(on = K.C in fl, enabled = ty != "code", icon = { Ic("code", pal.os) }, label = { T("Kode sebaris", 17f, 500, pal.os) }) {
+                                    ed.sheet = 0; ed.toggleFmt(K.C)
+                                }
+                            }
                         }
-                    }
-                    SRow(icon = { InkToolIcon(4, pal.os) }, label = { T("Coretan", 17f, 500, pal.os) }) {
-                        ed.sheet = 0; ed.ink.toggle(ed)
-                    }
-                    SRow(enabled = !convOff, icon = { Ic("quote", pal.os) }, label = { T("Kutipan", 17f, 500, pal.os) }) {
-                        ed.sheet = 0; if (ed.focus != null) ed.pickQuote = true
-                    }
-                    SRow(enabled = !convOff, icon = { Ic("pre", pal.os) }, label = { T("Kode", 17f, 500, pal.os) }) {
-                        ed.sheet = 0; ed.setCode()
-                    }
-                    SRow(enabled = !blkOff, icon = { Ic("hr", pal.os) }, label = { T("Garis horizontal", 17f, 500, pal.os) }) {
-                        ed.sheet = 0; ed.insHr()
-                    }
-                } else {
-                    SRow(on = ty == "p", enabled = !convOff, icon = { T("T", 20f, 700, pal.os) }, label = { T("Teks biasa", 17f, 500, pal.os) }) {
-                        ed.sheet = 0; ed.setPlain()
-                    }
-                    listOf(1 to 26f, 2 to 23f, 3 to 20f, 4 to 18f).forEach { (lv, sz) ->
-                        SRow(on = ty == "h" && blk?.lv == lv, enabled = !convOff, icon = { T("H$lv", 15f, 900, pal.p) },
-                            label = { T(if (lv == 4) "Sub-judul" else "Judul $lv", sz, 900, pal.os) }) {
-                            ed.sheet = 0; ed.setHead(lv)
-                        }
-                    }
-                    SRow(on = K.S in fl, enabled = ty != "code", icon = { Ic("s", pal.os) }, label = { T("Coret", 17f, 500, pal.os) }) {
-                        ed.sheet = 0; ed.toggleFmt(K.S)
-                    }
-                    SRow(on = K.C in fl, enabled = ty != "code", icon = { Ic("code", pal.os) }, label = { T("Kode sebaris", 17f, 500, pal.os) }) {
-                        ed.sheet = 0; ed.toggleFmt(K.C)
                     }
                 }
             }
