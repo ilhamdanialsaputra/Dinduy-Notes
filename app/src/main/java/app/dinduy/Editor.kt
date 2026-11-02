@@ -1407,8 +1407,9 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
      */
     fun selLong(p: Offset, fingerY: Float): Boolean {
         val edit = !reading
+        // tekan-tahan di atas gambar (mode baca MAUPUN ketik) bukan seleksi teks: biarkan gambar yang mengangkat dirinya
+        if (ipos.values.any { it.contains(p) }) return false
         if (edit) {
-            if (ipos.values.any { it.contains(p) }) return false          // itu gambar, bukan teks
             val nr = nearest(p) ?: return false
             if (nr.second > 32f * dens) return false                       // jauh dari teks (mis. judul / ruang kosong)
         }
