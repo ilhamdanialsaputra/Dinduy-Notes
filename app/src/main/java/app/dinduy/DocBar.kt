@@ -257,8 +257,6 @@ fun DocBar(ed: Ed, act: Actions) {
                             Modifier.fillMaxWidth().height(54.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp),
                             horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Tbn({ Ic("ok", it) }, true, true) { ed.closeImg() }
-                            Sep()
                             if (!inRow) {
                                 val al = b?.im?.getOrNull(s.second)?.al
                                 Tbn({ Ic("aL", it) }, al == "l", true) { ed.imgAlign("l") }
@@ -367,7 +365,7 @@ fun DocSheet(ed: Ed, act: Actions) {
         exit = fadeOut(tween(140)) + slideOutVertically(tween(240, easing = Emph)) { it }
     ) {
         // kotak penuh: tanpa sudut bundar, tanpa pegangan
-        Column(Modifier.fillMaxWidth().shadow(if (pal.dark) 10.dp else 6.dp, RectangleShape).background(pal.c3)) {
+        Column(Modifier.fillMaxWidth().background(pal.c3)) {
             val page = if (shown == 2) 2 else if (ed.sheetPage == 1) 1 else 0     // 0 Sisipkan, 1 Tabel, 2 Format
             AnimatedContent(
                 targetState = page,
