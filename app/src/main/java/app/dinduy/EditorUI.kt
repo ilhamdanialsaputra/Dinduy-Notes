@@ -907,7 +907,8 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
                     ed.mvBegin(bS.id, mS.id); true
                 },
                 onMove = { _, d -> ed.mvDrag(d.x, d.y) },
-                onEnd = { ok -> ed.mvEnd(ok) }
+                onEnd = { ok -> ed.mvEnd(ok) },
+                lead = 150L   // foto terangkat lebih cepat dari tekan-tahan biasa (~350 ms), jadi terasa langsung
             )
             .pointerInput(ed.reading) {
                 if (!ed.reading) detectTapGestures(onTap = { ed.selectImg(bS.id, ixS) })
