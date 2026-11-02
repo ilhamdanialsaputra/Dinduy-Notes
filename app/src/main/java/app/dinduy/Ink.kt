@@ -145,7 +145,7 @@ class InkCtl {
         if (on) { on = false; pop = false; sel = emptySet(); zoom = 1f; panX = 0f; panY = 0f }
         else {
             on = true; hide = false; pop = false
-            ed.selImg = null; ed.miniBar = false
+            ed.selImg = null; ed.miniBar = false; ed.sheet = 0; ed.sub = 0
             ed.clearReq++                         // tutup keyboard dan fokus teks
         }
         stamp = System.currentTimeMillis()
@@ -1126,20 +1126,20 @@ fun BoxScope.InkBar(ed: Ed, vm: AppVM) {
 
     AnimatedVisibility(
         visible = ik.on,
-        modifier = Modifier.align(if (left) Alignment.BottomStart else Alignment.BottomEnd),
+        modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
         enter = fadeIn(tween(220)) + slideInVertically(tween(300)) { it / 2 },
         exit = fadeOut(tween(160)) + slideOutVertically(tween(240)) { it / 2 }
     ) {
         Column(
-            Modifier.padding(horizontal = 10.dp).padding(bottom = 10.dp),
-            horizontalAlignment = if (left) Alignment.Start else Alignment.End
+            Modifier.fillMaxWidth().background(pal.c3),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             val tool = ik.tool
             AnimatedVisibility(ik.pop && tool != 3, enter = fadeIn(tween(180)) + slideInVertically(tween(240)) { it / 3 }, exit = fadeOut(tween(120))) {
                 val shape = RoundedCornerShape(28.dp)
                 Column(
-                    Modifier.padding(bottom = 8.dp).widthIn(max = 320.dp).fillMaxWidth()
-                        .shadow(if (pal.dark) 6.dp else 2.dp, shape).clip(shape).background(pal.c3).padding(16.dp)
+                    Modifier.padding(horizontal = 12.dp, vertical = 8.dp).widthIn(max = 360.dp).fillMaxWidth()
+                        .clip(shape).background(pal.c4).padding(16.dp)
                 ) {
                     if (tool != 2) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -1179,30 +1179,12 @@ fun BoxScope.InkBar(ed: Ed, vm: AppVM) {
                     }
                 }
             }
-            val cap = RoundedCornerShape(30.dp)
+            Box(Modifier.fillMaxWidth().height(1.dp).background(pal.ol.copy(alpha = .35f)))
             var drag by remember { mutableStateOf(0f) }
             Row(
-                Modifier.shadow(if (pal.dark) 6.dp else 2.dp, cap).clip(cap).background(pal.c3).horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp, vertical = 4.dp),
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // gagang: geser ke kiri / kanan untuk memindah sisi toolbar (pemakai kidal)
-                Box(
-                    Modifier.width(22.dp).height(46.dp).pointerInput(left) {
-                        detectHorizontalDragGestures(
-                            onDragStart = { drag = 0f },
-                            onDragEnd = {
-                                if (drag < -48f * density && !left) vm.setPr(pr.copy(isd = "l"))
-                                else if (drag > 48f * density && left) vm.setPr(pr.copy(isd = "r"))
-                                drag = 0f
-                            }
-                        ) { _, dx -> drag += dx }
-                    },
-                    Alignment.Center
-                ) {
-                    Canvas(Modifier.size(width = 8.dp, height = 20.dp)) {
-                        for (r in 0..2) for (c in 0..1) drawCircle(pal.osv, 1.3f * density, Offset(size.width * (.2f + .6f * c), size.height * (.15f + .35f * r)))
-                    }
-                }
                 for (t in 0..3) {
                     Box(contentAlignment = Alignment.BottomCenter) {
                         Tbn({ ToolIcon(t, it) }, tool == t, true) {
@@ -1217,8 +1199,6 @@ fun BoxScope.InkBar(ed: Ed, vm: AppVM) {
                     }
                 }
                 Box(Modifier.padding(horizontal = 3.dp).width(1.dp).height(24.dp).background(pal.ol.copy(alpha = .5f)))
-                Tbn({ Ic("undo", it) }, false, ed.canUndo) { ed.undo() }
-                Tbn({ Ic("redo", it) }, false, ed.canRedo) { ed.redo() }
                 Tbn({ ShapeIcon(it) }, pr.isn, true) { vm.setPr(pr.copy(isn = !pr.isn)) }
                 Tbn({ EyeIcon(it, ik.hide) }, ik.hide, true) { ik.hide = !ik.hide }
                 Tbn({ ExportIcon(it) }, false, !ik.exporting) { ik.hide = false; ik.sel = emptySet(); ik.exporting = true }
