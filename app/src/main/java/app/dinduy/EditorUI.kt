@@ -379,9 +379,10 @@ fun TF(
             }
         }
         val clear = if (ed.barOn) ed.barH + 16f * ed.dens else 0f   // tinggi kapsul (termasuk jarak bawahnya) + sedikit ruang napas
-        LaunchedEffect(v.selection, v.text.length, foc, clear) {
+        val imeB = WindowInsets.ime.getBottom(dn)   // berubah selama keyboard naik: kursor dicek lagi setelah layar menyempit
+        LaunchedEffect(v.selection, v.text.length, foc, clear, imeB) {
             if (foc && v.selection.collapsed) {
-                delay(30)
+                delay(60)
                 lay?.let { l ->
                     val o = (fold?.o2t(v.selection.start, 1) ?: v.selection.start).coerceIn(0, l.layoutInput.text.length)
                     try { bring.bringIntoView(l.getCursorRect(o).let { c -> c.copy(bottom = c.bottom + clear) }) } catch (e: Exception) { }
