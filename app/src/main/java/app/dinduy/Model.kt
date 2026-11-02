@@ -190,7 +190,8 @@ data class Blk(
     val tb: List<List<Rt>> = emptyList(),
     val ca: List<String> = emptyList(),
     val im: List<Img> = emptyList(),
-    val ik: List<Ink> = emptyList()   // coretan yang menempel pada blok ini (koordinat relatif terhadap blok)
+    val ik: List<Ink> = emptyList(),  // coretan yang menempel pada blok ini (koordinat relatif terhadap blok)
+    val ta: String = ""               // perataan teks: "" kiri, c tengah, r kanan, j rata kiri-kanan
 ) {
     val isText: Boolean get() = ty == "p" || ty == "h" || ty == "li" || ty == "q" || ty == "code"
     val isObj: Boolean get() = ty == "tbl" || ty == "img" || ty == "hr"
