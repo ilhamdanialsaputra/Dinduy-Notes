@@ -298,7 +298,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     }
 
     fun dropIfEmpty(id: String, title: String, bl: List<Blk>) {
-        if (title.isBlank() && plainOf(bl).isEmpty() && bl.none { it.isObj && it.ty != "hr" }) {
+        if (title.isBlank() && plainOf(bl).isEmpty() && bl.none { it.isObj && it.ty != "hr" } && bl.none { it.ik.isNotEmpty() }) {
             // catatan kosong yang diberi pengingat tetap disimpan (seperti Google Keep)
             if (docs.removeAll { it.id == id && it.rm == 0L && it.au.isEmpty() }) save()
         }
