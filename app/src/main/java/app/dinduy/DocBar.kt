@@ -257,6 +257,10 @@ fun DocBar(ed: Ed, act: Actions) {
                             Modifier.fillMaxWidth().height(54.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp),
                             horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically
                         ) {
+                            // ganti isi bingkai dengan foto lain (galeri / kamera); ukuran bingkai tidak berubah
+                            Chip("Ganti foto", pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.replT = ed.selImg ?: lastSel; act.replaceImage() }
+                            Tbn({ Ic("cam", it) }, false, true) { ed.replT = ed.selImg ?: lastSel; act.takePhoto(true) }
+                            Sep()
                             if (!inRow) {
                                 val al = b?.im?.getOrNull(s.second)?.al
                                 Tbn({ Ic("aL", it) }, al == "l", true) { ed.imgAlign("l") }
@@ -389,6 +393,9 @@ fun DocSheet(ed: Ed, act: Actions) {
                             0 -> {
                                 SRow(enabled = !blkOff, icon = { Ic("img", pal.os) }, label = { T("Gambar", 17f, 500, pal.os) }) {
                                     ed.sheet = 0; act.pickImages()
+                                }
+                                SRow(enabled = !blkOff, icon = { Ic("cam", pal.os) }, label = { T("Kamera", 17f, 500, pal.os) }) {
+                                    ed.sheet = 0; act.takePhoto(false)
                                 }
                                 SRow(enabled = !blkOff, icon = { Ic("table", pal.os) }, label = { T("Tabel", 17f, 500, pal.os) }) {
                                     ed.sheetPage = 1                       // geser ke pengaturan baris dan kolom
