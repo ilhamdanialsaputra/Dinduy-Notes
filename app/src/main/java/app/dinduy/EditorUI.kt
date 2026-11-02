@@ -380,10 +380,11 @@ fun TF(
             }
         }
         val clear = if (ed.barOn) ed.barH + 16f * ed.dens else 0f   // tinggi kapsul (termasuk jarak bawahnya) + sedikit ruang napas
+        val imeIns = WindowInsets.ime   // objeknya saja diambil di komposisi; nilainya dibaca di dalam efek
         LaunchedEffect(v.selection, v.text.length, foc, clear) {
             if (foc && v.selection.collapsed) {
                 // tinggi keyboard dipantau di sini (bukan di komposisi), jadi hanya kolom yang fokus yang bereaksi dan tidak ada recompose per frame
-                androidx.compose.runtime.snapshotFlow { WindowInsets.ime.getBottom(dn) }.collectLatest {
+                androidx.compose.runtime.snapshotFlow { imeIns.getBottom(dn) }.collectLatest {
                     delay(60)
                     lay?.let { l ->
                         val o = (fold?.o2t(v.selection.start, 1) ?: v.selection.start).coerceIn(0, l.layoutInput.text.length)
