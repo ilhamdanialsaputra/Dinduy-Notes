@@ -2,6 +2,8 @@
 
 package app.dinduy
 
+import androidx.activity.compose.BackHandler
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.expandHorizontally
@@ -203,6 +205,33 @@ private fun Modifier.trackPos(ed: Ed, key: String): Modifier = onGloballyPositio
     }
 }
 
+/**
+ * Rata kiri-kanan buatan sendiri (justify bawaan Android tidak jalan di sebagian HP / font).
+ * Ukur teks dengan rata kiri, lalu tiap baris (kecuali yang terakhir) dilebarkan dengan menambah jarak huruf
+ * pada spasi di baris itu sampai pas selebar kolom. Teks tidak diubah, jadi kursor dan seleksi tetap benar.
+ */
+private fun justifySpans(a: AnnotatedString, style: TextStyle, w: Int, tm: androidx.compose.ui.text.TextMeasurer, d: androidx.compose.ui.unit.Density): AnnotatedString {
+    if (w <= 0 || a.length < 2) return a
+    val r = tm.measure(a, style = style, constraints = androidx.compose.ui.unit.Constraints(maxWidth = w))
+    if (r.lineCount < 2) return a
+    val txt = a.text
+    val maxExtra = with(d) { style.fontSize.toPx() } * 1.5f
+    return buildAnnotatedString {
+        append(a)
+        for (i in 0 until r.lineCount - 1) {
+            val s = r.getLineStart(i)
+            val en = r.getLineEnd(i, visibleEnd = true).coerceAtMost(txt.length)
+            val slack = w - (r.getLineRight(i) - r.getLineLeft(i))
+            var n = 0
+            for (k in s until en) if (txt[k] == ' ') n++
+            if (n == 0 || slack <= 1f) continue
+            val extra = ((slack - 1f) / n).coerceAtMost(maxExtra)
+            val sp = with(d) { extra.toSp() }
+            for (k in s until en) if (txt[k] == ' ') addStyle(SpanStyle(letterSpacing = sp), k, k + 1)
+        }
+    }
+}
+
 /** Terapkan pemotongan baris buatan (teks mengelilingi gambar) pada teks bergaya. z = awalan tak terlihat di depan. */
 private fun Fold.applyTo(a: AnnotatedString, z: Int): AnnotatedString = buildAnnotatedString {
     val pad = SpanStyle(letterSpacing = ls.sp)
@@ -266,18 +295,24 @@ fun TF(
     val v = ed.tf[key] ?: return
     val rt = ed.rtOf(key)
     val fs = base.fontSize.value
+    val just = base.textAlign == androidx.compose.ui.text.style.TextAlign.Justify && fold == null
+    val base2 = if (base.textAlign == androidx.compose.ui.text.style.TextAlign.Justify)
+        base.copy(textAlign = androidx.compose.ui.text.style.TextAlign.Start, lineBreak = androidx.compose.ui.text.style.LineBreak.Simple) else base
+    val tm = androidx.compose.ui.text.rememberTextMeasurer()
+    val dn = androidx.compose.ui.platform.LocalDensity.current
+    var jw by remember { mutableStateOf(0) }       // lebar kolom teks (px), dipakai rata kiri-kanan
     if (ed.reading) {
         val sr = if (ed.selOn) ed.selRangeOf(key) else null
         val fh = if (ed.findOn) ed.hitsOf(key) else emptyList()
         val fc = if (fh.isEmpty()) null else ed.curHit()?.takeIf { it.key == key }
-        val ann = remember(rt, pal, fs, sr, fold, fh, fc) {
+        val ann = remember(rt, pal, fs, sr, fold, fh, fc, jw, just) {
             val a = styled(rt, rt.t, 0, pal, fs)
             val a2 = if (sr == null && fh.isEmpty()) a else buildAnnotatedString {
                 append(a)
                 if (sr != null) addStyle(SpanStyle(background = pal.p.copy(alpha = .32f)), sr.first, sr.second)
                 addFind(pal, fh, fc, 0, rt.t.length)
             }
-            if (fold == null) a2 else fold.applyTo(a2, 0)
+            if (fold == null) (if (just && jw > 0) justifySpans(a2, base2, jw, tm, dn) else a2) else fold.applyTo(a2, 0)
         }
         val uri = LocalUriHandler.current
         var lay by remember { mutableStateOf<TextLayoutResult?>(null) }
@@ -305,7 +340,7 @@ fun TF(
                         }
                     )
                 },
-            style = base, softWrap = wrap, onTextLayout = { lay = it }
+            style = base2, softWrap = wrap, onTextLayout = { lay = it; jw = it.layoutInput.constraints.maxWidth }
         )
     } else {
         val fr = remember { FocusRequester() }
@@ -333,7 +368,7 @@ fun TF(
         val sr = if (ed.selOn) ed.selRangeOf(key) else null
         val fh = if (ed.findOn) ed.hitsOf(key) else emptyList()
         val fc = if (fh.isEmpty()) null else ed.curHit()?.takeIf { it.key == key }
-        val vt = remember(rt, pal, fs, fold, sr, fh, fc) {
+        val vt = remember(rt, pal, fs, fold, sr, fh, fc, jw, just) {
             VisualTransformation { t ->
                 val a0 = styled(rt, t.text, 1, pal, fs)
                 val a = if (sr == null && fh.isEmpty()) a0 else buildAnnotatedString {
@@ -345,7 +380,7 @@ fun TF(
                     }
                     addFind(pal, fh, fc, 1, t.text.length)
                 }
-                if (fold == null) TransformedText(a, OffsetMapping.Identity)
+                if (fold == null) TransformedText(if (just && jw > 0) justifySpans(a, base2, jw, tm, dn) else a, OffsetMapping.Identity)
                 else {
                     val n = t.text.length
                     val tn = n + fold.total
@@ -411,8 +446,8 @@ fun TF(
                             }
                         }
                     ),
-                textStyle = base, cursorBrush = SolidColor(if (hideNative) Color.Transparent else pal.p), visualTransformation = vt,
-                onTextLayout = { lay = it },
+                textStyle = base2, cursorBrush = SolidColor(if (hideNative) Color.Transparent else pal.p), visualTransformation = vt,
+                onTextLayout = { lay = it; jw = it.layoutInput.constraints.maxWidth },
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 decorationBox = { inner ->
                     Box {
@@ -463,7 +498,7 @@ fun BlockView(ed: Ed, vm: AppVM, b: Blk, ordN: Int, dm: Dm, fold: Fold? = null, 
                 3 -> baseStyle(pal, dm, pal.p, fs * 1.45f, 1000, 1.02f, -.02f)
                 else -> baseStyle(pal, dm, pal.os, fs * 1.15f, 1000, 1.02f, -.02f)
             }
-            TF(ed, b.id, st.copy(textAlign = taOf(b)), Modifier.fillMaxWidth().padding(top = (fs * .4f).dp, bottom = (fs * .5f).dp))
+            TF(ed, b.id, st.aligned(b), Modifier.fillMaxWidth().padding(top = (fs * .4f).dp, bottom = (fs * .5f).dp))
         }
         "q" -> {
             val q = qs(b.k, pal)
@@ -480,7 +515,7 @@ fun BlockView(ed: Ed, vm: AppVM, b: Blk, ordN: Int, dm: Dm, fold: Fold? = null, 
                             Modifier.padding(bottom = (fs * .45f * .7f).dp), ls = .12f, alpha = if (b.k == "def") 1f else .85f
                         )
                     }
-                    TF(ed, b.id, baseStyle(pal, dm, q.fg, fs * 1.05f, 500).copy(textAlign = taOf(b)), Modifier.fillMaxWidth())
+                    TF(ed, b.id, baseStyle(pal, dm, q.fg, fs * 1.05f, 500).aligned(b), Modifier.fillMaxWidth())
                 }
             }
         }
@@ -563,7 +598,7 @@ fun ParaRow(ed: Ed, b: Blk, ordN: Int, dm: Dm, pal: Pal, fold: Fold?, mk: Float,
         }
         val st = baseStyle(pal, dm).let {
             if (done) it.copy(color = it.color.copy(alpha = .6f), textDecoration = TextDecoration.LineThrough) else it
-        }.copy(textAlign = taOf(b))
+        }.aligned(b)
         TF(ed, b.id, st, Modifier.weight(1f), hint = hint, fold = fold)
     }
 }
@@ -1343,6 +1378,18 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     val dm = Dm(vm.pr.fs.toFloat(), vm.pr.lh, LocalFF.current)
     val scroll = rememberScrollState()
     InkSetup(ed)
+    // Tombol back Android: tutup yang paling atas dulu. Mode ketik -> mode baca (tampilan penuh) -> baru keluar catatan.
+    BackHandler(true) {
+        when {
+            ed.sheet != 0 -> ed.sheet = 0
+            ed.sub != 0 -> ed.sub = 0
+            ed.ink.on -> ed.ink.toggle(ed)
+            ed.findOn -> ed.closeFind()
+            ed.selOn -> ed.clearSel()
+            !ed.reading -> ed.enterReading()
+            else -> act.back()
+        }
+    }
     val focusMgr = LocalFocusManager.current
     val kb = LocalSoftwareKeyboardController.current
     val density = LocalDensity.current
@@ -1773,7 +1820,6 @@ fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boole
     SideEffect { ed.barOn = showBar || recOn || ed.sheet != 0 }
     LaunchedEffect(imeOpen) { if (imeOpen && ed.sheet != 0) ed.sheet = 0 }   // ketuk teks: keyboard muncul, sheet menutup
     Box(Modifier.fillMaxSize()) {
-        if (ed.sheet != 0) Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { ed.sheet = 0 } })
         // kartu rekaman + kapsul alat dalam satu kolom yang diukur bersama (barH), jadi teks / kursor tidak pernah tertutup
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().onSizeChanged { ed.barH = it.height.toFloat() }) {
             AnimatedVisibility(
