@@ -1007,8 +1007,9 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         mvX += dx; mvY += dy
         if (dy > .5f) mvDir = 1 else if (dy < -.5f) mvDir = -1
         if (m.row) {
-            if (mergeT == null) rowDragStep(m)   // di atas gambar lain: jangan tukar urutan di barisnya sendiri
+            if (mergeT == null && dropAt < 0) rowDragStep(m)   // di atas gambar lain / di luar baris: jangan tukar urutan di barisnya sendiri
             mergeCheck()
+            rowOut(m)
         } else mvRecalc()
     }
 
@@ -1037,7 +1038,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val i = idx(m.bid)
         if (i < 0) return
         mergeCheck()
-        if (m.row) return
+        if (m.row) { rowOut(m); return }
         val cy = m.top + m.h / 2f + mvY
         var gap = blocks.size
         for ((j, b) in blocks.withIndex()) {
@@ -1070,6 +1071,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         mv = null; mvX = 0f; mvY = 0f; dropAt = -1; mergeT = null
         if (!apply || i < 0) return
         if (mt != null) { mergeImg(m.bid, m.imgId, mt); return }   // dilepas di atas gambar lain: otomatis jadi kolase
+        if (m.row && to >= 0) { extractImg(m.bid, m.imgId, anchor); return }   // kolase diseret keluar barisnya: jadi gambar sendiri
         var b = blocks[i]
         if (!m.row && b.im.size == 1 && al != b.im[0].al) {
             val mi = b.im[0]
@@ -1143,6 +1145,49 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             if (found != null) buzz?.invoke()
         }
         if (found != null && dropAt != -1) dropAt = -1
+    }
+
+    /** Gambar kolase diseret keluar dari barisnya (tanpa sasaran kolase): tentukan celah antar blok tempat ia akan dilepas. */
+    private fun rowOut(m: Mv) {
+        val i = idx(m.bid)
+        if (i < 0) return
+        val b = blocks[i]
+        val r = imgRect(b, b.im.indexOfFirst { it.id == m.imgId }) ?: return
+        val c = mvCenter(m) ?: return
+        val pad = 8f * dens
+        var nd = -1
+        if (mergeT == null && (c.y < r.top - pad || c.y > r.bottom + pad)) {
+            var gap = blocks.size
+            for ((j, x) in blocks.withIndex()) {
+                val q = bpos[x.id] ?: continue
+                if (q[0] + q[1] / 2f >= c.y) { gap = j; break }
+            }
+            nd = gap
+        }
+        if (nd != dropAt) { dropAt = nd; if (nd >= 0) buzz?.invoke() }
+    }
+
+    /** Keluarkan satu gambar dari kolase jadi blok gambar sendiri, ditaruh sebelum blok [anchor] (null = paling akhir). Gambar lain di kolase tetap. */
+    private fun extractImg(bid: String, imgId: String, anchor: String?) {
+        val i = idx(bid)
+        if (i < 0) return
+        val src = blocks[i]
+        val n = src.im.size
+        val mi = src.im.firstOrNull { it.id == imgId } ?: return
+        if (n < 2) return
+        val sum = src.im.sumOf { it.a.toDouble() }.toFloat().coerceAtLeast(.1f)
+        fun share(x: Img) = (x.a / sum * (1f - (n - 1) * GAP)).coerceIn(.2f, 1f)   // lebar tampil lama, jadi tinggi gambar tidak berubah
+        val rest = src.im.filter { it.id != imgId }
+        val solo = Blk(ty = "img", im = listOf(mi.copy(w = share(mi), al = "c")))
+        val l = blocks.toMutableList()
+        l[i] = if (rest.size == 1) src.copy(im = listOf(rest[0].copy(w = share(rest[0]), al = "c"))) else src.copy(im = rest)
+        val at = if (anchor == null) l.size else l.indexOfFirst { it.id == anchor }.let { if (it < 0) l.size else it }
+        l.add(at, solo)
+        blocks = l
+        selImg = solo.id to 0
+        focus = null; clearReq++
+        norm(); afterStructural()
+        buzz?.invoke()
     }
 
     /** Samakan tinggi semua gambar dalam satu baris kolase (lebar = bobot rasio), dengan tinggi dibatasi 120..520 dp. */
