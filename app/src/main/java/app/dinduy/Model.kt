@@ -183,7 +183,10 @@ data class Ink(
     // kalau teksnya turun baris.
     val an: List<Float> = emptyList(),
     val ah: Float = 0f,       // ukuran huruf (dp) saat dicoret: menskalakan tebal goresan mengikuti ukuran huruf, juga di PDF
-    val av: Int = 0
+    val av: Int = 0,
+    // av = 5: goresan di atas gambar. ai = id gambar, an = pasangan (u, v) tiap titik terhadap kotak gambar (0..1), ah = lebar gambar (dp) saat dicoret.
+    // av = 6: goresan di blok teks yang tidak bisa menempel ke huruf (mis. paragraf kosong): p diskalakan mengikuti ukuran huruf, ah = ukuran huruf (dp) saat dicoret.
+    val ai: String = ""
 )
 
 /** ty: p, h, li, q, code, tbl, hr, img */
