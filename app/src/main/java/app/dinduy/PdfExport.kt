@@ -881,13 +881,17 @@ object PdfExport {
         val em = l.em
         val wPx = s.w * em / s.ah                       // tebal mengikuti ukuran huruf, sama seperti di editor
         val col = inkColor(cx.pal, s.c, s.t == 1).toArgb()
-        if (s.av == 3) {                                // stabilo satu baris: satu potongan per baris, jadi bisa jatuh di halaman masing-masing
-            for (g in l.runSegs(s.an[0].toInt(), s.an[1], s.an[2], s.an[3].toInt(), s.an[4], s.an[5])) {
-                val path = Path()
-                val y = tl.oy + g[1]
-                path.moveTo(tl.ox + g[0], y)
-                path.lineTo(tl.ox + g[2], y)
-                f.strokes.add(PStroke(path, 1, col, wPx, y - wPx / 2f, y + wPx / 2f))
+        if (s.isRun) {                                  // stabilo: satu potongan per baris, jadi bisa jatuh di halaman masing-masing
+            val an = s.an
+            for (r in 0 until an.size / 6) {
+                val o = r * 6
+                for (g in l.runSegs(an[o].toInt(), an[o + 1], an[o + 2], an[o + 3].toInt(), an[o + 4], an[o + 5])) {
+                    val path = Path()
+                    val y = tl.oy + g[1]
+                    path.moveTo(tl.ox + g[0], y)
+                    path.lineTo(tl.ox + g[2], y)
+                    f.strokes.add(PStroke(path, 1, col, wPx, y - wPx / 2f, y + wPx / 2f))
+                }
             }
             return
         }
