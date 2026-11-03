@@ -409,7 +409,10 @@ fun AppRoot(vm: AppVM, act: Actions) {
             anim.animateTo(1f, tween(450))
         }
     }
-    val pal = lerpPal(from, to, anim.value)
+    // setelah animasi selesai pakai instance yang SAMA (stabil): tanpa ini setiap recompose AppRoot membuat Pal baru
+    // sehingga SELURUH layar yang membaca LocalPal ikut recompose
+    val av = anim.value
+    val pal = if (av >= 1f) to else lerpPal(from, to, av)
     val view = LocalView.current
     SideEffect {
         val w = (view.context as Activity).window
@@ -417,8 +420,10 @@ fun AppRoot(vm: AppVM, act: Actions) {
         c.isAppearanceLightStatusBars = !pal.dark
         c.isAppearanceLightNavigationBars = !pal.dark
     }
-    val cs = if (pal.dark) darkColorScheme(primary = pal.p, onPrimary = pal.op, surface = pal.s, onSurface = pal.os, background = pal.s)
-    else lightColorScheme(primary = pal.p, onPrimary = pal.op, surface = pal.s, onSurface = pal.os, background = pal.s)
+    val cs = remember(pal) {
+        if (pal.dark) darkColorScheme(primary = pal.p, onPrimary = pal.op, surface = pal.s, onSurface = pal.os, background = pal.s)
+        else lightColorScheme(primary = pal.p, onPrimary = pal.op, surface = pal.s, onSurface = pal.os, background = pal.s)
+    }
 
     val am = ctx.assets
     val ff = remember(vm.pr.ff) { loadFont(am, vm.pr.ff) }
