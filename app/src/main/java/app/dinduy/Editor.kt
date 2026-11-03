@@ -1984,19 +1984,27 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (hist[hi].bl !== blocks && hist[hi].bl != blocks) return
         val W = (contentCoords?.size?.width ?: 0).toFloat()
         if (W <= 0f) return
-        var any = false
-        val nb = blocks.map { b ->
-            if (!b.isText || b.ik.none { !it.anc }) return@map b
-            val top = bpos[b.id]?.get(0) ?: return@map b
-            b.copy(ik = b.ik.map { s ->
-                if (s.anc || s.p.isEmpty()) s else {
-                    val a = inkPts(s.copy(an = emptyList(), av = 0), b.id, top, W, dens)
-                    val r = withAnchor(s, b, a, a.size / 3)
-                    if (r.anc) { any = true; r } else s
-                }
-            })
+        val adds = HashMap<String, ArrayList<Ink>>()
+        val drop = HashSet<String>()
+        for (b in blocks) {
+            if (b.ik.none { !it.anc }) continue
+            val top = bpos[b.id]?.get(0) ?: continue
+            for (s in b.ik) {
+                if (s.anc || s.p.isEmpty()) continue
+                val raw = s.copy(an = emptyList(), ah = 0f, av = 0)
+                val a = inkPts(raw, b.id, top, W, dens)
+                val ps = inkBuild(raw, a, a.size / 3, W)
+                if (ps.none { it.second.anc }) continue          // tidak bisa dijangkarkan: biarkan seperti semula
+                drop.add(s.id)
+                for ((bid, st) in ps) adds.getOrPut(bid) { ArrayList() }.add(st)
+            }
         }
-        if (!any) return
+        if (drop.isEmpty()) return
+        val nb = blocks.map { b ->
+            val keep = if (b.ik.any { it.id in drop }) b.ik.filter { it.id !in drop } else b.ik
+            val add = adds[b.id]
+            if (add == null && keep === b.ik) b else b.copy(ik = keep + (add ?: emptyList()))
+        }
         blocks = nb
         hist[hi] = Snap(nb, hist[hi].key, hist[hi].sel)
         vm.syncInk(noteId, inkSyncP(nb))   // simpan jangkarnya supaya ekspor PDF catatan lama juga akurat
