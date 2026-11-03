@@ -135,7 +135,7 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
     val sat = satDp()
     val sab = sabDp()
     val note = vm.note(id)
-    val pr = vm.pr
+    val pr = vm.pr.copy(fs = vm.noteFs(id))
     val imgDir = vm.imgDir
     val ed = vm.ed?.takeIf { it.noteId == id }
     val widthDp = remember(id) { ed?.widthDp ?: 312f }
