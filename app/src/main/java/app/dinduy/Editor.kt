@@ -230,7 +230,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             else if (rc != null) b.copy(tb = b.tb.mapIndexed { ri, row ->
                 if (ri != rc.first) row else row.mapIndexed { ci, cell -> if (ci == rc.second) rt else cell }
             })
-            else b.copy(r = rt)
+            else b.copy(r = rt, ik = inkRemap(b.ik, b.r.t, rt.t))   // jangkar coretan ikut bergeser mengikuti perubahan huruf
         }
     }
 
@@ -420,7 +420,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (nb == null) return false
         commit()
         val nr = rt.slice(len, tx.length)
-        setBlock(i, nb.copy(r = nr))
+        setBlock(i, nb.copy(r = nr, ik = inkRemap(b.ik, tx, nr.t)))
         val np = (c - len).coerceAtLeast(0)
         tf[key] = TextFieldValue(Z + nr.t, TextRange(np + 1))
         typing = emptySet()
@@ -489,7 +489,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (right.t.startsWith("\n")) right = right.slice(1, right.t.length)
         if (left.t.endsWith("\n")) left = left.slice(0, left.t.length - 1)
         val nb = if (nty == "li") Blk(ty = "li", lt = b.lt, d = b.d, r = right, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi) else Blk(ty = "p", r = right, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi)
-        blocks = blocks.toMutableList().also { it[i] = b.copy(r = left); it.add(i + 1, nb) }
+        blocks = blocks.toMutableList().also { it[i] = b.copy(r = left, ik = inkRemap(b.ik, b.r.t, left.t)); it.add(i + 1, nb) }
         tf[b.id] = TextFieldValue(Z + left.t, TextRange(left.t.length + 1))
         seed(nb)
         focusAt(nb.id, 0)
@@ -506,7 +506,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             focusAt(b.id, 0)
         } else {
             val nb = Blk()
-            blocks = blocks.toMutableList().also { it[i] = b.copy(r = keep); it.add(i + 1, nb) }
+            blocks = blocks.toMutableList().also { it[i] = b.copy(r = keep, ik = inkRemap(b.ik, b.r.t, keep.t)); it.add(i + 1, nb) }
             tf[b.id] = TextFieldValue(Z + keep.t, TextRange(keep.t.length + 1))
             seed(nb)
             focusAt(nb.id, 0)
@@ -570,7 +570,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         else {
             val right = if (b.ty == "li") Blk(ty = "li", lt = b.lt, d = b.d, r = rt.slice(pos, rt.t.length), ta = b.ta, il = b.il, ir = b.ir, fi = b.fi)
             else Blk(ty = "p", r = rt.slice(pos, rt.t.length), ta = b.ta, il = b.il, ir = b.ir, fi = b.fi)
-            l[i] = b.copy(r = rt.slice(0, pos))
+            l[i] = b.copy(r = rt.slice(0, pos), ik = inkRemap(b.ik, rt.t, rt.t.substring(0, pos.coerceIn(0, rt.t.length))))
             l.addAll(i + 1, ns + right)
         }
         blocks = l
@@ -1975,6 +1975,32 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     val canUndo: Boolean get() { tick; return hi > 0 || hist[hi].bl != blocks }
     val canRedo: Boolean get() { tick; return hi < hist.size - 1 }
 
+/**
+     * Coretan lama (atau yang gagal dijangkarkan) dipasangi jangkar huruf berdasarkan posisinya sekarang di layar, jadi tidak ada lompatan.
+     * Diam-diam: tidak membuat langkah riwayat dan tidak menandai catatan berubah. Hanya jalan kalau tidak ada ketikan yang belum di-commit.
+     */
+    fun inkUpgrade() {
+        if (blocks.none { b -> b.ik.any { it.an.isEmpty() } }) return
+        if (hist[hi].bl !== blocks && hist[hi].bl != blocks) return
+        val W = (contentCoords?.size?.width ?: 0).toFloat()
+        if (W <= 0f) return
+        var any = false
+        val nb = blocks.map { b ->
+            if (!b.isText || b.ik.none { it.an.isEmpty() }) return@map b
+            val top = bpos[b.id]?.get(0) ?: return@map b
+            b.copy(ik = b.ik.map { s ->
+                if (s.an.isNotEmpty() || s.p.isEmpty()) s else {
+                    val a = inkPts(s, b.id, top, W, dens)
+                    val r = withAnchor(s, b, a, a.size / 3)
+                    if (r.an.isNotEmpty()) { any = true; r } else s
+                }
+            })
+        }
+        if (!any) return
+        blocks = nb
+        hist[hi] = Snap(nb, hist[hi].key, hist[hi].sel)
+    }
+
     fun undo() {
         if (reading) return
         commit()
@@ -2016,7 +2042,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (!chg) return
         chg = false
         commit()
-        vm.saveNote(noteId, title, blocks)
+        vm.saveNote(noteId, title, inkSyncP(blocks))
     }
 
     /** Ganti blok transkrip lama dengan yang baru (atau sisipkan di akhir isi catatan). */
