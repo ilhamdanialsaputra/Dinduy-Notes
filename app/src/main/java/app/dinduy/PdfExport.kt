@@ -84,6 +84,20 @@ object PdfExport {
 
     private class Em(val total: Float, val textH: Float)
 
+    /** Inden satu blok dalam pt: kiri, kanan, margin baris pertama, margin baris berikutnya (menggantung). */
+    private class Ind(val l: Float, val r: Float, val first: Float, val rest: Float)
+
+    private val NO_IND = Ind(0f, 0f, 0f, 0f)
+
+    /** sp = true untuk paragraf / judul / poin (baris pertama dan menggantung berlaku); kutipan hanya kiri + kanan. */
+    private fun indOf(cx: Cx, b: Blk, sp: Boolean): Ind {
+        if (b.il == 0 && b.ir == 0 && (b.fi == 0 || !sp)) return NO_IND
+        val u = cx.u
+        val (l, r) = fitInd(b.il, b.ir, cx.cw / u)
+        val f = if (sp) b.fi else 0
+        return Ind(l * u, r * u, f.coerceIn(0, IND_MAX_FI) * u, (-f).coerceIn(0, IND_MAX_FI) * u)
+    }
+
     private class QSt(val bg: Color, val fg: Color, val r: FloatArray, val label: String?, val bar: Boolean = false, val border: Boolean = false)
 
     private class TfSpan(private val tf: Typeface) : MetricAffectingSpan() {
@@ -104,7 +118,7 @@ object PdfExport {
      * dengan lebar tersedia dibagi rata ke jarak antar kata lewat Paint.wordSpacing.
      */
     private class JL(
-        val lay: StaticLayout, val just: Boolean, val tp: TextPaint, val width: Float, val narrow: Int, val indent: Int
+        val lay: StaticLayout, val just: Boolean, val tp: TextPaint, val width: Float, val lm: IntArray?
     ) {
         val height: Int get() = lay.height
         val lineCount: Int get() = lay.lineCount
@@ -127,7 +141,7 @@ object PdfExport {
                     var k = st
                     while (k < en && txt[k].isWhitespace()) k++   // spasi di awal baris tidak dihitung
                     for (q in k until en) if (txt[q] == ' ') sp++
-                    val avail = width - (if (i < narrow) indent.toFloat() else 0f)
+                    val avail = width - (if (lm != null) lm[minOf(i, lm.size - 1)].toFloat() else 0f)
                     val extra = avail - lay.getLineMax(i)
                     if (!hardBreak && sp > 0 && extra > .5f) ws = extra / sp
                 }
@@ -180,7 +194,7 @@ object PdfExport {
     private fun mk(
         cx: Cx, rt: Rt, width: Float, size: Float, color: Int, lineH: Float,
         bold: Boolean = false, mono: Boolean = false, ls: Float = 0f, ta: String = "",
-        strike: Boolean = false, narrow: Int = 0, indent: Int = 0, leftSide: Boolean = true
+        strike: Boolean = false, narrow: Int = 0, indent: Int = 0, leftSide: Boolean = true, ind: Ind = NO_IND
     ): JL {
         val text = rt.t
         val len = text.length
@@ -264,12 +278,25 @@ object PdfExport {
             .setIncludePad(false)
             .setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE)
             .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
-        if (narrow > 0 && indent > 0) {
-            val arr = IntArray(narrow + 1) { if (it < narrow) indent else 0 }
-            val zero = IntArray(narrow + 1)
-            if (leftSide) builder.setIndents(arr, zero) else builder.setIndents(zero, arr)
+        // margin per baris: elemen terakhir berlaku untuk semua baris sisanya.
+        // baris 0 = baris pertama (inden baris pertama), baris berikutnya = menggantung; gambar mengambang menggeser `narrow` baris pertama.
+        var lm: IntArray? = null
+        val flo = narrow > 0 && indent > 0
+        if (flo || ind.first > 0f || ind.rest > 0f) {
+            val n = max(narrow, 1) + 1
+            val left = IntArray(n)
+            val right = IntArray(n)
+            for (i in 0 until n) {
+                var l = if (i == 0) ind.first else ind.rest
+                var r = 0f
+                if (flo && i < narrow) { if (leftSide) l += indent else r += indent }
+                left[i] = l.roundToInt()
+                right[i] = r.roundToInt()
+            }
+            builder.setIndents(left, right)
+            lm = IntArray(n) { left[it] + right[it] }
         }
-        return JL(builder.build(), ta == "j", p, wi.toFloat(), narrow, indent)
+        return JL(builder.build(), ta == "j", p, wi.toFloat(), lm)
     }
 
     private fun lineCuts(f: Flow, lay: JL, top: Float) {
@@ -343,8 +370,9 @@ object PdfExport {
                 val top = fs * .4f
                 val bot = fs * .5f
                 val ind = fl?.indent ?: 0f
-                val lay = mk(cx, b.r, cx.cw - ind, size, col.toArgb(), size * 1.02f, bold = true, ls = -.02f, ta = b.ta)
-                val x = if (fl != null && fl.left) ind else 0f
+                val iv = indOf(cx, b, true)
+                val lay = mk(cx, b.r, (cx.cw - ind - iv.l - iv.r).coerceAtLeast(30f), size, col.toArgb(), size * 1.02f, bold = true, ls = -.02f, ta = b.ta, ind = iv)
+                val x = (if (fl != null && fl.left) ind else 0f) + iv.l
                 f.pieces.add(Piece(y0 + top, lay.height.toFloat(), x, null) { c -> lay.draw(c) })
                 f.zones.add(floatArrayOf(y0, y0 + top + lay.height + bot + .5f))
                 f.y = y0 + top + lay.height + bot
@@ -354,13 +382,14 @@ object PdfExport {
                 val mw = (when (b.lt) { "o" -> 2.2f; "c" -> 1.9f; else -> 1.7f }) * fs
                 val ind0 = b.d.coerceIn(0, 8) * 1.4f * fs
                 val flInd = fl?.indent ?: 0f
-                val x0 = if (fl != null && fl.left) flInd else 0f
+                val iv = indOf(cx, b, true)
+                val x0 = (if (fl != null && fl.left) flInd else 0f) + iv.l
                 val inset = ind0 + mw
-                val width = (cx.cw - flInd - inset).coerceAtLeast(30f)
+                val width = (cx.cw - flInd - inset - iv.l - iv.r).coerceAtLeast(30f)
                 val done = b.lt == "c" && b.x
                 val col = (if (done) pal.os.copy(alpha = .6f) else pal.os).toArgb()
                 val lineH = fs * cx.lh
-                val lay = mk(cx, b.r, width, fs, col, lineH, strike = done, ta = b.ta)
+                val lay = mk(cx, b.r, width, fs, col, lineH, strike = done, ta = b.ta, ind = iv)
                 lineCuts(f, lay, y0)
                 val n = cx.ords[b.id] ?: 1
                 f.pieces.add(Piece(y0, lay.height.toFloat(), x0, null) { c ->
@@ -375,18 +404,27 @@ object PdfExport {
             }
             else -> {
                 val lineH = fs * cx.lh
+                val iv = indOf(cx, b, true)
+                val indented = b.il != 0 || b.ir != 0 || b.fi != 0
+                val flOn = fl != null && fl.rem > 0f
                 var narrow = 0
                 var ind = 0
-                if (fl != null && fl.rem > 0f) {
-                    narrow = ceil(fl.rem / lineH).toInt().coerceAtLeast(0)
+                var shift = 0f
+                if (flOn && indented) {
+                    // sama dengan editor: paragraf berinden di samping gambar mengambang digeser utuh (tidak dipotong barisnya)
+                    shift = if (fl!!.left) fl.indent else 0f
+                    ind = 0
+                } else if (flOn) {
+                    narrow = ceil(fl!!.rem / lineH).toInt().coerceAtLeast(0)
                     ind = fl.indent.roundToInt()
                 }
+                val rightFl = if (flOn && indented && !fl!!.left) fl.indent else 0f
                 val lay = mk(
-                    cx, b.r, cx.cw, fs, pal.os.toArgb(), lineH, ta = b.ta,
-                    narrow = narrow, indent = ind, leftSide = fl?.left ?: true
+                    cx, b.r, (cx.cw - shift - rightFl - iv.l - iv.r).coerceAtLeast(30f), fs, pal.os.toArgb(), lineH, ta = b.ta,
+                    narrow = narrow, indent = ind, leftSide = fl?.left ?: true, ind = iv
                 )
                 lineCuts(f, lay, y0)
-                f.pieces.add(Piece(y0, lay.height.toFloat(), 0f, null) { c -> lay.draw(c) })
+                f.pieces.add(Piece(y0, lay.height.toFloat(), shift + iv.l, null) { c -> lay.draw(c) })
                 f.y = y0 + lay.height + fs * 1.1f
                 Em(f.y - y0, lay.height.toFloat())
             }
@@ -425,7 +463,9 @@ object PdfExport {
         val padX = 22f * u
         val padY = 18f * u
         val size = fs * 1.05f
-        val lay = mk(cx, b.r, cx.cw - 2f * padX, size, q.fg.toArgb(), size * cx.lh, ta = b.ta)
+        val iv = indOf(cx, b, false)
+        val boxW = (cx.cw - iv.l - iv.r).coerceAtLeast(60f)
+        val lay = mk(cx, b.r, (boxW - 2f * padX).coerceAtLeast(30f), size, q.fg.toArgb(), size * cx.lh, ta = b.ta)
         val lsz = fs * .7f * 1.05f
         val lp = TextPaint(Paint.ANTI_ALIAS_FLAG)
         lp.textSize = lsz
@@ -440,9 +480,9 @@ object PdfExport {
         val y0 = f.y
         f.cuts.add(y0)
         for (i in 1 until lay.lineCount) f.cuts.add(y0 + padY + labelH + lay.getLineTop(i))
-        val rs = radii(q.r, u, cx.cw, boxH)
-        val w = cx.cw
-        f.pieces.add(Piece(y0, boxH, 0f, { c ->
+        val rs = radii(q.r, u, boxW, boxH)
+        val w = boxW
+        f.pieces.add(Piece(y0, boxH, iv.l, { c ->
             val path = boxPath(w, boxH, rs)
             val p = Paint(Paint.ANTI_ALIAS_FLAG)
             if (q.bg.alpha > 0f) {
