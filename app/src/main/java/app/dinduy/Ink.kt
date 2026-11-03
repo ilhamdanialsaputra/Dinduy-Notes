@@ -220,7 +220,7 @@ internal fun inkRescue(prev: List<Blk>, cur: List<Blk>, pos: Map<String, FloatAr
                 if (oy != null && ty != null && dens > 0f) dy = (oy - ty) / dens
             }
             val np = if (dy == 0f) s.p else s.p.mapIndexed { i, v -> if (i % 3 == 1) v + dy else v }
-            val moved = if (r[ti].id == pb.id) s.copy(p = np) else s.copy(p = np, an = emptyList(), ah = 0f)
+            val moved = if (r[ti].id == pb.id) s.copy(p = np) else s.copy(p = np, an = emptyList(), ah = 0f, av = 0)
             r[ti] = r[ti].copy(ik = r[ti].ik + moved)
             have.add(s.id)
         }
@@ -258,6 +258,9 @@ fun Ed.inkTarget(cy: Float): Pair<Blk, Float>? {
     return b to bt
 }
 
+/** Goresan menempel ke huruf (jangkar valid dan versinya terbaru). */
+val Ink.anc: Boolean get() = av >= 2 && ah > 0f && an.isNotEmpty() && an.size == (if (av == 3) 6 else p.size)
+
 /** Geser jangkar huruf mengikuti perubahan teks blok (old -> new): huruf sesudah bagian yang berubah ikut bergeser, yang ada di bagian terhapus mengerut. */
 internal fun inkRemap(ik: List<Ink>, old: String, new: String): List<Ink> {
     if (ik.isEmpty() || old == new || ik.none { it.an.isNotEmpty() }) return ik
@@ -281,12 +284,20 @@ internal fun inkRemap(ik: List<Ink>, old: String, new: String): List<Ink> {
     }
 }
 
+/** Ukuran huruf (px) layout ini; jadi satuan jarak vertikal goresan terhadap garis dasar. */
+private fun emPx(lay: androidx.compose.ui.text.TextLayoutResult): Float {
+    val fs = lay.layoutInput.style.fontSize
+    if (fs.type == androidx.compose.ui.unit.TextUnitType.Sp) return with(lay.layoutInput.density) { fs.toPx() }
+    return ((lay.getLineBottom(0) - lay.getLineTop(0)) / 1.6f).coerceAtLeast(1f)
+}
+
 /**
  * Hitung jangkar huruf untuk titik mutlak a (piksel konten) di atas teks blok b. Null kalau blok bukan teks, layoutnya belum siap /
- * basi, atau ada titik yang jauh dari teks blok itu (maka goresan cukup menempel ke blok seperti dulu).
- * Hasil: (daftar tiga-tiga, tinggi baris dp di titik pertama).
+ * basi, ada titik yang jauh dari teks blok itu, atau stabilo yang tidak berada di satu baris (maka goresan cukup menempel ke blok).
+ * Hasil: (jangkar, ukuran huruf dp, versi). Pena: satu jangkar per titik (versi 2). Stabilo satu baris: hanya titik paling kiri
+ * dan paling kanan (versi 3), supaya bisa digambar per baris.
  */
-internal fun Ed.inkAnchor(b: Blk, a: FloatArray, n: Int): Pair<List<Float>, Float>? {
+internal fun Ed.inkAnchor(b: Blk, a: FloatArray, n: Int, hl: Boolean): Triple<List<Float>, Float, Int>? {
     if (!b.isText || n == 0 || b.r.t.isEmpty()) return null
     val lay = lays[b.id] ?: return null
     val pos = kpos[b.id] ?: return null
@@ -295,89 +306,141 @@ internal fun Ed.inkAnchor(b: Blk, a: FloatArray, n: Int): Pair<List<Float>, Floa
     if (len <= z) return null
     if (folds[b.id] == null && len != b.r.t.length + z) return null     // layout basi (teks baru saja berubah)
     val h = lay.size.height.toFloat()
+    val em = emPx(lay)
     val tol = h / lay.lineCount.coerceAtLeast(1)
+    var l0 = -1
+    if (hl) {                                                           // stabilo: baris dominan = baris di titik tengah
+        var sy = 0f
+        for (i in 0 until n) sy += a[i * 3 + 1] - pos.y
+        l0 = lay.getLineForVerticalPosition((sy / n).coerceIn(0f, max(0f, h - 1f)))
+    }
     val out = ArrayList<Float>(n * 3)
-    var lh0 = 0f
     for (i in 0 until n) {
         val lx = a[i * 3] - pos.x
         val ly = a[i * 3 + 1] - pos.y
         if (ly < -tol || ly > h + tol) return null
         val cy = ly.coerceIn(0f, max(0f, h - 1f))
-        val line = lay.getLineForVerticalPosition(cy)
+        val line = if (l0 >= 0) l0 else lay.getLineForVerticalPosition(cy)
+        if (l0 >= 0 && abs(ly - lay.getLineBaseline(line)) > tol * .9f) return null
         val ls = max(lay.getLineStart(line), z)
         val le = lay.getLineEnd(line, true)
-        var c = lay.getOffsetForPosition(Offset(lx, cy))
+        var c = lay.getOffsetForPosition(Offset(lx, if (l0 >= 0) lay.getLineBaseline(line) - 1f else cy))
         c = c.coerceIn(ls, max(ls, le - 1)).coerceIn(0, len - 1)
         val box = lay.getBoundingBox(c)
-        val lt = lay.getLineTop(line); val lb = lay.getLineBottom(line)
-        if (i == 0) lh0 = lb - lt
         out.add(fromLay(b.id, c).toFloat())
-        out.add(((lx - box.left) / max(box.width, 1f) * 1000f).roundToInt() / 1000f)
-        out.add(((ly - lt) / max(lb - lt, 1f) * 1000f).roundToInt() / 1000f)
+        out.add(((lx - box.left) / max(box.width, em * .1f) * 1000f).roundToInt() / 1000f)
+        out.add(((ly - lay.getLineBaseline(line)) / em * 1000f).roundToInt() / 1000f)
     }
-    return out to lh0 / dens
+    if (!hl) return Triple(out, em / dens, 2)
+    var i0 = 0; var i1 = 0
+    for (i in 1 until n) { if (a[i * 3] < a[i0 * 3]) i0 = i; if (a[i * 3] > a[i1 * 3]) i1 = i }
+    return Triple(out.subList(i0 * 3, i0 * 3 + 3) + out.subList(i1 * 3, i1 * 3 + 3), em / dens, 3)
 }
 
 /** Pasang jangkar huruf pada goresan s yang titik mutlaknya a (n titik) berada di atas blok tgt; kalau tidak bisa, jangkar dikosongkan. */
 internal fun Ed.withAnchor(s: Ink, tgt: Blk, a: FloatArray, n: Int): Ink {
-    val r = inkAnchor(tgt, a, n)
-    return if (r == null) s.copy(an = emptyList(), ah = 0f) else s.copy(an = r.first, ah = r.second)
+    val r = inkAnchor(tgt, a, n, s.t == 1)
+    return if (r == null) s.copy(an = emptyList(), ah = 0f, av = 0) else s.copy(an = r.first, ah = r.second, av = r.third)
+}
+
+/** Stabilo satu baris: segmen (x0, y, x1) per baris yang dilalui, dalam koordinat layout. Baris tengah penuh, ujungnya mengikuti huruf awal / akhir. */
+private fun Ed.runSegs(bid: String, lay: androidx.compose.ui.text.TextLayoutResult, an: List<Float>, em: Float): List<FloatArray> {
+    val len = lay.layoutInput.text.length
+    var o0 = toLay(bid, an[0].toInt()).coerceIn(0, len - 1); var f0 = an[1]; var y0 = an[2]
+    var o1 = toLay(bid, an[3].toInt()).coerceIn(0, len - 1); var f1 = an[4]; var y1 = an[5]
+    if (o1 < o0 || (o1 == o0 && f1 < f0)) {
+        val to = o0; o0 = o1; o1 = to
+        val tf = f0; f0 = f1; f1 = tf
+        val ty = y0; y0 = y1; y1 = ty
+    }
+    val b0 = lay.getBoundingBox(o0); val b1 = lay.getBoundingBox(o1)
+    val l0 = lay.getLineForOffset(o0); val l1 = lay.getLineForOffset(o1)
+    val fy = (y0 + y1) / 2f
+    val out = ArrayList<FloatArray>()
+    for (ln in l0..l1) {
+        val xs = if (ln == l0) b0.left + f0 * max(b0.width, em * .1f) else lay.getLineLeft(ln)
+        val xe = if (ln == l1) b1.left + f1 * max(b1.width, em * .1f) else lay.getLineRight(ln)
+        val y = lay.getLineBaseline(ln) + fy * em
+        if (l0 == l1 || xe - xs > .5f) out.add(floatArrayOf(min(xs, xe), y, max(xs, xe)))
+    }
+    return out
 }
 
 /**
  * Titik goresan (x, y, k) dalam piksel konten. Goresan berjangkar dihitung dari posisi huruf di layout sekarang; yang tidak
- * (atau layout belum siap) dari koordinat relatif blok. local = true: relatif terhadap pojok kiri-atas kolom teks (untuk cache path).
+ * (atau layout belum siap) dari koordinat relatif blok. Stabilo satu baris mengembalikan pasangan titik (awal, akhir) per baris.
+ * local = true: relatif terhadap pojok kiri-atas kolom teks (untuk cache path).
  */
 fun Ed.inkPts(s: Ink, bid: String, top: Float, W: Float, d: Float, local: Boolean = false): FloatArray {
-    val n = s.p.size / 3
-    val a = FloatArray(n * 3)
-    val an = s.an
-    val lay = if (n > 0 && an.size == n * 3) lays[bid] else null
+    val lay = if (s.anc) lays[bid] else null
     val pos = if (lay != null) kpos[bid] else null
     if (lay != null && pos != null && lay.layoutInput.text.isNotEmpty()) {
         val len = lay.layoutInput.text.length
         val ox = if (local) 0f else pos.x
         val oy = if (local) 0f else pos.y
+        val em = emPx(lay)
+        val an = s.an
+        if (s.av == 3) {
+            val segs = runSegs(bid, lay, an, em)
+            val a = FloatArray(segs.size * 6)
+            segs.forEachIndexed { i, g ->
+                a[i * 6] = ox + g[0]; a[i * 6 + 1] = oy + g[1]; a[i * 6 + 2] = 1f
+                a[i * 6 + 3] = ox + g[2]; a[i * 6 + 4] = oy + g[1]; a[i * 6 + 5] = 1f
+            }
+            return a
+        }
+        val n = s.p.size / 3
+        val a = FloatArray(n * 3)
         for (i in 0 until n) {
             val o = toLay(bid, an[i * 3].toInt()).coerceIn(0, len - 1)
             val box = lay.getBoundingBox(o)
             val ln = lay.getLineForOffset(o)
-            val lt = lay.getLineTop(ln); val lb = lay.getLineBottom(ln)
-            a[i * 3] = ox + box.left + an[i * 3 + 1] * max(box.width, 1f)
-            a[i * 3 + 1] = oy + lt + an[i * 3 + 2] * max(lb - lt, 1f)
+            a[i * 3] = ox + box.left + an[i * 3 + 1] * max(box.width, em * .1f)
+            a[i * 3 + 1] = oy + lay.getLineBaseline(ln) + an[i * 3 + 2] * em
             a[i * 3 + 2] = s.p[i * 3 + 2]
         }
         return a
     }
+    val n = s.p.size / 3
+    val a = FloatArray(n * 3)
     val t = if (local) 0f else top
     for (i in 0 until n) { a[i * 3] = s.p[i * 3] * W; a[i * 3 + 1] = t + s.p[i * 3 + 1] * d; a[i * 3 + 2] = s.p[i * 3 + 2] }
     return a
 }
 
-/** Pengali tebal goresan berjangkar: tinggi baris sekarang dibanding saat dicoret (stabilo ikut menebal / menipis saat huruf diubah ukurannya). */
-fun Ed.inkScale(s: Ink, bid: String): Float {
-    if (s.ah <= 0f || s.an.isEmpty()) return 1f
-    val lay = lays[bid] ?: return 1f
-    val len = lay.layoutInput.text.length
-    if (len == 0) return 1f
-    val o = toLay(bid, s.an[0].toInt()).coerceIn(0, len - 1)
-    val ln = lay.getLineForOffset(o)
-    val lh = lay.getLineBottom(ln) - lay.getLineTop(ln)
-    return (lh / (s.ah * dens)).coerceIn(.3f, 5f)
+/** Path goresan berjangkar relatif kolom teks (digambar dengan translate ke posisi kolom). */
+internal fun Ed.inkLocalPath(s: Ink, bid: String, W: Float, d: Float, wpx: Float): Path {
+    val pa = inkPts(s, bid, 0f, W, d, local = true)
+    val m = pa.size / 3
+    if (s.av == 3) {
+        val p = Path()
+        var i = 0
+        while (i + 1 < m) { p.moveTo(pa[i * 3], pa[i * 3 + 1]); p.lineTo(pa[(i + 1) * 3], pa[(i + 1) * 3 + 1]); i += 2 }
+        return p
+    }
+    return inkPath(pa, m, s.t, wpx, s.sh)
 }
 
-/** Salinan blok untuk disimpan: koordinat relatif goresan berjangkar disegarkan sesuai layout sekarang (dipakai ekspor PDF dan sebagai cadangan kalau layout belum siap). */
+/** Pengali tebal goresan berjangkar: ukuran huruf sekarang dibanding saat dicoret (stabilo ikut menebal / menipis saat huruf diubah ukurannya). */
+fun Ed.inkScale(s: Ink, bid: String): Float {
+    if (!s.anc) return 1f
+    val lay = lays[bid] ?: return 1f
+    if (lay.layoutInput.text.isEmpty()) return 1f
+    return (emPx(lay) / (s.ah * dens)).coerceIn(.3f, 5f)
+}
+
+/** Salinan blok untuk disimpan: koordinat relatif goresan berjangkar disegarkan sesuai layout sekarang (cadangan kalau layout belum siap, mis. saat dibuka lagi). */
 fun Ed.inkSyncP(bl: List<Blk>): List<Blk> {
-    if (bl.none { b -> b.ik.any { it.an.isNotEmpty() } }) return bl
+    if (bl.none { b -> b.ik.any { it.anc } }) return bl
     val W = (contentCoords?.size?.width ?: 0).toFloat()
     if (W <= 0f) return bl
     val d = dens
     return bl.map { b ->
-        if (b.ik.none { it.an.isNotEmpty() }) return@map b
+        if (b.ik.none { it.anc }) return@map b
         val top = bpos[b.id]?.get(0) ?: return@map b
         if (lays[b.id] == null || kpos[b.id] == null) return@map b
         b.copy(ik = b.ik.map { s ->
-            if (s.an.isEmpty() || s.an.size != s.p.size) s
+            if (!s.anc) s
             else { val a = inkPts(s, b.id, top, W, d); s.copy(p = relPts(a, a.size / 3, top, W, d)) }
         })
     }
@@ -420,7 +483,7 @@ fun Ed.inkBox(ids: Set<String>, W: Float): Rect? {
         val top = bpos[b.id]?.get(0) ?: continue
         for (s in b.ik) {
             if (s.id !in ids) continue
-            val pad = s.w * dens / 2f
+            val pad = s.w * dens / 2f * inkScale(s, b.id)
             val pa = inkPts(s, b.id, top, W, dens)
             for (i in 0 until pa.size / 3) {
                 val x = pa[i * 3]; val y = pa[i * 3 + 1]
@@ -437,10 +500,10 @@ fun Ed.inkInBox(r: Rect, W: Float): Set<String> {
     for (b in blocks) {
         val top = bpos[b.id]?.get(0) ?: continue
         for (s in b.ik) {
-            val n = s.p.size / 3
+            val pa = inkPts(s, b.id, top, W, dens)
+            val n = pa.size / 3
             if (n == 0) continue
             var k = 0
-            val pa = inkPts(s, b.id, top, W, dens)
             for (i in 0 until n) {
                 val x = pa[i * 3]; val y = pa[i * 3 + 1]
                 if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) k++
@@ -461,10 +524,10 @@ fun Ed.inkInPoly(poly: FloatArray, W: Float): Set<String> {
     for (b in blocks) {
         val top = bpos[b.id]?.get(0) ?: continue
         for (s in b.ik) {
-            val n = s.p.size / 3
+            val pa = inkPts(s, b.id, top, W, dens)
+            val n = pa.size / 3
             if (n == 0) continue
             var k = 0
-            val pa = inkPts(s, b.id, top, W, dens)
             for (i in 0 until n) {
                 val x = pa[i * 3]; val y = pa[i * 3 + 1]
                 if (x < px0 || x > px1 || y < py0 || y > py1) continue
@@ -503,7 +566,7 @@ fun Ed.inkTransform(ids: Set<String>, dx: Float, dy: Float, sc: Float, px: Float
                 y0 = min(y0, a[i * 3 + 1]); y1 = max(y1, a[i * 3 + 1])
             }
             val (tgt, tt) = inkTarget((y0 + y1) / 2f) ?: continue
-            adds.getOrPut(tgt.id) { ArrayList() }.add(withAnchor(s.copy(w = (s.w * sc).coerceIn(.5f, 60f), p = relPts(a, n, tt, W, d)), tgt, a, n))
+            adds.getOrPut(tgt.id) { ArrayList() }.add(withAnchor(s.copy(w = (s.w * inkScale(s, b.id) * sc).coerceIn(.5f, 60f), p = relPts(a, n, tt, W, d)), tgt, a, n))
         }
     }
     inkApply(base.map { b -> adds[b.id]?.let { b.copy(ik = b.ik + it) } ?: b })
@@ -558,10 +621,10 @@ fun Ed.inkHit(x: Float, y: Float, r: Float, W: Float): List<String> {
         if (b.ik.isEmpty()) continue
         val top = bpos[b.id]?.get(0) ?: continue
         for (s in b.ik) {
-            val n = s.p.size / 3
-            if (n == 0) continue
-            val rr = r + s.w * d * .5f
             val pa = inkPts(s, b.id, top, W, d)
+            val n = pa.size / 3
+            if (n == 0) continue
+            val rr = r + s.w * d * .5f * inkScale(s, b.id)
             var hit = false
             var px = pa[0]; var py = pa[1]
             if (hypot(px - x, py - y) <= rr) hit = true
@@ -1387,15 +1450,14 @@ fun BoxScope.InkLayers(ed: Ed, vm: AppVM, scroll: ScrollState) {
                 total++
                 // goresan berjangkar: posisi dari huruf (layout teks blok); path disimpan relatif kolom teks dan dibangun ulang
                 // hanya kalau layout-nya diganti, bukan tiap kali blok bergeser
-                val lay = if (s.an.isNotEmpty() && s.an.size == s.p.size) ed.lays[b.id] else null
+                val lay = if (s.anc) ed.lays[b.id] else null
                 val kp = if (lay != null) ed.kpos[b.id] else null
                 val anch = lay != null && kp != null
                 var cs = ik.cache[s.id]
                 if (cs == null || cs.src !== s || cs.w != W || cs.d != d || cs.anch != anch || (anch && cs.lay !== lay)) {
                     cs = if (anch) {
                         val sc = ed.inkScale(s, b.id)
-                        val pa = ed.inkPts(s, b.id, 0f, W, d, local = true)
-                        CS(s, 0f, W, d, inkPath(pa, pa.size / 3, s.t, s.w * d * sc, s.sh), lay, true, sc)
+                        CS(s, 0f, W, d, ed.inkLocalPath(s, b.id, W, d, s.w * d * sc), lay, true, sc)
                     } else CS(s, 0f, W, d, storedPath(s, 0f, W, d))
                     ik.cache[s.id] = cs
                 }
