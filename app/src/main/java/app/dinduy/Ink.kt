@@ -142,6 +142,7 @@ class InkCtl {
     var zoom by mutableStateOf(1f)
     var panX by mutableStateOf(0f)
     var panY by mutableStateOf(0f)
+    var refit = false                              // setelah diputar: kotak seleksi dihitung ulang dari goresannya
     var lasso: ArrayList<Offset>? = null          // jejak lasso yang sedang digambar (konten px); gambar ulang lewat tick
     var exporting by mutableStateOf(false)
     var layer: GraphicsLayer? = null
@@ -354,7 +355,8 @@ fun Ed.inkInPoly(poly: FloatArray, W: Float): Set<String> {
 }
 
 /** Pindah / ubah ukuran goresan terpilih sebagai satu langkah; tiap goresan menempel lagi ke blok terdekat. */
-fun Ed.inkTransform(ids: Set<String>, dx: Float, dy: Float, sc: Float, px: Float, py: Float, W: Float) {
+fun Ed.inkTransform(ids: Set<String>, dx: Float, dy: Float, sc: Float, px: Float, py: Float, W: Float, rot: Float = 0f) {
+    val cr = cos(rot); val sr = sin(rot)
     val d = dens
     val adds = HashMap<String, ArrayList<Ink>>()
     val base = blocks.map { b -> if (b.ik.any { it.id in ids }) b.copy(ik = b.ik.filter { it.id !in ids }) else b }
@@ -366,8 +368,9 @@ fun Ed.inkTransform(ids: Set<String>, dx: Float, dy: Float, sc: Float, px: Float
             val n = a.size / 3
             var y0 = Float.MAX_VALUE; var y1 = -Float.MAX_VALUE
             for (i in 0 until n) {
-                a[i * 3] = px + (a[i * 3] - px) * sc + dx
-                a[i * 3 + 1] = py + (a[i * 3 + 1] - py) * sc + dy
+                val ux = (a[i * 3] - px) * sc; val uy = (a[i * 3 + 1] - py) * sc
+                a[i * 3] = px + ux * cr - uy * sr + dx
+                a[i * 3 + 1] = py + ux * sr + uy * cr + dy
                 y0 = min(y0, a[i * 3 + 1]); y1 = max(y1, a[i * 3 + 1])
             }
             val (tgt, tt) = inkTarget((y0 + y1) / 2f) ?: continue
@@ -791,7 +794,7 @@ fun Modifier.inkPinch(ed: Ed, scroll: ScrollState): Modifier {
     return pointerInput(Unit) {
         awaitPointerEventScope {
             var active = false; var pinching = false
-            var sel = false; var sd0 = 1f; var scx = 0f; var scy = 0f      // cubit pada seleksi: jarak & titik tengah awal (koordinat konten)
+            var sel = false; var sd0 = 1f; var scx = 0f; var scy = 0f; var sa0 = 0f      // cubit pada seleksi: jarak & titik tengah awal (koordinat konten)
             var pd = 0f; var d0 = 0f; var pcx = 0f; var pcy = 0f
             fun commitSel() {
                 if (!sel) return
@@ -799,8 +802,10 @@ fun Modifier.inkPinch(ed: Ed, scroll: ScrollState): Modifier {
                 val x = ik.xf; ik.xf = null; ik.busy = false; ik.tick++
                 val box = ik.box
                 val W = (ed.contentCoords?.size?.width ?: 0).toFloat()
-                if (x != null && x.size >= 5 && box != null && W > 0f && ik.sel.isNotEmpty() && (x[2] != 1f || x[0] != 0f || x[1] != 0f)) {
-                    ed.inkTransform(ik.sel, x[0], x[1], x[2], x[3], x[4], W)
+                val rot = if (x != null && x.size >= 6) x[5] else 0f
+                if (x != null && x.size >= 5 && box != null && W > 0f && ik.sel.isNotEmpty() && (x[2] != 1f || x[0] != 0f || x[1] != 0f || rot != 0f)) {
+                    ed.inkTransform(ik.sel, x[0], x[1], x[2], x[3], x[4], W, rot)
+                    if (rot != 0f) ik.refit = true
                     ik.box = box.xfm(x)
                 }
             }
@@ -818,13 +823,17 @@ fun Modifier.inkPinch(ed: Ed, scroll: ScrollState): Modifier {
                     val box = ik.box
                     if (ik.tool == 3 && ik.sel.isNotEmpty() && box != null) {     // titik tengah di dalam seleksi: cubit mengubah ukuran gambar terpilih
                         val ccx = (cx - ik.panX) / ik.zoom; val ccy = (cy - ik.panY) / ik.zoom + scroll.value
-                        if (box.inflate(24f * density).contains(Offset(ccx, ccy))) { sel = true; sd0 = d; scx = ccx; scy = ccy; ik.busy = true }
+                        if (box.inflate(24f * density).contains(Offset(ccx, ccy))) { sel = true; sd0 = d; scx = ccx; scy = ccy; sa0 = atan2(b.y - a.y, b.x - a.x); ik.busy = true }
                     }
                     continue
                 }
                 if (sel) {
                     val ccx = (cx - ik.panX) / ik.zoom; val ccy = (cy - ik.panY) / ik.zoom + scroll.value
-                    ik.xf = floatArrayOf(ccx - scx, ccy - scy, (d / sd0).coerceIn(.2f, 6f), scx, scy); ik.tick++
+                    val tp = 2f * PI.toFloat()
+                    var ra = atan2(b.y - a.y, b.x - a.x) - sa0                    // puntiran dua jari
+                    while (ra > PI.toFloat()) ra -= tp
+                    while (ra < -PI.toFloat()) ra += tp
+                    ik.xf = floatArrayOf(ccx - scx, ccy - scy, (d / sd0).coerceIn(.2f, 6f), scx, scy, ra); ik.tick++
                     for (c in fs) c.consume()
                     pd = d; pcx = cx; pcy = cy
                     continue
@@ -852,10 +861,22 @@ fun Modifier.inkPinch(ed: Ed, scroll: ScrollState): Modifier {
 /** Kotak setelah transformasi pratinjau [x] = (dx, dy, skala, pivotX, pivotY). */
 private fun Rect.xfm(x: FloatArray): Rect {
     val k = x[2]; val px = x[3]; val py = x[4]
+    val r = if (x.size >= 6) x[5] else 0f
+    if (r != 0f) {                                           // diputar: ambil kotak pembatas dari keempat sudut
+        val c = cos(r); val sn = sin(r)
+        var x0 = Float.MAX_VALUE; var x1 = -Float.MAX_VALUE; var y0 = Float.MAX_VALUE; var y1 = -Float.MAX_VALUE
+        for (q in 0 until 4) {
+            val cx = if (q % 2 == 0) left else right; val cy = if (q < 2) top else bottom
+            val ux = (cx - px) * k; val uy = (cy - py) * k
+            val nx = px + ux * c - uy * sn + x[0]; val ny = py + ux * sn + uy * c + x[1]
+            x0 = min(x0, nx); x1 = max(x1, nx); y0 = min(y0, ny); y1 = max(y1, ny)
+        }
+        return Rect(x0, y0, x1, y1)
+    }
     return Rect(px + (left - px) * k + x[0], py + (top - py) * k + x[1], px + (right - px) * k + x[0], py + (bottom - py) * k + x[1])
 }
 
-private class BoxH(val del: Offset, val tl: Offset, val tr: Offset, val bl: Offset, val br: Offset, val mv: Offset)
+private class BoxH(val del: Offset, val tl: Offset, val tr: Offset, val bl: Offset, val br: Offset, val mv: Offset, val rot: Offset)
 
 /** Pegangan frame ditaruh agak menjauh dari kotaknya supaya tidak tertutup jari. */
 private fun boxHandles(b: Rect, d: Float): BoxH {
@@ -864,7 +885,8 @@ private fun boxHandles(b: Rect, d: Float): BoxH {
         Offset(b.center.x, max(b.top - 38f * d, 24f * d)),
         Offset(b.left - o, b.top - o), Offset(b.right + o, b.top - o),
         Offset(b.left - o, b.bottom + o), Offset(b.right + o, b.bottom + o),
-        Offset(b.center.x, b.bottom + 38f * d)
+        Offset(b.center.x, b.bottom + 38f * d),
+        Offset(b.center.x + 62f * d, b.bottom + 38f * d)
     )
 }
 
@@ -976,6 +998,11 @@ fun Modifier.inkInput(ed: Ed, vm: AppVM, scroll: ScrollState): Modifier {
                         ik.box = box.translate(x[0], x[1])
                     }
                     3 -> { ed.inkErase(ik.sel); ik.sel = emptySet(); ik.box = null }
+                    10 -> if (x.size >= 6 && x[5] != 0f && ik.sel.isNotEmpty()) {
+                        ed.inkTransform(ik.sel, 0f, 0f, 1f, x[3], x[4], W, x[5])
+                        ik.refit = true
+                        ik.box = box.xfm(x)
+                    }
                     5, 6, 7, 8 -> if (x.size >= 5 && x[2] != 1f && ik.sel.isNotEmpty()) {
                         ed.inkTransform(ik.sel, 0f, 0f, x[2], x[3], x[4], W)
                         ik.box = box.xfm(x)
@@ -1035,6 +1062,7 @@ fun Modifier.inkInput(ed: Ed, vm: AppVM, scroll: ScrollState): Modifier {
                             m = when {
                                 ik.sel.isNotEmpty() && near(p, h.del) -> 3
                                 near(p, h.tl) -> 5; near(p, h.tr) -> 6; near(p, h.bl) -> 7; near(p, h.br) -> 8
+                                near(p, h.rot) -> 10
                                 near(p, h.mv) -> 1
                                 box.inflate(6f * dens).contains(p) -> 1
                                 else -> 0
@@ -1087,6 +1115,21 @@ fun Modifier.inkInput(ed: Ed, vm: AppVM, scroll: ScrollState): Modifier {
                         1 -> {
                             gxf = floatArrayOf(dx, dy, 1f)
                             ik.xf = floatArrayOf(dx, dy, 1f, box.left, box.top); ik.tick++
+                        }
+                        10 -> {                                      // putar mengelilingi pusat kotak; menempel tiap 15°
+                            val cc = box.center
+                            val tp = 2f * PI.toFloat()
+                            var ang = atan2(c.position.y - cc.y, c.position.x - cc.x) - atan2(gDown.y - cc.y, gDown.x - cc.x)
+                            while (ang > PI.toFloat()) ang -= tp
+                            while (ang < -PI.toFloat()) ang += tp
+                            val deg = ang * 180f / PI.toFloat()
+                            val snap = (deg / 15f).roundToInt() * 15f
+                            if (abs(deg - snap) < 4f) {
+                                if (gxf.size >= 6 && gxf[5] != snap * PI.toFloat() / 180f) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                ang = snap * PI.toFloat() / 180f
+                            }
+                            gxf = floatArrayOf(0f, 0f, 1f, cc.x, cc.y, ang)
+                            ik.xf = gxf; ik.tick++
                         }
                         else -> {                                    // tarik sudut: perbesar / perkecil gambar terpilih (proporsional)
                             val pv = when (gm) {
@@ -1196,6 +1239,12 @@ fun BoxScope.InkLayers(ed: Ed, vm: AppVM, scroll: ScrollState) {
         if (!(ik.on && ik.tool == 3)) { ik.box = null; ik.sel = emptySet(); ik.lasso = null }
     }
     LaunchedEffect(ed.blocks) {
+        if (ik.refit && ik.tool == 3 && ik.sel.isNotEmpty()) {
+            withFrameNanos { }; withFrameNanos { }
+            ik.refit = false
+            val W = (ed.contentCoords?.size?.width ?: 0).toFloat()
+            if (W > 0f) ed.inkBox(ik.sel, W)?.let { ik.box = it.inflate(8f * ed.dens) }
+        }
         if (ik.tool == 3 && ik.sel.isNotEmpty()) {
             val all = HashSet<String>()
             for (b in ed.blocks) for (s in b.ik) all.add(s.id)
@@ -1210,25 +1259,38 @@ fun BoxScope.InkLayers(ed: Ed, vm: AppVM, scroll: ScrollState) {
         val W = size.width
         val d = density
         val er = ik.erase
-        val seen = HashSet<String>()
+        // Path disimpan dalam koordinat lokal blok (top = 0) dan hanya digeser saat digambar. Dulu path SEMUA coretan di bawah
+        // blok yang tingginya berubah (mengetik / foto berubah) dibangun ulang; di catatan panjang itu yang bikin lemot.
+        var total = 0
+        val x = ik.xf
         for (b in ed.blocks) {
             if (b.ik.isEmpty()) continue
             val top = ed.bpos[b.id]?.get(0) ?: continue
             for (s in b.ik) {
-                seen.add(s.id)
+                total++
                 var cs = ik.cache[s.id]
-                if (cs == null || cs.src !== s || cs.top != top || cs.w != W || cs.d != d) {
-                    cs = CS(s, top, W, d, storedPath(s, top, W, d)); ik.cache[s.id] = cs
+                if (cs == null || cs.src !== s || cs.w != W || cs.d != d) {
+                    cs = CS(s, 0f, W, d, storedPath(s, 0f, W, d)); ik.cache[s.id] = cs
                 }
                 val a = if (s.id in er) .22f else 1f
                 val col = inkColor(pal, s.c, s.t == 1)
-                val x = ik.xf
-                if (x != null && s.id in ik.sel) withTransform({ translate(x[0], x[1]); scale(x[2], x[2], Offset(x[3], x[4])) }) {
+                if (x != null && s.id in ik.sel) withTransform({
+                    translate(x[0], x[1])
+                    if (x.size >= 6) rotate(x[5] * 180f / PI.toFloat(), Offset(x[3], x[4]))
+                    scale(x[2], x[2], Offset(x[3], x[4]))
+                    translate(0f, top)
+                }) {
+                    drawStroke(s, cs.path, col, a, pal.dark)
+                } else if (top != 0f) withTransform({ translate(0f, top) }) {
                     drawStroke(s, cs.path, col, a, pal.dark)
                 } else drawStroke(s, cs.path, col, a, pal.dark)
             }
         }
-        if (ik.cache.size > seen.size + 32) ik.cache.keys.retainAll(seen)
+        if (ik.cache.size > total + 32) {
+            val seen = HashSet<String>()
+            for (b in ed.blocks) for (s in b.ik) seen.add(s.id)
+            ik.cache.keys.retainAll(seen)
+        }
     }
     // goresan yang sedang berjalan: lapisan terpisah, jadi coretan lama tidak ikut digambar ulang
     Canvas(Modifier.matchParentSize()) {
@@ -1275,6 +1337,9 @@ fun BoxScope.InkLayers(ed: Ed, vm: AppVM, scroll: ScrollState) {
             drawCircle(pal.c3, r, h.mv); drawCircle(pal.p, r, h.mv, style = Stroke(1.6f * d))
             drawLine(pal.p, h.mv + Offset(-q - d, 0f), h.mv + Offset(q + d, 0f), 2f * d, StrokeCap.Round)          // + = pindah
             drawLine(pal.p, h.mv + Offset(0f, -q - d), h.mv + Offset(0f, q + d), 2f * d, StrokeCap.Round)
+            drawCircle(pal.c3, r, h.rot); drawCircle(pal.p, r, h.rot, style = Stroke(1.6f * d))                       // putar
+            drawArc(pal.p, -50f, 270f, false, h.rot - Offset(q + 1f * d, q + 1f * d), androidx.compose.ui.geometry.Size(2f * (q + 1f * d), 2f * (q + 1f * d)), style = Stroke(2f * d, cap = StrokeCap.Round))
+            drawLine(pal.p, h.rot + Offset(q * .9f, -q * 1.9f), h.rot + Offset(q * 1.8f, -q * .9f), 2f * d, StrokeCap.Round)
             if (ik.sel.isNotEmpty()) {                                                                           // x = hapus isi frame
                 drawLine(pal.p, box.topCenter, h.del, 1.4f * d)
                 drawCircle(pal.c3, r, h.del); drawCircle(pal.p, r, h.del, style = Stroke(1.6f * d))
