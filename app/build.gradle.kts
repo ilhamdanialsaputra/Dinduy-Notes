@@ -46,9 +46,9 @@ android {
     defaultConfig {
         applicationId = "app.dinduy"
         minSdk = 26
-        targetSdk = 34
-        versionCode = 2
-        versionName = "1.1"
+        targetSdk = 36
+        versionCode = 3
+        versionName = "1.2"
         // whisper-android (versi gratis) hanya menyertakan arm64-v8a
         ndk { abiFilters += listOf("arm64-v8a") }
     }
@@ -66,7 +66,9 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true      // R8: kode lebih kecil & lebih cepat dimuat
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = if (ksFile != null) signingConfigs.getByName("ci") else signingConfigs.getByName("debug")
         }
         debug {
@@ -100,4 +102,6 @@ dependencies {
     implementation("org.jsoup:jsoup:1.18.1")
     // Transkripsi suara ke teks offline (whisper.cpp), Maven Central
     implementation("dev.ffmpegkit-maintained:whisper-android:1.0.0")
+    // memasang baseline profile bawaan Compose/AndroidX saat instal: startup & scroll jauh lebih cepat di HP lama
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
 }
