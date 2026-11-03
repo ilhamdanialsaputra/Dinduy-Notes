@@ -979,7 +979,8 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
                 val cc = ed.contentCoords
                 if (cc != null && cc.isAttached && c.isAttached) {
                     val o = cc.localPositionOf(c, Offset.Zero)
-                    ed.ipos[mS.id] = androidx.compose.ui.geometry.Rect(o, Size(c.size.width.toFloat(), c.size.height.toFloat()))
+                    val nr = androidx.compose.ui.geometry.Rect(o, Size(c.size.width.toFloat(), c.size.height.toFloat()))
+                    if (ed.ipos[mS.id] != nr) { ed.ipos[mS.id] = nr; ed.ink.lay++ }   // coretan di atas gambar ikut posisi / ukuran gambar
                 }
             }
     ) {
