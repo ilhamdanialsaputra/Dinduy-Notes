@@ -70,6 +70,15 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextIndent
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.verticalDrag
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.unit.dp
 
 // =====================================================================================
@@ -90,7 +99,16 @@ fun taOf(b: Blk): TextAlign = when (b.ta) {
 
 // ------------------------------------------------------------------ bilah atas
 /** Gaya teks + perataan. Rata kiri-kanan (Justify) dikerjakan sendiri oleh TF, lihat justifySpans di EditorUI. */
-fun TextStyle.aligned(b: Blk): TextStyle = copy(textAlign = taOf(b))
+@Composable
+fun TextStyle.aligned(b: Blk): TextStyle {
+    val st = copy(textAlign = taOf(b))
+    if (b.fi == 0 || !(b.ty == "p" || b.ty == "h" || b.ty == "li")) return st
+    // dp -> sp lewat Density supaya sama persis dengan padding dp (tidak ikut skala huruf sistem)
+    val d = androidx.compose.ui.platform.LocalDensity.current
+    val first = with(d) { b.fi.coerceIn(0, IND_MAX_FI).dp.toSp() }
+    val rest = with(d) { (-b.fi).coerceIn(0, IND_MAX_FI).dp.toSp() }
+    return st.copy(textIndent = TextIndent(firstLine = first, restLine = rest))
+}
 
 /** Kiri: panah kembali dan pil centang bertukar dengan gerak "pop": pil membesar dari titik tengah, ikon berputar dan membesar / mengecil dengan pegas. */
 @Composable
@@ -203,6 +221,7 @@ fun DocBar(ed: Ed, act: Actions) {
     val convOff = cell || ty == "img"
     val isLi = ty == "li" && !cell
     val kb = LocalSoftwareKeyboardController.current
+    val haptic = LocalHapticFeedback.current
     val kindNow = if (ed.selImg != null) 1 else if (cell) 2 else if (ed.pickQuote) 3 else 0
     var lastSel by remember { mutableStateOf<Pair<String, Int>?>(null) }
     var subShown by remember { mutableStateOf(1) }
@@ -311,6 +330,24 @@ fun DocBar(ed: Ed, act: Actions) {
                         val ta = blk?.ta ?: ""
                         DropBtn(false, ed.sub == 1, !cell && ty != "code" && ty != "img", { ed.sub = if (ed.sub == 1) 0 else 1 }) { AlignIcon(ta, it) }
                         DropBtn(isLi, ed.sub == 2, !convOff, { ed.sub = if (ed.sub == 2) 0 else 2 }) { Ic("ul", it) }
+                        Sep()
+                        // voice note: sekarang di bilah utama (tidak lagi di sheet Sisipkan)
+                        Tbn({ Ic("mic", it) }, ed.recActive, !ed.recActive && !selMode) {
+                            ed.sub = 0
+                            act.requestMic {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                ed.startVoice()
+                            }
+                        }
+                        // stabilo coretan (alat Stabilo di mode coret). Stabilo teks (ikon di atas) tetap ada: jadi ada dua stabilo di bilah ini
+                        Tbn({ InkToolIcon(1, it) }, ed.ink.on && ed.ink.tool == 1, true) {
+                            ed.sub = 0
+                            val ik = ed.ink
+                            if (!ik.on) ik.toggle(ed)
+                            ik.hide = false
+                            ik.tool = 1; ik.pop = false; ik.sel = emptySet(); ik.box = null
+                            ik.stamp = System.currentTimeMillis()
+                        }
                     }
                 }
             }
@@ -346,16 +383,38 @@ private fun Stepper(label: String, v: Int, lo: Int, hi: Int, onChange: (Int) -> 
     }
 }
 
+/** Satu baris pengaturan inden: label, tombol −, angka (dp), tombol +. Langkah IND_STEP. Nonaktif = pudar dan tidak bisa diketuk. */
+@Composable
+private fun IndRow(label: String, v: Int, hi: Int, enabled: Boolean, onChange: (Int) -> Unit) {
+    val pal = LocalPal.current
+    Row(
+        Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 22.dp).alpha(if (enabled) 1f else .35f),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        T(label, 17f, 500, pal.os, Modifier.weight(1f))
+        Chip("−", pal.c4, pal.os, CircleShape, 44.dp, 44.dp) { if (enabled && v > 0) onChange((v - IND_STEP).coerceAtLeast(0)) }
+        Box(Modifier.width(56.dp), Alignment.Center) { T("$v", 18f, 800, pal.os) }
+        Chip("+", pal.c4, pal.os, CircleShape, 44.dp, 44.dp) { if (enabled && v < hi) onChange((v + IND_STEP).coerceAtMost(hi)) }
+    }
+}
+
 @Composable
 fun DocSheet(ed: Ed, act: Actions) {
     val pal = LocalPal.current
-    val haptic = LocalHapticFeedback.current
     // nilai sheet terakhir yang aktif ditulis langsung saat komposisi (bukan SideEffect), jadi konten tidak pernah "lompat" saat sheet dibuka
     val last = remember { intArrayOf(1) }
     if (ed.sheet != 0) last[0] = ed.sheet
     val shown = last[0]
     LaunchedEffect(ed.sheet) {                                   // kembali ke daftar setelah sheet selesai menutup
         if (ed.sheet == 0) { delay(380); if (ed.sheet == 0) ed.sheetPage = 0 }
+    }
+    // geser-tutup: hanya dari bilah pegangan (di luar area gulir), jadi tidak pernah bentrok dengan gulir isi sheet
+    val scope = rememberCoroutineScope()
+    val drag = remember { Animatable(0f) }
+    val dens = androidx.compose.ui.platform.LocalDensity.current.density
+    val closeSheet by rememberUpdatedState({ ed.sheet = 0 })
+    LaunchedEffect(ed.sheet) {
+        if (ed.sheet != 0) drag.snapTo(0f) else { delay(420); if (ed.sheet == 0) drag.snapTo(0f) }
     }
     val selMode = ed.selOn
     val key = if (selMode) null else ed.focus
@@ -372,9 +431,35 @@ fun DocSheet(ed: Ed, act: Actions) {
         exit = fadeOut(tween(140)) + shrinkVertically(tween(260, easing = Emph), shrinkTowards = Alignment.Top)
     ) {
         // kotak penuh: tanpa sudut bundar, tanpa pegangan
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)).background(pal.c3)) {
-            Box(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 2.dp), Alignment.Center) {
-                Box(Modifier.size(width = 36.dp, height = 4.dp).clip(CircleShape).background(pal.osv.copy(alpha = .38f)))
+        Column(
+            Modifier.fillMaxWidth().graphicsLayer { translationY = drag.value }
+                .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)).background(pal.c3)
+        ) {
+            Box(
+                Modifier.fillMaxWidth().height(32.dp).pointerInput(Unit) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val vt = VelocityTracker()
+                        vt.addPosition(down.uptimeMillis, down.position)
+                        var acc = 0f
+                        verticalDrag(down.id) { ch ->
+                            vt.addPosition(ch.uptimeMillis, ch.position)
+                            acc = (acc + ch.positionChange().y).coerceAtLeast(0f)
+                            ch.consume()
+                            val a = acc
+                            scope.launch { drag.snapTo(a) }
+                        }
+                        val vy = vt.calculateVelocity().y
+                        val end = acc
+                        scope.launch {
+                            if (end > 80f * dens || (end > 8f * dens && vy > 1100f)) closeSheet()
+                            else drag.animateTo(0f, spring(dampingRatio = .8f, stiffness = 500f))
+                        }
+                    }
+                },
+                Alignment.Center
+            ) {
+                Box(Modifier.padding(top = 4.dp).size(width = 36.dp, height = 4.dp).clip(CircleShape).background(pal.osv.copy(alpha = .38f)))
             }
             val page = if (shown == 2) 2 else if (ed.sheetPage == 1) 1 else 0     // 0 Sisipkan, 1 Tabel, 2 Format
             AnimatedContent(
@@ -401,13 +486,6 @@ fun DocSheet(ed: Ed, act: Actions) {
                                 }
                                 SRow(enabled = !blkOff, icon = { Ic("table", pal.os) }, label = { T("Tabel", 17f, 500, pal.os) }) {
                                     ed.sheetPage = 1                       // geser ke pengaturan baris dan kolom
-                                }
-                                SRow(enabled = !ed.recActive && !selMode, icon = { Ic("mic", pal.os) }, label = { T("Voice note", 17f, 500, pal.os) }) {
-                                    ed.sheet = 0
-                                    act.requestMic {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        ed.startVoice()
-                                    }
                                 }
                                 SRow(icon = { InkToolIcon(4, pal.os) }, label = { T("Coretan", 17f, 500, pal.os) }) {
                                     ed.sheet = 0; ed.ink.toggle(ed)
@@ -441,19 +519,32 @@ fun DocSheet(ed: Ed, act: Actions) {
                             }
                             else -> {
                                 SRow(on = ty == "p", enabled = !convOff, icon = { T("T", 20f, 700, pal.os) }, label = { T("Teks biasa", 17f, 500, pal.os) }) {
-                                    ed.sheet = 0; ed.setPlain()
+                                    ed.setPlain()
                                 }
                                 listOf(1 to 26f, 2 to 23f, 3 to 20f, 4 to 18f).forEach { (lv, sz) ->
                                     SRow(on = ty == "h" && blk?.lv == lv, enabled = !convOff, icon = { T("H$lv", 15f, 900, pal.p) },
                                         label = { T(if (lv == 4) "Sub-judul" else "Judul $lv", sz, 900, pal.os) }) {
-                                        ed.sheet = 0; ed.setHead(lv)
+                                        ed.setHead(lv)
                                     }
                                 }
                                 SRow(on = K.S in fl, enabled = ty != "code", icon = { Ic("s", pal.os) }, label = { T("Coret", 17f, 500, pal.os) }) {
-                                    ed.sheet = 0; ed.toggleFmt(K.S)
+                                    ed.toggleFmt(K.S)
                                 }
                                 SRow(on = K.C in fl, enabled = ty != "code", icon = { Ic("code", pal.os) }, label = { T("Kode sebaris", 17f, 500, pal.os) }) {
-                                    ed.sheet = 0; ed.toggleFmt(K.C)
+                                    ed.toggleFmt(K.C)
+                                }
+                                // ---- inden paragraf ----
+                                val indLR = !blkOff && blk != null && (ty == "p" || ty == "h" || ty == "li" || ty == "q")
+                                val indSp = !blkOff && blk != null && (ty == "p" || ty == "h" || ty == "li")
+                                Box(Modifier.fillMaxWidth().height(1.dp).padding(horizontal = 22.dp).background(pal.ol.copy(alpha = .35f)))
+                                T("Inden", 15f, 800, pal.p, Modifier.padding(start = 22.dp, top = 12.dp, bottom = 2.dp))
+                                IndRow("Inden kiri", blk?.il ?: 0, IND_MAX, indLR) { ed.setIndent(0, it) }
+                                IndRow("Inden kanan", blk?.ir ?: 0, IND_MAX, indLR) { ed.setIndent(1, it) }
+                                IndRow("Baris pertama", (blk?.fi ?: 0).coerceAtLeast(0), IND_MAX_FI, indSp) { ed.setIndent(2, it) }
+                                IndRow("Menggantung", (-(blk?.fi ?: 0)).coerceAtLeast(0), IND_MAX_FI, indSp) { ed.setIndent(3, it) }
+                                Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), Alignment.Center) {
+                                    val any = blk != null && (blk.il != 0 || blk.ir != 0 || blk.fi != 0)
+                                    Chip("Atur ulang inden", pal.c4, pal.os, RoundedCornerShape(23.dp)) { if (indLR && any) ed.resetIndent() }
                                 }
                             }
                         }
