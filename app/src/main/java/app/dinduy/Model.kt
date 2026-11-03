@@ -207,7 +207,7 @@ data class Blk(
 }
 
 // ---- inden paragraf (satuan dp; PDF mengalikan dengan skala yang sama dengan jarak lain) ----
-const val IND_STEP = 8        // langkah tombol + / −
+const val IND_UNIT = 48       // ukuran satu inden (dp), satu ketukan = satu inden ala Word
 const val IND_MAX = 120       // batas inden kiri dan kanan
 const val IND_MAX_FI = 96     // batas inden baris pertama / menggantung
 const val IND_MIN_COL = 120f  // lebar kolom teks minimal (dp) yang selalu disisakan
