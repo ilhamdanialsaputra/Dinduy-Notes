@@ -1484,7 +1484,8 @@ fun Sep() {
 fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     val pal = LocalPal.current
     val ffNow = LocalFF.current
-    val dm = remember(vm.pr.fs, vm.pr.lh, ffNow) { Dm(vm.pr.fs.toFloat(), vm.pr.lh, ffNow) }   // instance stabil: blok tidak recompose tanpa sebab
+    val nfs = vm.noteFs(ed.noteId)
+    val dm = remember(nfs, vm.pr.lh, ffNow) { Dm(nfs.toFloat(), vm.pr.lh, ffNow) }   // instance stabil: blok tidak recompose tanpa sebab
     val scroll = rememberScrollState()
     InkSetup(ed)
     // Tombol back Android: tutup yang paling atas dulu. Mode ketik -> mode baca (tampilan penuh) -> baru keluar catatan.
