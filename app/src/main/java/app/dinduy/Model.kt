@@ -278,6 +278,11 @@ fun ords(bl: List<Blk>): Map<String, Int> {
 }
 
 fun wordCount(x: String): Int {
-    val s = x.trim()
-    return if (s.isEmpty()) 0 else s.split(Regex("\\s+")).size
+    var n = 0
+    var inWord = false
+    for (c in x) {
+        if (c.isWhitespace()) inWord = false
+        else if (!inWord) { inWord = true; n++ }
+    }
+    return n
 }
