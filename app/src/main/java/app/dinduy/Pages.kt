@@ -353,7 +353,10 @@ fun NoteMenuPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
             }
         }
         SGroup("Bagikan dan ekspor", 60) {
-            MRow(POS_TOP, "up", "Bagikan sebagai .md", "Kirim catatan sebagai berkas Markdown lewat WhatsApp, Berkas, dan lainnya") {
+            MRow(POS_TOP, "txt", "Ekspor PDF", "Pratinjau per halaman, atur ukuran huruf, lalu simpan atau bagikan. Coretan ikut, rekaman suara tidak", chevron = true) {
+                nav.push(Scr.PdfExport(id))
+            }
+            MRow(POS_MID, "up", "Bagikan sebagai .md", "Kirim catatan sebagai berkas Markdown lewat WhatsApp, Berkas, dan lainnya") {
                 d?.let { act.shareMd(noteFileName(it), noteToMd(it)) }
             }
             MRow(POS_MID, "dl", "Simpan sebagai .md", "Simpan berkas Markdown ke perangkat") {
