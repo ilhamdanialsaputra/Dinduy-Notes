@@ -98,6 +98,49 @@ object PdfExport {
 
     private const val FL = Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
 
+    /**
+     * Pembungkus StaticLayout yang bisa rata kiri-kanan (justify). Justify bawaan Android tidak andal di kanvas PDF,
+     * jadi tiap baris (kecuali baris terakhir paragraf / baris yang diakhiri enter) digambar sendiri: selisih lebar baris
+     * dengan lebar tersedia dibagi rata ke jarak antar kata lewat Paint.wordSpacing.
+     */
+    private class JL(
+        val lay: StaticLayout, val just: Boolean, val tp: TextPaint, val width: Float, val narrow: Int, val indent: Int
+    ) {
+        val height: Int get() = lay.height
+        val lineCount: Int get() = lay.lineCount
+        fun getLineTop(i: Int): Int = lay.getLineTop(i)
+
+        fun draw(c: Canvas) {
+            if (!just || lay.lineCount < 2) { lay.draw(c); return }
+            val n = lay.lineCount
+            val txt = lay.text
+            for (i in 0 until n) {
+                val top = lay.getLineTop(i).toFloat()
+                val bot = (if (i + 1 < n) lay.getLineTop(i + 1) else lay.height).toFloat()
+                var ws = 0f
+                if (i < n - 1) {
+                    val st = lay.getLineStart(i)
+                    var en = lay.getLineEnd(i)
+                    val hardBreak = en > st && txt[en - 1] == '\n'
+                    while (en > st && txt[en - 1].isWhitespace()) en--
+                    var sp = 0
+                    var k = st
+                    while (k < en && txt[k].isWhitespace()) k++   // spasi di awal baris tidak dihitung
+                    for (q in k until en) if (txt[q] == ' ') sp++
+                    val avail = width - (if (i < narrow) indent.toFloat() else 0f)
+                    val extra = avail - lay.getLineMax(i)
+                    if (!hardBreak && sp > 0 && extra > .5f) ws = extra / sp
+                }
+                c.save()
+                c.clipRect(-2000f, top, 4000f, bot)
+                tp.wordSpacing = ws
+                lay.draw(c)
+                tp.wordSpacing = 0f
+                c.restore()
+            }
+        }
+    }
+
     // ------------------------------------------------------------------ huruf
     private fun loadFonts(ctx: Context, ff: String): Fonts {
         val am = ctx.assets
@@ -138,7 +181,7 @@ object PdfExport {
         cx: Cx, rt: Rt, width: Float, size: Float, color: Int, lineH: Float,
         bold: Boolean = false, mono: Boolean = false, ls: Float = 0f, ta: String = "",
         strike: Boolean = false, narrow: Int = 0, indent: Int = 0, leftSide: Boolean = true
-    ): StaticLayout {
+    ): JL {
         val text = rt.t
         val len = text.length
         val sb = SpannableStringBuilder(text)
@@ -221,16 +264,15 @@ object PdfExport {
             .setIncludePad(false)
             .setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE)
             .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
-        if (ta == "j") builder.setJustificationMode(Layout.JUSTIFICATION_MODE_INTER_WORD)
         if (narrow > 0 && indent > 0) {
             val arr = IntArray(narrow + 1) { if (it < narrow) indent else 0 }
             val zero = IntArray(narrow + 1)
             if (leftSide) builder.setIndents(arr, zero) else builder.setIndents(zero, arr)
         }
-        return builder.build()
+        return JL(builder.build(), ta == "j", p, wi.toFloat(), narrow, indent)
     }
 
-    private fun lineCuts(f: Flow, lay: StaticLayout, top: Float) {
+    private fun lineCuts(f: Flow, lay: JL, top: Float) {
         for (i in 1 until lay.lineCount) f.cuts.add(top + lay.getLineTop(i))
     }
 
@@ -493,7 +535,7 @@ object PdfExport {
         val padX = tfs * .9f
         val padY = tfs * .7f
         val inner = (colW - 2f * padX).coerceAtLeast(10f)
-        val lays = ArrayList<List<StaticLayout>>()
+        val lays = ArrayList<List<JL>>()
         val hts = ArrayList<Float>()
         rows.forEachIndexed { ri, row ->
             val head = ri == 0
