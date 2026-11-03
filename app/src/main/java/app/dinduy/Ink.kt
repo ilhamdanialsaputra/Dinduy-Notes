@@ -142,6 +142,7 @@ class InkCtl {
     var zoom by mutableStateOf(1f)
     var panX by mutableStateOf(0f)
     var panY by mutableStateOf(0f)
+    var lasso: ArrayList<Offset>? = null          // jejak lasso yang sedang digambar (konten px); gambar ulang lewat tick
     var exporting by mutableStateOf(false)
     var layer: GraphicsLayer? = null
     var busy = false                             // sedang ada gestur coret
@@ -314,6 +315,37 @@ fun Ed.inkInBox(r: Rect, W: Float): Set<String> {
             for (i in 0 until n) {
                 val x = s.p[i * 3] * W; val y = top + s.p[i * 3 + 1] * dens
                 if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) k++
+            }
+            if (k * 2 >= n) out.add(s.id)
+        }
+    }
+    return out
+}
+
+/** Goresan yang minimal separuh titiknya berada di dalam lasso (poligon, pasangan x,y piksel konten). */
+fun Ed.inkInPoly(poly: FloatArray, W: Float): Set<String> {
+    val m = poly.size / 2
+    if (m < 3) return emptySet()
+    var px0 = Float.MAX_VALUE; var px1 = -Float.MAX_VALUE; var py0 = Float.MAX_VALUE; var py1 = -Float.MAX_VALUE
+    for (i in 0 until m) { px0 = min(px0, poly[i * 2]); px1 = max(px1, poly[i * 2]); py0 = min(py0, poly[i * 2 + 1]); py1 = max(py1, poly[i * 2 + 1]) }
+    val out = HashSet<String>()
+    for (b in blocks) {
+        val top = bpos[b.id]?.get(0) ?: continue
+        for (s in b.ik) {
+            val n = s.p.size / 3
+            if (n == 0) continue
+            var k = 0
+            for (i in 0 until n) {
+                val x = s.p[i * 3] * W; val y = top + s.p[i * 3 + 1] * dens
+                if (x < px0 || x > px1 || y < py0 || y > py1) continue
+                var inside = false
+                var j = m - 1
+                for (q in 0 until m) {
+                    val xi = poly[q * 2]; val yi = poly[q * 2 + 1]; val xj = poly[j * 2]; val yj = poly[j * 2 + 1]
+                    if ((yi > y) != (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside
+                    j = q
+                }
+                if (inside) k++
             }
             if (k * 2 >= n) out.add(s.id)
         }
@@ -528,7 +560,8 @@ private fun turnDeg(ax: Float, ay: Float, bx: Float, by: Float, cx: Float, cy: F
     return (d * 180.0 / PI).toFloat()
 }
 
-/** Kenali goresan tunggal sebagai garis / elips / persegi / segitiga. null = tidak yakin (biarkan apa adanya). */
+/** Kenali goresan tunggal: garis, busur, garis patah, lingkaran / elips (miring juga), persegi / persegi panjang (miring juga),
+ *  segitiga (sama sisi dikenali), segi-5..8 (beraturan dikenali). null = tidak yakin (biarkan apa adanya). */
 internal fun recognize(a: FloatArray, n: Int, dens: Float): FloatArray? {
     if (n < 4) return null
     var len = 0f; var x0 = a[0]; var x1 = a[0]; var y0 = a[1]; var y1 = a[1]
@@ -536,65 +569,189 @@ internal fun recognize(a: FloatArray, n: Int, dens: Float): FloatArray? {
         len += hypot(a[i * 3] - a[i * 3 - 3], a[i * 3 + 1] - a[i * 3 - 2])
         x0 = min(x0, a[i * 3]); x1 = max(x1, a[i * 3]); y0 = min(y0, a[i * 3 + 1]); y1 = max(y1, a[i * 3 + 1])
     }
-    val w = x1 - x0; val h = y1 - y0; val diag = hypot(w, h)
+    val diag = hypot(x1 - x0, y1 - y0)
     if (len < 40f * dens || diag < 24f * dens) return null
+    val gap = hypot(a[n * 3 - 3] - a[0], a[n * 3 - 2] - a[1])
+    return if (gap > .22f * len) recognizeOpen(a, n, len, gap, dens) else recognizeClosed(a, n, len, diag, dens)
+}
+
+private fun recognizeOpen(a: FloatArray, n: Int, len: Float, gap: Float, dens: Float): FloatArray? {
     val fx = a[0]; val fy = a[1]; val ex = a[n * 3 - 3]; val ey = a[n * 3 - 2]
-    val gap = hypot(ex - fx, ey - fy)
-    if (gap > .22f * len) {                                    // terbuka: hanya garis lurus
-        if (gap < .85f * len) return null
+    if (gap >= .85f * len) {                                   // garis lurus
         var md = 0f
         for (i in 0 until n) md = max(md, segDist(a[i * 3], a[i * 3 + 1], fx, fy, ex, ey))
-        if (md > .06f * gap) return null
-        var ax = fx; var ay = fy; var bx = ex; var by = ey
-        val ang = atan2(ey - fy, ex - fx)
-        if (abs(sin(ang)) < .14f) { val ym = (fy + ey) / 2f; ay = ym; by = ym }          // kunci horizontal
-        else if (abs(cos(ang)) < .14f) { val xm = (fx + ex) / 2f; ax = xm; bx = xm }     // kunci vertikal
-        return tri(ax, ay, bx, by)
+        if (md <= .06f * gap) {
+            var ax = fx; var ay = fy; var bx = ex; var by = ey
+            val ang = atan2(ey - fy, ex - fx)
+            if (abs(sin(ang)) < .14f) { val ym = (fy + ey) / 2f; ay = ym; by = ym }          // kunci horizontal
+            else if (abs(cos(ang)) < .14f) { val xm = (fx + ex) / 2f; ax = xm; bx = xm }     // kunci vertikal
+            return tri(ax, ay, bx, by)
+        }
     }
-    val cx = (x0 + x1) / 2f; val cy = (y0 + y1) / 2f; val ra = w / 2f; val rb = h / 2f
+    fitArc(a, n, dens)?.let { return it }                      // busur lingkaran
+    val v = rdp(a, n, .045f * len)                             // garis patah (zig-zag, panah, huruf V / Z)
+    val k = v.size / 3
+    if (k in 3..6) {
+        for (i in 1 until k) if (hypot(v[i * 3] - v[i * 3 - 3], v[i * 3 + 1] - v[i * 3 - 2]) < .12f * len) return null
+        for (i in 1 until k - 1) if (turnDeg(v[i * 3 - 3], v[i * 3 - 2], v[i * 3], v[i * 3 + 1], v[i * 3 + 3], v[i * 3 + 4]) < 25f) return null
+        return v
+    }
+    return null
+}
+
+private fun fitArc(a: FloatArray, n: Int, dens: Float): FloatArray? {
+    val m1 = n / 2
+    val ax = a[0]; val ay = a[1]; val bx = a[m1 * 3]; val by = a[m1 * 3 + 1]; val cx = a[n * 3 - 3]; val cy = a[n * 3 - 2]
+    val d = 2f * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by))
+    if (abs(d) < 1e-3f) return null
+    val a2 = ax * ax + ay * ay; val b2 = bx * bx + by * by; val c2 = cx * cx + cy * cy
+    val ux = (a2 * (by - cy) + b2 * (cy - ay) + c2 * (ay - by)) / d
+    val uy = (a2 * (cx - bx) + b2 * (ax - cx) + c2 * (bx - ax)) / d
+    val r = hypot(ax - ux, ay - uy)
+    if (r < 12f * dens || r > 4000f * dens) return null
+    var err = 0f
+    for (i in 0 until n) err += abs(hypot(a[i * 3] - ux, a[i * 3 + 1] - uy) - r)
+    if (err / n > .05f * r) return null
+    val tp = 2f * PI.toFloat()
+    fun nm(t: Float): Float { var x = t; while (x < 0f) x += tp; while (x >= tp) x -= tp; return x }
+    val a0 = atan2(ay - uy, ax - ux)
+    val s1 = nm(atan2(cy - uy, cx - ux) - a0); val sm = nm(atan2(by - uy, bx - ux) - a0)
+    val sweep = if (sm <= s1) s1 else -(tp - s1)
+    if (abs(sweep) < .45f || abs(sweep) > 5.2f) return null    // kira-kira 26° sampai 300°
+    val steps = max(10, (abs(sweep) * 180f / PI.toFloat() / 4f).toInt())
+    val o = FloatArray((steps + 1) * 3)
+    for (i in 0..steps) {
+        val t = a0 + sweep * i / steps
+        o[i * 3] = ux + r * cos(t); o[i * 3 + 1] = uy + r * sin(t); o[i * 3 + 2] = 1f
+    }
+    return o
+}
+
+/** Elips terbaik untuk sudut [th]: [err, cx, cy, ra, rb, th] atau null. */
+private fun fitEllipse(a: FloatArray, n: Int, th: Float, dens: Float): FloatArray? {
+    val c = cos(th); val s = sin(th)
+    var u0 = Float.MAX_VALUE; var u1 = -Float.MAX_VALUE; var v0 = Float.MAX_VALUE; var v1 = -Float.MAX_VALUE
+    for (i in 0 until n) {
+        val u = a[i * 3] * c + a[i * 3 + 1] * s; val v = -a[i * 3] * s + a[i * 3 + 1] * c
+        u0 = min(u0, u); u1 = max(u1, u); v0 = min(v0, v); v1 = max(v1, v)
+    }
+    val cu = (u0 + u1) / 2f; val cv = (v0 + v1) / 2f; val ra = (u1 - u0) / 2f; val rb = (v1 - v0) / 2f
     if (ra < 8f * dens || rb < 8f * dens) return null
     var err = 0f
-    for (i in 0 until n) { val u = (a[i * 3] - cx) / ra; val v = (a[i * 3 + 1] - cy) / rb; err += abs(u * u + v * v - 1f) }
-    err /= n
-    if (err < .17f) {                                          // lingkaran atau oval
+    for (i in 0 until n) {
+        val u = (a[i * 3] * c + a[i * 3 + 1] * s - cu) / ra; val v = (-a[i * 3] * s + a[i * 3 + 1] * c - cv) / rb
+        err += abs(u * u + v * v - 1f)
+    }
+    return floatArrayOf(err / n, cu * c - cv * s, cu * s + cv * c, ra, rb, th)
+}
+
+private fun regularPoly(cx: Float, cy: Float, r: Float, k: Int, phase: Float): FloatArray {
+    val o = FloatArray((k + 1) * 3)
+    for (i in 0..k) {
+        val t = phase + 2f * PI.toFloat() * (i % k) / k
+        o[i * 3] = cx + r * cos(t); o[i * 3 + 1] = cy + r * sin(t); o[i * 3 + 2] = 1f
+    }
+    return o
+}
+
+private fun closedPoly(cs: List<Float>): FloatArray {
+    val k = cs.size / 2
+    val o = FloatArray((k + 1) * 3)
+    for (i in 0..k) { o[i * 3] = cs[(i % k) * 2]; o[i * 3 + 1] = cs[(i % k) * 2 + 1]; o[i * 3 + 2] = 1f }
+    return o
+}
+
+/** Sudut-sudut poligon dari jalur tertutup: RDP, lalu titik awal dihitung sebagai sudut kalau memang tikungan. */
+private fun cornersOf(a: FloatArray, n: Int, eps: Float): List<Float> {
+    val pc = FloatArray((n + 1) * 3)
+    a.copyInto(pc, 0, 0, n * 3); pc[n * 3] = a[0]; pc[n * 3 + 1] = a[1]; pc[n * 3 + 2] = 1f
+    val v = rdp(pc, n + 1, eps)
+    val vc = v.size / 3
+    val cs = ArrayList<Float>()
+    if (vc < 4) return cs
+    val pv = vc - 2
+    if (turnDeg(v[pv * 3], v[pv * 3 + 1], v[0], v[1], v[3], v[4]) > 35f) { cs.add(v[0]); cs.add(v[1]) }
+    for (i in 1..vc - 2) { cs.add(v[i * 3]); cs.add(v[i * 3 + 1]) }
+    return cs
+}
+
+private fun recognizeClosed(a: FloatArray, n: Int, len: Float, diag: Float, dens: Float): FloatArray? {
+    var mx = 0f; var my = 0f
+    for (i in 0 until n) { mx += a[i * 3]; my += a[i * 3 + 1] }
+    mx /= n; my /= n
+    var sxx = 0f; var syy = 0f; var sxy = 0f
+    for (i in 0 until n) { val dx = a[i * 3] - mx; val dy = a[i * 3 + 1] - my; sxx += dx * dx; syy += dy * dy; sxy += dx * dy }
+    val e0 = fitEllipse(a, n, 0f, dens)
+    val e1 = fitEllipse(a, n, .5f * atan2(2f * sxy, sxx - syy), dens)
+    val e = if (e0 != null && (e1 == null || e0[0] <= e1[0] + .01f)) e0 else e1
+    if (e != null && e[0] < .17f) {                            // lingkaran atau elips (boleh miring)
+        val ra = e[3]; val rb = e[4]; val c = cos(e[5]); val s = sin(e[5])
         val circ = abs(ra - rb) < .12f * max(ra, rb)
-        val r0 = (ra + rb) / 2f
-        val m = 48
+        val m = 64
         val o = FloatArray((m + 1) * 3)
         for (i in 0..m) {
             val t = 2f * PI.toFloat() * i / m
-            o[i * 3] = cx + (if (circ) r0 else ra) * cos(t); o[i * 3 + 1] = cy + (if (circ) r0 else rb) * sin(t); o[i * 3 + 2] = 1f
+            val u = (if (circ) (ra + rb) / 2f else ra) * cos(t); val v = (if (circ) (ra + rb) / 2f else rb) * sin(t)
+            o[i * 3] = e[1] + u * c - v * s; o[i * 3 + 1] = e[2] + u * s + v * c; o[i * 3 + 2] = 1f
         }
         return o
     }
-    val pc = FloatArray((n + 1) * 3)
-    a.copyInto(pc, 0, 0, n * 3); pc[n * 3] = fx; pc[n * 3 + 1] = fy; pc[n * 3 + 2] = 1f
-    val v = rdp(pc, n + 1, .07f * diag)
-    val vc = v.size / 3
-    if (vc < 4) return null
-    val cs = ArrayList<Float>()
-    val pv = vc - 2
-    if (turnDeg(v[pv * 3], v[pv * 3 + 1], v[0], v[1], v[3], v[4]) > 35f) { cs.add(v[0]); cs.add(v[1]) }   // titik awal ternyata sudut
-    for (i in 1..vc - 2) { cs.add(v[i * 3]); cs.add(v[i * 3 + 1]) }
-    val k = cs.size / 2
-    if (k != 3 && k != 4) return null
-    for (i in 0 until k) {
-        val p = (i + k - 1) % k; val q = (i + 1) % k
-        val t = turnDeg(cs[p * 2], cs[p * 2 + 1], cs[i * 2], cs[i * 2 + 1], cs[q * 2], cs[q * 2 + 1])
-        if (k == 4 && (t < 60f || t > 120f)) return null
-        if (k == 3 && t > 160f) return null
-    }
-    if (k == 4) {
+    for (eps in floatArrayOf(.07f, .05f)) {
+        val cs = cornersOf(a, n, eps * diag)
+        val k = cs.size / 2
+        if (k < 3 || k > 8) continue
+        var ok = true
+        var emin = Float.MAX_VALUE; var emax = 0f
+        for (i in 0 until k) {
+            val p = (i + k - 1) % k; val q = (i + 1) % k
+            val t = turnDeg(cs[p * 2], cs[p * 2 + 1], cs[i * 2], cs[i * 2 + 1], cs[q * 2], cs[q * 2 + 1])
+            val el = hypot(cs[q * 2] - cs[i * 2], cs[q * 2 + 1] - cs[i * 2 + 1])
+            emin = min(emin, el); emax = max(emax, el)
+            if (el < .06f * len) ok = false
+            if (k == 4 && (t < 60f || t > 120f)) ok = false
+            if (k == 3 && t > 160f) ok = false
+            if (k >= 5 && (t < 20f || t > 150f)) ok = false
+        }
+        if (!ok) continue
+        val ccx = (0 until k).sumOf { cs[it * 2].toDouble() }.toFloat() / k
+        val ccy = (0 until k).sumOf { cs[it * 2 + 1].toDouble() }.toFloat() / k
+        val rr = (0 until k).sumOf { hypot(cs[it * 2] - ccx, cs[it * 2 + 1] - ccy).toDouble() }.toFloat() / k
+        val ph = atan2(cs[1] - ccy, cs[0] - ccx)
+        if (k == 3) return if (emin > .86f * emax) regularPoly(ccx, ccy, rr, 3, ph) else closedPoly(cs)
+        if (k >= 5) return if (emin > .7f * emax) regularPoly(ccx, ccy, rr, k, ph) else closedPoly(cs)
+        // empat sudut
         var axis = true
         for (i in 0 until 4) {
             val q = (i + 1) % 4
             val ddx = abs(cs[q * 2] - cs[i * 2]); val ddy = abs(cs[q * 2 + 1] - cs[i * 2 + 1])
             if (min(ddx, ddy) > .18f * max(ddx, ddy)) axis = false
         }
-        if (axis) return tri(x0, y0, x1, y0, x1, y1, x0, y1, x0, y0)
-        return tri(cs[0], cs[1], cs[2], cs[3], cs[4], cs[5], cs[6], cs[7], cs[0], cs[1])
+        var bx0 = Float.MAX_VALUE; var bx1 = -Float.MAX_VALUE; var by0 = Float.MAX_VALUE; var by1 = -Float.MAX_VALUE
+        for (i in 0 until 4) { bx0 = min(bx0, cs[i * 2]); bx1 = max(bx1, cs[i * 2]); by0 = min(by0, cs[i * 2 + 1]); by1 = max(by1, cs[i * 2 + 1]) }
+        if (axis) return tri(bx0, by0, bx1, by0, bx1, by1, bx0, by1, bx0, by0)
+        var right = true
+        for (i in 0 until 4) {
+            val p = (i + 3) % 4; val q = (i + 1) % 4
+            val t = turnDeg(cs[p * 2], cs[p * 2 + 1], cs[i * 2], cs[i * 2 + 1], cs[q * 2], cs[q * 2 + 1])
+            if (t < 78f || t > 102f) right = false
+        }
+        if (!right) return closedPoly(cs)                      // jajar genjang / trapesium: sudut tetap, sisi diluruskan
+        val ux = ((cs[2] - cs[0]) + (cs[4] - cs[6])) / 2f; val uy = ((cs[3] - cs[1]) + (cs[5] - cs[7])) / 2f
+        val w = hypot(ux, uy); val dx = ux / w; val dy = uy / w
+        val vx = ((cs[6] - cs[0]) + (cs[4] - cs[2])) / 2f; val vy = ((cs[7] - cs[1]) + (cs[5] - cs[3])) / 2f
+        var h = vx * -dy + vy * dx
+        var ww = w
+        if (abs(abs(h) - w) < .08f * max(abs(h), w)) { val sq = (abs(h) + w) / 2f; ww = sq; h = if (h < 0f) -sq else sq }
+        val nx = -dy; val ny = dx
+        return tri(
+            ccx - dx * ww / 2f - nx * h / 2f, ccy - dy * ww / 2f - ny * h / 2f,
+            ccx + dx * ww / 2f - nx * h / 2f, ccy + dy * ww / 2f - ny * h / 2f,
+            ccx + dx * ww / 2f + nx * h / 2f, ccy + dy * ww / 2f + ny * h / 2f,
+            ccx - dx * ww / 2f + nx * h / 2f, ccy - dy * ww / 2f + ny * h / 2f,
+            ccx - dx * ww / 2f - nx * h / 2f, ccy - dy * ww / 2f - ny * h / 2f
+        )
     }
-    return tri(cs[0], cs[1], cs[2], cs[3], cs[4], cs[5], cs[0], cs[1])
+    return null
 }
 
 private fun pressureK(p: Float) = if (p <= .01f) .7f else (.35f + .95f * p).coerceIn(.3f, 1.3f)
@@ -634,20 +791,48 @@ fun Modifier.inkPinch(ed: Ed, scroll: ScrollState): Modifier {
     return pointerInput(Unit) {
         awaitPointerEventScope {
             var active = false; var pinching = false
+            var sel = false; var sd0 = 1f; var scx = 0f; var scy = 0f      // cubit pada seleksi: jarak & titik tengah awal (koordinat konten)
             var pd = 0f; var d0 = 0f; var pcx = 0f; var pcy = 0f
+            fun commitSel() {
+                if (!sel) return
+                sel = false
+                val x = ik.xf; ik.xf = null; ik.busy = false; ik.tick++
+                val box = ik.box
+                val W = (ed.contentCoords?.size?.width ?: 0).toFloat()
+                if (x != null && x.size >= 5 && box != null && W > 0f && ik.sel.isNotEmpty() && (x[2] != 1f || x[0] != 0f || x[1] != 0f)) {
+                    ed.inkTransform(ik.sel, x[0], x[1], x[2], x[3], x[4], W)
+                    ik.box = box.xfm(x)
+                }
+            }
             while (true) {
                 val ev = awaitPointerEvent(PointerEventPass.Initial)
                 val fs = ev.changes.filter { it.pressed && it.type == PointerType.Touch }
                 val lv = ik.live
-                if (!ik.on || fs.size < 2 || (lv != null && lv.com)) { active = false; pinching = false; continue }
+                // dua jari selalu berarti zoom / geser, bukan menggambar (goresan jari yang sedang berjalan dibatalkan oleh inkInput)
+                if (!ik.on || fs.size < 2 || (lv != null && lv.stylus)) { commitSel(); active = false; pinching = false; continue }
                 val a = fs[0].position; val b = fs[1].position
                 val d = max(hypot(a.x - b.x, a.y - b.y), 1f)
                 val cx = (a.x + b.x) / 2f; val cy = (a.y + b.y) / 2f
-                if (!active) { active = true; pd = d; d0 = d; pcx = cx; pcy = cy; pinching = ik.zoom > 1f; continue }
-                if (!pinching && abs(d / d0 - 1f) > .06f) pinching = true
+                if (!active) {
+                    active = true; pd = d; d0 = d; pcx = cx; pcy = cy; pinching = ik.zoom > 1f
+                    val box = ik.box
+                    if (ik.tool == 3 && ik.sel.isNotEmpty() && box != null) {     // titik tengah di dalam seleksi: cubit mengubah ukuran gambar terpilih
+                        val ccx = (cx - ik.panX) / ik.zoom; val ccy = (cy - ik.panY) / ik.zoom + scroll.value
+                        if (box.inflate(24f * density).contains(Offset(ccx, ccy))) { sel = true; sd0 = d; scx = ccx; scy = ccy; ik.busy = true }
+                    }
+                    continue
+                }
+                if (sel) {
+                    val ccx = (cx - ik.panX) / ik.zoom; val ccy = (cy - ik.panY) / ik.zoom + scroll.value
+                    ik.xf = floatArrayOf(ccx - scx, ccy - scy, (d / sd0).coerceIn(.2f, 6f), scx, scy); ik.tick++
+                    for (c in fs) c.consume()
+                    pd = d; pcx = cx; pcy = cy
+                    continue
+                }
+                if (!pinching && (abs(d / d0 - 1f) > .04f || hypot(cx - pcx, cy - pcy) > 10f * density)) pinching = true
                 if (pinching) {
                     val z0 = ik.zoom
-                    val z1 = (z0 * d / pd).coerceIn(1f, 3f)
+                    val z1 = (z0 * d / pd).coerceIn(1f, 4f)
                     val ux = (pcx - ik.panX) / z0; val uy = (pcy - ik.panY) / z0
                     val W = size.width.toFloat(); val H = size.height.toFloat()
                     val nx = (cx - ux * z1).coerceIn(W * (1f - z1), 0f)
@@ -664,6 +849,12 @@ fun Modifier.inkPinch(ed: Ed, scroll: ScrollState): Modifier {
 }
 
 // ------------------------------------------------------------------ input (jari, stylus, palm rejection, lasso)
+/** Kotak setelah transformasi pratinjau [x] = (dx, dy, skala, pivotX, pivotY). */
+private fun Rect.xfm(x: FloatArray): Rect {
+    val k = x[2]; val px = x[3]; val py = x[4]
+    return Rect(px + (left - px) * k + x[0], py + (top - py) * k + x[1], px + (right - px) * k + x[0], py + (bottom - py) * k + x[1])
+}
+
 private class BoxH(val del: Offset, val tl: Offset, val tr: Offset, val bl: Offset, val br: Offset, val mv: Offset)
 
 /** Pegangan frame ditaruh agak menjauh dari kotaknya supaya tidak tertutup jari. */
@@ -782,13 +973,37 @@ fun Modifier.inkInput(ed: Ed, vm: AppVM, scroll: ScrollState): Modifier {
                 when (m) {
                     1 -> if (x[0] != 0f || x[1] != 0f) {
                         if (ik.sel.isNotEmpty()) ed.inkTransform(ik.sel, x[0], x[1], 1f, box.left, box.top, W)
-                        val nb = box.translate(x[0], x[1]); ik.box = nb; ik.sel = ed.inkInBox(nb, W)
+                        ik.box = box.translate(x[0], x[1])
                     }
-                    3 -> { ed.inkErase(ik.sel); ik.sel = emptySet() }
+                    3 -> { ed.inkErase(ik.sel); ik.sel = emptySet(); ik.box = null }
+                    5, 6, 7, 8 -> if (x.size >= 5 && x[2] != 1f && ik.sel.isNotEmpty()) {
+                        ed.inkTransform(ik.sel, 0f, 0f, x[2], x[3], x[4], W)
+                        ik.box = box.xfm(x)
+                    }
                 }
             }
 
             fun near(p: Offset, o: Offset) = hypot(p.x - o.x, p.y - o.y) <= 26f * dens
+
+            fun finishLasso() {
+                val pts = ik.lasso; ik.lasso = null
+                id = null; gm = 0; ik.busy = false; ik.tick++
+                ik.stamp = System.currentTimeMillis()
+                if (pts == null || pts.isEmpty()) return
+                val W = size.width.toFloat()
+                var lx0 = Float.MAX_VALUE; var lx1 = -Float.MAX_VALUE; var ly0 = Float.MAX_VALUE; var ly1 = -Float.MAX_VALUE
+                for (o in pts) { lx0 = min(lx0, o.x); lx1 = max(lx1, o.x); ly0 = min(ly0, o.y); ly1 = max(ly1, o.y) }
+                val ids: Set<String> = if (max(lx1 - lx0, ly1 - ly0) < 16f * dens) {         // ketukan: pilih satu goresan di bawah jari
+                    ed.inkHit(pts[0].x, pts[0].y, 14f * dens, W).take(1).toSet()
+                } else {
+                    val poly = FloatArray(pts.size * 2)
+                    for (i in pts.indices) { poly[i * 2] = pts[i].x; poly[i * 2 + 1] = pts[i].y }
+                    ed.inkInPoly(poly, W)
+                }
+                ik.sel = ids
+                ik.box = if (ids.isEmpty()) null else ed.inkBox(ids, W)?.inflate(8f * dens)
+                if (ids.isNotEmpty()) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            }
 
             while (true) {
                 val ev = awaitPointerEvent(PointerEventPass.Initial)
@@ -811,23 +1026,25 @@ fun Modifier.inkInput(ed: Ed, vm: AppVM, scroll: ScrollState): Modifier {
                     val fingers = ev.changes.count { it.pressed && it.type != PointerType.Stylus }
                     if (!styl && fingers != 1) continue          // dua jari sekaligus: biarkan menggulir / cubit
                     val W = size.width.toFloat()
-                    if (ik.tool == 3) {                          // alat Pilih: hanya frame yang menangkap sentuhan, sisanya tetap menggulir
+                    if (ik.tool == 3) {                          // alat Pilih (lasso): seret frame / sudut, atau lingkari goresan
                         val box = ik.box
+                        val p = d.position
+                        var m = 0
                         if (box != null) {
-                            val h = boxHandles(box, dens); val p = d.position
-                            val m = when {
+                            val h = boxHandles(box, dens)
+                            m = when {
                                 ik.sel.isNotEmpty() && near(p, h.del) -> 3
                                 near(p, h.tl) -> 5; near(p, h.tr) -> 6; near(p, h.bl) -> 7; near(p, h.br) -> 8
                                 near(p, h.mv) -> 1
                                 box.inflate(6f * dens).contains(p) -> 1
                                 else -> 0
                             }
-                            if (m != 0) {
-                                id = d.id; gm = m; gBox = box; gDown = p; gTap = true; gxf = floatArrayOf(0f, 0f, 1f)
-                                ik.busy = true; ik.pop = false; ik.stamp = System.currentTimeMillis()
-                                d.consume()
-                            }
                         }
+                        id = d.id; gDown = p; gTap = true; gxf = floatArrayOf(0f, 0f, 1f)
+                        ik.busy = true; ik.pop = false; ik.stamp = System.currentTimeMillis()
+                        if (m != 0) { gm = m; gBox = box }
+                        else { gm = 9; gBox = null; ik.lasso = arrayListOf(p); ik.tick++ }
+                        d.consume()
                         continue
                     }
                     val p = prefs
@@ -845,13 +1062,25 @@ fun Modifier.inkInput(ed: Ed, vm: AppVM, scroll: ScrollState): Modifier {
                     continue
                 }
 
-                if (gm != 0) {                                   // sedang menarik frame
+                if (gm != 0) {                                   // sedang menarik frame / melingkari
                     val c = ev.changes.firstOrNull { it.id == id }
-                    if (c == null) { endG(false); continue }
+                    if (c == null) { ik.lasso = null; endG(false); continue }
+                    // jari kedua mendarat: ini zoom / cubit, batalkan gestur satu jari
+                    if (c.type != PointerType.Stylus && ev.changes.any { it.pressed && it.id != id && it.type != PointerType.Stylus }) {
+                        ik.lasso = null; endG(false); continue
+                    }
                     c.consume()
+                    if (gm == 9) {
+                        val ls = ik.lasso
+                        if (!c.pressed) { finishLasso(); continue }
+                        if (ls != null) {
+                            val lp = ls[ls.size - 1]
+                            if (hypot(c.position.x - lp.x, c.position.y - lp.y) > 3f * dens) { ls.add(c.position); ik.tick++ }
+                        }
+                        continue
+                    }
                     if (!c.pressed) { endG(if (gm == 3) gTap else true); continue }
                     val box = gBox ?: continue
-                    val W = size.width.toFloat()
                     val dx = c.position.x - gDown.x; val dy = c.position.y - gDown.y
                     when (gm) {
                         3 -> if (hypot(dx, dy) > 14f * dens) gTap = false
@@ -859,15 +1088,15 @@ fun Modifier.inkInput(ed: Ed, vm: AppVM, scroll: ScrollState): Modifier {
                             gxf = floatArrayOf(dx, dy, 1f)
                             ik.xf = floatArrayOf(dx, dy, 1f, box.left, box.top); ik.tick++
                         }
-                        else -> {                                    // gedein / kecilin kotak dari salah satu sudut
-                            val minS = 48f * dens
-                            var l = box.left; var t = box.top; var r = box.right; var b = box.bottom
-                            if (gm == 5 || gm == 7) l = (box.left + dx).coerceIn(0f, r - minS)
-                            if (gm == 6 || gm == 8) r = (box.right + dx).coerceIn(l + minS, W)
-                            if (gm == 5 || gm == 6) t = (box.top + dy).coerceAtMost(b - minS)
-                            if (gm == 7 || gm == 8) b = (box.bottom + dy).coerceAtLeast(t + minS)
-                            val nb = Rect(l, t, r, b)
-                            ik.box = nb; ik.sel = ed.inkInBox(nb, W); ik.tick++
+                        else -> {                                    // tarik sudut: perbesar / perkecil gambar terpilih (proporsional)
+                            val pv = when (gm) {
+                                5 -> Offset(box.right, box.bottom); 6 -> Offset(box.left, box.bottom)
+                                7 -> Offset(box.right, box.top); else -> Offset(box.left, box.top)
+                            }
+                            val dd = max(hypot(gDown.x - pv.x, gDown.y - pv.y), 1f)
+                            val sc = (hypot(c.position.x - pv.x, c.position.y - pv.y) / dd).coerceIn(.2f, 6f)
+                            gxf = floatArrayOf(0f, 0f, sc, pv.x, pv.y)
+                            ik.xf = gxf; ik.tick++
                         }
                     }
                     continue
@@ -877,7 +1106,7 @@ fun Modifier.inkInput(ed: Ed, vm: AppVM, scroll: ScrollState): Modifier {
                 val c = ev.changes.firstOrNull { it.id == id }
                 if (c == null) { finish(false, false); continue }
                 val others = ev.changes.count { it.pressed && it.id != id && it.type != PointerType.Stylus }
-                if (!committed && !lv.stylus && others >= 1) {   // jari kedua mendarat cepat: ini gulir / cubit dua jari, batalkan
+                if (!lv.stylus && others >= 1) {                 // jari kedua mendarat (kapan pun): ini zoom / geser dua jari, goresan dibatalkan
                     finish(false, false); continue
                 }
                 if (!c.pressed) {                                // angkat: selesai (ketukan singkat jadi titik)
@@ -962,23 +1191,17 @@ fun InkSetup(ed: Ed) {
 fun BoxScope.InkLayers(ed: Ed, vm: AppVM, scroll: ScrollState) {
     val pal = LocalPal.current
     val ik = ed.ink
-    // alat Pilih: frame muncul sendiri di tengah layar, tinggal digedein / dikecilin
+    // alat Pilih: tanpa frame bawaan; pilih dengan melingkari goresan (lasso) atau mengetuknya
     LaunchedEffect(ik.on, ik.tool) {
-        if (ik.on && ik.tool == 3) {
-            val W = (ed.contentCoords?.size?.width ?: 0).toFloat()
-            if (ik.box == null && W > 0f) {
-                val d = ed.dens
-                val bw = min(W * .62f, 260f * d); val bh = 170f * d
-                val cy = scroll.value + ed.viewH / (2f * ik.zoom)
-                val nb = Rect(W / 2f - bw / 2f, cy - bh / 2f, W / 2f + bw / 2f, cy + bh / 2f)
-                ik.box = nb; ik.sel = ed.inkInBox(nb, W)
-            }
-        } else { ik.box = null; ik.sel = emptySet() }
+        if (!(ik.on && ik.tool == 3)) { ik.box = null; ik.sel = emptySet(); ik.lasso = null }
     }
     LaunchedEffect(ed.blocks) {
-        val b = ik.box
-        val W = (ed.contentCoords?.size?.width ?: 0).toFloat()
-        if (ik.tool == 3 && b != null && W > 0f) ik.sel = ed.inkInBox(b, W)
+        if (ik.tool == 3 && ik.sel.isNotEmpty()) {
+            val all = HashSet<String>()
+            for (b in ed.blocks) for (s in b.ik) all.add(s.id)
+            val keep = ik.sel.filter { it in all }.toSet()
+            if (keep.size != ik.sel.size) { ik.sel = keep; if (keep.isEmpty()) ik.box = null }
+        }
     }
     // goresan selesai: path disimpan di cache, hanya dibangun ulang kalau posisi blok / lebar berubah
     Canvas(Modifier.matchParentSize()) {
@@ -1026,10 +1249,19 @@ fun BoxScope.InkLayers(ed: Ed, vm: AppVM, scroll: ScrollState) {
             drawCircle(pal.os, lv.wDp * density, e, alpha = .5f, style = Stroke(1.5f * density))
         }
         ik.lay
+        val ls = ik.lasso
+        if (ls != null && ls.size > 1) {                                                                       // jejak lasso
+            val lp = Path()
+            lp.moveTo(ls[0].x, ls[0].y)
+            for (i in 1 until ls.size) lp.lineTo(ls[i].x, ls[i].y)
+            lp.close()
+            drawPath(lp, pal.p.copy(alpha = .10f))
+            drawPath(lp, pal.p, style = Stroke(2f * density, cap = StrokeCap.Round, join = StrokeJoin.Round, pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f * density, 7f * density))))
+        }
         val bx0 = ik.box
         if (ik.on && ik.tool == 3 && bx0 != null && lv == null) {            // frame kotak alat Pilih
             val x = ik.xf
-            val box = if (x == null) bx0 else bx0.translate(x[0], x[1])
+            val box = if (x == null || x.size < 5) bx0 else bx0.xfm(x)
             val d = density
             val h = boxHandles(box, d)
             drawRect(pal.p.copy(alpha = .07f), box.topLeft, box.size)
