@@ -350,8 +350,10 @@ private fun Stepper(label: String, v: Int, lo: Int, hi: Int, onChange: (Int) -> 
 fun DocSheet(ed: Ed, act: Actions) {
     val pal = LocalPal.current
     val haptic = LocalHapticFeedback.current
-    var shown by remember { mutableStateOf(1) }
-    SideEffect { if (ed.sheet != 0) shown = ed.sheet }
+    // nilai sheet terakhir yang aktif ditulis langsung saat komposisi (bukan SideEffect), jadi konten tidak pernah "lompat" saat sheet dibuka
+    val last = remember { intArrayOf(1) }
+    if (ed.sheet != 0) last[0] = ed.sheet
+    val shown = last[0]
     LaunchedEffect(ed.sheet) {                                   // kembali ke daftar setelah sheet selesai menutup
         if (ed.sheet == 0) { delay(380); if (ed.sheet == 0) ed.sheetPage = 0 }
     }
@@ -366,8 +368,8 @@ fun DocSheet(ed: Ed, act: Actions) {
 
     AnimatedVisibility(
         visible = ed.sheet != 0,
-        enter = fadeIn(tween(200)) + slideInVertically(tween(340, easing = Emph)) { it },
-        exit = fadeOut(tween(140)) + slideOutVertically(tween(240, easing = Emph)) { it }
+        enter = fadeIn(tween(200)) + expandVertically(tween(300, easing = Emph), expandFrom = Alignment.Top),
+        exit = fadeOut(tween(140)) + shrinkVertically(tween(260, easing = Emph), shrinkTowards = Alignment.Top)
     ) {
         // kotak penuh: tanpa sudut bundar, tanpa pegangan
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)).background(pal.c3)) {
@@ -377,11 +379,7 @@ fun DocSheet(ed: Ed, act: Actions) {
             val page = if (shown == 2) 2 else if (ed.sheetPage == 1) 1 else 0     // 0 Sisipkan, 1 Tabel, 2 Format
             AnimatedContent(
                 targetState = page,
-                transitionSpec = {
-                    val fwd = targetState > initialState
-                    (slideInHorizontally(tween(320, easing = Emph)) { if (fwd) it else -it } + fadeIn(tween(160)))
-                        .togetherWith(slideOutHorizontally(tween(260, easing = Emph)) { if (fwd) -it / 3 else it / 3 } + fadeOut(tween(120)))
-                },
+                transitionSpec = { fadeIn(tween(180, 60)).togetherWith(fadeOut(tween(100))) },
                 label = "sheetpage"
             ) { pg ->
                 Column(Modifier.fillMaxWidth()) {
