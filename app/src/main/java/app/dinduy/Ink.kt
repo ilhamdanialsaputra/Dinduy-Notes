@@ -220,7 +220,7 @@ internal fun inkRescue(prev: List<Blk>, cur: List<Blk>, pos: Map<String, FloatAr
                 if (oy != null && ty != null && dens > 0f) dy = (oy - ty) / dens
             }
             val np = if (dy == 0f) s.p else s.p.mapIndexed { i, v -> if (i % 3 == 1) v + dy else v }
-            val moved = if (r[ti].id == pb.id) s.copy(p = np) else s.copy(p = np, an = emptyList(), ah = 0f, av = 0, ai = "")
+            val moved = if (r[ti].id == pb.id) s.copy(p = np) else s.copy(p = np, an = emptyList(), ah = 0f, av = 0, ai = "", o = emptyList())
             r[ti] = r[ti].copy(ik = r[ti].ik + moved)
             have.add(s.id)
         }
@@ -368,12 +368,44 @@ internal fun Ed.inkAnchor(b: Blk, a: FloatArray, n: Int, hl: Boolean, skip: Int 
     return Triple(flat, em / dens, if (use.size == 1) 3 else 4)
 }
 
+/** Bentuk goresan relatif titik pertama dalam satuan ukuran huruf (em, px). */
+internal fun shapeOf(a: FloatArray, n: Int, em: Float): List<Float> {
+    if (n < 4 || em <= 0f) return emptyList()
+    val out = ArrayList<Float>(n * 2)
+    for (i in 0 until n) {
+        out.add(((a[i * 3] - a[0]) / em * 1000f).roundToInt() / 1000f)
+        out.add(((a[i * 3 + 1] - a[1]) / em * 1000f).roundToInt() / 1000f)
+    }
+    return out
+}
+
+/**
+ * Rapikan hasil pemetaan per-huruf: posisi ideal = bentuk asli x ukuran huruf sekarang (digeser rata-rata); selisih terhadap
+ * ideal (akibat teks pindah baris / lebar huruf beda) dihaluskan, jadi goresan mengikuti teks dengan landai, tidak melar atau patah.
+ */
+private fun smoothInk(a: FloatArray, n: Int, o: List<Float>, em: Float) {
+    var cx = 0f; var cy = 0f
+    for (i in 0 until n) { cx += a[i * 3] - o[i * 2] * em; cy += a[i * 3 + 1] - o[i * 2 + 1] * em }
+    cx /= n; cy /= n
+    val dx = FloatArray(n) { a[it * 3] - (cx + o[it * 2] * em) }
+    val dy = FloatArray(n) { a[it * 3 + 1] - (cy + o[it * 2 + 1] * em) }
+    val w = max(2, n / 8)
+    for (i in 0 until n) {
+        val lo = max(0, i - w); val hi = min(n - 1, i + w)
+        var sx = 0f; var sy = 0f
+        for (j in lo..hi) { sx += dx[j]; sy += dy[j] }
+        val k = (hi - lo + 1).toFloat()
+        a[i * 3] = cx + o[i * 2] * em + sx / k
+        a[i * 3 + 1] = cy + o[i * 2 + 1] * em + sy / k
+    }
+}
+
 /** Pasang jangkar huruf pada goresan s yang titik mutlaknya a (n titik) berada di atas blok tgt; kalau tidak bisa, jangkar dikosongkan. */
 internal fun Ed.withAnchor(s: Ink, tgt: Blk, a: FloatArray, n: Int, skip: Int = 0): Ink {
-    val none = s.copy(an = emptyList(), ah = 0f, av = 0, ai = "")
+    val none = s.copy(an = emptyList(), ah = 0f, av = 0, ai = "", o = emptyList())
     if (tgt.ty == "img") return imgAnchor(none, tgt, a, n) ?: none
     val r = inkAnchor(tgt, a, n, s.t == 1, skip)
-    if (r != null) return none.copy(an = r.first, ah = r.second, av = r.third)
+    if (r != null) return none.copy(an = r.first, ah = r.second, av = r.third, o = if (r.third == 2) shapeOf(a, n, r.second * dens) else emptyList())
     // tidak bisa menempel ke huruf (paragraf kosong, titik jauh dari teks): tetap relatif blok, tapi ikut skala ukuran huruf
     val lay = if (tgt.isText) lays[tgt.id] else null
     if (lay != null && s.p.isNotEmpty()) return none.copy(ah = emPx(lay) / dens, av = 6)
@@ -478,6 +510,7 @@ fun Ed.inkPts(s: Ink, bid: String, top: Float, W: Float, d: Float, local: Boolea
             a[i * 3 + 1] = oy + lay.getLineBaseline(ln) + an[i * 3 + 2] * em
             a[i * 3 + 2] = s.p[i * 3 + 2]
         }
+        if (s.av == 2 && s.o.size == n * 2) smoothInk(a, n, s.o, em)
         return a
     }
     val n = s.p.size / 3
@@ -529,7 +562,7 @@ fun Ed.inkSyncP(bl: List<Blk>): List<Blk> {
             } else {
                 val lay = lays[b.id]
                 if (lay == null || kpos[b.id] == null) s
-                else if (s.anc) { val a = inkPts(s, b.id, top, W, d); s.copy(p = relPts(a, a.size / 3, top, W, d)) }
+                else if (s.anc) { val a = inkPts(s, b.id, top, W, d); s.copy(p = relPts(a, a.size / 3, top, W, d), o = if (s.av == 2 && s.o.isEmpty()) shapeOf(a, a.size / 3, emPx(lay)) else s.o) }
                 else if (s.fz) { val a = inkPts(s, b.id, top, W, d); s.copy(p = relPts(a, a.size / 3, top, W, d), ah = emPx(lay) / d) }
                 else s
             }
@@ -581,6 +614,7 @@ internal fun Ed.inkBuild(base: Ink, a: FloatArray, n: Int, W: Float): List<Pair<
         if (i == n || own[i]!!.id != own[st]!!.id) { runs.add(intArrayOf(st, i - 1)); st = i }
     }
     if (runs.size == 1) return single()
+    if (own.any { it!!.ty == "tbl" || it.ty == "q" || it.ty == "img" || it.ty == "hr" }) return single()   // tabel / kutipan: jangan dipecah (potongan beda cara hitung = ada garis pemisah)
     if (runs.size > 60 || (base.t == 0 && own.map { it!!.id }.distinct().size > 40)) return single()
     val out = ArrayList<Pair<String, Ink>>()
     for ((k, r) in runs.withIndex()) {
