@@ -176,7 +176,12 @@ data class Ink(
     val c: Int = 0,
     val w: Float = 3f,
     val p: List<Float> = emptyList(),
-    val sh: Boolean = false   // bentuk dirapikan: sudut tajam, tanpa penghalusan
+    val sh: Boolean = false,  // bentuk dirapikan: sudut tajam, tanpa penghalusan
+    // Jangkar ke huruf: per titik tiga angka (indeks huruf di teks blok, posisi x dalam kotak huruf, posisi y dalam tinggi baris).
+    // Kosong = goresan hanya menempel ke blok (koordinat p). Terisi = posisi digambar dari huruf, jadi ikut bergeser /
+    // memanjang / memendek / membesar saat teks atau ukuran hurufnya berubah.
+    val an: List<Float> = emptyList(),
+    val ah: Float = 0f        // tinggi baris (dp) saat dicoret; dipakai untuk menskalakan tebal goresan mengikuti ukuran huruf
 )
 
 /** ty: p, h, li, q, code, tbl, hr, img */
