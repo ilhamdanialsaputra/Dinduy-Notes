@@ -1005,8 +1005,29 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     var mergeT by mutableStateOf<MergeT?>(null)   // gambar yang sedang diseret berada di atas gambar lain: lepas = jadi kolase
     var replT: Pair<String, Int>? = null          // gambar yang akan diganti (dicatat saat tombol Ganti diketuk)
     var dens = 1f
-    var viewH = 0f
+    var viewH by mutableStateOf(0f)
+    var barHLive by mutableStateOf(0f)            // tinggi kapsul/sheet langsung (tanpa debounce), dipakai gulir kursor
+    fun cursorClear(): Float = if (barHLive > 0f) barHLive + 12f * dens else 12f * dens
     var scroll: ScrollState? = null
+
+    /** Selisih gulir agar kursor tetap terlihat di atas keyboard + kapsul; dipanggil tiap frame lewat snapshotFlow. */
+    fun cursorScrollDelta(scrollV: Int): Float {
+        if (reading || selOn || ink.on || titleFocus || findOn) return 0f
+        val key = focus ?: return 0f
+        val v = tf[key] ?: return 0f
+        if (!v.selection.collapsed) return 0f
+        val lay = lays[key] ?: return 0f
+        val pos = kpos[key] ?: return 0f
+        if (lsh[key] != 1 || viewH <= 0f) return 0f
+        val lt = lay.layoutInput.text.length
+        val o = toLay(key, v.selection.start - 1).coerceIn(0, lt)
+        val r = lay.getCursorRect(o)
+        val top = pos.y + r.top
+        val bot = pos.y + r.bottom
+        val vt = scrollV + 12f * dens
+        val vb = scrollV + viewH - cursorClear()
+        return when { bot > vb -> bot - vb; top < vt -> top - vt; else -> 0f }
+    }
     var buzz: (() -> Unit)? = null
     val bpos = HashMap<String, FloatArray>()   // id blok -> [atas, tinggi] di ruang konten
     private var mvDir = 0
