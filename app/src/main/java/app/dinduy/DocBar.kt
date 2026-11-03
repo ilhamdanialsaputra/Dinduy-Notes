@@ -323,12 +323,13 @@ fun DocBar(ed: Ed, act: Actions) {
 private fun SRow(on: Boolean = false, enabled: Boolean = true, icon: @Composable () -> Unit, label: @Composable () -> Unit, onClick: () -> Unit) {
     val pal = LocalPal.current
     Row(
-        Modifier.fillMaxWidth().height(58.dp).alpha(if (enabled) 1f else .35f)
-            .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 20.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 1.dp).height(56.dp).clip(RoundedCornerShape(18.dp))
+            .background(if (on) pal.pc.copy(alpha = .6f) else Color.Transparent).alpha(if (enabled) 1f else .35f)
+            .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(Modifier.size(28.dp), Alignment.Center) { icon() }
-        Spacer(Modifier.width(20.dp))
+        Box(Modifier.size(40.dp).clip(RoundedCornerShape(13.dp)).background(if (on) pal.p.copy(alpha = .16f) else pal.c4), Alignment.Center) { icon() }
+        Spacer(Modifier.width(16.dp))
         Box(Modifier.weight(1f)) { label() }
         if (on) Ic("ok", pal.p)
     }
@@ -369,7 +370,10 @@ fun DocSheet(ed: Ed, act: Actions) {
         exit = fadeOut(tween(140)) + slideOutVertically(tween(240, easing = Emph)) { it }
     ) {
         // kotak penuh: tanpa sudut bundar, tanpa pegangan
-        Column(Modifier.fillMaxWidth().background(pal.c3)) {
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)).background(pal.c3)) {
+            Box(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 2.dp), Alignment.Center) {
+                Box(Modifier.size(width = 36.dp, height = 4.dp).clip(CircleShape).background(pal.osv.copy(alpha = .38f)))
+            }
             val page = if (shown == 2) 2 else if (ed.sheetPage == 1) 1 else 0     // 0 Sisipkan, 1 Tabel, 2 Format
             AnimatedContent(
                 targetState = page,
@@ -381,7 +385,7 @@ fun DocSheet(ed: Ed, act: Actions) {
                 label = "sheetpage"
             ) { pg ->
                 Column(Modifier.fillMaxWidth()) {
-                    Row(Modifier.fillMaxWidth().padding(start = if (pg == 1) 6.dp else 20.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().padding(start = if (pg == 1) 6.dp else 22.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         if (pg == 1) IconBtn("chl", pal.os, { ed.sheetPage = 0 })
                         T(if (pg == 2) "Format" else if (pg == 1) "Tabel" else "Sisipkan", 20f, 800, pal.os, Modifier.weight(1f).padding(vertical = 12.dp))
                         IconBtn("x", pal.os, { ed.sheet = 0 })
