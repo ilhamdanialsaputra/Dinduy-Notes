@@ -685,7 +685,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
     val focusMgr = LocalFocusManager.current
     val state = rememberLazyStaggeredGridState()
     // tween tanpa overshoot supaya buka/tutup pencarian tidak bergetar
-    val saRaw by animateFloatAsState(if (vm.searchOn) 1f else 0f, tween(420, easing = Emph), label = "sa")
+    val saRaw by animateFloatAsState(if (vm.searchOn) 1f else 0f, tween(if (vm.searchOn) 360 else 260, easing = Emph), label = "sa")
     val sa = saRaw.coerceIn(0f, 1f)
     val fabConn = remember {
         object : NestedScrollConnection {
@@ -839,47 +839,24 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                 .graphicsLayer { translationX = 84.dp.toPx() * sa; scaleX = 1f - .4f * sa; scaleY = 1f - .4f * sa; alpha = 1f - sa }
         ) { IconBtn(if (cols == 1) "cols" else "rows", pal.osv, { if (sa < .5f) vm.setPr(vm.pr.copy(cols = if (cols == 1) 2 else 1)) }) }
 
-        val padH = lerp(72.dp, 8.dp, sa)
-        val pillH = lerp(56.dp, panelH, sa)
-        Box(
-            Modifier.padding(top = sat + 8.dp, start = padH, end = padH).fillMaxWidth().height(pillH)
-                .clip(RoundedCornerShape(lerp(28.dp, 32.dp, sa))).background(pal.c3)
-                .pointerInput(vm.searchOn) { if (vm.searchOn) detectTapGestures { } }
-        ) {
-            Column {
-                Row(
-                    Modifier.fillMaxWidth().height(56.dp).clickable(
-                        interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !vm.searchOn
-                    ) { vm.searchOn = true }.padding(start = 20.dp, end = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Ic("search", if (vm.searchOn) pal.p else pal.osv)
-                    Spacer(Modifier.width(12.dp))
-                    BasicTextField(
-                        value = vm.query, onValueChange = { vm.query = it },
-                        modifier = Modifier.weight(1f).focusRequester(fr).onFocusChanged { if (it.isFocused && !vm.searchOn) vm.searchOn = true },
-                        textStyle = TextStyle(color = pal.os, fontFamily = LocalFF.current, fontSize = 17.sp, fontWeight = FontWeight(500)),
-                        singleLine = true, cursorBrush = SolidColor(pal.p),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = { focusMgr.clearFocus() }),
-                        decorationBox = { inner ->
-                            Box { if (vm.query.isEmpty()) T(if (vm.remFilter) "Cari di Pengingat" else vm.filter?.let { "Cari di $it" } ?: "Cari catatan", 17f, 500, pal.osv, maxLines = 1); inner() }
-                        }
-                    )
-                    Box(Modifier.graphicsLayer { alpha = sa; scaleX = .4f + .6f * sa; scaleY = .4f + .6f * sa }) {
-                        IconBtn("x", pal.p, { vm.searchOn = false }, size = 44.dp, enabled = vm.searchOn)
-                    }
-                }
-                val q = vm.query.trim().lowercase()
-                val res by remember(vm) {
-                    derivedStateOf {
-                        val qq = vm.query.trim().lowercase()
-                        vm.sorted(vm.liveF().filter { qq.isEmpty() || (it.t + " " + it.x).lowercase().contains(qq) })
-                    }
-                }
+        val q = vm.query.trim().lowercase()
+        val res by remember(vm) {
+            derivedStateOf {
+                val qq = vm.query.trim().lowercase()
+                vm.sorted(vm.liveF().filter { qq.isEmpty() || (it.t + " " + it.x).lowercase().contains(qq) })
+            }
+        }
+        // hasil pencarian: halaman penuh di bawah bilah (seperti Google Keep). Bilah tetap ramping dan tidak mengubah ukuran tiap frame
+        if (sa > 0.001f || vm.searchOn) {
+            Box(
+                Modifier.fillMaxSize()
+                    .graphicsLayer { alpha = sa; compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.ModulateAlpha }
+                    .background(pal.s)
+                    .pointerInput(vm.searchOn) { if (vm.searchOn) detectTapGestures { } }
+            ) {
                 LazyColumn(
-                    Modifier.weight(1f).fillMaxWidth().graphicsLayer { alpha = sa; translationY = (1f - sa) * 14.dp.toPx() },
-                    contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 4.dp, bottom = 16.dp),
+                    Modifier.fillMaxSize().graphicsLayer { translationY = (1f - sa) * 18.dp.toPx() },
+                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = sat + 76.dp, bottom = imeH + 16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     if (res.isEmpty() && vm.searchOn) item(key = "empty-search") {
@@ -898,6 +875,43 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                         }
                     }
                 }
+            }
+        }
+
+        val padH = lerp(72.dp, 8.dp, sa)
+        Box(
+            Modifier.padding(top = sat + 8.dp, start = padH, end = padH).fillMaxWidth().height(56.dp)
+                .clip(RoundedCornerShape(28.dp)).background(pal.c3)
+        ) {
+            Row(
+                Modifier.fillMaxSize().clickable(
+                    interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !vm.searchOn
+                ) { vm.searchOn = true }.padding(start = 4.dp, end = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // ikon kiri: kaca pembesar berputar jadi panah kembali (seperti Keep)
+                Box(Modifier.size(48.dp).clip(CircleShape).clickable(enabled = vm.searchOn) { vm.searchOn = false }, Alignment.Center) {
+                    Box(Modifier.graphicsLayer { alpha = 1f - sa; scaleX = 1f - .5f * sa; scaleY = 1f - .5f * sa; rotationZ = -90f * sa }) { Ic("search", pal.osv) }
+                    Box(Modifier.graphicsLayer { alpha = sa; scaleX = .5f + .5f * sa; scaleY = .5f + .5f * sa; rotationZ = 90f * (1f - sa) }) { Ic("chl", pal.p) }
+                }
+                Spacer(Modifier.width(6.dp))
+                BasicTextField(
+                    value = vm.query, onValueChange = { vm.query = it },
+                    modifier = Modifier.weight(1f).focusRequester(fr).onFocusChanged { if (it.isFocused && !vm.searchOn) vm.searchOn = true },
+                    textStyle = TextStyle(color = pal.os, fontFamily = LocalFF.current, fontSize = 17.sp, fontWeight = FontWeight(500)),
+                    singleLine = true, cursorBrush = SolidColor(pal.p),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { focusMgr.clearFocus() }),
+                    decorationBox = { inner ->
+                        Box { if (vm.query.isEmpty()) T(if (vm.remFilter) "Cari di Pengingat" else vm.filter?.let { "Cari di $it" } ?: "Cari catatan", 17f, 500, pal.osv, maxLines = 1); inner() }
+                    }
+                )
+                // hapus teks: hanya muncul saat ada ketikan
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = vm.searchOn && vm.query.isNotEmpty(),
+                    enter = androidx.compose.animation.fadeIn(tween(140)) + androidx.compose.animation.scaleIn(tween(180, easing = Emph), .6f),
+                    exit = androidx.compose.animation.fadeOut(tween(100)) + androidx.compose.animation.scaleOut(tween(120), .6f)
+                ) { IconBtn("x", pal.osv, { vm.query = "" }, size = 44.dp) }
             }
         }
     }
