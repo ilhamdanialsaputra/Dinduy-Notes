@@ -1945,4 +1945,25 @@ fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boole
             AnimatedVisibility(
                 visible = recOn,
                 enter = fadeIn(tween(220, easing = Emph)) +
-         
+                    scaleIn(spring(.8f, 380f), .86f, TransformOrigin(.9f, 1f)) +
+                    expandVertically(tween(300, easing = Emph)),
+                exit = fadeOut(tween(160)) +
+                    scaleOut(tween(220, easing = Emph), .9f, TransformOrigin(.9f, 1f)) +
+                    shrinkVertically(tween(260, easing = Emph))
+            ) {
+                RecordCard(vm)
+            }
+            DocSheet(ed, act)
+            // bilah datar: gerak kecil + pudar, karena keyboard sudah ikut bergerak sendiri
+            AnimatedVisibility(
+                visible = showBar && ed.sheet == 0,
+                enter = fadeIn(tween(260, easing = Emph)) + slideInVertically(tween(320, easing = Emph)) { it / 3 } +
+                    expandVertically(tween(320, easing = Emph)),
+                exit = fadeOut(tween(180)) + slideOutVertically(tween(260, easing = Emph)) { it / 4 } +
+                    shrinkVertically(tween(300, easing = Emph))
+            ) {
+                DocBar(ed, act)
+            }
+        }
+    }
+}
