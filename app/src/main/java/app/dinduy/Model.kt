@@ -178,8 +178,9 @@ data class Ink(
     val p: List<Float> = emptyList(),
     val sh: Boolean = false,  // bentuk dirapikan: sudut tajam, tanpa penghalusan
     // Jangkar ke huruf (lihat Ink.anc). av = 0 tanpa jangkar (hanya menempel ke blok lewat p); 2 = per titik tiga angka
-    // (indeks huruf, posisi x dalam kotak huruf, posisi y dari garis dasar dalam satuan ukuran huruf); 3 = stabilo satu baris,
-    // hanya dua jangkar (awal dan akhir), digambar per baris sehingga terbelah rapi kalau teksnya turun baris.
+    // (indeks huruf, posisi x dalam kotak huruf, posisi y dari garis dasar dalam satuan ukuran huruf); 3 / 4 = stabilo: satu
+    // (3) atau beberapa (4) "jalur" per baris, tiap jalur cuma dua jangkar (awal dan akhir), digambar per baris sehingga terbelah rapi
+    // kalau teksnya turun baris.
     val an: List<Float> = emptyList(),
     val ah: Float = 0f,       // ukuran huruf (dp) saat dicoret: menskalakan tebal goresan mengikuti ukuran huruf, juga di PDF
     val av: Int = 0
