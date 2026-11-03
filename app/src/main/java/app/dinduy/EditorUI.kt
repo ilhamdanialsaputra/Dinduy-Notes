@@ -165,6 +165,7 @@ import kotlinx.coroutines.delay
 /** Lebar kapsul saat mengembang, sebagai pecahan dari lebar area. */
 private const val BAR_FRAC = 0.84f
 
+@androidx.compose.runtime.Immutable
 class Dm(val fs: Float, val lh: Float, val ff: FontFamily = FontFamily.Default)
 
 fun spanStyle(k: Int, pal: Pal, fs: Float): SpanStyle = when (k) {
@@ -326,7 +327,9 @@ fun TF(
 ) {
     val pal = LocalPal.current
     val v = ed.tf[key] ?: return
-    val rt = ed.rtOf(key)
+    // Rt dibaca lewat derivedStateOf: blok lain yang berubah tidak membangunkan kolom ini (Rt blok yang tak berubah = instance sama)
+    val rtS = remember(key) { androidx.compose.runtime.derivedStateOf { ed.rtOf(key) } }
+    val rt = rtS.value
     val fs = base.fontSize.value
     val just = base.textAlign == androidx.compose.ui.text.style.TextAlign.Justify
     val base2 = if (base.textAlign == androidx.compose.ui.text.style.TextAlign.Justify)
@@ -334,7 +337,10 @@ fun TF(
     val tm = androidx.compose.ui.text.rememberTextMeasurer()
     val dn = androidx.compose.ui.platform.LocalDensity.current
     var jw by remember { mutableStateOf(0) }       // lebar kolom teks (px), dipakai rata kiri-kanan
-    if (ed.reading) {
+    // Sel tabel yang tidak sedang diedit digambar sebagai Text ringan (sama seperti mode baca); BasicTextField hanya dipasang di sel aktif.
+    val activeS = remember(key) { androidx.compose.runtime.derivedStateOf { ed.focus == key || ed.req?.key == key } }
+    val lite = !ed.reading && isCellKey(key) && !activeS.value
+    if (ed.reading || lite) {
         val sr = if (ed.selOn) ed.selRangeOf(key) else null
         val fh = if (ed.findOn) ed.hitsOf(key) else emptyList()
         val fc = if (fh.isEmpty()) null else ed.curHit()?.takeIf { it.key == key }
@@ -361,15 +367,18 @@ fun TF(
                         if (ed.kpos[key] != o) ed.kpos[key] = o
                     }
                 }
-                .pointerInput(rt, ed.selOn) {
-                    if (ed.selOn) detectTapGestures { ed.clearSel() }
+                .pointerInput(rt, ed.selOn, lite) {
+                    if (ed.selOn && !lite) detectTapGestures { ed.clearSel() }
                     else detectTapGestures(
                         // mode baca: ketuk sekali di teks mana pun = langsung mengedit di situ (ketuk tautan = buka tautan)
+                        // sel tabel ringan (mode ketik): ketuk = pasang kolom teks sungguhan di sel itu dan fokus ke sana
                         onTap = { pos ->
+                            if (ed.selOn) ed.dropSel()
                             if (ed.ink.on) return@detectTapGestures
                             val l = lay ?: return@detectTapGestures
                             val o0 = l.getOffsetForPosition(pos)
                             val o = fold?.t2o(o0, 0) ?: o0
+                            if (lite) { ed.focusAt(key, o); return@detectTapGestures }
                             val u = rt.sp.firstOrNull { it.k == K.L && o >= it.s && o < it.e }?.u
                             if (u != null) uri.openUri(u) else ed.exitReading(key, o)
                         }
@@ -383,20 +392,23 @@ fun TF(
         var lay by remember { mutableStateOf<TextLayoutResult?>(null) }
         var foc by remember { mutableStateOf(false) }
         LaunchedEffect(lay) { lay?.let { ed.lays[key] = it; ed.lsh[key] = 1 } }
-        val r = ed.req
-        LaunchedEffect(r) {
-            if (r != null && r.key == key) {
-                try { fr.requestFocus() } catch (e: Exception) { }
-                ed.applyReq(r)
+        // permintaan fokus dibaca di dalam efek (bukan di komposisi): ed.req berubah tidak membangunkan semua kolom
+        LaunchedEffect(key) {
+            androidx.compose.runtime.snapshotFlow { ed.req }.collect { r ->
+                if (r != null && r.key == key) {
+                    try { fr.requestFocus() } catch (e: Exception) { }
+                    ed.applyReq(r)
+                }
             }
         }
-        val clear = if (ed.barOn) ed.barH + 16f * ed.dens else 0f   // tinggi kapsul (termasuk jarak bawahnya) + sedikit ruang napas
+        val kbc = LocalSoftwareKeyboardController.current
         val imeIns = WindowInsets.ime   // objeknya saja diambil di komposisi; nilainya dibaca di dalam efek
-        LaunchedEffect(v.selection, v.text.length, foc, clear) {
+        LaunchedEffect(v.selection, v.text.length, foc) {
             if (foc && v.selection.collapsed) {
-                // tinggi keyboard dipantau di sini (bukan di komposisi), jadi hanya kolom yang fokus yang bereaksi dan tidak ada recompose per frame
-                androidx.compose.runtime.snapshotFlow { imeIns.getBottom(dn) }.collectLatest {
+                // tinggi keyboard + tinggi kapsul dipantau di sini (bukan di komposisi), jadi hanya kolom yang fokus yang bereaksi dan tidak ada recompose per frame
+                androidx.compose.runtime.snapshotFlow { imeIns.getBottom(dn) to (if (ed.barOn) ed.barH else 0f) }.collectLatest {
                     delay(60)
+                    val clear = if (ed.barOn) ed.barH + 16f * ed.dens else 0f   // tinggi kapsul (termasuk jarak bawahnya) + sedikit ruang napas
                     lay?.let { l ->
                         val o = (fold?.o2t(v.selection.start, 1) ?: v.selection.start).coerceIn(0, l.layoutInput.text.length)
                         try { bring.bringIntoView(l.getCursorRect(o).let { c -> c.copy(bottom = c.bottom + clear) }) } catch (e: Exception) { }
@@ -472,7 +484,7 @@ fun TF(
                             else -> false
                         }
                     }
-                    .onFocusChanged { foc = it.isFocused; if (it.isFocused) ed.onFocus(key) }
+                    .onFocusChanged { foc = it.isFocused; if (it.isFocused) { ed.onFocus(key); if (ed.sheet != 0) kbc?.hide() } }
                     .wordTap(
                         onTap = { if (ed.selEdit) ed.dropSel() },
                         onDouble = { pos ->
@@ -486,7 +498,7 @@ fun TF(
                     ),
                 textStyle = base2, cursorBrush = SolidColor(if (hideNative) Color.Transparent else pal.p), visualTransformation = vt,
                 onTextLayout = { lay = it; jw = it.layoutInput.constraints.maxWidth },
-                readOnly = ed.sheet != 0,      // sheet bawah aktif: ketuk / seleksi teks tetap bisa, tapi keyboard tidak muncul
+                readOnly = foc && ed.sheet != 0,      // sheet bawah aktif: hanya kolom yang fokus yang membaca ed.sheet (kolom lain tidak ikut recompose)
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 decorationBox = { inner ->
                     Box {
@@ -527,7 +539,7 @@ fun BlockView(ed: Ed, vm: AppVM, b: Blk, ordN: Int, dm: Dm, fold: Fold? = null, 
     when (b.ty) {
         "p", "li" -> {
             // paragraf dan poin memakai satu composable yang sama: mengubah poin <-> paragraf tidak membuat TextField baru (keyboard tetap)
-            val only = b.ty == "p" && ed.blocks.size == 1 && b.r.t.isEmpty()
+            val only = b.ty == "p" && b.r.t.isEmpty() && ed.blocks.size == 1
             ParaRow(ed, b, ordN, dm, pal, fold, mk, if (only) "Tulis catatan…" else null)
         }
         "h" -> {
@@ -646,46 +658,70 @@ fun ParaRow(ed: Ed, b: Blk, ordN: Int, dm: Dm, pal: Pal, fold: Fold?, mk: Float,
 fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal) {
     val cols = b.tb.firstOrNull()?.size ?: 1
     val colW = maxOf(110f, ed.widthDp / cols).dp
+    // sel yang sedang diedit di tabel ini (null = tidak ada). derivedStateOf: hanya tabel yang fokusnya berubah yang recompose.
+    val fkS = remember(b.id) {
+        androidx.compose.runtime.derivedStateOf {
+            val f = ed.focus
+            if (f != null && !ed.reading && isCellKey(f) && keyBlock(f) == b.id) f else null
+        }
+    }
+    val fk = fkS.value
+    val fRC = if (fk != null) cellRC(fk) else null
     Box(
         Modifier.fillMaxWidth().padding(bottom = (dm.fs * 1.1f).dp).clip(RoundedCornerShape(24.dp)).background(pal.c2)
             .horizontalScroll(rememberScrollState())
     ) {
         Column {
             b.tb.forEachIndexed { r, row ->
-                Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {   // tinggi sel sebaris sama, supaya garis kolom tidak putus
+                val head = r == 0
+                val fc = if (fRC != null && fRC.first == r) fRC.second else -1
+                // satu baris = satu Layout sendiri (satu kali ukur, tanpa IntrinsicSize): tinggi baris = sel tertinggi
+                TRow(colW, head, r > 0, fc, pal) {
                     row.forEachIndexed { c, _ ->
                         val k = "${b.id}:$r:$c"
-                        val focused = ed.focus == k && !ed.reading
-                        val head = r == 0
-                        val bg = if (focused) pal.pc else if (head) pal.sc else Color.Transparent
+                        val focused = fc == c
                         val fg = if (focused) pal.opc else if (head) pal.osc else pal.os
-                        Box(
-                            Modifier.width(colW).fillMaxHeight().background(bg)
-                                .drawBehind {
-                                    val o = { x: Float, y: Float -> androidx.compose.ui.geometry.Offset(x, y) }
-                                    if (r > 0) drawLine(pal.ol, o(0f, 0f), o(size.width, 0f), 1.dp.toPx())   // garis pemisah baris
-                                    if (c > 0) drawLine(pal.ol, o(0f, 0f), o(0f, size.height), 1.dp.toPx())   // garis pemisah kolom
-                                }
-                                .padding(horizontal = 16.dp, vertical = 12.dp)
-                        ) {
-                            val al = when (b.ca.getOrNull(c)) {
-                                "center" -> androidx.compose.ui.text.style.TextAlign.Center
-                                "right" -> androidx.compose.ui.text.style.TextAlign.End
-                                else -> androidx.compose.ui.text.style.TextAlign.Start
-                            }
-                            TF(
-                                ed, k,
-                                TextStyle(
-                                    color = fg, fontFamily = dm.ff, fontSize = (dm.fs * .9f).sp, lineHeight = (dm.fs * .9f * 1.45f).sp,
-                                    fontWeight = FontWeight(if (head) 850 else 400), textAlign = al
-                                ),
-                                Modifier.fillMaxWidth()
-                            )
+                        val al = when (b.ca.getOrNull(c)) {
+                            "center" -> androidx.compose.ui.text.style.TextAlign.Center
+                            "right" -> androidx.compose.ui.text.style.TextAlign.End
+                            else -> androidx.compose.ui.text.style.TextAlign.Start
                         }
+                        TF(
+                            ed, k,
+                            TextStyle(
+                                color = fg, fontFamily = dm.ff, fontSize = (dm.fs * .9f).sp, lineHeight = (dm.fs * .9f * 1.45f).sp,
+                                fontWeight = FontWeight(if (head) 850 else 400), textAlign = al
+                            ),
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)
+                        )
                     }
                 }
             }
         }
+    }
+}
+
+/** Satu baris tabel. Latar sel (kepala / sel aktif) dan garis pemisah digambar di sini; sel hanya berisi teks. */
+@Composable
+private fun TRow(colW: Dp, head: Boolean, topLine: Boolean, fc: Int, pal: Pal, content: @Composable () -> Unit) {
+    androidx.compose.ui.layout.Layout(
+        content = content,
+        modifier = Modifier.drawBehind {
+            val w = colW.toPx()
+            val n = if (w > 0f) (size.width / w + .5f).toInt() else 0
+            for (c in 0 until n) {
+                val x = c * w
+                if (c == fc) drawRect(pal.pc, Offset(x, 0f), Size(w, size.height))
+                else if (head) drawRect(pal.sc, Offset(x, 0f), Size(w, size.height))
+            }
+            if (topLine) drawLine(pal.ol, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx())   // garis pemisah baris
+            for (c in 1 until n) drawLine(pal.ol, Offset(c * w, 0f), Offset(c * w, size.height), 1.dp.toPx())   // garis pemisah kolom
+        }
+    ) { ms, _ ->
+        val w = colW.roundToPx()
+        val ps = ms.map { it.measure(Constraints(minWidth = w, maxWidth = w)) }
+        val h = ps.maxOfOrNull { it.height } ?: 0
+        layout(w * ps.size, h) { ps.forEachIndexed { i, p -> p.placeRelative(i * w, 0) } }
     }
 }
 
@@ -1431,7 +1467,8 @@ fun Sep() {
 @Composable
 fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     val pal = LocalPal.current
-    val dm = Dm(vm.pr.fs.toFloat(), vm.pr.lh, LocalFF.current)
+    val ffNow = LocalFF.current
+    val dm = remember(vm.pr.fs, vm.pr.lh, ffNow) { Dm(vm.pr.fs.toFloat(), vm.pr.lh, ffNow) }   // instance stabil: blok tidak recompose tanpa sebab
     val scroll = rememberScrollState()
     InkSetup(ed)
     // Tombol back Android: tutup yang paling atas dulu. Mode ketik -> mode baca (tampilan penuh) -> baru keluar catatan.
@@ -1512,7 +1549,9 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
         }
     }
 
-    val imeOpen = WindowInsets.ime.getBottom(density) > 0
+    // derivedStateOf: hanya berubah saat keyboard benar-benar buka/tutup, bukan tiap frame animasinya (dulu seluruh layar recompose per frame)
+    val imeInsets = WindowInsets.ime
+    val imeOpen by remember(density) { androidx.compose.runtime.derivedStateOf { imeInsets.getBottom(density) > 0 } }
     val haptic = LocalHapticFeedback.current
     val hasAu = vm.note(ed.noteId)?.au?.isNotEmpty() == true
     SideEffect {
@@ -1906,25 +1945,4 @@ fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boole
             AnimatedVisibility(
                 visible = recOn,
                 enter = fadeIn(tween(220, easing = Emph)) +
-                    scaleIn(spring(.8f, 380f), .86f, TransformOrigin(.9f, 1f)) +
-                    expandVertically(tween(300, easing = Emph)),
-                exit = fadeOut(tween(160)) +
-                    scaleOut(tween(220, easing = Emph), .9f, TransformOrigin(.9f, 1f)) +
-                    shrinkVertically(tween(260, easing = Emph))
-            ) {
-                RecordCard(vm)
-            }
-            DocSheet(ed, act)
-            // bilah datar: gerak kecil + pudar, karena keyboard sudah ikut bergerak sendiri
-            AnimatedVisibility(
-                visible = showBar && ed.sheet == 0,
-                enter = fadeIn(tween(260, easing = Emph)) + slideInVertically(tween(320, easing = Emph)) { it / 3 } +
-                    expandVertically(tween(320, easing = Emph)),
-                exit = fadeOut(tween(180)) + slideOutVertically(tween(260, easing = Emph)) { it / 4 } +
-                    shrinkVertically(tween(300, easing = Emph))
-            ) {
-                DocBar(ed, act)
-            }
-        }
-    }
-}
+         
