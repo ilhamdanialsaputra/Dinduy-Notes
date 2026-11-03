@@ -1010,15 +1010,53 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     fun cursorClear(): Float = if (barHLive > 0f) barHLive + 12f * dens else 12f * dens
     var scroll: ScrollState? = null
 
-    /** Selisih gulir agar kursor tetap terlihat di atas keyboard + kapsul; dipanggil tiap frame lewat snapshotFlow. */
+    // ---- gulir otomatis ke kursor ----
+    // Prinsip: HANYA satu sistem yang menggulir (fungsi ini). Gulir bawaan BasicTextField dimatikan di NoteScreen (cursorSpec).
+    // Gulir hanya terjadi bila (a) kursor/teks/blok fokus berubah, atau (b) keyboard/kapsul berubah DAN kursor tadinya masih terlihat.
+    // Perubahan layout kebetulan (blok lain berubah ukuran, dll) tidak boleh menyeret layar kembali ke kursor.
+    private class CsSig(val key: String, val sel: Int, val len: Int, val vh: Float, val bh: Float) {
+        override fun equals(other: Any?) = other is CsSig && key == other.key && sel == other.sel && len == other.len && vh == other.vh && bh == other.bh
+        override fun hashCode() = ((key.hashCode() * 31 + sel) * 31 + len) * 31 + vh.hashCode() + bh.hashCode()
+        fun sameCaret(o: CsSig) = key == o.key && sel == o.sel && len == o.len
+    }
+    private var csSig: CsSig? = null
+    private var csPend = false          // ada perubahan yang belum sempat dihitung (menunggu layout yang sudah segar)
+    private var csForce = false         // true: kursor berpindah / teks berubah -> wajib terlihat; false: hanya viewport berubah
+    private var csLastForce = false
+    private var csRefVh = 0f            // ukuran viewport sebelum perubahan (untuk cek "tadinya terlihat")
+    private var csRefBh = 0f
+    private var csTry = 0
+    private var csBump by mutableStateOf(0)
+
+    /** Dipanggil collector setelah menggulir: bila gulir terpotong (batas gulir belum ikut membesar), coba lagi beberapa frame. */
+    fun csApplied(want: Float, used: Float) {
+        if (kotlin.math.abs(want - used) > 1f && csTry < 5) {
+            csTry++
+            csPend = true
+            csForce = csLastForce
+            csBump++
+        }
+    }
+
+    /** Selisih gulir agar kursor tetap terlihat di atas keyboard + kapsul; dipanggil lewat snapshotFlow. */
     fun cursorScrollDelta(scrollV: Int): Float {
-        if (reading || selOn || ink.on || titleFocus || findOn) return 0f
-        val key = focus ?: return 0f
+        if (reading || selOn || ink.on || titleFocus || findOn) { csPend = false; return 0f }
+        val key = focus ?: run { csSig = null; csPend = false; return 0f }
         val v = tf[key] ?: return 0f
-        if (!v.selection.collapsed) return 0f
+        if (!v.selection.collapsed || viewH <= 0f) return 0f
+        if (csBump < 0) return 0f   // hanya untuk berlangganan (dipakai coba-ulang)
+        val sig = CsSig(key, v.selection.start, v.text.length, viewH, barHLive)
+        val old = csSig
+        if (sig != old) {
+            csSig = sig
+            if (old == null || !sig.sameCaret(old)) { csForce = true; csTry = 0; csPend = true }
+            else if (!csPend) { csForce = false; csRefVh = old.vh; csRefBh = old.bh; csPend = true }
+        }
+        if (!csPend) return 0f
         val lay = lays[key] ?: return 0f
         val pos = kpos[key] ?: return 0f
-        if (lsh[key] != 1 || viewH <= 0f) return 0f
+        // layout harus layout dari kolom edit dan dari teks yang sekarang (kalau belum, tunggu: lays berubah => dihitung lagi)
+        if (lsh[key] != 1 || layLen[key] != v.text.length) return 0f
         val lt = lay.layoutInput.text.length
         val o = toLay(key, v.selection.start - 1).coerceIn(0, lt)
         val r = lay.getCursorRect(o)
@@ -1026,6 +1064,16 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val bot = pos.y + r.bottom
         val vt = scrollV + 12f * dens
         val vb = scrollV + viewH - cursorClear()
+        csPend = false
+        csLastForce = csForce
+        val force = csForce
+        csForce = false
+        if (!force) {
+            // hanya keyboard/kapsul yang berubah: ikuti kursor hanya bila tadinya memang terlihat (pembaca yang sengaja menggulir menjauh tidak diseret balik)
+            val clr0 = (if (csRefBh > 0f) csRefBh + 12f * dens else 12f * dens)
+            val vb0 = scrollV + csRefVh - clr0
+            if (!(bot <= vb0 + 2f && top >= vt - 2f)) return 0f
+        }
         return when { bot > vb -> bot - vb; top < vt -> top - vt; else -> 0f }
     }
     var buzz: (() -> Unit)? = null
@@ -1328,6 +1376,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     var selDrag by mutableStateOf(false)
     val lays = mutableStateMapOf<String, TextLayoutResult>()
     val kpos = mutableStateMapOf<String, Offset>()
+    val layLen = HashMap<String, Int>()       // panjang teks kolom edit saat layout di lays dibuat (deteksi layout basi)
     val lsh = HashMap<String, Int>()          // 1 bila layout berasal dari kolom edit (ada awalan Z di indeks 0)
     val ipos = HashMap<String, Rect>()        // kotak tiap gambar di ruang konten
     val folds = HashMap<String, Fold>()       // pemotongan baris buatan (teks mengelilingi gambar), per kolom teks
