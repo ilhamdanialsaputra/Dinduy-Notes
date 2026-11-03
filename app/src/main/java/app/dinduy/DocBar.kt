@@ -521,13 +521,13 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM) {
                                 }
                             }
                             else -> {
-                                // ---- ukuran teks: nilainya sama dengan slider di Pengaturan (vm.pr.fs), jadi dua-duanya selalu nyambung ----
+                                // ---- ukuran teks: per catatan (Note.fs); 0 = ikut bawaan ----
                                 Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 6.dp)) {
                                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                         T("Ukuran teks", 17f, 500, pal.os)
-                                        T("${vm.pr.fs} px", 16f, 600, pal.p)
+                                        T("${vm.noteFs(ed.noteId)} px", 16f, 600, pal.p)
                                     }
-                                    BigSlider(vm.pr.fs.toFloat(), 14f, 30f) { vm.setPr(vm.pr.copy(fs = it.toInt())) }
+                                    BigSlider(vm.noteFs(ed.noteId).toFloat(), 14f, 30f) { v -> vm.upd(ed.noteId) { it.copy(fs = v.toInt()) } }
                                 }
                                 Box(Modifier.fillMaxWidth().height(1.dp).padding(horizontal = 22.dp).background(pal.ol.copy(alpha = .35f)))
                                 SRow(on = ty == "p", enabled = !convOff, icon = { T("T", 20f, 700, pal.os) }, label = { T("Teks biasa", 17f, 500, pal.os) }) {
