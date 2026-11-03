@@ -1007,15 +1007,6 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
                     .size(7.dp, 64.dp).clip(CircleShape).background(pal.p)
             )
         }
-        val merging = ed.mergeT != null
-        val leaving = liftedRow && !merging && ed.dropAt >= 0
-        if (liftedBlk || (liftedRow && (merging || leaving))) {
-            val t = if (merging) "Lepas untuk jadi kolase" else if (leaving) "Lepas untuk keluar dari kolase" else when (ed.mvAl) { "l" -> "Kiri · teks di kanan"; "r" -> "Kanan · teks di kiri"; else -> "Tengah" }
-            Box(
-                Modifier.align(Alignment.TopCenter).padding(top = 10.dp).clip(RoundedCornerShape(14.dp)).background(pal.p)
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
-            ) { T(t, 13f, 900, pal.op) }
-        }
         if (selected && !ed.reading && ed.mv == null) {
             Box(Modifier.matchParentSize().border(2.dp, pal.p, shape))
             // centang tutup mode edit gambar: menempel di gambarnya, bukan di toolbar
@@ -1903,9 +1894,15 @@ fun SelHandles(ed: Ed) {
 fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boolean) {
     val recOn = ed.recActive
     SideEffect { ed.barOn = showBar || recOn || ed.sheet != 0 }
+    // Tinggi bilah berubah tiap frame saat bilah / sheet beranimasi. Kalau langsung ditulis ke ed.barH, SETIAP blok teks
+    // ikut recompose + restart efek tiap frame (penyebab sheet "+" dan "A" lemot). Sekarang baru diterapkan setelah animasi tenang.
+    var rawBarH by remember { mutableStateOf(0f) }
+    LaunchedEffect(Unit) {
+        androidx.compose.runtime.snapshotFlow { rawBarH }.collectLatest { h -> delay(80); ed.barH = h }
+    }
     Box(Modifier.fillMaxSize()) {
         // kartu rekaman + kapsul alat dalam satu kolom yang diukur bersama (barH), jadi teks / kursor tidak pernah tertutup
-        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().onSizeChanged { ed.barH = it.height.toFloat() }) {
+        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().onSizeChanged { rawBarH = it.height.toFloat() }) {
             AnimatedVisibility(
                 visible = recOn,
                 enter = fadeIn(tween(220, easing = Emph)) +
