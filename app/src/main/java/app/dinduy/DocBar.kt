@@ -383,18 +383,21 @@ private fun Stepper(label: String, v: Int, lo: Int, hi: Int, onChange: (Int) -> 
     }
 }
 
-/** Satu baris pengaturan inden: label, tombol −, angka (dp), tombol +. Langkah IND_STEP. Nonaktif = pudar dan tidak bisa diketuk. */
+/** Ikon inden. kind: 0 kiri, 1 kanan, 2 baris pertama, 3 menggantung. */
 @Composable
-private fun IndRow(label: String, v: Int, hi: Int, enabled: Boolean, onChange: (Int) -> Unit) {
-    val pal = LocalPal.current
-    Row(
-        Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 22.dp).alpha(if (enabled) 1f else .35f),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        T(label, 17f, 500, pal.os, Modifier.weight(1f))
-        Chip("−", pal.c4, pal.os, CircleShape, 44.dp, 44.dp) { if (enabled && v > 0) onChange((v - IND_STEP).coerceAtLeast(0)) }
-        Box(Modifier.width(56.dp), Alignment.Center) { T("$v", 18f, 800, pal.os) }
-        Chip("+", pal.c4, pal.os, CircleShape, 44.dp, 44.dp) { if (enabled && v < hi) onChange((v + IND_STEP).coerceAtMost(hi)) }
+private fun IndentIcon(kind: Int, c: Color) {
+    Canvas(Modifier.size(24.dp)) {
+        val u = size.width / 24f
+        val ys = listOf(5f, 10f, 14f, 19f)
+        ys.forEachIndexed { n, y ->
+            val (a, b) = when (kind) {
+                0 -> 10f to 21f
+                1 -> 3f to 14f
+                2 -> (if (n == 0) 9f else 3f) to 21f
+                else -> (if (n == 0) 3f else 9f) to 21f
+            }
+            drawLine(c, Offset(a * u, y * u), Offset(b * u, y * u), 2f * u, StrokeCap.Round)
+        }
     }
 }
 
@@ -533,18 +536,25 @@ fun DocSheet(ed: Ed, act: Actions) {
                                 SRow(on = K.C in fl, enabled = ty != "code", icon = { Ic("code", pal.os) }, label = { T("Kode sebaris", 17f, 500, pal.os) }) {
                                     ed.toggleFmt(K.C)
                                 }
-                                // ---- inden paragraf ----
+                                // ---- inden paragraf: satu ketukan = satu inden, ketuk lagi = lepas ----
                                 val indLR = !blkOff && blk != null && (ty == "p" || ty == "h" || ty == "li" || ty == "q")
                                 val indSp = !blkOff && blk != null && (ty == "p" || ty == "h" || ty == "li")
                                 Box(Modifier.fillMaxWidth().height(1.dp).padding(horizontal = 22.dp).background(pal.ol.copy(alpha = .35f)))
                                 T("Inden", 15f, 800, pal.p, Modifier.padding(start = 22.dp, top = 12.dp, bottom = 2.dp))
-                                IndRow("Inden kiri", blk?.il ?: 0, IND_MAX, indLR) { ed.setIndent(0, it) }
-                                IndRow("Inden kanan", blk?.ir ?: 0, IND_MAX, indLR) { ed.setIndent(1, it) }
-                                IndRow("Baris pertama", (blk?.fi ?: 0).coerceAtLeast(0), IND_MAX_FI, indSp) { ed.setIndent(2, it) }
-                                IndRow("Menggantung", (-(blk?.fi ?: 0)).coerceAtLeast(0), IND_MAX_FI, indSp) { ed.setIndent(3, it) }
-                                Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), Alignment.Center) {
-                                    val any = blk != null && (blk.il != 0 || blk.ir != 0 || blk.fi != 0)
-                                    Chip("Atur ulang inden", pal.c4, pal.os, RoundedCornerShape(23.dp)) { if (indLR && any) ed.resetIndent() }
+                                val il = blk?.il ?: 0
+                                val ir = blk?.ir ?: 0
+                                val fi = blk?.fi ?: 0
+                                SRow(on = il > 0, enabled = indLR, icon = { IndentIcon(0, pal.os) }, label = { T("Inden kiri", 17f, 500, pal.os) }) {
+                                    ed.setIndent(0, if (il > 0) 0 else IND_UNIT)
+                                }
+                                SRow(on = ir > 0, enabled = indLR, icon = { IndentIcon(1, pal.os) }, label = { T("Inden kanan", 17f, 500, pal.os) }) {
+                                    ed.setIndent(1, if (ir > 0) 0 else IND_UNIT)
+                                }
+                                SRow(on = fi > 0, enabled = indSp, icon = { IndentIcon(2, pal.os) }, label = { T("Inden baris pertama", 17f, 500, pal.os) }) {
+                                    ed.setIndent(2, if (fi > 0) 0 else IND_UNIT)
+                                }
+                                SRow(on = fi < 0, enabled = indSp, icon = { IndentIcon(3, pal.os) }, label = { T("Inden menggantung", 17f, 500, pal.os) }) {
+                                    ed.setIndent(3, if (fi < 0) 0 else IND_UNIT)
                                 }
                             }
                         }
