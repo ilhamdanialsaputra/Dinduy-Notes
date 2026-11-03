@@ -37,6 +37,7 @@ private val RX_CK = Regex("^\\[([ xX]?)]\\s")
  * Hanya tampilan: teks aslinya tidak berubah.
  */
 
+@androidx.compose.runtime.Immutable
 class Fold(val cuts: IntArray, val padLen: Int, val padCnt: Int, val ls: Float, val cutR: Float = 0f) {
     private val sp = if (padLen > 0) padLen else 0
 
@@ -97,10 +98,41 @@ fun cellRC(k: String): Pair<Int, Int> {
     return (p.getOrNull(1)?.toIntOrNull() ?: 0) to (p.getOrNull(2)?.toIntOrNull() ?: 0)
 }
 
+/**
+ * Penyimpan TextFieldValue per kolom. Tiap kunci punya state sendiri, jadi mengetik di satu blok TIDAK membangunkan
+ * kolom lain (mutableStateMapOf = satu objek state untuk seluruh peta: tiap put meng-invalidate SEMUA kolom yang membacanya).
+ * [ver] naik saat kunci ditambah / dihapus dan hanya dibaca kalau kunci yang diminta belum ada.
+ */
+class TfStore {
+    private val m = HashMap<String, androidx.compose.runtime.MutableState<TextFieldValue>>()
+    private var ver by mutableStateOf(0)
+    val keys: Set<String> get() = m.keys
+
+    operator fun get(key: String): TextFieldValue? {
+        val s = m[key]
+        if (s == null) {
+            if (ver == Int.MIN_VALUE) return null   // hanya untuk berlangganan: kunci baru akan membangunkan pembaca ini
+            return null
+        }
+        return s.value
+    }
+
+    operator fun set(key: String, v: TextFieldValue) {
+        val s = m[key]
+        if (s == null) { m[key] = mutableStateOf(v); ver += 1 } else s.value = v
+    }
+
+    fun remove(key: String) { if (m.remove(key) != null) ver += 1 }
+    fun clear() { if (m.isNotEmpty()) { m.clear(); ver += 1 } }
+    fun containsKey(key: String): Boolean = m.containsKey(key)
+    fun removePrefix(p: String) { if (m.keys.removeAll { it.startsWith(p) }) ver += 1 }
+}
+
+@androidx.compose.runtime.Stable
 class Ed(private val vm: AppVM, val noteId: String, private val scope: CoroutineScope) {
     var title by mutableStateOf("")
     var blocks by mutableStateOf<List<Blk>>(listOf(Blk()))
-    val tf = mutableStateMapOf<String, TextFieldValue>()
+    val tf = TfStore()
     var focus by mutableStateOf<String?>(null)
     var typing by mutableStateOf(setOf<Int>())
     var reading by mutableStateOf(false)
@@ -170,7 +202,18 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     }
 
     fun idx(id: String) = blocks.indexOfFirst { it.id == id }
-    fun blockOfKey(k: String): Blk? = blocks.firstOrNull { it.id == keyBlock(k) }
+    // peta id -> blok, dibangun ulang hanya kalau daftar blok berganti: pencarian O(1), bukan O(N) per kolom per ketikan
+    private var idMapFor: List<Blk>? = null
+    private var idMap = HashMap<String, Blk>()
+    fun blockOfKey(k: String): Blk? {
+        val bl = blocks
+        if (idMapFor !== bl) {
+            val mm = HashMap<String, Blk>(bl.size * 2 + 4)
+            for (x in bl) if (x.id !in mm) mm[x.id] = x
+            idMap = mm; idMapFor = bl
+        }
+        return idMap[keyBlock(k)]
+    }
 
     fun rtOf(key: String): Rt {
         val b = blockOfKey(key) ?: return Rt()
@@ -746,7 +789,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             }
             "dt" -> {
                 blocks = blocks.filterIndexed { k, _ -> k != i }
-                tf.keys.removeAll { it.startsWith("$bid:") }
+                tf.removePrefix("$bid:")
                 norm()
                 focus = null
                 afterStructural()
@@ -755,7 +798,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             }
         }
         setBlock(i, nb)
-        tf.keys.removeAll { it.startsWith("$bid:") }
+        tf.removePrefix("$bid:")
         seed(nb)
         focusAt(target, 0)
         afterStructural()
