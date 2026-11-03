@@ -196,11 +196,29 @@ data class Blk(
     val ca: List<String> = emptyList(),
     val im: List<Img> = emptyList(),
     val ik: List<Ink> = emptyList(),  // coretan yang menempel pada blok ini (koordinat relatif terhadap blok)
-    val ta: String = ""               // perataan teks: "" kiri, c tengah, r kanan, j rata kiri-kanan
+    val ta: String = "",              // perataan teks: "" kiri, c tengah, r kanan, j rata kiri-kanan
+    val il: Int = 0,                  // inden kiri (dp)
+    val ir: Int = 0,                  // inden kanan (dp)
+    val fi: Int = 0                   // > 0 inden baris pertama, < 0 inden menggantung (dp, nilai mutlak = jaraknya)
 ) {
     val isText: Boolean get() = ty == "p" || ty == "h" || ty == "li" || ty == "q" || ty == "code"
     val isObj: Boolean get() = ty == "tbl" || ty == "img" || ty == "hr"
     val isMulti: Boolean get() = ty == "q" || ty == "code"
+}
+
+// ---- inden paragraf (satuan dp; PDF mengalikan dengan skala yang sama dengan jarak lain) ----
+const val IND_STEP = 8        // langkah tombol + / −
+const val IND_MAX = 120       // batas inden kiri dan kanan
+const val IND_MAX_FI = 96     // batas inden baris pertama / menggantung
+const val IND_MIN_COL = 120f  // lebar kolom teks minimal (dp) yang selalu disisakan
+
+/** Inden kiri dan kanan yang benar-benar dipakai: kalau jumlahnya terlalu besar untuk lebar [total], dikecilkan sebanding. */
+fun fitInd(l: Int, r: Int, total: Float): Pair<Float, Float> {
+    val lf = l.coerceIn(0, IND_MAX).toFloat()
+    val rf = r.coerceIn(0, IND_MAX).toFloat()
+    val room = (total - IND_MIN_COL).coerceAtLeast(0f)
+    val sum = lf + rf
+    return if (sum <= room || sum <= 0f) lf to rf else (lf * room / sum) to (rf * room / sum)
 }
 
 /** Rekaman suara pada catatan. File: filesDir/audio/<id>.m4a. tr = hasil transkripsi (kosong = belum). */
