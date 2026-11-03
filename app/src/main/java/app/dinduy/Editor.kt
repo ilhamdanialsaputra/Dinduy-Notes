@@ -22,6 +22,13 @@ const val SIDE_GAP = 14f
 const val SIDE_MIN = 110f
 const val SIDE_W = 0.5f
 
+private val RX_BUL = Regex("^([-*•+])\\s")
+private val RX_NUM = Regex("^\\d{1,3}[.)]\\s")
+private val RX_DASHL = Regex("^-\\p{L}")
+private val RX_QT = Regex("^>\\s")
+private val RX_HD = Regex("^(#{1,2})\\s")
+private val RX_CK = Regex("^\\[([ xX]?)]\\s")
+
 /**
  * Pemotongan baris buatan untuk satu paragraf yang melewati dasar gambar mengambang:
  * [cuts] = offset awal tiap baris yang disisipi pemisah baris visual; [padLen] = jumlah spasi-em penggeser
@@ -29,6 +36,7 @@ const val SIDE_W = 0.5f
  * [ls] = letter-spacing (sp) agar lebar penggeser pas selebar gambar.
  * Hanya tampilan: teks aslinya tidak berubah.
  */
+
 class Fold(val cuts: IntArray, val padLen: Int, val padCnt: Int, val ls: Float, val cutR: Float = 0f) {
     private val sp = if (padLen > 0) padLen else 0
 
@@ -343,25 +351,25 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         var nb: Blk? = null
         var len = 0
         if (b.ty == "p") {
-            var m = Regex("^([-*•+])\\s").find(tx)
+            var m = RX_BUL.find(tx)
             if (m != null && c == m.value.length) { nb = Blk(id = b.id, ik = b.ik, ta = b.ta, ty = "li", lt = "b"); len = m.value.length }
             if (nb == null) {
-                m = Regex("^\\d{1,3}[.)]\\s").find(tx)
+                m = RX_NUM.find(tx)
                 if (m != null && c == m.value.length) { nb = Blk(id = b.id, ik = b.ik, ta = b.ta, ty = "li", lt = "o"); len = m.value.length }
             }
-            if (nb == null && Regex("^-\\p{L}").containsMatchIn(tx) && c >= 2 && c <= 1 + df.ins) {
+            if (nb == null && RX_DASHL.containsMatchIn(tx) && c >= 2 && c <= 1 + df.ins) {
                 nb = Blk(id = b.id, ik = b.ik, ta = b.ta, ty = "li", lt = "b"); len = 1
             }
             if (nb == null) {
-                m = Regex("^>\\s").find(tx)
+                m = RX_QT.find(tx)
                 if (m != null && c == 2) { nb = Blk(id = b.id, ik = b.ik, ta = b.ta, ty = "q", k = "quote"); len = 2 }
             }
             if (nb == null) {
-                m = Regex("^(#{1,2})\\s").find(tx)
+                m = RX_HD.find(tx)
                 if (m != null && c == m.value.length) { nb = Blk(id = b.id, ik = b.ik, ta = b.ta, ty = "h", lv = m.groupValues[1].length); len = m.value.length }
             }
         } else if (b.ty == "li" && b.lt == "b") {
-            val m = Regex("^\\[([ xX]?)]\\s").find(tx)
+            val m = RX_CK.find(tx)
             if (m != null && c == m.value.length) {
                 nb = Blk(id = b.id, ik = b.ik, ta = b.ta, ty = "li", lt = "c", d = b.d, x = m.groupValues[1].isNotBlank()); len = m.value.length
             }
