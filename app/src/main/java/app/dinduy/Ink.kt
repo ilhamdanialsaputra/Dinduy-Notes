@@ -263,6 +263,7 @@ val Ink.anc: Boolean get() = ah > 0f && when (av) {
     2 -> an.isNotEmpty() && an.size == p.size
     3 -> an.size == 6
     4 -> an.size >= 12 && an.size % 6 == 0
+    7 -> an.size == 3 && o.size * 3 == p.size * 2      // pena kaku: satu titik acuan di huruf + bentuk (o) dalam satuan ukuran huruf
     else -> false
 }
 
@@ -368,6 +369,40 @@ internal fun Ed.inkAnchor(b: Blk, a: FloatArray, n: Int, hl: Boolean, skip: Int 
     return Triple(flat, em / dens, if (use.size == 1) 3 else 4)
 }
 
+/**
+ * Pena kaku: seluruh goresan menempel ke SATU huruf (titik tengah goresan), bentuknya disimpan dalam satuan ukuran huruf (o).
+ * Saat huruf dibesarkan / dikecilkan atau teks pindah baris, goresan ikut bergeser dan diskalakan utuh, tidak pernah melar.
+ * Titik tengah yang jauh dari teks tetap dijangkarkan ke huruf terdekat (mis. di ruang kosong sesudah akhir baris).
+ */
+internal fun Ed.rigidAnchor(b: Blk, a: FloatArray, n: Int): Triple<List<Float>, Float, List<Float>>? {
+    if (!b.isText || n < 2 || b.r.t.isEmpty()) return null
+    val lay = lays[b.id] ?: return null
+    val pos = kpos[b.id] ?: return null
+    val len = lay.layoutInput.text.length
+    val z = lsh[b.id] ?: 0
+    if (len <= z) return null
+    if (folds[b.id] == null && len != b.r.t.length + z) return null
+    val em = emPx(lay)
+    if (em <= 0f) return null
+    var mx = 0f; var my = 0f
+    for (i in 0 until n) { mx += a[i * 3]; my += a[i * 3 + 1] }
+    mx /= n; my /= n
+    val lx = mx - pos.x; val ly = my - pos.y
+    val h = lay.size.height.toFloat()
+    val line = lay.getLineForVerticalPosition(ly.coerceIn(0f, max(0f, h - 1f)))
+    val base = lay.getLineBaseline(line)
+    val ls = max(lay.getLineStart(line), z)
+    val le = lay.getLineEnd(line, true)
+    var c = lay.getOffsetForPosition(Offset(lx, base - 1f))
+    c = c.coerceIn(ls, max(ls, le - 1)).coerceIn(0, len - 1)
+    val box = lay.getBoundingBox(c)
+    fun r3(v: Float) = (v * 1000f).roundToInt() / 1000f
+    val an = listOf(fromLay(b.id, c).toFloat(), r3((lx - box.left) / max(box.width, em * .1f)), r3((ly - base) / em))
+    val o = ArrayList<Float>(n * 2)
+    for (i in 0 until n) { o.add(r3((a[i * 3] - mx) / em)); o.add(r3((a[i * 3 + 1] - my) / em)) }
+    return Triple(an, em / dens, o)
+}
+
 /** Bentuk goresan relatif titik pertama dalam satuan ukuran huruf (em, px). */
 internal fun shapeOf(a: FloatArray, n: Int, em: Float): List<Float> {
     if (n < 4 || em <= 0f) return emptyList()
@@ -404,6 +439,7 @@ private fun smoothInk(a: FloatArray, n: Int, o: List<Float>, em: Float) {
 internal fun Ed.withAnchor(s: Ink, tgt: Blk, a: FloatArray, n: Int, skip: Int = 0): Ink {
     val none = s.copy(an = emptyList(), ah = 0f, av = 0, ai = "", o = emptyList())
     if (tgt.ty == "img") return imgAnchor(none, tgt, a, n) ?: none
+    if (s.t == 0) rigidAnchor(tgt, a, n)?.let { return none.copy(an = it.first, ah = it.second, av = 7, o = it.third) }
     val r = inkAnchor(tgt, a, n, s.t == 1, skip)
     if (r != null) return none.copy(an = r.first, ah = r.second, av = r.third, o = if (r.third == 2) shapeOf(a, n, r.second * dens) else emptyList())
     // tidak bisa menempel ke huruf (paragraf kosong, titik jauh dari teks): tetap relatif blok, tapi ikut skala ukuran huruf
@@ -490,6 +526,16 @@ fun Ed.inkPts(s: Ink, bid: String, top: Float, W: Float, d: Float, local: Boolea
         val oy = if (local) 0f else pos.y
         val em = emPx(lay)
         val an = s.an
+        if (s.av == 7) {
+            val o0 = toLay(bid, an[0].toInt()).coerceIn(0, len - 1)
+            val bx = lay.getBoundingBox(o0)
+            val rx = ox + bx.left + an[1] * max(bx.width, em * .1f)
+            val ry = oy + lay.getLineBaseline(lay.getLineForOffset(o0)) + an[2] * em
+            val m = s.p.size / 3
+            val g = FloatArray(m * 3)
+            for (i in 0 until m) { g[i * 3] = rx + s.o[i * 2] * em; g[i * 3 + 1] = ry + s.o[i * 2 + 1] * em; g[i * 3 + 2] = s.p[i * 3 + 2] }
+            return g
+        }
         if (s.isRun) {
             val segs = ArrayList<FloatArray>()
             for (r in 0 until an.size / 6) segs.addAll(runSegs(bid, lay, an.subList(r * 6, r * 6 + 6), em))
@@ -599,7 +645,7 @@ internal fun Ed.inkBuild(base: Ink, a: FloatArray, n: Int, W: Float): List<Pair<
         val (tgt, bt) = inkTarget((y0 + y1) / 2f) ?: return emptyList()
         return listOf(tgt.id to withAnchor(base.copy(p = relPts(a, n, bt, W, d)), tgt, a, n))
     }
-    if (n < 2) return single()
+    if (n < 2 || base.t == 0) return single()   // pena: satu potongan utuh (kaku); stabilo tetap dipecah per baris / blok
     val own = arrayOfNulls<Blk>(n)
     val tops = FloatArray(n)
     for (i in 0 until n) {
