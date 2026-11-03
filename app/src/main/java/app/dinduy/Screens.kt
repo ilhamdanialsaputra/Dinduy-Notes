@@ -1436,12 +1436,7 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                 }
                 SGroup("Teks", 120) {
                     SCard(POS_TOP) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            T("Ukuran teks", 16f, 500, pal.os)
-                            T("${pr.fs} px", 16f, 600, pal.p)
-                        }
-                        BigSlider(pr.fs.toFloat(), 14f, 30f) { vm.setPr(pr.copy(fs = it.toInt())) }
-                        T("Jarak baris", 16f, 500, pal.os, Modifier.padding(top = 6.dp, bottom = 14.dp))
+                        T("Jarak baris", 16f, 500, pal.os, Modifier.padding(bottom = 14.dp))
                         val lhs = listOf(1.45f to "Rapat", 1.65f to "Normal", 1.95f to "Lega")
                         SegPill(3, lhs.indexOfFirst { it.first == pr.lh }.let { if (it < 0) 1 else it }, { vm.setPr(pr.copy(lh = lhs[it].first)) }) { i, fg ->
                             T(lhs[i].second, 15f, 500, fg)
