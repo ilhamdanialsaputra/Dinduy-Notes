@@ -115,6 +115,7 @@ sealed class Scr {
     object Trash : Scr()
     class NoteMenu(val id: String) : Scr()     // halaman titik tiga di editor
     class NoteLabels(val id: String) : Scr()   // halaman label untuk satu catatan
+    class PdfExport(val id: String) : Scr()    // halaman Ekspor PDF dari menu titik tiga
     object Models : Scr()                      // unduh model transkripsi
 }
 
@@ -443,14 +444,15 @@ fun AppRoot(vm: AppVM, act: Actions) {
             // catatan tetap "terbuka" selama halaman titik tiga / label ada di atasnya
             val modelsOnNote = top is Scr.Models && nav.stack.any { it is Scr.Note }
             val modelsOnSettings = top is Scr.Models && !modelsOnNote
-            val inNote = isNote || top is Scr.NoteMenu || top is Scr.NoteLabels || modelsOnNote
+            val inNote = isNote || top is Scr.NoteMenu || top is Scr.NoteLabels || top is Scr.PdfExport || modelsOnNote
             val reading = vm.ed?.reading == true && isNote
             val imgSel = vm.ed?.selImg != null && isNote
             val selE = vm.ed?.selEdit == true && isNote
             val finding = vm.ed?.findOn == true && isNote
-            val pageIds = remember { arrayOfNulls<String>(2) }
+            val pageIds = remember { arrayOfNulls<String>(3) }
             (top as? Scr.NoteMenu)?.let { pageIds[0] = it.id }
             (top as? Scr.NoteLabels)?.let { pageIds[1] = it.id }
+            (top as? Scr.PdfExport)?.let { pageIds[2] = it.id }
 
             BackHandler(enabled = nav.stack.size > 1 || drawer.isOpen || vm.addOn || vm.sel.isNotEmpty() || vm.searchOn || (isHome && (vm.filter != null || vm.remFilter)) || reading || imgSel || selE || finding) {
                 when {
@@ -510,7 +512,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
                         SettingsScreen(vm, act, onBack = { nav.pop() })
                     }
                     AddScrim(vm)
-                    NoteLayer(vm, on = inNote, morph = vm.morph, under = top is Scr.NoteMenu || top is Scr.NoteLabels || modelsOnNote) {
+                    NoteLayer(vm, on = inNote, morph = vm.morph, under = top is Scr.NoteMenu || top is Scr.NoteLabels || top is Scr.PdfExport || modelsOnNote) {
                         val id = nav.noteId
                         if (id != null) {
                             val sc = rememberCoroutineScope()
@@ -525,11 +527,14 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     }
 
                     // halaman titik tiga & label: satu halaman penuh bergaya Pengaturan, di atas editor
-                    ViewLayer(on = top is Scr.NoteMenu, under = top is Scr.NoteLabels) {
+                    ViewLayer(on = top is Scr.NoteMenu, under = top is Scr.NoteLabels || top is Scr.PdfExport) {
                         pageIds[0]?.let { NoteMenuPage(vm, nav, act, it) }
                     }
                     ViewLayer(on = top is Scr.NoteLabels, under = false) {
                         pageIds[1]?.let { NoteLabelsPage(vm, nav, it) }
+                    }
+                    ViewLayer(on = top is Scr.PdfExport, under = false) {
+                        pageIds[2]?.let { PdfExportPage(vm, nav, act, it) }
                     }
                     // halaman transkripsi: digambar PALING ATAS (di atas editor), kalau tidak tersembunyi di balik lapisan catatan
                     ViewLayer(on = top is Scr.Models, under = false) {
@@ -556,6 +561,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
 class MainActivity : ComponentActivity(), Actions {
     private val vm: AppVM by viewModels()
     private var pendingMd: String = ""
+    private var pendingPdf: File? = null
 
     private val imgPicker = registerForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(20)) { uris ->
         if (uris.isNotEmpty()) lifecycleScope.launch {
@@ -663,6 +669,21 @@ class MainActivity : ComponentActivity(), Actions {
                 contentResolver.openOutputStream(uri)?.use { it.write(pendingMd.toByteArray(Charsets.UTF_8)) }
                 vm.show("Berkas tersimpan")
             } catch (e: Exception) { vm.show("Gagal menyimpan berkas") }
+        }
+    }
+
+    private val pdfSaver = registerForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
+        val src = pendingPdf
+        if (uri != null && src != null) {
+            lifecycleScope.launch {
+                val ok = withContext(Dispatchers.IO) {
+                    try {
+                        contentResolver.openOutputStream(uri)?.use { o -> src.inputStream().use { it.copyTo(o) } }
+                        true
+                    } catch (e: Exception) { false }
+                }
+                vm.show(if (ok) "PDF tersimpan" else "Gagal menyimpan PDF")
+            }
         }
     }
 
@@ -868,6 +889,30 @@ class MainActivity : ComponentActivity(), Actions {
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             startActivity(Intent.createChooser(i, "Bagikan catatan"))
+        }
+    }
+
+    override fun savePdf(name: String, file: File) {
+        pendingPdf = file
+        pdfSaver.launch(name)
+    }
+
+    override fun sharePdf(name: String, file: File) {
+        lifecycleScope.launch {
+            // salin ke cache dengan nama catatan supaya penerima melihat nama yang rapi
+            val f = withContext(Dispatchers.IO) {
+                val out = File(cacheDir, name)
+                file.copyTo(out, overwrite = true)
+                out
+            }
+            val uri = FileProvider.getUriForFile(this@MainActivity, "$packageName.fileprovider", f)
+            val i = Intent(Intent.ACTION_SEND).apply {
+                type = "application/pdf"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, name.removeSuffix(".pdf"))
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(i, "Bagikan PDF"))
         }
     }
 
