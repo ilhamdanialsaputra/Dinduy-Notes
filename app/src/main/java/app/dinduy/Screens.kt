@@ -868,8 +868,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     itemsIndexed(res, key = { _, it -> "s" + it.id }) { ri, d ->
                         NoteCard(
                             d, pos[d.id] ?: ri, vm.pr.cd, false,
-                            flowItem().makeRoom(vm, d.id, ri, { res.indexOfFirst { it.id == vm.openId } }, hPx, dens.density),
-                            paper = true
+                            flowItem().makeRoom(vm, d.id, ri, { res.indexOfFirst { it.id == vm.openId } }, hPx, dens.density)
                         ) { m ->
                             focusMgr.clearFocus(); vm.cardMorph[d.id] = m; nav.openNote(d.id, m)
                         }
