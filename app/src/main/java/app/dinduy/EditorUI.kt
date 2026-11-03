@@ -662,7 +662,7 @@ fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal) {
                         Box(
                             Modifier.width(colW).fillMaxHeight().background(bg)
                                 .drawBehind {
-                                    val o = androidx.compose.ui.geometry.Offset
+                                    val o = { x: Float, y: Float -> androidx.compose.ui.geometry.Offset(x, y) }
                                     if (r > 0) drawLine(pal.ol, o(0f, 0f), o(size.width, 0f), 1.dp.toPx())   // garis pemisah baris
                                     if (c > 0) drawLine(pal.ol, o(0f, 0f), o(0f, size.height), 1.dp.toPx())   // garis pemisah kolom
                                 }
