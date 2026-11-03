@@ -1980,7 +1980,7 @@ fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boole
             ) {
                 RecordCard(vm)
             }
-            DocSheet(ed, act)
+            DocSheet(ed, act, vm)
             // bilah datar: gerak kecil + pudar, karena keyboard sudah ikut bergerak sendiri
             AnimatedVisibility(
                 visible = showBar && ed.sheet == 0,
