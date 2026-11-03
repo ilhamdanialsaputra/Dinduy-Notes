@@ -897,7 +897,12 @@ object PdfExport {
         }
         val n = s.p.size / 3
         val a = FloatArray(n * 3)
-        for (q in 0 until n) {
+        if (s.av == 7) {
+            val bx = l.charBox(s.an[0].toInt())
+            val rx = tl.ox + bx[0] + s.an[1] * max(bx[1], em * .1f)
+            val ry = tl.oy + bx[2] + s.an[2] * em
+            for (q in 0 until n) { a[q * 3] = rx + s.o[q * 2] * em; a[q * 3 + 1] = ry + s.o[q * 2 + 1] * em; a[q * 3 + 2] = s.p[q * 3 + 2] }
+        } else for (q in 0 until n) {
             val bx = l.charBox(s.an[q * 3].toInt())
             a[q * 3] = tl.ox + bx[0] + s.an[q * 3 + 1] * max(bx[1], em * .1f)
             a[q * 3 + 1] = tl.oy + bx[2] + s.an[q * 3 + 2] * em
