@@ -388,7 +388,6 @@ fun TF(
         )
     } else {
         val fr = remember { FocusRequester() }
-        val bring = remember { BringIntoViewRequester() }
         var lay by remember { mutableStateOf<TextLayoutResult?>(null) }
         var foc by remember { mutableStateOf(false) }
         LaunchedEffect(lay) { lay?.let { ed.lays[key] = it; ed.lsh[key] = 1 } }
@@ -402,20 +401,7 @@ fun TF(
             }
         }
         val kbc = LocalSoftwareKeyboardController.current
-        val imeIns = WindowInsets.ime   // objeknya saja diambil di komposisi; nilainya dibaca di dalam efek
-        LaunchedEffect(v.selection, v.text.length, foc) {
-            if (foc && v.selection.collapsed) {
-                // tinggi keyboard + tinggi kapsul dipantau di sini (bukan di komposisi), jadi hanya kolom yang fokus yang bereaksi dan tidak ada recompose per frame
-                androidx.compose.runtime.snapshotFlow { imeIns.getBottom(dn) to (if (ed.barOn) ed.barH else 0f) }.collectLatest {
-                    delay(60)
-                    val clear = if (ed.barOn) ed.barH + 16f * ed.dens else 0f   // tinggi kapsul (termasuk jarak bawahnya) + sedikit ruang napas
-                    lay?.let { l ->
-                        val o = (fold?.o2t(v.selection.start, 1) ?: v.selection.start).coerceIn(0, l.layoutInput.text.length)
-                        try { bring.bringIntoView(l.getCursorRect(o).let { c -> c.copy(bottom = c.bottom + clear) }) } catch (e: Exception) { }
-                    }
-                }
-            }
-        }
+        // gulir ke kursor kini ditangani NoteScreen (ed.cursorScrollDelta): langsung ikut keyboard tiap frame, tanpa delay / animasi tambahan
         val sr = if (ed.selOn) ed.selRangeOf(key) else null
         val fh = if (ed.findOn) ed.hitsOf(key) else emptyList()
         val fc = if (fh.isEmpty()) null else ed.curHit()?.takeIf { it.key == key }
@@ -457,7 +443,20 @@ fun TF(
         ) {
             BasicTextField(
                 value = v, onValueChange = { ed.onText(key, it) },
-                modifier = modifier.focusProperties { canFocus = !ed.ink.on }.focusRequester(fr).bringIntoViewRequester(bring).trackPos(ed, key)
+                modifier = modifier.focusProperties { canFocus = !ed.ink.on }.focusRequester(fr).trackPos(ed, key)
+                    .then(
+                        // sheet bawah aktif => field readOnly (kursor bawaan tidak digambar), jadi kursor digambar manual agar tetap terlihat
+                        if (foc && ed.sheet != 0) Modifier.drawWithContent {
+                            drawContent()
+                            val l = lay
+                            if (l != null && v.selection.collapsed) {
+                                val o = (fold?.o2t(v.selection.start, 1) ?: v.selection.start).coerceIn(0, l.layoutInput.text.length)
+                                val r = l.getCursorRect(o)
+                                val w = 2.dp.toPx()
+                                drawLine(pal.p, Offset(r.left + w / 2f, r.top), Offset(r.left + w / 2f, r.bottom), w, androidx.compose.ui.graphics.StrokeCap.Round)
+                            }
+                        } else Modifier
+                    )
                     .onPreviewKeyEvent { e ->
                         if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                         val ctrl = e.isCtrlPressed
@@ -1588,16 +1587,25 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     // (bawaan Compose melempar target ke bagian atas layar). Blok yang lebih tinggi dari layar tidak diratakan ke atas.
     val cursorSpec = remember {
         object : BringIntoViewSpec {
+            override val scrollAnimationSpec: androidx.compose.animation.core.AnimationSpec<Float> = tween(120, easing = Emph)
             override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+                val cs = containerSize - ed.cursorClear()
                 val trail = offset + size
                 return when {
-                    size > containerSize -> 0f
-                    offset >= 0f && trail <= containerSize -> 0f
+                    size > cs -> 0f
+                    offset >= 0f && trail <= cs -> 0f
                     offset < 0f -> offset
-                    else -> trail - containerSize
+                    else -> trail - cs
                 }
             }
         }
+    }
+    // kursor ikut naik bareng keyboard: tiap frame (viewH berubah mengikuti IME) selisihnya langsung diterapkan, tanpa delay & animasi
+    LaunchedEffect(ed, scroll) {
+        androidx.compose.runtime.snapshotFlow {
+            val d = ed.cursorScrollDelta(androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { scroll.value })
+            d to Any()
+        }.collect { (d, _) -> if (d != 0f) scroll.dispatchRawDelta(d) }
     }
 
     Column(Modifier.fillMaxSize().background(pal.s)) {
@@ -1941,7 +1949,7 @@ fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boole
     }
     Box(Modifier.fillMaxSize()) {
         // kartu rekaman + kapsul alat dalam satu kolom yang diukur bersama (barH), jadi teks / kursor tidak pernah tertutup
-        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().onSizeChanged { rawBarH = it.height.toFloat() }) {
+        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().onSizeChanged { rawBarH = it.height.toFloat(); ed.barHLive = rawBarH }) {
             AnimatedVisibility(
                 visible = recOn,
                 enter = fadeIn(tween(220, easing = Emph)) +
@@ -1957,10 +1965,8 @@ fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boole
             // bilah datar: gerak kecil + pudar, karena keyboard sudah ikut bergerak sendiri
             AnimatedVisibility(
                 visible = showBar && ed.sheet == 0,
-                enter = fadeIn(tween(260, easing = Emph)) + slideInVertically(tween(320, easing = Emph)) { it / 3 } +
-                    expandVertically(tween(320, easing = Emph)),
-                exit = fadeOut(tween(180)) + slideOutVertically(tween(260, easing = Emph)) { it / 4 } +
-                    shrinkVertically(tween(300, easing = Emph))
+                enter = fadeIn(tween(200)) + expandVertically(tween(300, easing = Emph), expandFrom = Alignment.Top),
+                exit = fadeOut(tween(140)) + shrinkVertically(tween(260, easing = Emph), shrinkTowards = Alignment.Top)
             ) {
                 DocBar(ed, act)
             }
