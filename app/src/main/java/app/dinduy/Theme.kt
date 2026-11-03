@@ -289,9 +289,15 @@ object Pth {
     )
 }
 
+/** Path ikon di-parse sekali saja lalu dipakai bersama (sebelumnya di-parse ulang di setiap ikon yang tampil). */
+private val IconPaths = HashMap<String, androidx.compose.ui.graphics.Path>()
+
+private fun iconPath(n: String): androidx.compose.ui.graphics.Path =
+    IconPaths.getOrPut(n) { PathParser().parsePathString(Pth.m[n] ?: "").toPath() }
+
 @Composable
 fun Ic(n: String, tint: Color, sz: Dp = 24.dp, modifier: Modifier = Modifier) {
-    val path = remember(n) { PathParser().parsePathString(Pth.m[n] ?: "").toPath() }
+    val path = remember(n) { iconPath(n) }
     Canvas(modifier.size(sz)) {
         val sc = this.size.width / 24f
         scale(sc, sc, pivot = Offset.Zero) { drawPath(path, tint) }
