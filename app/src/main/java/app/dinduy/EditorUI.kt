@@ -222,6 +222,16 @@ fun AnnotatedString.Builder.addFind(pal: Pal, hits: List<FHit>, cur: FHit?, off:
 fun baseStyle(pal: Pal, dm: Dm, color: Color = pal.os, size: Float = dm.fs, w: Int = 400, lhEm: Float = dm.lh, ls: Float = 0f) =
     TextStyle(color = color, fontFamily = dm.ff, fontSize = size.sp, fontWeight = FontWeight(w), lineHeight = (lhEm * size).sp, letterSpacing = ls.em)
 
+/** Default Compose untuk gulir horizontal (kode / tabel); NoteScreen mematikan gulir vertikal bawaan lewat LocalBringIntoViewSpec. */
+private val LocalHBiv = androidx.compose.runtime.staticCompositionLocalOf<BringIntoViewSpec?> { null }
+
+@Composable
+private fun HBox(modifier: Modifier, content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit) {
+    val d = LocalHBiv.current
+    if (d == null) Box(modifier, content = content)
+    else CompositionLocalProvider(LocalBringIntoViewSpec provides d) { Box(modifier, content = content) }
+}
+
 /** Catat posisi kolom teks di ruang konten, dipakai seleksi lintas blok (mode baca maupun mode ketik). */
 private fun Modifier.trackPos(ed: Ed, key: String): Modifier = onGloballyPositioned { c ->
     val cc = ed.contentCoords
@@ -390,7 +400,8 @@ fun TF(
         val fr = remember { FocusRequester() }
         var lay by remember { mutableStateOf<TextLayoutResult?>(null) }
         var foc by remember { mutableStateOf(false) }
-        LaunchedEffect(lay) { lay?.let { ed.lays[key] = it; ed.lsh[key] = 1 } }
+        var layN by remember { mutableStateOf(-1) }   // panjang teks saat layout 'lay' dibuat
+        LaunchedEffect(lay) { lay?.let { ed.layLen[key] = layN; ed.lays[key] = it; ed.lsh[key] = 1 } }
         // permintaan fokus dibaca di dalam efek (bukan di komposisi): ed.req berubah tidak membangunkan semua kolom
         LaunchedEffect(key) {
             androidx.compose.runtime.snapshotFlow { ed.req }.collect { r ->
@@ -496,7 +507,7 @@ fun TF(
                         }
                     ),
                 textStyle = base2, cursorBrush = SolidColor(if (hideNative) Color.Transparent else pal.p), visualTransformation = vt,
-                onTextLayout = { lay = it; jw = it.layoutInput.constraints.maxWidth },
+                onTextLayout = { lay = it; layN = v.text.length; jw = it.layoutInput.constraints.maxWidth },
                 readOnly = foc && ed.sheet != 0,      // sheet bawah aktif: hanya kolom yang fokus yang membaca ed.sheet (kolom lain tidak ikut recompose)
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 decorationBox = { inner ->
@@ -579,7 +590,7 @@ fun BlockView(ed: Ed, vm: AppVM, b: Blk, ordN: Int, dm: Dm, fold: Fold? = null, 
                                 .padding(horizontal = 12.dp, vertical = 4.dp), ls = .1f
                         )
                     }
-                    Box(Modifier.horizontalScroll(rememberScrollState())) {
+                    HBox(Modifier.horizontalScroll(rememberScrollState())) {
                         TF(
                             ed, b.id,
                             TextStyle(
@@ -666,7 +677,7 @@ fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal) {
     }
     val fk = fkS.value
     val fRC = if (fk != null) cellRC(fk) else null
-    Box(
+    HBox(
         Modifier.fillMaxWidth().padding(bottom = (dm.fs * 1.1f).dp).clip(RoundedCornerShape(24.dp)).background(pal.c2)
             .horizontalScroll(rememberScrollState())
     ) {
@@ -1583,12 +1594,15 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
         }
     }
 
-    // gulir otomatis ke kursor: geser seminimal mungkin, jadi kursor berhenti tepat di atas kapsul alat
-    // (bawaan Compose melempar target ke bagian atas layar). Blok yang lebih tinggi dari layar tidak diratakan ke atas.
+    // Gulir bawaan Compose (BringIntoView) untuk kolom catatan DIMATIKAN: dulu ia bersaing dengan gulir per-frame di bawah
+    // (dua sistem menggulir untuk satu ketukan => loncat / ngegulir sendiri). Satu-satunya yang menggulir ke kursor
+    // adalah Ed.cursorScrollDelta. Judul tetap memakai perilaku geser-seminimal lama.
+    val defSpec = LocalBringIntoViewSpec.current
     val cursorSpec = remember {
         object : BringIntoViewSpec {
             override val scrollAnimationSpec: androidx.compose.animation.core.AnimationSpec<Float> = tween(120, easing = Emph)
             override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+                if (!ed.titleFocus) return 0f
                 val cs = containerSize - ed.cursorClear()
                 val trail = offset + size
                 return when {
@@ -1600,12 +1614,12 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
             }
         }
     }
-    // kursor ikut naik bareng keyboard: tiap frame (viewH berubah mengikuti IME) selisihnya langsung diterapkan, tanpa delay & animasi
+    // kursor ikut naik bareng keyboard: selisih dihitung ulang saat kursor / teks / keyboard / kapsul berubah, tanpa delay & animasi
     LaunchedEffect(ed, scroll) {
         androidx.compose.runtime.snapshotFlow {
             val d = ed.cursorScrollDelta(androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { scroll.value })
             d to Any()
-        }.collect { (d, _) -> if (d != 0f) scroll.dispatchRawDelta(d) }
+        }.collect { (d, _) -> if (d != 0f) ed.csApplied(d, scroll.dispatchRawDelta(d)) }
     }
 
     Column(Modifier.fillMaxSize().background(pal.s)) {
@@ -1617,7 +1631,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                 .clipToBounds()
                 .inkPinch(ed, scroll)
         ) {
-            CompositionLocalProvider(LocalBringIntoViewSpec provides cursorSpec) {
+            CompositionLocalProvider(LocalBringIntoViewSpec provides cursorSpec, LocalHBiv provides defSpec) {
             Column(Modifier.fillMaxSize().inkZoom(ed).verticalScroll(scroll), horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(
                     Modifier.widthIn(max = 700.dp).fillMaxWidth().padding(horizontal = 24.dp)
