@@ -300,6 +300,9 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     // ---------- catatan ----------
     fun note(id: String): Note? = docs.firstOrNull { it.id == id }
 
+    /** Ukuran huruf efektif sebuah catatan: milik catatan itu, atau bawaan bila belum diatur. */
+    fun noteFs(id: String): Int = (note(id)?.fs?.takeIf { it > 0 } ?: pr.fs).coerceIn(14, 30)
+
     fun upd(id: String, f: (Note) -> Note) {
         val i = docs.indexOfFirst { it.id == id }
         if (i >= 0) {
