@@ -395,26 +395,26 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         var len = 0
         if (b.ty == "p") {
             var m = RX_BUL.find(tx)
-            if (m != null && c == m.value.length) { nb = Blk(id = b.id, ik = b.ik, ta = b.ta, ty = "li", lt = "b"); len = m.value.length }
+            if (m != null && c == m.value.length) { nb = Blk(id = b.id, ik = b.ik, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi, ty = "li", lt = "b"); len = m.value.length }
             if (nb == null) {
                 m = RX_NUM.find(tx)
-                if (m != null && c == m.value.length) { nb = Blk(id = b.id, ik = b.ik, ta = b.ta, ty = "li", lt = "o"); len = m.value.length }
+                if (m != null && c == m.value.length) { nb = Blk(id = b.id, ik = b.ik, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi, ty = "li", lt = "o"); len = m.value.length }
             }
             if (nb == null && RX_DASHL.containsMatchIn(tx) && c >= 2 && c <= 1 + df.ins) {
-                nb = Blk(id = b.id, ik = b.ik, ta = b.ta, ty = "li", lt = "b"); len = 1
+                nb = Blk(id = b.id, ik = b.ik, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi, ty = "li", lt = "b"); len = 1
             }
             if (nb == null) {
                 m = RX_QT.find(tx)
-                if (m != null && c == 2) { nb = Blk(id = b.id, ik = b.ik, ta = b.ta, ty = "q", k = "quote"); len = 2 }
+                if (m != null && c == 2) { nb = Blk(id = b.id, ik = b.ik, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi, ty = "q", k = "quote"); len = 2 }
             }
             if (nb == null) {
                 m = RX_HD.find(tx)
-                if (m != null && c == m.value.length) { nb = Blk(id = b.id, ik = b.ik, ta = b.ta, ty = "h", lv = m.groupValues[1].length); len = m.value.length }
+                if (m != null && c == m.value.length) { nb = Blk(id = b.id, ik = b.ik, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi, ty = "h", lv = m.groupValues[1].length); len = m.value.length }
             }
         } else if (b.ty == "li" && b.lt == "b") {
             val m = RX_CK.find(tx)
             if (m != null && c == m.value.length) {
-                nb = Blk(id = b.id, ik = b.ik, ta = b.ta, ty = "li", lt = "c", d = b.d, x = m.groupValues[1].isNotBlank()); len = m.value.length
+                nb = Blk(id = b.id, ik = b.ik, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi, ty = "li", lt = "c", d = b.d, x = m.groupValues[1].isNotBlank()); len = m.value.length
             }
         }
         if (nb == null) return false
@@ -488,7 +488,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         var right = b.r.slice(pos, b.r.t.length)
         if (right.t.startsWith("\n")) right = right.slice(1, right.t.length)
         if (left.t.endsWith("\n")) left = left.slice(0, left.t.length - 1)
-        val nb = if (nty == "li") Blk(ty = "li", lt = b.lt, d = b.d, r = right, ta = b.ta) else Blk(ty = "p", r = right, ta = b.ta)
+        val nb = if (nty == "li") Blk(ty = "li", lt = b.lt, d = b.d, r = right, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi) else Blk(ty = "p", r = right, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi)
         blocks = blocks.toMutableList().also { it[i] = b.copy(r = left); it.add(i + 1, nb) }
         tf[b.id] = TextFieldValue(Z + left.t, TextRange(left.t.length + 1))
         seed(nb)
@@ -568,8 +568,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         } else if (pos >= rt.t.length) l.addAll(i + 1, ns)
         else if (pos <= 0) l.addAll(i, ns)
         else {
-            val right = if (b.ty == "li") Blk(ty = "li", lt = b.lt, d = b.d, r = rt.slice(pos, rt.t.length))
-            else Blk(ty = "p", r = rt.slice(pos, rt.t.length))
+            val right = if (b.ty == "li") Blk(ty = "li", lt = b.lt, d = b.d, r = rt.slice(pos, rt.t.length), ta = b.ta, il = b.il, ir = b.ir, fi = b.fi)
+            else Blk(ty = "p", r = rt.slice(pos, rt.t.length), ta = b.ta, il = b.il, ir = b.ir, fi = b.fi)
             l[i] = b.copy(r = rt.slice(0, pos))
             l.addAll(i + 1, ns + right)
         }
@@ -648,7 +648,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             val end = start + ln.length
             val r = b.r.slice(start, end)
             val nb = if (n == 0) b.copy(r = r)
-                else if (b.ty == "li") Blk(ty = "li", lt = b.lt, d = b.d, r = r) else Blk(ty = "p", r = r)
+                else if (b.ty == "li") Blk(ty = "li", lt = b.lt, d = b.d, r = r, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi)
+                else Blk(ty = "p", r = r, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi)
             if (target == null && cur <= end) { target = nb; off = (cur - start).coerceAtLeast(0) }
             parts.add(nb)
             start = end + 1
@@ -688,6 +689,24 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     /** Perataan paragraf: "" kiri, c tengah, r kanan, j rata kiri-kanan. Tidak berlaku untuk blok kode. */
     fun setAlign(a: String) = convertFocused { b -> if (b.isText && b.ty != "code") b.copy(ta = a) else b }
+
+    /**
+     * Inden paragraf (dp, nilai mutlak). kind: 0 kiri, 1 kanan, 2 baris pertama, 3 menggantung.
+     * Baris pertama dan menggantung saling meniadakan (satu angka bertanda di Blk.fi). Tidak berlaku untuk kode;
+     * kutipan hanya mengenal inden kiri / kanan (baris pertama / menggantung per paragraf, bukan per baris kutipan).
+     */
+    fun setIndent(kind: Int, v: Int) = convertFocused { b ->
+        if (!b.isText || b.ty == "code") b else when (kind) {
+            0 -> b.copy(il = v.coerceIn(0, IND_MAX))
+            1 -> b.copy(ir = v.coerceIn(0, IND_MAX))
+            2 -> if (b.ty == "q") b else b.copy(fi = v.coerceIn(0, IND_MAX_FI))
+            else -> if (b.ty == "q") b else b.copy(fi = -v.coerceIn(0, IND_MAX_FI))
+        }
+    }
+
+    fun resetIndent() = convertFocused { b ->
+        if (!b.isText || b.ty == "code") b else b.copy(il = 0, ir = 0, fi = 0)
+    }
 
     fun setCode() = convertFocused { b ->
         if (b.ty == "code") b.copy(ty = "p") else b.copy(ty = "code", r = Rt(b.r.t))
@@ -920,7 +939,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val rest = b.im.filterIndexed { j, _ -> j != s.second }
         if (rest.isEmpty()) {
             // teks di sisi gambar tidak ikut hilang: jadi paragraf biasa
-            if (b.r.t.isNotEmpty()) setBlock(i, Blk(id = b.id, ik = b.ik, ta = b.ta, ty = "p", r = b.r))
+            if (b.r.t.isNotEmpty()) setBlock(i, Blk(id = b.id, ik = b.ik, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi, ty = "p", r = b.r))
             else blocks = blocks.filterIndexed { j, _ -> j != i }
         } else if (rest.size == 1) setBlock(i, b.copy(im = listOf(rest[0].copy(a = rest[0].o, w = 0.6f, al = "c"))))
         else setBlock(i, b.copy(im = rest))
