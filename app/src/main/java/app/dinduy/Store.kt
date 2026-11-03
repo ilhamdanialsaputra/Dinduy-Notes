@@ -319,6 +319,11 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         upd(id) { it.copy(t = title, bl = bl, x = plainOf(bl), u = now) }
     }
 
+    /** Simpan blok tanpa mengubah teks / waktu ubah catatan (dipakai saat coretan lama diam-diam diberi jangkar huruf). */
+    fun syncInk(id: String, bl: List<Blk>) {
+        upd(id) { it.copy(bl = bl) }
+    }
+
     fun dropIfEmpty(id: String, title: String, bl: List<Blk>) {
         if (title.isBlank() && plainOf(bl).isEmpty() && bl.none { it.isObj && it.ty != "hr" } && bl.none { it.ik.isNotEmpty() }) {
             // catatan kosong yang diberi pengingat tetap disimpan (seperti Google Keep)
