@@ -876,17 +876,15 @@ private fun Rect.xfm(x: FloatArray): Rect {
     return Rect(px + (left - px) * k + x[0], py + (top - py) * k + x[1], px + (right - px) * k + x[0], py + (bottom - py) * k + x[1])
 }
 
-private class BoxH(val del: Offset, val tl: Offset, val tr: Offset, val bl: Offset, val br: Offset, val mv: Offset, val rot: Offset)
+/** Hanya dua pegangan: hapus (atas) dan satu pegangan ubah-ukuran + putar (pojok kanan bawah). Pindah = seret isi kotak. */
+private class BoxH(val del: Offset, val tf: Offset)
 
 /** Pegangan frame ditaruh agak menjauh dari kotaknya supaya tidak tertutup jari. */
 private fun boxHandles(b: Rect, d: Float): BoxH {
     val o = 16f * d
     return BoxH(
         Offset(b.center.x, max(b.top - 38f * d, 24f * d)),
-        Offset(b.left - o, b.top - o), Offset(b.right + o, b.top - o),
-        Offset(b.left - o, b.bottom + o), Offset(b.right + o, b.bottom + o),
-        Offset(b.center.x, b.bottom + 38f * d),
-        Offset(b.center.x + 62f * d, b.bottom + 38f * d)
+        Offset(b.right + o, b.bottom + o)
     )
 }
 
@@ -998,19 +996,15 @@ fun Modifier.inkInput(ed: Ed, vm: AppVM, scroll: ScrollState): Modifier {
                         ik.box = box.translate(x[0], x[1])
                     }
                     3 -> { ed.inkErase(ik.sel); ik.sel = emptySet(); ik.box = null }
-                    10 -> if (x.size >= 6 && x[5] != 0f && ik.sel.isNotEmpty()) {
-                        ed.inkTransform(ik.sel, 0f, 0f, 1f, x[3], x[4], W, x[5])
-                        ik.refit = true
-                        ik.box = box.xfm(x)
-                    }
-                    5, 6, 7, 8 -> if (x.size >= 5 && x[2] != 1f && ik.sel.isNotEmpty()) {
-                        ed.inkTransform(ik.sel, 0f, 0f, x[2], x[3], x[4], W)
+                    5 -> if (x.size >= 6 && (x[2] != 1f || x[5] != 0f) && ik.sel.isNotEmpty()) {   // ubah ukuran + putar sekaligus, pusat = tengah kotak
+                        ed.inkTransform(ik.sel, 0f, 0f, x[2], x[3], x[4], W, x[5])
+                        if (x[5] != 0f) ik.refit = true
                         ik.box = box.xfm(x)
                     }
                 }
             }
 
-            fun near(p: Offset, o: Offset) = hypot(p.x - o.x, p.y - o.y) <= 26f * dens
+            fun near(p: Offset, o: Offset) = hypot(p.x - o.x, p.y - o.y) <= 30f * dens
 
             fun finishLasso() {
                 val pts = ik.lasso; ik.lasso = null
@@ -1061,9 +1055,7 @@ fun Modifier.inkInput(ed: Ed, vm: AppVM, scroll: ScrollState): Modifier {
                             val h = boxHandles(box, dens)
                             m = when {
                                 ik.sel.isNotEmpty() && near(p, h.del) -> 3
-                                near(p, h.tl) -> 5; near(p, h.tr) -> 6; near(p, h.bl) -> 7; near(p, h.br) -> 8
-                                near(p, h.rot) -> 10
-                                near(p, h.mv) -> 1
+                                ik.sel.isNotEmpty() && near(p, h.tf) -> 5
                                 box.inflate(6f * dens).contains(p) -> 1
                                 else -> 0
                             }
@@ -1116,9 +1108,11 @@ fun Modifier.inkInput(ed: Ed, vm: AppVM, scroll: ScrollState): Modifier {
                             gxf = floatArrayOf(dx, dy, 1f)
                             ik.xf = floatArrayOf(dx, dy, 1f, box.left, box.top); ik.tick++
                         }
-                        10 -> {                                      // putar mengelilingi pusat kotak; menempel tiap 15°
+                        5 -> {                                       // satu pegangan: jarak ke pusat = ukuran, sudut = putaran (menempel tiap 15°)
                             val cc = box.center
                             val tp = 2f * PI.toFloat()
+                            val d0 = max(hypot(gDown.x - cc.x, gDown.y - cc.y), 1f)
+                            val sc = (hypot(c.position.x - cc.x, c.position.y - cc.y) / d0).coerceIn(.2f, 6f)
                             var ang = atan2(c.position.y - cc.y, c.position.x - cc.x) - atan2(gDown.y - cc.y, gDown.x - cc.x)
                             while (ang > PI.toFloat()) ang -= tp
                             while (ang < -PI.toFloat()) ang += tp
@@ -1128,19 +1122,10 @@ fun Modifier.inkInput(ed: Ed, vm: AppVM, scroll: ScrollState): Modifier {
                                 if (gxf.size >= 6 && gxf[5] != snap * PI.toFloat() / 180f) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 ang = snap * PI.toFloat() / 180f
                             }
-                            gxf = floatArrayOf(0f, 0f, 1f, cc.x, cc.y, ang)
+                            gxf = floatArrayOf(0f, 0f, sc, cc.x, cc.y, ang)
                             ik.xf = gxf; ik.tick++
                         }
-                        else -> {                                    // tarik sudut: perbesar / perkecil gambar terpilih (proporsional)
-                            val pv = when (gm) {
-                                5 -> Offset(box.right, box.bottom); 6 -> Offset(box.left, box.bottom)
-                                7 -> Offset(box.right, box.top); else -> Offset(box.left, box.top)
-                            }
-                            val dd = max(hypot(gDown.x - pv.x, gDown.y - pv.y), 1f)
-                            val sc = (hypot(c.position.x - pv.x, c.position.y - pv.y) / dd).coerceIn(.2f, 6f)
-                            gxf = floatArrayOf(0f, 0f, sc, pv.x, pv.y)
-                            ik.xf = gxf; ik.tick++
-                        }
+                        else -> {}
                     }
                     continue
                 }
@@ -1328,18 +1313,19 @@ fun BoxScope.InkLayers(ed: Ed, vm: AppVM, scroll: ScrollState) {
             val h = boxHandles(box, d)
             drawRect(pal.p.copy(alpha = .07f), box.topLeft, box.size)
             drawRect(pal.p, box.topLeft, box.size, style = Stroke(1.8f * d, pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f * d, 6f * d))))
-            for ((c, o) in listOf(box.topLeft to h.tl, box.topRight to h.tr, box.bottomLeft to h.bl, box.bottomRight to h.br)) {
-                drawLine(pal.p, c, o, 1.4f * d)
-                drawCircle(pal.c3, 11f * d, o); drawCircle(pal.p, 11f * d, o, style = Stroke(2f * d))
-            }
             val r = 18f * d; val q = 6f * d
-            drawLine(pal.p, box.bottomCenter, h.mv, 1.4f * d)
-            drawCircle(pal.c3, r, h.mv); drawCircle(pal.p, r, h.mv, style = Stroke(1.6f * d))
-            drawLine(pal.p, h.mv + Offset(-q - d, 0f), h.mv + Offset(q + d, 0f), 2f * d, StrokeCap.Round)          // + = pindah
-            drawLine(pal.p, h.mv + Offset(0f, -q - d), h.mv + Offset(0f, q + d), 2f * d, StrokeCap.Round)
-            drawCircle(pal.c3, r, h.rot); drawCircle(pal.p, r, h.rot, style = Stroke(1.6f * d))                       // putar
-            drawArc(pal.p, -50f, 270f, false, h.rot - Offset(q + 1f * d, q + 1f * d), androidx.compose.ui.geometry.Size(2f * (q + 1f * d), 2f * (q + 1f * d)), style = Stroke(2f * d, cap = StrokeCap.Round))
-            drawLine(pal.p, h.rot + Offset(q * .9f, -q * 1.9f), h.rot + Offset(q * 1.8f, -q * .9f), 2f * d, StrokeCap.Round)
+            if (ik.sel.isNotEmpty()) {
+                // satu pegangan pojok kanan bawah: tarik = ubah ukuran, putar = memutar (ikon panah diagonal)
+                drawLine(pal.p, box.bottomRight, h.tf, 1.4f * d)
+                drawCircle(pal.c3, r, h.tf); drawCircle(pal.p, r, h.tf, style = Stroke(1.6f * d))
+                val a = Offset(q * .75f, q * .75f)
+                drawLine(pal.p, h.tf - a, h.tf + a, 2f * d, StrokeCap.Round)
+                drawLine(pal.p, h.tf + a, h.tf + a + Offset(-q * .8f, 0f), 2f * d, StrokeCap.Round)
+                drawLine(pal.p, h.tf + a, h.tf + a + Offset(0f, -q * .8f), 2f * d, StrokeCap.Round)
+                drawLine(pal.p, h.tf - a, h.tf - a + Offset(q * .8f, 0f), 2f * d, StrokeCap.Round)
+                drawLine(pal.p, h.tf - a, h.tf - a + Offset(0f, q * .8f), 2f * d, StrokeCap.Round)
+                drawArc(pal.p, 200f, 130f, false, h.tf - Offset(r + 5f * d, r + 5f * d), androidx.compose.ui.geometry.Size(2f * (r + 5f * d), 2f * (r + 5f * d)), style = Stroke(1.6f * d, cap = StrokeCap.Round))
+            }
             if (ik.sel.isNotEmpty()) {                                                                           // x = hapus isi frame
                 drawLine(pal.p, box.topCenter, h.del, 1.4f * d)
                 drawCircle(pal.c3, r, h.del); drawCircle(pal.p, r, h.del, style = Stroke(1.6f * d))
