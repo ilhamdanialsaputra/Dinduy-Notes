@@ -265,7 +265,7 @@ private fun justifySpans(
             // baris yang berakhir pemisah baris buatan (teks mengelilingi gambar di kanan) lebih sempit dari kolom: ratakan ke tepi gambar, bukan ke tepi kolom
             val hard = r.getLineEnd(i).let { it in 1..txt.length && txt[it - 1] == '\n' }
             val tw = if (hard && cutR > 0f) w - cutR else w.toFloat()
-            val slack = tw - (r.getLineRight(i) - r.getLineLeft(i))
+            val slack = tw - r.getLineRight(i)      // tepi kanan sudah termasuk inden (baris pertama / menggantung)
             var n = 0
             for (k in s until en) if (txt[k] == ' ') n++
             if (n == 0 || slack <= 1f) continue
@@ -354,7 +354,7 @@ fun TF(
         val sr = if (ed.selOn) ed.selRangeOf(key) else null
         val fh = if (ed.findOn) ed.hitsOf(key) else emptyList()
         val fc = if (fh.isEmpty()) null else ed.curHit()?.takeIf { it.key == key }
-        val ann = remember(rt, pal, fs, sr, fold, fh, fc, jw, just) {
+        val ann = remember(rt, pal, fs, sr, fold, fh, fc, jw, just, base.textIndent) {
             val a = styled(rt, rt.t, 0, pal, fs)
             val a2 = if (sr == null && fh.isEmpty()) a else buildAnnotatedString {
                 append(a)
@@ -416,7 +416,7 @@ fun TF(
         val sr = if (ed.selOn) ed.selRangeOf(key) else null
         val fh = if (ed.findOn) ed.hitsOf(key) else emptyList()
         val fc = if (fh.isEmpty()) null else ed.curHit()?.takeIf { it.key == key }
-        val vt = remember(rt, pal, fs, fold, sr, fh, fc, jw, just) {
+        val vt = remember(rt, pal, fs, fold, sr, fh, fc, jw, just, base.textIndent) {
             VisualTransformation { t ->
                 val a0 = styled(rt, t.text, 1, pal, fs)
                 val a = if (sr == null && fh.isEmpty()) a0 else buildAnnotatedString {
@@ -559,12 +559,14 @@ fun BlockView(ed: Ed, vm: AppVM, b: Blk, ordN: Int, dm: Dm, fold: Fold? = null, 
                 3 -> baseStyle(pal, dm, pal.p, fs * 1.45f, 1000, 1.02f, -.02f)
                 else -> baseStyle(pal, dm, pal.os, fs * 1.15f, 1000, 1.02f, -.02f)
             }
-            TF(ed, b.id, st.aligned(b), Modifier.fillMaxWidth().padding(top = (fs * .4f).dp, bottom = (fs * .5f).dp))
+            val (il, ir) = fitInd(b.il, b.ir, ed.widthDp)
+            TF(ed, b.id, st.aligned(b), Modifier.fillMaxWidth().padding(start = il.dp, end = ir.dp, top = (fs * .4f).dp, bottom = (fs * .5f).dp))
         }
         "q" -> {
             val q = qs(b.k, pal)
+            val (il, ir) = fitInd(b.il, b.ir, ed.widthDp)
             Box(
-                Modifier.fillMaxWidth().padding(bottom = bottom).clip(q.shape).background(q.bg)
+                Modifier.fillMaxWidth().padding(start = il.dp, end = ir.dp, bottom = bottom).clip(q.shape).background(q.bg)
                     .then(if (q.border) Modifier.border(3.dp, pal.p, q.shape) else Modifier)
                     .drawBehind { if (q.bar) drawRect(pal.owc, size = Size(7.dp.toPx(), size.height)) }
                     .padding(horizontal = 22.dp, vertical = 18.dp)
@@ -619,9 +621,11 @@ fun ParaRow(ed: Ed, b: Blk, ordN: Int, dm: Dm, pal: Pal, fold: Fold?, mk: Float,
     val lineH = fs * dm.lh
     val mw = when (b.lt) { "o" -> 2.2f; "c" -> 1.9f; else -> 1.7f } * fs
     val done = li && b.lt == "c" && b.x
+    val (il, ir) = fitInd(b.il, b.ir, ed.widthDp)
     Row(
         Modifier.fillMaxWidth().padding(
-            start = if (li) (b.d * 1.4f * fs).dp else 0.dp,
+            start = (if (li) (b.d * 1.4f * fs).dp else 0.dp) + il.dp,
+            end = ir.dp,
             bottom = (if (li) fs * .5f else fs * 1.1f).dp
         )
     ) {
@@ -1191,7 +1195,8 @@ private fun planFloat(ed: Ed, i: Int, dm: Dm, pal: Pal, tm: TextMeasurer, dn: De
         val fits = top + h <= rem
         var fold: Fold? = null
         var mk = 0f
-        if (!fits && (x.ty == "p" || x.ty == "li") && x.r.t.indexOf('\n') < 0) {
+        val indented = x.il != 0 || x.ir != 0 || x.fi != 0
+        if (!fits && !indented && (x.ty == "p" || x.ty == "li") && x.r.t.indexOf('\n') < 0) {
             var k = 0
             while (k < res.lineCount && top + res.getLineTop(k) < rem) k++
             if (k in 1 until res.lineCount) {
