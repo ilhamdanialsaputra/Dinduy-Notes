@@ -186,7 +186,10 @@ data class Ink(
     val av: Int = 0,
     // av = 5: goresan di atas gambar. ai = id gambar, an = pasangan (u, v) tiap titik terhadap kotak gambar (0..1), ah = lebar gambar (dp) saat dicoret.
     // av = 6: goresan di blok teks yang tidak bisa menempel ke huruf (mis. paragraf kosong): p diskalakan mengikuti ukuran huruf, ah = ukuran huruf (dp) saat dicoret.
-    val ai: String = ""
+    val ai: String = "",
+    // Bentuk asli goresan pena berjangkar (av = 2): pasangan (dx, dy) tiap titik terhadap titik pertama, dalam satuan ukuran huruf.
+    // Dipakai untuk merapikan bentuk saat huruf diperbesar / diperkecil (supaya tidak melar kalau teks pindah baris).
+    val o: List<Float> = emptyList()
 )
 
 /** ty: p, h, li, q, code, tbl, hr, img */
@@ -253,6 +256,7 @@ data class Note(
     val p: Boolean = false,
     val dt: Long = 0L,
     val lb: List<String> = emptyList(),  // nama label catatan
+    val fs: Int = 0,                     // ukuran huruf catatan ini (px); 0 = ikut bawaan (Prefs.fs)
     val rm: Long = 0L,                   // pengingat: waktu bunyi pertama (epoch ms), 0 = tanpa pengingat
     val rr: String = "",                 // ulangi pengingat: "" tidak / d harian / w mingguan / m bulanan / y tahunan
     val rd: Long = 0L,                   // waktu pengingat tidak-berulang yang sudah dibunyikan (supaya tidak dobel setelah HP menyala ulang)
