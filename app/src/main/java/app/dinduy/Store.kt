@@ -126,6 +126,7 @@ const val WEL = "# Selamat datang di Dinduy\n\nCatatan yang **rapi**, cepat, dan
     "> [!IDEA]\n> Satu catatan bisa memuat banyak jenis kotak.\n\n```js\nconst halo = (nama) => \"Halo \" + nama;\n```\n\n" +
     "| Fitur | Status |\n|---|---|\n| Tabel | Siap |\n| Kode | Siap |\n\n---\n\nSelamat mencatat."
 
+@androidx.compose.runtime.Stable
 class AppVM(app: Application) : AndroidViewModel(app) {
     private val ctx = app.applicationContext
     private val file = File(ctx.filesDir, "dinduy.json")
