@@ -305,7 +305,7 @@ private fun emPx(lay: androidx.compose.ui.text.TextLayoutResult): Float {
  * Hasil: (jangkar, ukuran huruf dp, versi). Pena: satu jangkar per titik (versi 2). Stabilo: dipecah per baris yang dilalui, tiap
  * baris cuma titik paling kiri dan paling kanan (versi 3 kalau satu baris, 4 kalau beberapa), supaya digambar per baris.
  */
-internal fun Ed.inkAnchor(b: Blk, a: FloatArray, n: Int, hl: Boolean): Triple<List<Float>, Float, Int>? {
+internal fun Ed.inkAnchor(b: Blk, a: FloatArray, n: Int, hl: Boolean, skip: Int = 0): Triple<List<Float>, Float, Int>? {
     if (!b.isText || n == 0 || b.r.t.isEmpty()) return null
     val lay = lays[b.id] ?: return null
     val pos = kpos[b.id] ?: return null
@@ -316,31 +316,36 @@ internal fun Ed.inkAnchor(b: Blk, a: FloatArray, n: Int, hl: Boolean): Triple<Li
     val h = lay.size.height.toFloat()
     val em = emPx(lay)
     val tol = h / lay.lineCount.coerceAtLeast(1)
-    val ln = IntArray(n)
+    val ln = IntArray(n) { -1 }
     val out = ArrayList<Float>(n * 3)
+    var good = 0
     for (i in 0 until n) {
         val lx = a[i * 3] - pos.x
         val ly = a[i * 3 + 1] - pos.y
-        if (ly < -tol || ly > h + tol) return null
+        // titik yang jauh dari teks: pena -> seluruh goresan tidak dijangkarkan (kecuali titik sambungan dari blok sebelumnya,
+        // lihat skip); stabilo -> titik itu saja yang diabaikan, jalur baris lain tetap ikut huruf
+        val far = ly < -tol * 2.5f || ly > h + tol * 2.5f
+        if (far && !hl && i >= skip) return null
         val cy = ly.coerceIn(0f, max(0f, h - 1f))
         val line = lay.getLineForVerticalPosition(cy)
         val base = lay.getLineBaseline(line)
-        if (hl && abs(ly - base) > tol * .9f) return null
+        val off = hl && (far || abs(ly - base) > tol * .9f)
         val ls = max(lay.getLineStart(line), z)
         val le = lay.getLineEnd(line, true)
         var c = lay.getOffsetForPosition(Offset(lx, if (hl) base - 1f else cy))
         c = c.coerceIn(ls, max(ls, le - 1)).coerceIn(0, len - 1)
         val box = lay.getBoundingBox(c)
-        ln[i] = line
+        if (!off) { ln[i] = line; good++ }
         out.add(fromLay(b.id, c).toFloat())
         out.add(((lx - box.left) / max(box.width, em * .1f) * 1000f).roundToInt() / 1000f)
         out.add(((ly - base) / em * 1000f).roundToInt() / 1000f)
     }
     if (!hl) return Triple(out, em / dens, 2)
+    if (good == 0) return null
     // stabilo: satu jalur per baris (titik paling kiri sampai paling kanan di baris itu)
     val runs = ArrayList<List<Float>>()
     val ext = ArrayList<Float>()
-    for (L in ln.distinct().sorted()) {
+    for (L in ln.filter { it >= 0 }.distinct().sorted()) {
         var i0 = -1; var i1 = -1
         for (i in 0 until n) if (ln[i] == L) {
             if (i0 < 0 || a[i * 3] < a[i0 * 3]) i0 = i
@@ -358,8 +363,8 @@ internal fun Ed.inkAnchor(b: Blk, a: FloatArray, n: Int, hl: Boolean): Triple<Li
 }
 
 /** Pasang jangkar huruf pada goresan s yang titik mutlaknya a (n titik) berada di atas blok tgt; kalau tidak bisa, jangkar dikosongkan. */
-internal fun Ed.withAnchor(s: Ink, tgt: Blk, a: FloatArray, n: Int): Ink {
-    val r = inkAnchor(tgt, a, n, s.t == 1)
+internal fun Ed.withAnchor(s: Ink, tgt: Blk, a: FloatArray, n: Int, skip: Int = 0): Ink {
+    val r = inkAnchor(tgt, a, n, s.t == 1, skip)
     return if (r == null) s.copy(an = emptyList(), ah = 0f, av = 0) else s.copy(an = r.first, ah = r.second, av = r.third)
 }
 
@@ -503,7 +508,7 @@ internal fun Ed.inkBuild(base: Ink, a: FloatArray, n: Int, W: Float): List<Pair<
         val (blk, tp) = inkTarget(a[i * 3 + 1]) ?: return single()
         own[i] = blk; tops[i] = tp
     }
-    if (own.any { !it!!.isText }) return single()
+    // blok bukan teks (gambar, tabel, garis) ikut jadi potongan sendiri: potongannya menempel ke blok itu, potongan di teks tetap ikut huruf
     // potongan = deretan titik berurutan yang pemiliknya sama
     val runs = ArrayList<IntArray>()          // [awal, akhir] inklusif
     var st = 0
@@ -511,7 +516,7 @@ internal fun Ed.inkBuild(base: Ink, a: FloatArray, n: Int, W: Float): List<Pair<
         if (i == n || own[i]!!.id != own[st]!!.id) { runs.add(intArrayOf(st, i - 1)); st = i }
     }
     if (runs.size == 1) return single()
-    if (runs.size > 12 || (base.t == 0 && own.map { it!!.id }.distinct().size > 8)) return single()
+    if (runs.size > 60 || (base.t == 0 && own.map { it!!.id }.distinct().size > 40)) return single()
     val out = ArrayList<Pair<String, Ink>>()
     for ((k, r) in runs.withIndex()) {
         val from = if (base.t == 0 && k > 0) r[0] - 1 else r[0]      // pena: titik terakhir potongan sebelumnya dipakai lagi
@@ -520,7 +525,7 @@ internal fun Ed.inkBuild(base: Ink, a: FloatArray, n: Int, W: Float): List<Pair<
         System.arraycopy(a, from * 3, pts, 0, cnt * 3)
         val blk = own[r[0]]!!
         val id = if (k == 0) base.id else uid()
-        out.add(blk.id to withAnchor(base.copy(id = id, p = relPts(pts, cnt, tops[r[0]], W, d)), blk, pts, cnt))
+        out.add(blk.id to withAnchor(base.copy(id = id, p = relPts(pts, cnt, tops[r[0]], W, d)), blk, pts, cnt, if (from < r[0]) 1 else 0))
     }
     return out
 }
