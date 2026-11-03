@@ -481,8 +481,6 @@ private fun relPts(a: FloatArray, n: Int, top: Float, W: Float, d: Float): List<
     return out
 }
 
-fun Ed.inkAdd(lv: LiveInk, W: Float, dens: Float) = inkAddRaw(lv.tool, lv.color, lv.wDp, lv.pts, lv.n, false, W, dens)
-
 /**
  * Pecah goresan (titik mutlak a, n titik, piksel konten) per blok teks yang dilaluinya dan pasang jangkar huruf di tiap potongan.
  * Tiap Enter = satu blok, jadi stabilo / coretan yang melintasi beberapa baris sering berarti beberapa blok: tiap potongan menempel
