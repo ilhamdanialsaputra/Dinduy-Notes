@@ -77,6 +77,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -94,6 +95,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -172,11 +174,19 @@ private val SH = listOf(
     floatArrayOf(60f, 28f, 28f, 28f), floatArrayOf(28f, 28f, 60f, 28f)
 )
 
+private val FD_ID = Locale("id", "ID")
+private val FD_SHORT = SimpleDateFormat("d MMM", FD_ID)
+private val FD_LONG = SimpleDateFormat("d MMM yyyy", FD_ID)
+private val FD_YEAR = SimpleDateFormat("yyyy", Locale.US)
+
+// dipanggil hanya dari thread UI; formatter dibuat sekali (SimpleDateFormat mahal dibuat berulang per kartu)
 private fun fdate(u: Long): String {
     val d = Date(u)
-    val same = SimpleDateFormat("yyyy", Locale.US).format(d) == SimpleDateFormat("yyyy", Locale.US).format(Date())
-    return SimpleDateFormat(if (same) "d MMM" else "d MMM yyyy", Locale("id", "ID")).format(d)
+    val same = FD_YEAR.format(d) == FD_YEAR.format(Date())
+    return (if (same) FD_SHORT else FD_LONG).format(d)
 }
+
+private val WS_RX = Regex("\\s+")
 
 /** Spring "spatial" Material 3 Expressive untuk perpindahan kartu antar posisi di daftar. */
 private val PlaceSpec = spring<IntOffset>(0.8f, 380f, IntOffset.VisibilityThreshold)
@@ -346,7 +356,7 @@ fun CardBody(d: Note, kind: String, c2: Boolean, fg: Color, padH: Dp, padV: Dp, 
         )
         if (kind != "t") {
             T(
-                d.x.replace(Regex("\\s+"), " ").trim().take(150).ifEmpty { if (d.au.isNotEmpty()) "Catatan suara" else "Kosong" }, if (c2) 13.5f else 15f, 450, fg,
+                remember(d.x) { d.x.take(1000).replace(WS_RX, " ").trim().take(150) }.ifEmpty { if (d.au.isNotEmpty()) "Catatan suara" else "Kosong" }, if (c2) 13.5f else 15f, 450, fg,
                 modifier = Modifier.padding(start = if (bodyLast) insBL else 0.dp, bottom = if (bodyLast) insBL else 0.dp),
                 maxLines = if (kind == "s") (if (c2) 2 else 1) else (if (c2) 4 else 3), lh = 1.45f, alpha = .8f
             )
@@ -370,8 +380,8 @@ fun CardBody(d: Note, kind: String, c2: Boolean, fg: Color, padH: Dp, padV: Dp, 
         }
         if (kind == "f") {
             Row(Modifier.fillMaxWidth().padding(start = insBL, bottom = insBL), horizontalArrangement = if (c2) Arrangement.Start else Arrangement.SpaceBetween) {
-                if (!c2) T(wordCount(d.x).toString() + " kata", 13f, 700, fg, ls = .02f, alpha = .75f)
-                T((if (delTime != 0L) "Dihapus " else "") + fdate(if (delTime != 0L) delTime else d.u), if (c2) 12f else 13f, 700, fg, ls = .02f, alpha = .75f)
+                if (!c2) T(remember(d.x) { wordCount(d.x) }.toString() + " kata", 13f, 700, fg, ls = .02f, alpha = .75f)
+                T(remember(delTime, d.u) { (if (delTime != 0L) "Dihapus " else "") + fdate(if (delTime != 0L) delTime else d.u) }, if (c2) 12f else 13f, 700, fg, ls = .02f, alpha = .75f)
             }
         }
     }
@@ -695,11 +705,16 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
     val sel = vm.sel
     val selMode = sel.isNotEmpty()
     val cols = vm.pr.cols.coerceIn(1, 2)
-    val live = vm.sorted(vm.liveF()).let { l ->
-        // 1 & 2 kolom: catatan kosong yang sedang dibuka disembunyikan dari grid supaya kartu lain tidak bergeser
-        l.filterNot { d ->
-            d.t.isBlank() && d.x.isBlank() && d.bl.none { it.isObj && it.ty != "hr" } && d.rm == 0L && d.au.isEmpty() &&
-                vm.openId == d.id && vm.nav.stack.any { s -> s is Scr.Note && s.id == d.id }
+    // derivedStateOf: hanya dihitung ulang saat catatan / filter / urutan / layar berubah, bukan tiap frame animasi pencarian atau keyboard
+    val live by remember(vm) {
+        derivedStateOf {
+            vm.sorted(vm.liveF()).let { l ->
+                // 1 & 2 kolom: catatan kosong yang sedang dibuka disembunyikan dari grid supaya kartu lain tidak bergeser
+                l.filterNot { d ->
+                    d.t.isBlank() && d.x.isBlank() && d.bl.none { it.isObj && it.ty != "hr" } && d.rm == 0L && d.au.isEmpty() &&
+                        vm.openId == d.id && vm.nav.stack.any { s -> s is Scr.Note && s.id == d.id }
+                }
+            }
         }
     }
     val pos = remember(live) { live.withIndex().associate { it.value.id to it.index } }
@@ -856,7 +871,12 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     }
                 }
                 val q = vm.query.trim().lowercase()
-                val res = vm.sorted(vm.liveF().filter { q.isEmpty() || (it.t + " " + it.x).lowercase().contains(q) })
+                val res by remember(vm) {
+                    derivedStateOf {
+                        val qq = vm.query.trim().lowercase()
+                        vm.sorted(vm.liveF().filter { qq.isEmpty() || (it.t + " " + it.x).lowercase().contains(qq) })
+                    }
+                }
                 LazyColumn(
                     Modifier.weight(1f).fillMaxWidth().graphicsLayer { alpha = sa; translationY = (1f - sa) * 14.dp.toPx() },
                     contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 4.dp, bottom = 16.dp),
@@ -868,8 +888,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     }
                     // indeks warna/bentuk memakai posisi di daftar penuh, jadi kartu tidak berganti warna saat tersaring;
                     // kartu yang cocok bergeser mulus, yang tidak cocok memudar keluar
-                    items(res, key = { "s" + it.id }) { d ->
-                        val ri = res.indexOf(d)
+                    itemsIndexed(res, key = { _, it -> "s" + it.id }) { ri, d ->
                         NoteCard(
                             d, pos[d.id] ?: ri, vm.pr.cd, false,
                             flowItem().makeRoom(vm, d.id, ri, { res.indexOfFirst { it.id == vm.openId } }, hPx, dens.density),
@@ -1041,8 +1060,7 @@ fun ListScreen(
             if (notes.isEmpty()) item(key = "empty-list") {
                 T(empty, 17f, 600, pal.osv, flowItem().fillMaxWidth().padding(vertical = 48.dp), align = androidx.compose.ui.text.style.TextAlign.Center)
             }
-            items(notes, key = { it.id }) { d ->
-                val ix = notes.indexOf(d)
+            itemsIndexed(notes, key = { _, it -> it.id }) { ix, d ->
                 androidx.compose.runtime.DisposableEffect(d.id) { onDispose { vm.cardMorph.remove(d.id) } }
                 val first = remember(d.id) { d.id !in seen }
                 val prog = remember(d.id) { Animatable(if (first) 0f else 1f) }
