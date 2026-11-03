@@ -30,9 +30,11 @@ object K {
 
 val FMT = listOf(K.B, K.I, K.U, K.S, K.M, K.C)
 
+@androidx.compose.runtime.Immutable
 @Serializable
 data class Sp(val s: Int, val e: Int, val k: Int, val u: String? = null)
 
+@androidx.compose.runtime.Immutable
 @Serializable
 data class Rt(val t: String = "", val sp: List<Sp> = emptyList())
 
@@ -151,6 +153,7 @@ operator fun Rt.plus(o: Rt): Rt {
 
 fun Rt.withKind(k: Int): Rt = copy(sp = normSp(sp + Sp(0, t.length, k), t.length))
 
+@androidx.compose.runtime.Immutable
 @Serializable
 data class Img(
     val id: String,
@@ -165,6 +168,7 @@ data class Img(
 
 /** Satu goresan coretan. t: 0 pulpen, 1 stabilo. c: indeks warna 0..4 (mengikuti tema). w: tebal (dp).
  *  p: daftar tiga-tiga (x = pecahan lebar konten, y = dp dari atas blok induk, k = faktor tebal). */
+@androidx.compose.runtime.Immutable
 @Serializable
 data class Ink(
     val id: String = uid(),
@@ -176,6 +180,7 @@ data class Ink(
 )
 
 /** ty: p, h, li, q, code, tbl, hr, img */
+@androidx.compose.runtime.Immutable
 @Serializable
 data class Blk(
     val id: String = uid(),
