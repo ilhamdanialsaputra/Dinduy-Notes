@@ -29,6 +29,8 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -259,10 +261,29 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         write(Db(pr, docs.toList(), labels.toList()))
     }
 
+    // Catatan itu immutable: JSON catatan yang tidak berubah dipakai ulang, jadi menyimpan setelah mengetik hanya
+    // meng-encode catatan yang diedit (bukan seluruh database). Hasil berkasnya identik dengan encode biasa.
+    private val noteJson = java.util.IdentityHashMap<Note, String>()
+
+    private fun encodeDb(db: Db): String = synchronized(noteJson) {
+        val keep = java.util.IdentityHashMap<Note, String>()
+        val sb = StringBuilder(64 * 1024)
+        sb.append("{\"pr\":").append(J.encodeToString(Prefs.serializer(), db.pr)).append(",\"docs\":[")
+        for ((i, n) in db.docs.withIndex()) {
+            if (i > 0) sb.append(',')
+            val js = noteJson[n] ?: J.encodeToString(Note.serializer(), n)
+            keep[n] = js
+            sb.append(js)
+        }
+        sb.append("],\"lbl\":").append(J.encodeToString(ListSerializer(String.serializer()), db.lbl)).append('}')
+        noteJson.clear(); noteJson.putAll(keep)
+        sb.toString()
+    }
+
     private fun write(db: Db) {
         try {
             val tmp = File(file.path + ".tmp")
-            tmp.writeText(J.encodeToString(Db.serializer(), db))
+            tmp.writeText(encodeDb(db))
             if (!tmp.renameTo(file)) {
                 file.writeText(tmp.readText()); tmp.delete()
             }
