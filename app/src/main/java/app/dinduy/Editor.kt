@@ -1980,19 +1980,19 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
      * Diam-diam: tidak membuat langkah riwayat dan tidak menandai catatan berubah. Hanya jalan kalau tidak ada ketikan yang belum di-commit.
      */
     fun inkUpgrade() {
-        if (blocks.none { b -> b.ik.any { !it.anc } }) return
+        if (blocks.none { b -> b.ik.any { !it.anc && !it.img } }) return
         if (hist[hi].bl !== blocks && hist[hi].bl != blocks) return
         val W = (contentCoords?.size?.width ?: 0).toFloat()
         if (W <= 0f) return
         val adds = HashMap<String, ArrayList<Ink>>()
         val drop = HashSet<String>()
         for (b in blocks) {
-            if (b.ik.none { !it.anc }) continue
+            if (b.ik.none { !it.anc && !it.img }) continue
             val top = bpos[b.id]?.get(0) ?: continue
             for (s in b.ik) {
-                if (s.anc || s.p.isEmpty()) continue
+                if (s.anc || s.img || s.p.isEmpty()) continue
                 val raw = s.copy(an = emptyList(), ah = 0f, av = 0)
-                val a = inkPts(raw, b.id, top, W, dens)
+                val a = inkPts(s, b.id, top, W, dens)          // posisi sekarang (goresan berskala ikut ukuran huruf), bukan p mentah
                 val ps = inkBuild(raw, a, a.size / 3, W)
                 if (ps.none { it.second.anc }) continue          // tidak bisa dijangkarkan: biarkan seperti semula
                 drop.add(s.id)
