@@ -1976,29 +1976,30 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     val canRedo: Boolean get() { tick; return hi < hist.size - 1 }
 
 /**
-     * Coretan lama (atau yang gagal dijangkarkan) dipasangi jangkar huruf berdasarkan posisinya sekarang di layar, jadi tidak ada lompatan.
+     * Coretan lama (atau yang belum berjangkar) dipasangi jangkar huruf berdasarkan posisinya sekarang di layar, jadi tidak ada lompatan.
      * Diam-diam: tidak membuat langkah riwayat dan tidak menandai catatan berubah. Hanya jalan kalau tidak ada ketikan yang belum di-commit.
      */
     fun inkUpgrade() {
-        if (blocks.none { b -> b.ik.any { it.an.isEmpty() } }) return
+        if (blocks.none { b -> b.ik.any { !it.anc } }) return
         if (hist[hi].bl !== blocks && hist[hi].bl != blocks) return
         val W = (contentCoords?.size?.width ?: 0).toFloat()
         if (W <= 0f) return
         var any = false
         val nb = blocks.map { b ->
-            if (!b.isText || b.ik.none { it.an.isEmpty() }) return@map b
+            if (!b.isText || b.ik.none { !it.anc }) return@map b
             val top = bpos[b.id]?.get(0) ?: return@map b
             b.copy(ik = b.ik.map { s ->
-                if (s.an.isNotEmpty() || s.p.isEmpty()) s else {
-                    val a = inkPts(s, b.id, top, W, dens)
+                if (s.anc || s.p.isEmpty()) s else {
+                    val a = inkPts(s.copy(an = emptyList(), av = 0), b.id, top, W, dens)
                     val r = withAnchor(s, b, a, a.size / 3)
-                    if (r.an.isNotEmpty()) { any = true; r } else s
+                    if (r.anc) { any = true; r } else s
                 }
             })
         }
         if (!any) return
         blocks = nb
         hist[hi] = Snap(nb, hist[hi].key, hist[hi].sel)
+        vm.syncInk(noteId, inkSyncP(nb))   // simpan jangkarnya supaya ekspor PDF catatan lama juga akurat
     }
 
     fun undo() {
