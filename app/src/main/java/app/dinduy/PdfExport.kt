@@ -64,11 +64,15 @@ object PdfExport {
 
     private class PStroke(val path: Path, val tool: Int, val color: Int, val w: Float, val top: Float, val bottom: Float)
 
+    /** Tata letak satu kolom teks beserta pojok kiri-atasnya di ruang aliran (pt); dipakai supaya coretan berjangkar bisa dihitung dari huruf. */
+    private class TL(val lay: JL, val ox: Float, val oy: Float)
+
     private class Flow {
         val pieces = ArrayList<Piece>()
         val cuts = ArrayList<Float>()          // posisi yang boleh jadi batas halaman
         val zones = ArrayList<FloatArray>()    // rentang yang tidak boleh dipotong (gambar, judul)
         val strokes = ArrayList<PStroke>()
+        val texts = HashMap<String, TL>()      // id blok -> tata letak teksnya
         var y = 0f
     }
 
@@ -123,6 +127,82 @@ object PdfExport {
         val height: Int get() = lay.height
         val lineCount: Int get() = lay.lineCount
         fun getLineTop(i: Int): Int = lay.getLineTop(i)
+        val em: Float get() = tp.textSize
+
+        /** Tambahan jarak antar kata pada baris i bila rata kiri-kanan (aturan sama dengan draw). */
+        private fun wsOf(i: Int): Float {
+            val n = lay.lineCount
+            if (!just || n < 2 || i >= n - 1) return 0f
+            val txt = lay.text
+            val st = lay.getLineStart(i)
+            var en = lay.getLineEnd(i)
+            val hardBreak = en > st && txt[en - 1] == '\n'
+            while (en > st && txt[en - 1].isWhitespace()) en--
+            var sp = 0
+            var k = st
+            while (k < en && txt[k].isWhitespace()) k++
+            for (q in k until en) if (txt[q] == ' ') sp++
+            val avail = width - (if (lm != null) lm[minOf(i, lm.size - 1)].toFloat() else 0f)
+            val extra = avail - lay.getLineMax(i)
+            return if (!hardBreak && sp > 0 && extra > .5f) extra / sp else 0f
+        }
+
+        /** Kotak huruf ke-c: [kiri, lebar, garis dasar], sudah termasuk jarak tambahan baris rata kiri-kanan. */
+        fun charBox(c0: Int): FloatArray {
+            val txt = lay.text
+            val len = txt.length
+            val c = c0.coerceIn(0, max(0, len - 1))
+            val ln = lay.getLineForOffset(c)
+            val ws = wsOf(ln)
+            val le = lay.getLineEnd(ln)
+            var sp = 0
+            if (ws > 0f) {
+                var k = lay.getLineStart(ln)
+                while (k < le && txt[k].isWhitespace()) k++
+                for (q in k until c) if (txt[q] == ' ') sp++
+            }
+            val x = lay.getPrimaryHorizontal(c)
+            val raw = (if (c + 1 < le) lay.getPrimaryHorizontal(c + 1) else lay.getLineRight(ln)) - x
+            val wd = max(raw + (if (ws > 0f && len > 0 && txt[c] == ' ') ws else 0f), 0f)
+            return floatArrayOf(x + ws * sp, wd, lay.getLineBaseline(ln).toFloat())
+        }
+
+        /** Bentang teks terlihat baris i: [kiri, kanan]. */
+        fun lineSpan(i: Int): FloatArray {
+            val txt = lay.text
+            val st = lay.getLineStart(i)
+            var en = lay.getLineEnd(i)
+            while (en > st && txt[en - 1].isWhitespace()) en--
+            if (en <= st) { val l = lay.getLineLeft(i); return floatArrayOf(l, l) }
+            val a = charBox(st); val b = charBox(en - 1)
+            return floatArrayOf(a[0], b[0] + b[1])
+        }
+
+        /** Stabilo satu baris: segmen (x0, y, x1) per baris yang dilalui; ujungnya mengikuti huruf awal / akhir. */
+        fun runSegs(o0i: Int, f0i: Float, y0i: Float, o1i: Int, f1i: Float, y1i: Float): List<FloatArray> {
+            val len = lay.text.length
+            if (len == 0) return emptyList()
+            var o0 = o0i.coerceIn(0, len - 1); var f0 = f0i; var y0 = y0i
+            var o1 = o1i.coerceIn(0, len - 1); var f1 = f1i; var y1 = y1i
+            if (o1 < o0 || (o1 == o0 && f1 < f0)) {
+                val to = o0; o0 = o1; o1 = to
+                val tf = f0; f0 = f1; f1 = tf
+                val ty = y0; y0 = y1; y1 = ty
+            }
+            val b0 = charBox(o0); val b1 = charBox(o1)
+            val l0 = lay.getLineForOffset(o0); val l1 = lay.getLineForOffset(o1)
+            val fy = (y0 + y1) / 2f
+            val e = em
+            val out = ArrayList<FloatArray>()
+            for (ln in l0..l1) {
+                val sp = lineSpan(ln)
+                val xs = if (ln == l0) b0[0] + f0 * max(b0[1], e * .1f) else sp[0]
+                val xe = if (ln == l1) b1[0] + f1 * max(b1[1], e * .1f) else sp[1]
+                val y = lay.getLineBaseline(ln) + fy * e
+                if (l0 == l1 || xe - xs > .5f) out.add(floatArrayOf(min(xs, xe), y, max(xs, xe)))
+            }
+            return out
+        }
 
         fun draw(c: Canvas) {
             if (!just || lay.lineCount < 2) { lay.draw(c); return }
@@ -374,6 +454,7 @@ object PdfExport {
                 val lay = mk(cx, b.r, (cx.cw - ind - iv.l - iv.r).coerceAtLeast(30f), size, col.toArgb(), size * 1.02f, bold = true, ls = -.02f, ta = b.ta, ind = iv)
                 val x = (if (fl != null && fl.left) ind else 0f) + iv.l
                 f.pieces.add(Piece(y0 + top, lay.height.toFloat(), x, null) { c -> lay.draw(c) })
+                f.texts[b.id] = TL(lay, x, y0 + top)
                 f.zones.add(floatArrayOf(y0, y0 + top + lay.height + bot + .5f))
                 f.y = y0 + top + lay.height + bot
                 Em(f.y - y0, lay.height.toFloat())
@@ -391,6 +472,7 @@ object PdfExport {
                 val lineH = fs * cx.lh
                 val lay = mk(cx, b.r, width, fs, col, lineH, strike = done, ta = b.ta, ind = iv)
                 lineCuts(f, lay, y0)
+                f.texts[b.id] = TL(lay, x0 + inset, y0)
                 val n = cx.ords[b.id] ?: 1
                 f.pieces.add(Piece(y0, lay.height.toFloat(), x0, null) { c ->
                     drawMarker(c, cx, b, n, ind0, lineH)
@@ -424,6 +506,7 @@ object PdfExport {
                     narrow = narrow, indent = ind, leftSide = fl?.left ?: true, ind = iv
                 )
                 lineCuts(f, lay, y0)
+                f.texts[b.id] = TL(lay, shift + iv.l, y0)
                 f.pieces.add(Piece(y0, lay.height.toFloat(), shift + iv.l, null) { c -> lay.draw(c) })
                 f.y = y0 + lay.height + fs * 1.1f
                 Em(f.y - y0, lay.height.toFloat())
@@ -479,6 +562,7 @@ object PdfExport {
         val boxH = padY * 2f + labelH + lay.height
         val y0 = f.y
         f.cuts.add(y0)
+        f.texts[b.id] = TL(lay, iv.l + padX, y0 + padY + labelH)
         for (i in 1 until lay.lineCount) f.cuts.add(y0 + padY + labelH + lay.getLineTop(i))
         val rs = radii(q.r, u, boxW, boxH)
         val w = boxW
@@ -537,6 +621,7 @@ object PdfExport {
         val boxH = pad * 2f + chipH + lay.height
         val y0 = f.y
         f.cuts.add(y0)
+        f.texts[b.id] = TL(lay, pad, y0 + pad + chipH)
         for (i in 1 until lay.lineCount) f.cuts.add(y0 + pad + chipH + lay.getLineTop(i))
         val rs = radii(floatArrayOf(28f, 28f, 28f, 28f), u, cx.cw, boxH)
         val w = cx.cw
@@ -790,10 +875,43 @@ object PdfExport {
     }
 
     // ------------------------------------------------------------------ coretan
+    /** Goresan berjangkar: tiap titik dihitung dari huruf di tata letak PDF, jadi tetap menempel di huruf yang sama walau baris dan ukuran huruf berbeda dari editor. */
+    private fun anchoredInk(f: Flow, cx: Cx, s: Ink, tl: TL) {
+        val l = tl.lay
+        val em = l.em
+        val wPx = s.w * em / s.ah                       // tebal mengikuti ukuran huruf, sama seperti di editor
+        val col = inkColor(cx.pal, s.c, s.t == 1).toArgb()
+        if (s.av == 3) {                                // stabilo satu baris: satu potongan per baris, jadi bisa jatuh di halaman masing-masing
+            for (g in l.runSegs(s.an[0].toInt(), s.an[1], s.an[2], s.an[3].toInt(), s.an[4], s.an[5])) {
+                val path = Path()
+                val y = tl.oy + g[1]
+                path.moveTo(tl.ox + g[0], y)
+                path.lineTo(tl.ox + g[2], y)
+                f.strokes.add(PStroke(path, 1, col, wPx, y - wPx / 2f, y + wPx / 2f))
+            }
+            return
+        }
+        val n = s.p.size / 3
+        val a = FloatArray(n * 3)
+        for (q in 0 until n) {
+            val bx = l.charBox(s.an[q * 3].toInt())
+            a[q * 3] = tl.ox + bx[0] + s.an[q * 3 + 1] * max(bx[1], em * .1f)
+            a[q * 3 + 1] = tl.oy + bx[2] + s.an[q * 3 + 2] * em
+            a[q * 3 + 2] = s.p[q * 3 + 2]
+        }
+        val ap = inkPath(a, n, s.t, wPx, s.sh).asAndroidPath()
+        val rf = RectF()
+        ap.computeBounds(rf, true)
+        val pad = if (s.t == 1) wPx / 2f else 0f
+        f.strokes.add(PStroke(ap, s.t, col, wPx, rf.top - pad, rf.bottom + pad))
+    }
+
     private fun inkOf(f: Flow, cx: Cx, b: Blk, top: Float) {
+        val tl = f.texts[b.id]
         for (s in b.ik) {
             val n = s.p.size / 3
             if (n == 0) continue
+            if (tl != null && s.anc && tl.lay.lay.text.isNotEmpty()) { anchoredInk(f, cx, s, tl); continue }
             val a = FloatArray(n * 3)
             for (q in 0 until n) {
                 a[q * 3] = s.p[q * 3] * cx.cw
