@@ -461,8 +461,9 @@ fun AppRoot(vm: AppVM, act: Actions) {
     // mode "auto" = ikuti terang/gelap perangkat
     val sysDark = androidx.compose.foundation.isSystemInDarkTheme()
     val effMode = normMode(vm.pr.mode).let { if (it == "auto") (if (sysDark) "dark" else "light") else it }
-    val target = remember(effMode, vm.pr.seed, dynOn) {
-        (if (dynOn) dynamicPal(ctx, effMode) else null) ?: buildPal(effMode, vm.pr.seed)
+    val target = remember(effMode, vm.pr.seed, dynOn, vm.pr.mono) {
+        val base = (if (dynOn) dynamicPal(ctx, effMode) else null) ?: buildPal(effMode, vm.pr.seed)
+        if (vm.pr.mono) base.toMono() else base
     }
     val anim = remember { Animatable(1f) }
     var from by remember { mutableStateOf(target) }
