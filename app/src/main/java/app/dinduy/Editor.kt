@@ -1,5 +1,6 @@
 package app.dinduy
 
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.runtime.getValue
@@ -28,27 +29,43 @@ private val RX_DASHL = Regex("^-\\p{L}")
 private val RX_QT = Regex("^>\\s")
 private val RX_HD = Regex("^(#{1,2})\\s")
 private val RX_CK = Regex("^\\[([ xX]?)]\\s")
+private val RX_URL = Regex("^https?://[^\\s<>\"]{4,}$")
+
+/** Isi [s] kalau seluruhnya hanya satu alamat web, selain itu null. */
+private fun asUrl(s: String): String? {
+    val t = s.trim()
+    return if (t.length <= 2000 && RX_URL.matches(t)) t else null
+}
 
 /**
  * Pemotongan baris buatan untuk satu paragraf yang melewati dasar gambar mengambang:
- * [cuts] = offset awal tiap baris yang disisipi pemisah baris visual; [padLen] = jumlah spasi-em penggeser
- * (gambar di kiri) di awal tiap baris sempit; [padCnt] = berapa pemotongan pertama yang diikuti penggeser;
- * [ls] = letter-spacing (sp) agar lebar penggeser pas selebar gambar.
+ * [cuts] = offset awal tiap baris yang disisipi pemisah baris visual; [pn] = jumlah spasi-em penggeser di awal tiap baris
+ * (indeks 0 = baris pertama, indeks j = baris sesudah pemotongan ke-(j-1); ukurannya cuts.size + 1);
+ * [pl] = letter-spacing (sp) tiap penggeser agar lebarnya pas. Penggeser dipakai untuk menggeser baris sempit di kanan gambar kiri
+ * dan untuk inden baris pertama / menggantung (inden pada TextField tidak bisa dipakai karena tiap pemotongan memulai paragraf baru).
  * Hanya tampilan: teks aslinya tidak berubah.
  */
 
 @androidx.compose.runtime.Immutable
-class Fold(val cuts: IntArray, val padLen: Int, val padCnt: Int, val ls: Float, val cutR: Float = 0f) {
-    private val sp = if (padLen > 0) padLen else 0
-
+class Fold(val cuts: IntArray, val pn: IntArray, val pl: FloatArray, val cutR: Float = 0f) {
     // [cutR] = px yang dikurangkan dari lebar kolom untuk baris sempit TANPA penggeser (gambar di kanan); dipakai rata kiri-kanan.
     override fun equals(other: Any?): Boolean =
-        other is Fold && padLen == other.padLen && padCnt == other.padCnt && ls == other.ls && cutR == other.cutR &&
-            cuts.contentEquals(other.cuts)
+        other is Fold && cutR == other.cutR && cuts.contentEquals(other.cuts) && pn.contentEquals(other.pn) && pl.contentEquals(other.pl)
 
-    override fun hashCode(): Int = ((cuts.contentHashCode() * 31 + padLen) * 31 + padCnt) * 31 + ls.hashCode() + cutR.hashCode()
-    private fun cum(m: Int) = m + padLen * minOf(m, padCnt)
-    val total: Int = sp + cum(cuts.size)
+    override fun hashCode(): Int =
+        (((cuts.contentHashCode() * 31 + pn.contentHashCode()) * 31 + pl.contentHashCode()) * 31) + cutR.hashCode()
+
+    private fun p0() = if (pn.isNotEmpty()) pn[0] else 0
+    private fun pAt(j: Int) = if (j < pn.size) pn[j] else 0
+
+    /** Jumlah karakter tambahan (pemisah baris + penggeser) di antara awal baris ke-1 dan pemotongan ke-m. */
+    private fun cum(m: Int): Int {
+        var s = 0
+        for (j in 1..m) s += 1 + pAt(j)
+        return s
+    }
+
+    val total: Int = p0() + cum(cuts.size)
 
     /** Offset asli (z = jumlah karakter awalan tak terlihat) -> offset tampilan. */
     fun o2t(o: Int, z: Int): Int {
@@ -56,19 +73,19 @@ class Fold(val cuts: IntArray, val padLen: Int, val padCnt: Int, val ls: Float, 
         val r = o - z
         var c = 0
         while (c < cuts.size && cuts[c] <= r) c++
-        return z + r + sp + cum(c)
+        return z + r + p0() + cum(c)
     }
 
     /** Offset tampilan -> offset asli. */
     fun t2o(t: Int, z: Int): Int {
         if (t < z) return t
-        val tt = t - z - sp
+        val tt = t - z - p0()
         if (tt <= 0) return z
         var passed = 0
         for (k in cuts.indices) {
             val start = cuts[k] + cum(k)
             if (tt <= start) break
-            val len = 1 + (if (k < padCnt) padLen else 0)
+            val len = 1 + pAt(k + 1)
             if (tt < start + len) return z + cuts[k]
             passed = k + 1
         }
@@ -338,6 +355,11 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val df = diff(oldRt.t, nt)
         val insStr = nt.substring(df.p, df.p + df.ins)
         val cell = isCellKey(key)
+        // URL ditempel ke paragraf kosong -> kartu pratinjau tautan (ketikan biasa satu-satu tidak ikut, hanya tempel)
+        if (df.ins >= 8 && !cell && b.ty == "p" && oldRt.t.isBlank()) {
+            val u = asUrl(nt)
+            if (u != null) { linkize(key, u); return }
+        }
         if (df.ins > 0 && insStr.indexOf('\n') >= 0) {
             val without = nt.removeRange(df.p, df.p + df.ins)
             if (cell) {
@@ -398,7 +420,11 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             if (m != null && c == m.value.length) { nb = Blk(id = b.id, ik = b.ik, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi, ty = "li", lt = "b"); len = m.value.length }
             if (nb == null) {
                 m = RX_NUM.find(tx)
-                if (m != null && c == m.value.length) { nb = Blk(id = b.id, ik = b.ik, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi, ty = "li", lt = "o"); len = m.value.length }
+                if (m != null && c == m.value.length) {
+                    // "4. " -> butir bernomor 4 (nomor berikutnya melanjutkan dari angka itu)
+                    val num = m.value.takeWhile { it.isDigit() }.toIntOrNull() ?: 0
+                    nb = Blk(id = b.id, ik = b.ik, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi, ty = "li", lt = "o", st = num); len = m.value.length
+                }
             }
             if (nb == null && RX_DASHL.containsMatchIn(tx) && c >= 2 && c <= 1 + df.ins) {
                 nb = Blk(id = b.id, ik = b.ik, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi, ty = "li", lt = "b"); len = 1
@@ -534,6 +560,13 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
                     blocks = blocks.filterIndexed { j, _ -> j != i - 1 }
                     focusAt(b.id, 0)
                 }
+                pv.ty == "lnk" -> {
+                    // kartu tautan kembali jadi tautan biasa (teks); Backspace berikutnya menghapusnya
+                    val nb = Blk(id = pv.id, ty = "p", r = Rt(pv.l, listOf(Sp(0, pv.l.length, K.L, pv.l))))
+                    blocks = blocks.toMutableList().also { it[i - 1] = nb }
+                    seed(nb)
+                    focusAt(nb.id, nb.r.t.length)
+                }
                 pv.ty == "tbl" -> {
                     val r = pv.tb.size - 1
                     val c = pv.tb[r].size - 1
@@ -558,8 +591,11 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (i < 0) return
         val b = blocks[i]
         commit()
-        val ns = md(s.trimEnd('\n'), true)
-        if (ns.isEmpty()) return
+        val ns0 = md(s.trimEnd('\n'), true)
+        if (ns0.isEmpty()) return
+        // satu alamat web saja yang ditempel ke paragraf kosong -> kartu pratinjau tautan
+        val lone = if (ns0.size == 1 && ns0[0].ty == "p" && b.ty == "p" && b.r.t.isBlank()) asUrl(ns0[0].r.t) else null
+        val ns = if (lone != null) listOf(Blk(ty = "lnk", l = lone)) else ns0
         val l = blocks.toMutableList()
         val rt = b.r
         if (b.ty == "img") l.addAll(i + 1, ns)
@@ -583,6 +619,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             blocks.getOrNull(j + 1)?.let { if (it.isText) focusAt(it.id, 0) }
         }
         afterStructural()
+        if (lone != null) revealMedia(last.id)
     }
 
     // ---------- perintah toolbar ----------
@@ -677,8 +714,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     }
 
     private fun setListRaw(t: String) = convertFocused { b ->
-        if (b.ty == "li" && b.lt == t) b.copy(ty = "p")
-        else b.copy(ty = "li", lt = t, d = if (b.ty == "li") b.d else 0, r = flat(b.r))
+        if (b.ty == "li" && b.lt == t) b.copy(ty = "p", st = 0)
+        else b.copy(ty = "li", lt = t, d = if (b.ty == "li") b.d else 0, r = flat(b.r), st = if (b.ty == "li" && t == "o") b.st else 0)
     }
 
     fun setQuote(k: String) = convertFocused { b ->
@@ -732,7 +769,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     fun grid(c: Int, r: Int): List<List<Rt>> = List(r) { List(c) { Rt() } }
 
     fun insertObjs(list: List<Blk>) {
-        val key = focus?.let { keyBlock(it) } ?: blocks.last().id
+        val key = focus?.let { keyBlock(it) } ?: selImg?.first ?: blocks.last().id
         var i = idx(key)
         if (i < 0) i = blocks.size - 1
         commit()
@@ -756,7 +793,81 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     fun insTable(r: Int = 3, c: Int = 3) = insertObjs(listOf(Blk(ty = "tbl", tb = grid(c, r), ca = List(c) { "left" })))
     fun insHr() = insertObjs(listOf(Blk(ty = "hr")))
     fun addImages(imgs: List<Img>) {
-        if (imgs.isNotEmpty()) insertObjs(imgs.map { Blk(ty = "img", im = listOf(it)) })
+        if (imgs.isEmpty()) return
+        val list = imgs.map { Blk(ty = "img", im = listOf(it)) }
+        insertObjs(list)
+        revealMedia(list.first().id)
+    }
+
+    /** URL ditempel di paragraf kosong [key]: ganti jadi kartu pratinjau tautan, kursor pindah ke paragraf sesudahnya. */
+    private fun linkize(key: String, url: String) {
+        val i = idx(key)
+        if (i < 0) return
+        val b = blocks[i]
+        commit()
+        val nb = Blk(ty = "lnk", l = url)
+        blocks = blocks.toMutableList().also { it[i] = nb }
+        tf.remove(b.id)
+        afterStructural()
+        val j = idx(nb.id)
+        blocks.getOrNull(j + 1)?.let { if (it.isText) focusAt(it.id, 0) }
+        revealMedia(nb.id)
+    }
+
+    /** Kartu tautan jadi tautan biasa (teks berisi alamatnya). */
+    fun linkToText(id: String) {
+        val i = idx(id)
+        if (i < 0 || blocks[i].ty != "lnk") return
+        val b = blocks[i]
+        commit()
+        val nb = Blk(id = b.id, ty = "p", r = Rt(b.l, listOf(Sp(0, b.l.length, K.L, b.l))))
+        setBlock(i, nb)
+        seed(nb)
+        afterStructural()
+        focusAt(nb.id, nb.r.t.length)
+    }
+
+    /** Hasil ambil data tautan (judul + alamat gambar) disimpan di kartu; tidak menambah langkah undo. */
+    fun setLinkMeta(id: String, title: String, image: String) {
+        val i = idx(id)
+        if (i < 0) return
+        val b = blocks[i]
+        if (b.ty != "lnk" || (title.isEmpty() && image.isEmpty())) return
+        val synced = hist[hi].bl === blocks || hist[hi].bl == blocks
+        setBlock(i, b.copy(r = Rt(title.take(300)), pi = image))
+        if (synced) hist[hi] = Snap(blocks, hist[hi].key, hist[hi].sel)
+        dirty()
+    }
+
+    /** Gulir halus ke media yang baru disisipkan (gambar, kartu tautan) bila belum terlihat penuh. */
+    fun revealMedia(id: String) {
+        scope.launch {
+            delay(280)   // tunggu keyboard turun dan tata letak selesai
+            var n = 0
+            while (n < 20) {
+                val p = bpos[id]
+                val sc = scroll
+                if (p != null && sc != null && p[1] > 0f) {
+                    delay(60)
+                    val q = bpos[id] ?: p
+                    val top = q[0]
+                    val bot = top + q[1]
+                    val m = 24f * dens
+                    val vis = viewH - cursorClear()
+                    val cur = sc.value.toFloat()
+                    val want = when {
+                        q[1] + 2f * m >= vis -> top - m
+                        top < cur + m -> top - m
+                        bot > cur + vis - m -> bot - vis + m
+                        else -> return@launch
+                    }
+                    sc.animateScrollTo(want.toInt().coerceIn(0, sc.maxValue), tween(420, easing = Emph))
+                    return@launch
+                }
+                n++
+                delay(60)
+            }
+        }
     }
 
     // ---------- tabel ----------
@@ -1376,6 +1487,18 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     // ---------- gambar: ganti foto (bingkai tetap) ----------
     /** Isi bingkai gambar terpilih dengan foto lain: ukuran bingkai, perataan, dan posisinya tidak berubah; pangkas diatur ulang. */
+    /** Pemilih galeri untuk "ganti foto" (dipasang NoteScreen); null bila belum siap. */
+    var replPick: (() -> Unit)? = null
+
+    /** Foto pilihan dari galeri dipakai mengganti isi bingkai yang dicatat di [replT]. */
+    fun replaceFromUri(uri: android.net.Uri) {
+        scope.launch {
+            val n = vm.importImage(uri)
+            if (n == null) { replT = null; vm.show("Couldn't load the photo"); return@launch }
+            replaceImg(n)
+        }
+    }
+
     fun replaceImg(n: Img) {
         val s = replT ?: selImg
         replT = null
@@ -1945,8 +2068,18 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     private fun norm() {
         val out = ArrayList<Blk>()
         for (b in blocks) {
-            if (b.isObj && (out.isEmpty() || out.last().isObj)) out.add(Blk())
+            // gambar / kartu tautan boleh di baris paling atas, tanpa paragraf kosong di atasnya
+            val atTop = out.isEmpty() && (b.ty == "img" || b.ty == "lnk")
+            if (b.isObj && !atTop && (out.isEmpty() || out.last().isObj)) out.add(Blk())
             out.add(b)
+        }
+        // paragraf kosong lama di atas gambar / kartu tautan paling atas ikut dibuang
+        if (out.size > 1 && (out[1].ty == "img" || out[1].ty == "lnk")) {
+            val f0 = out[0]
+            if (f0.ty == "p" && f0.r.t.isEmpty() && f0.ik.isEmpty() && f0.il == 0 && f0.ir == 0 && f0.fi == 0 && f0.ta.isEmpty()) {
+                tf.remove(f0.id)
+                out.removeAt(0)
+            }
         }
         if (out.isEmpty() || out.last().isObj || out.last().isMulti) out.add(Blk())
         if (out != blocks) {
