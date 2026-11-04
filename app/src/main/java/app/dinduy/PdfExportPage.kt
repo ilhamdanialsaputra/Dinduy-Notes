@@ -142,11 +142,11 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
     val maxSide = remember(id) { ed?.maxSideW() ?: .6f }
     val hasInk = remember(note) { note?.bl?.any { it.ik.isNotEmpty() } == true }
 
-    // Ukuran awal selalu 12 pt. Coretan menempel ke huruf / ruang kosong dan ikut berubah ukuran, jadi tidak perlu lagi memakai ukuran layar.
+    // Catatan beroret: ukuran huruf awal = persis seperti di layar (coretan pas). Tanpa coretan: ukuran dokumen biasa (12 pt).
     val faithful = pr.fs * (PdfExport.CW / widthDp)
     val lo = 7f
     val hi = max(40f, faithful * 1.3f)
-    val def = (12f.coerceIn(lo, hi) * 2f).roundToInt() / 2f
+    val def = ((if (hasInk) faithful else 12f).coerceIn(lo, hi) * 2f).roundToInt() / 2f
     var pt by remember(id) { mutableFloatStateOf(def) }
 
     var view by remember { mutableStateOf<PdfView?>(null) }
@@ -245,7 +245,7 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 12.dp)) {
                     val pages = info?.pages
                     T(
-                        (if (pages != null) "$pages halaman · A4. " else "") + "Coretan ikut menyesuaikan ukuran teks.",
+                        (if (pages != null) "$pages halaman · A4. " else "") + "Coretan tetap, hanya teks yang berubah ukuran.",
                         13f, 400, pal.osv, Modifier.weight(1f), lh = 1.3f
                     )
                     if (pt != def) {
