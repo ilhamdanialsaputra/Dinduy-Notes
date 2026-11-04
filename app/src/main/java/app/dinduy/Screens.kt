@@ -305,11 +305,6 @@ fun NoteCard(
             )
     ) {
         CardBody(d, "f", c2, fg, CARD_PAD_H, CARD_PAD_V, 0.dp, 0.dp, delTime)
-        if (d.p) {
-            Box(Modifier.align(Alignment.TopEnd).padding(top = 12.dp, end = 12.dp).graphicsLayer { rotationZ = 32f; alpha = .6f }) {
-                Ic("pin", fg, 16.dp)
-            }
-        }
     }
 }
 
@@ -386,6 +381,9 @@ fun SwipeCard(enabled: Boolean, shape: androidx.compose.ui.graphics.Shape, onArc
     val off = remember { Animatable(0f) }
     val col = remember { Animatable(1f) }
     var w by remember { mutableStateOf(1f) }
+    var winL by remember { mutableStateOf(0f) }
+    var winR by remember { mutableStateOf(0f) }
+    val scrW = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp * androidx.compose.ui.platform.LocalDensity.current.density
     val haptic = LocalHapticFeedback.current
     var hit by remember { mutableStateOf(false) }
     var dir by remember { mutableStateOf(1) }
@@ -399,6 +397,7 @@ fun SwipeCard(enabled: Boolean, shape: androidx.compose.ui.graphics.Shape, onArc
     LaunchedEffect(hit) { if (hit) { wig.snapTo(0f); wig.animateTo(1f, spring(.22f, 240f)) } else wig.snapTo(1f) }
     Box(
         Modifier.fillMaxWidth().onSizeChanged { w = it.width.toFloat().coerceAtLeast(1f) }
+            .onGloballyPositioned { val b = it.boundsInWindow(); winL = b.left; winR = b.right }
             .layout { m, c ->
                 val pl = m.measure(c)
                 val h = (pl.height * col.value).roundToInt()
@@ -421,7 +420,10 @@ fun SwipeCard(enabled: Boolean, shape: androidx.compose.ui.graphics.Shape, onArc
                         if (!ok) off.animateTo(0f, spring(1f, 500f))
                         else {
                             val right = off.value > 0
-                            off.animateTo(if (right) w * 1.1f else -w * 1.1f, tween(280, easing = Emph))
+                            // buang sampai benar-benar keluar layar (kartu kolom kanan ke kiri / kolom kiri ke kanan harus menyeberang penuh)
+                            val m = 24f * dens
+                            val tgt = if (right) maxOf(w * 1.1f, scrW - winL + m) else -maxOf(w * 1.1f, winR + m)
+                            off.animateTo(tgt, tween(280, easing = Emph))
                             col.animateTo(0f, tween(300, easing = Emph))
                             if (right) onArchive() else onDelete()
                         }
