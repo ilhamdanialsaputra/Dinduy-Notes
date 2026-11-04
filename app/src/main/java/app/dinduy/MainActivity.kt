@@ -178,7 +178,7 @@ fun ViewLayer(on: Boolean, under: Boolean, keep: Boolean = false, base: Boolean 
                     topLeft = Offset(-w, 0f), size = Size(w, size.height)
                 )
             }
-            .background(pal.s).pointerInput(Unit) { }
+            .background(pal.bg).pointerInput(Unit) { }
             .then(
                 if (!on) Modifier.pointerInput(Unit) {
                     awaitPointerEventScope {
@@ -422,8 +422,8 @@ fun AppRoot(vm: AppVM, act: Actions) {
         c.isAppearanceLightNavigationBars = !pal.dark
     }
     val cs = remember(pal) {
-        if (pal.dark) darkColorScheme(primary = pal.p, onPrimary = pal.op, surface = pal.s, onSurface = pal.os, background = pal.s)
-        else lightColorScheme(primary = pal.p, onPrimary = pal.op, surface = pal.s, onSurface = pal.os, background = pal.s)
+        if (pal.dark) darkColorScheme(primary = pal.p, onPrimary = pal.op, surface = pal.s, onSurface = pal.os, background = pal.bg)
+        else lightColorScheme(primary = pal.p, onPrimary = pal.op, surface = pal.s, onSurface = pal.os, background = pal.bg)
     }
 
     val am = ctx.assets
@@ -488,7 +488,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     }
                 }
             ) {
-                Box(Modifier.fillMaxSize().background(pal.s)) {
+                Box(Modifier.fillMaxSize().background(pal.bg)) {
                     ViewLayer(
                         on = true, base = true, keep = true,
                         under = nav.stack.any { it is Scr.Settings || it is Scr.Archive || it is Scr.Trash }
