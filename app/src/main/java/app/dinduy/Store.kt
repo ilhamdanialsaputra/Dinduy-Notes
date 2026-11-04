@@ -118,7 +118,7 @@ fun rememberImg(vm: AppVM, id: String): ImageBitmap? {
     return st.value
 }
 
-const val WEL = "# Selamat datang di Dinduy\n\nCatatan yang **rapi**, cepat, dan nyaman di jempol.\n\n## Mulai dari sini\n\n" +
+const val WEL = "Catatan yang **rapi**, cepat, dan nyaman di jempol.\n\n## Mulai dari sini\n\n" +
     "- Ketuk **Baru** untuk membuat catatan\n- Tahan kartu catatan untuk memilih, menghapus, atau menggandakan\n" +
     "- Geser kapsul di atas keyboard untuk memformat teks\n\n### Daftar tugas\n\n- [x] Buka Dinduy\n" +
     "- [ ] Tulis catatan pertamamu\n- [ ] Coba ketuk kotak centang\n\n1. Ketik teks\n2. Pilih gaya di kapsul\n" +
