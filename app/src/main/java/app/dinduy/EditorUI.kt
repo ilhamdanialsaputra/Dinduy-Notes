@@ -905,7 +905,7 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
     val haptic = LocalHapticFeedback.current
     var box by remember { mutableStateOf(IntSize.Zero) }
     var snapOn by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(22.dp)
+    val shape = RoundedCornerShape(8.dp)
     val row = b.im.size > 1
     val mS by rememberUpdatedState(m)
     val bS by rememberUpdatedState(b)
