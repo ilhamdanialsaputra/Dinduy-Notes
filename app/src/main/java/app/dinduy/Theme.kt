@@ -133,7 +133,7 @@ fun normMode(m: String): String = when (m) {
 /**
  * Palet dari satu warna dasar (seed). Seluruh permukaan (latar, kertas, kartu, sheet, chip) ikut diberi corak seed,
  * bukan hanya tombol, jadi warna kustom benar-benar terasa di seluruh aplikasi.
- * Terang : kertas (kartu & editor) lebih terang dari latar beranda.
+ * Terang : krem seperti semula (kertas lebih terang dari latar beranda), hue mengikuti seed.
  * Gelap  : kertas (kartu & editor) HITAM PEKAT (AMOLED), latar beranda satu tingkat lebih terang.
  */
 fun buildPal(mode: String, seed: String): Pal {
@@ -147,14 +147,14 @@ fun buildPal(mode: String, seed: String): Pal {
     val ec = hsl(4f, 70f, cl); val oec = hsl(4f, 70f, ol)
     val ac = hsl(h + 150f, 45f, cl); val oac = hsl(h + 150f, 45f, ol)
     return if (light) {
-        val ns = minOf(sat * .7f, 40f)                 // kejenuhan netral: tipis, tapi cukup untuk terlihat
-        fun n(l: Float, k: Float = 1f) = hsl(h, ns * k, l)
-        val paper = n(97f)
+        // kombinasi sama dengan versi terang yang lama (krem hangat: kertas lebih terang dari latar),
+        // hanya corak/hue-nya sekarang mengikuti seed (atau wallpaper) alih-alih dikunci ke krem
+        val paper = hsl(h, 100f, 96f)          // dulu 0xFFFFF9EB
         Pal(
-            false, t(40f), Color.White, t(88f), t(12f), t(86f, .5f), t(14f, .5f), t(86f, .8f, 60f), t(14f, .8f, 60f),
-            paper, n(10f, .5f), n(34f, .5f), n(78f, .6f),
-            n(95f), paper, n(90f), n(86f), wc, owc, ec, oec, ac, oac,
-            n(92f)
+            false, t(40f), Color.White, t(90f), t(12f), t(88f, .4f), t(14f, .4f), t(88f, .7f, 60f), t(14f, .7f, 60f),
+            paper, t(10f, .12f), t(35f, .15f), t(78f, .15f),
+            t(96f, .25f), paper, t(92f, .25f), t(89f, .25f), wc, owc, ec, oec, ac, oac,
+            hsl(h, 52f, 92f)                   // dulu 0xFFF5EDE0
         )
     } else {
         val ns = minOf(sat * .35f, 26f)
@@ -185,16 +185,13 @@ fun dynamicPal(ctx: android.content.Context, mode: String): Pal? {
         val seed = a1(500)
         val base = buildPal(md, String.format("#%06X", seed.toArgb() and 0xFFFFFF))   // sumber warna peringatan/error/aksen
         if (md == "light") {
-            // permukaan dicampur dengan corak aksen wallpaper supaya latar & kartu ikut berwarna
-            val paper = lerp(n1(10), a2(10), .55f)
-            val bg = lerp(n1(50), a2(50), .75f)
-            val c3 = lerp(n1(100), a2(100), .7f)
+            // permukaan memakai kombinasi terang yang sama dengan buildPal (hue dari wallpaper); aksen tetap dari warna sistem
             Pal(
                 false, a1(600), a1(0), a1(100), a1(900), a2(100), a2(900), a3(100), a3(900),
-                paper, n1(900), n2(700), n2(200),
-                lerp(paper, bg, .5f), paper, c3, lerp(c3, a2(200), .5f),
+                base.s, n1(900), n2(700), n2(200),
+                base.c1, base.c2, base.c3, base.c4,
                 base.wc, base.owc, base.ec, base.oec, base.ac, base.oac,
-                bg
+                base.bg
             )
         } else {
             // gelap: kertas (kartu & editor) hitam pekat, latar beranda sedikit terangkat dan bercorak wallpaper
