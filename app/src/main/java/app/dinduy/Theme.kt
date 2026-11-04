@@ -49,6 +49,8 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 
 val Emph = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+/** Emphasized decelerate: cepat di awal lalu mengendap, dipakai untuk geser halaman supaya terasa snappy. */
+val EmphDecel = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
 
 // ---------- jenis huruf ----------
 // Berkas font TIDAK ada di repository: Gradle mengunduhnya ke assets/fonts saat build (lihat app/build.gradle.kts).
@@ -121,44 +123,47 @@ fun hueSat(hex: String): Pair<Float, Float> {
     return h to s * 100f
 }
 
+/** Tema sekarang hanya tiga: auto / light / dark (dark = AMOLED). Nilai lama dipetakan supaya data pengguna lama tetap jalan. */
+fun normMode(m: String): String = when (m) {
+    "light", "tonal" -> "light"
+    "dark", "amoled" -> "dark"
+    else -> "auto"
+}
+
+/**
+ * Palet dari satu warna dasar (seed). Seluruh permukaan (latar, kertas, kartu, sheet, chip) ikut diberi corak seed,
+ * bukan hanya tombol, jadi warna kustom benar-benar terasa di seluruh aplikasi.
+ * Terang : kertas (kartu & editor) lebih terang dari latar beranda.
+ * Gelap  : kertas (kartu & editor) HITAM PEKAT (AMOLED), latar beranda satu tingkat lebih terang.
+ */
 fun buildPal(mode: String, seed: String): Pal {
     val (h, s0) = hueSat(seed)
     val sat = maxOf(35f, minOf(s0, 88f))
     fun t(l: Float, k: Float = 1f, o: Float = 0f) = hsl(h + o, sat * k, l)
-    val lt = mode == "light" || mode == "tonal"
-    val amoled = mode == "amoled"
-    val cl = if (lt) (if (mode == "light") 90f else 84f) else (if (amoled) 22f else 28f)
-    val ol = if (lt) 14f else 90f
+    val light = normMode(mode) == "light"
+    val cl = if (light) 90f else 22f
+    val ol = if (light) 14f else 90f
     val wc = hsl(38f, 70f, cl); val owc = hsl(38f, 70f, ol)
     val ec = hsl(4f, 70f, cl); val oec = hsl(4f, 70f, ol)
     val ac = hsl(h + 150f, 45f, cl); val oac = hsl(h + 150f, 45f, ol)
-    return when (mode) {
-        "light" -> {
-            val paper = Color(0xFFFFF9EB)
-            Pal(
-                false, t(40f), Color.White, t(90f), t(12f), t(88f, .4f), t(14f, .4f), t(88f, .7f, 60f), t(14f, .7f, 60f),
-                paper, t(10f, .12f), t(35f, .15f), t(78f, .15f),
-                t(96f, .25f), paper, t(92f, .25f), t(89f, .25f), wc, owc, ec, oec, ac, oac,
-                Color(0xFFF5EDE0)
-            )
-        }
-        "tonal" -> {
-            val paper = t(94f, .55f)
-            Pal(
-                false, t(34f), Color.White, t(80f, .9f), t(10f), t(82f, .5f), t(12f, .5f), t(80f, .75f, 60f), t(12f, .75f, 60f),
-                paper, t(10f, .2f), t(30f, .2f), t(70f, .2f),
-                t(90f, .45f), paper, t(84f, .45f), t(80f, .45f), wc, owc, ec, oec, ac, oac,
-                t(88f, .5f)
-            )
-        }
-        else -> Pal(
-            true, t(80f), t(20f), t(if (amoled) 24f else 30f, .85f), t(90f),
-            t(if (amoled) 22f else 26f, .3f), t(90f, .3f), t(if (amoled) 22f else 28f, .5f, 60f), t(90f, .5f, 60f),
-            if (amoled) Color(0xFF0F0F0F) else t(13f, .15f), t(90f, .1f), t(75f, .12f), t(30f, .1f),
-            if (amoled) Color(0xFF080808) else t(11f, .15f), if (amoled) Color(0xFF0F0F0F) else t(13f, .15f),
-            if (amoled) Color(0xFF161616) else t(17f, .15f), if (amoled) Color(0xFF1F1F1F) else t(21f, .15f),
-            wc, owc, ec, oec, ac, oac,
-            if (amoled) Color.Black else t(8f, .15f)
+    return if (light) {
+        val ns = minOf(sat * .7f, 40f)                 // kejenuhan netral: tipis, tapi cukup untuk terlihat
+        fun n(l: Float, k: Float = 1f) = hsl(h, ns * k, l)
+        val paper = n(97f)
+        Pal(
+            false, t(40f), Color.White, t(88f), t(12f), t(86f, .5f), t(14f, .5f), t(86f, .8f, 60f), t(14f, .8f, 60f),
+            paper, n(10f, .5f), n(34f, .5f), n(78f, .6f),
+            n(95f), paper, n(90f), n(86f), wc, owc, ec, oec, ac, oac,
+            n(92f)
+        )
+    } else {
+        val ns = minOf(sat * .35f, 26f)
+        fun n(l: Float, k: Float = 1f) = hsl(h, ns * k, l)
+        Pal(
+            true, t(80f), t(20f), t(24f, .85f), t(90f), t(22f, .45f), t(90f, .35f), t(22f, .6f, 60f), t(90f, .5f, 60f),
+            Color.Black, n(90f, .4f), n(75f, .5f), n(30f),
+            n(7f), Color.Black, n(12f), n(17f), wc, owc, ec, oec, ac, oac,
+            n(9f)
         )
     }
 }
@@ -176,47 +181,33 @@ fun dynamicPal(ctx: android.content.Context, mode: String): Pal? {
         fun a3(n: Int) = tone("accent3", n)
         fun n1(n: Int) = tone("neutral1", n)
         fun n2(n: Int) = tone("neutral2", n)
+        val md = normMode(mode)
         val seed = a1(500)
-        val base = buildPal(mode, String.format("#%06X", seed.toArgb() and 0xFFFFFF))   // sumber warna peringatan/error/aksen
-        when (mode) {
-            "light" -> {
-                // pola Keep: kertas = permukaan paling terang (≈ tone 98), latar = satu tingkat di bawahnya (≈ tone 94)
-                val paper = Color(0xFFFFF9EB)
-                Pal(
-                    false, a1(600), a1(0), a1(100), a1(900), a2(100), a2(900), a3(100), a3(900),
-                    paper, n1(900), n2(700), n2(200),
-                    n1(50), paper, n1(100), lerp(n1(100), n1(200), .35f),
-                    base.wc, base.owc, base.ec, base.oec, base.ac, base.oac,
-                    Color(0xFFF5EDE0)
-                )
-            }
-            "tonal" -> {
-                val paper = a2(50)
-                Pal(
-                    false, a1(700), a1(0), a1(200), a1(900), a2(200), a2(900), a3(200), a3(900),
-                    paper, n1(900), n2(700), n2(300),
-                    a2(100), paper, lerp(a2(100), a2(200), .6f), a2(200),
-                    base.wc, base.owc, base.ec, base.oec, base.ac, base.oac,
-                    lerp(a2(50), a2(100), .6f)
-                )
-            }
-            else -> {
-                val am = mode == "amoled"
-                val s = if (am) Color.Black else lerp(n1(900), n1(1000), .4f)
-                val hi = n1(800)
-                val paper = if (am) Color(0xFF0F0F0F) else lerp(s, hi, .32f)
-                Pal(
-                    true, a1(200), a1(800),
-                    if (am) lerp(a1(700), a1(800), .5f) else a1(700), a1(100),
-                    if (am) lerp(a2(700), a2(800), .5f) else a2(700), a2(100),
-                    if (am) lerp(a3(700), a3(800), .5f) else a3(700), a3(100),
-                    paper, n1(100), n2(200), n2(700),
-                    if (am) Color(0xFF080808) else lerp(s, hi, .18f), paper,
-                    if (am) Color(0xFF161616) else lerp(s, hi, .5f), if (am) Color(0xFF1F1F1F) else lerp(s, hi, .75f),
-                    base.wc, base.owc, base.ec, base.oec, base.ac, base.oac,
-                    s
-                )
-            }
+        val base = buildPal(md, String.format("#%06X", seed.toArgb() and 0xFFFFFF))   // sumber warna peringatan/error/aksen
+        if (md == "light") {
+            // permukaan dicampur dengan corak aksen wallpaper supaya latar & kartu ikut berwarna
+            val paper = lerp(n1(10), a2(10), .55f)
+            val bg = lerp(n1(50), a2(50), .75f)
+            val c3 = lerp(n1(100), a2(100), .7f)
+            Pal(
+                false, a1(600), a1(0), a1(100), a1(900), a2(100), a2(900), a3(100), a3(900),
+                paper, n1(900), n2(700), n2(200),
+                lerp(paper, bg, .5f), paper, c3, lerp(c3, a2(200), .5f),
+                base.wc, base.owc, base.ec, base.oec, base.ac, base.oac,
+                bg
+            )
+        } else {
+            // gelap: kertas (kartu & editor) hitam pekat, latar beranda sedikit terangkat dan bercorak wallpaper
+            val bg = lerp(n1(900), a2(900), .55f)
+            val c3 = lerp(bg, a2(800), .45f)
+            Pal(
+                true, a1(200), a1(800), lerp(a1(700), a1(800), .5f), a1(100),
+                lerp(a2(700), a2(800), .5f), a2(100), lerp(a3(700), a3(800), .5f), a3(100),
+                Color.Black, n1(100), n2(200), n2(700),
+                lerp(bg, Color.Black, .55f), Color.Black, c3, lerp(c3, a2(700), .45f),
+                base.wc, base.owc, base.ec, base.oec, base.ac, base.oac,
+                bg
+            )
         }
     } catch (e: Exception) {
         null
