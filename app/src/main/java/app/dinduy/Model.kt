@@ -265,9 +265,9 @@ data class Note(
 
 @Serializable
 data class Prefs(
-    val mode: String = "auto",   // auto (ikuti perangkat) / light / tonal / dark / amoled
+    val mode: String = "auto",   // auto (ikuti perangkat) / light / dark (dark = AMOLED)
     val seed: String = "#6750A4",
-    val fs: Int = 16,
+    val fs: Int = 15,
     val lh: Float = 1.65f,
     val sort: String = "u",
     val cd: String = "f",
