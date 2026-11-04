@@ -44,6 +44,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -402,7 +404,7 @@ private fun IndentIcon(kind: Int, c: Color) {
 }
 
 @Composable
-fun DocSheet(ed: Ed, act: Actions, vm: AppVM) {
+fun DocSheet(ed: Ed, act: Actions, vm: AppVM, holdH: Int = 0) {
     val pal = LocalPal.current
     // nilai sheet terakhir yang aktif ditulis langsung saat komposisi (bukan SideEffect), jadi konten tidak pernah "lompat" saat sheet dibuka
     val last = remember { intArrayOf(1) }
@@ -428,15 +430,21 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM) {
     val convOff = cell || ty == "img"
     val fl = if (selMode) FMT.filter { ed.selAllFmt(it) }.toSet() else ed.activeFlags()
 
+    // dibuka dari keyboard (holdH > 0): sheet menempati persis tempat keyboard tadi, tingginya tetap, dan muncul tanpa expand / membal;
+    // area catatan tidak bergerak sama sekali. Dibuka tanpa keyboard: perilaku lama (tinggi mengikuti isi).
+    val fixed = holdH > 0
+    val holdDp = with(androidx.compose.ui.platform.LocalDensity.current) { holdH.toDp() }
     AnimatedVisibility(
         visible = ed.sheet != 0,
-        enter = fadeIn(tween(200)) + expandVertically(tween(300, easing = Emph), expandFrom = Alignment.Top),
-        exit = fadeOut(tween(140)) + shrinkVertically(tween(260, easing = Emph), shrinkTowards = Alignment.Top)
+        enter = if (fixed) fadeIn(tween(90)) else fadeIn(tween(200)) + expandVertically(tween(300, easing = Emph), expandFrom = Alignment.Top),
+        exit = if (fixed) fadeOut(tween(120)) else fadeOut(tween(140)) + shrinkVertically(tween(260, easing = Emph), shrinkTowards = Alignment.Top)
     ) {
         // kotak penuh: tanpa sudut bundar, tanpa pegangan
         Column(
             Modifier.fillMaxWidth().graphicsLayer { translationY = drag.value }
                 .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)).background(pal.c3)
+                .then(if (fixed) Modifier.height(holdDp) else Modifier)
+                .windowInsetsPadding(WindowInsets.navigationBars)
         ) {
             Box(
                 Modifier.fillMaxWidth().height(32.dp).pointerInput(Unit) {
