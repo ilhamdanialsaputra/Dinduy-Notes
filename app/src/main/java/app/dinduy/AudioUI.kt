@@ -236,11 +236,11 @@ fun RecordCard(vm: AppVM) {
     val shape = RoundedCornerShape(32.dp)
     Row(
         Modifier.widthIn(max = 560.dp).fillMaxWidth().padding(horizontal = 10.dp).padding(bottom = 8.dp)
-            .shadow(if (pal.dark) 6.dp else 1.dp, shape).clip(shape).background(pal.c3)
+            .shadow(if (pal.dark) 6.dp else 1.dp, shape).clip(shape).background(pal.tb)
             .padding(start = 18.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(Modifier.size(10.dp).graphicsLayer { alpha = dot }.clip(RoundedCornerShape(5.dp)).background(Color(0xFFE53935)))
+        Box(Modifier.size(10.dp).graphicsLayer { alpha = dot }.clip(RoundedCornerShape(5.dp)).background(if (pal.mono) pal.os else Color(0xFFE53935)))
         Spacer(Modifier.width(10.dp))
         T(fmtTime(rec.ms), 18f, 700, pal.os, Modifier.widthIn(min = 48.dp), maxLines = 1)
         Spacer(Modifier.width(10.dp))
@@ -263,7 +263,7 @@ fun RecordCard(vm: AppVM) {
         }
         Spacer(Modifier.width(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            GBtn(0, "x", null, pal.c4, pal.os) {
+            GBtn(0, "x", null, pal.tb2, pal.os) {
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 vm.cancelRec()
             }
