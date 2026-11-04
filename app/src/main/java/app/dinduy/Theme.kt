@@ -134,12 +134,12 @@ fun buildPal(mode: String, seed: String): Pal {
     val ac = hsl(h + 150f, 45f, cl); val oac = hsl(h + 150f, 45f, ol)
     return when (mode) {
         "light" -> {
-            val paper = t(96.5f, .95f)
+            val paper = Color(0xFFFFF9EB)
             Pal(
                 false, t(40f), Color.White, t(90f), t(12f), t(88f, .4f), t(14f, .4f), t(88f, .7f, 60f), t(14f, .7f, 60f),
                 paper, t(10f, .12f), t(35f, .15f), t(78f, .15f),
                 t(96f, .25f), paper, t(92f, .25f), t(89f, .25f), wc, owc, ec, oec, ac, oac,
-                t(92f, .7f)
+                Color(0xFFF5EDE0)
             )
         }
         "tonal" -> {
@@ -181,13 +181,13 @@ fun dynamicPal(ctx: android.content.Context, mode: String): Pal? {
         when (mode) {
             "light" -> {
                 // pola Keep: kertas = permukaan paling terang (≈ tone 98), latar = satu tingkat di bawahnya (≈ tone 94)
-                val paper = lerp(n1(10), n1(50), .25f)
+                val paper = Color(0xFFFFF9EB)
                 Pal(
                     false, a1(600), a1(0), a1(100), a1(900), a2(100), a2(900), a3(100), a3(900),
                     paper, n1(900), n2(700), n2(200),
                     n1(50), paper, n1(100), lerp(n1(100), n1(200), .35f),
                     base.wc, base.owc, base.ec, base.oec, base.ac, base.oac,
-                    lerp(n1(50), n1(100), .2f)
+                    Color(0xFFF5EDE0)
                 )
             }
             "tonal" -> {
