@@ -47,6 +47,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Constraints
+import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -433,12 +436,51 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM, holdH: Int = 0) {
 
     // dibuka dari keyboard (holdH > 0): sheet menempati persis tempat keyboard tadi, tingginya tetap, dan muncul tanpa expand / membal;
     // area catatan tidak bergerak sama sekali. Dibuka tanpa keyboard: perilaku lama (tinggi mengikuti isi).
-    val fixed = holdH > 0
+    // Gerak sheet: MENGGESER dari bawah layar ke atas (dan sebaliknya saat menutup), tanpa fade dan tanpa pantulan.
+    // Satu progres `prog` (tween dengan kurva emphasized, bukan spring) menggerakkan dua hal sekaligus:
+    //  - posisi sheet (translasi), dan
+    //  - tinggi yang dilaporkan ke tata letak, jadi area catatan di atasnya ikut naik/turun searah, tanpa lompatan.
+    val prog = remember { Animatable(0f) }
+    var alive by remember { mutableStateOf(false) }
+    val open = ed.sheet != 0
+    val fx = remember { booleanArrayOf(false) }        // mode "menggantikan keyboard" dikunci saat sheet mulai dibuka
+    val startH = remember { floatArrayOf(0f) }         // tinggi bilah yang diganti sheet saat mulai dibuka
+    if (open && prog.targetValue < .5f) {
+        fx[0] = holdH > 0
+        startH[0] = androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { ed.barHLive }
+    }
+    LaunchedEffect(open) {
+        if (open) {
+            alive = true
+            prog.animateTo(1f, tween(320, easing = EmphDecel))
+        } else {
+            prog.animateTo(0f, tween(230, easing = EmphAccel))
+            alive = false
+        }
+    }
+    if (!alive && !open) return
+    val fixed = fx[0]
     val holdDp = with(androidx.compose.ui.platform.LocalDensity.current) { holdH.toDp() }
-    AnimatedVisibility(
-        visible = ed.sheet != 0,
-        enter = if (fixed) fadeIn(tween(90)) else fadeIn(tween(200)) + expandVertically(tween(300, easing = Emph), expandFrom = Alignment.Top),
-        exit = if (fixed) fadeOut(tween(120)) else fadeOut(tween(140)) + shrinkVertically(tween(260, easing = Emph), shrinkTowards = Alignment.Top)
+    Box(
+        Modifier.fillMaxWidth()
+            .layout { m, c ->
+                val pl = m.measure(c.copy(minHeight = 0, maxHeight = Constraints.Infinity))
+                val p = prog.value
+                val h = when {
+                    fixed -> pl.height                                                       // menggantikan keyboard: tinggi tetap, hanya meluncur
+                    ed.sheet != 0 -> (startH[0] + (pl.height - startH[0]) * p).roundToInt()  // membuka: dari tinggi bilah lama ke tinggi penuh
+                    else -> (pl.height * p).roundToInt()                                     // menutup: mengecil ke nol
+                }
+                layout(pl.width, h) { pl.place(0, 0) }
+            }
+            .graphicsLayer {
+                val p = prog.value
+                translationY = when {
+                    fixed -> (1f - p) * size.height
+                    ed.sheet != 0 -> (1f - p) * startH[0]
+                    else -> 0f
+                }
+            }
     ) {
         // kotak penuh: tanpa sudut bundar, tanpa pegangan
         Column(
