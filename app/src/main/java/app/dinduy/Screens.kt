@@ -118,6 +118,19 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.PressInteraction
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -774,7 +787,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         LazyVerticalStaggeredGrid(
             columns = StaggeredGridCells.Fixed(cols),
             state = state, modifier = Modifier.fillMaxSize().nestedScroll(fabConn).graphicsLayer { alpha = 1f - sa },
-            contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = sat + 78.dp, bottom = 130.dp + sab),
+            contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = sat + 78.dp, bottom = 160.dp + sab),
             verticalItemSpacing = 8.dp,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -966,26 +979,42 @@ fun HomeCard(
     }
 }
 
+/** Buka catatan baru dari tombol FAB (morph melar dari tombol ke satu halaman penuh). */
+fun openNewFromFab(vm: AppVM) {
+    val n = vm.newNote()
+    vm.nav.openNote(n.id, vm.fabMorph, true)
+}
+
+private const val FAB_HOLD_MS = 550L   // tahan sedikit lama untuk memunculkan sheet (suara dll.)
+
+/**
+ * FAB:
+ *  - ketuk            -> catatan baru langsung terbuka (melar dari tombol)
+ *  - tahan ~0,5 detik -> sheet tambah (ada catatan suara)
+ *  - tarik ke atas    -> catatan mekar mengikuti jari; lepas di atas ambang = terbuka, kalau tidak = menguncup lagi
+ */
 @Composable
-fun Fab(vm: AppVM, small: Boolean, hide: Boolean, lift: Dp, onClick: () -> Unit) {
+fun Fab(vm: AppVM, small: Boolean, hide: Boolean, lift: Dp) {
     val pal = LocalPal.current
     val src = remember { MutableInteractionSource() }
     val pr by src.collectIsPressedAsState()
-    val sc by animateFloatAsState(if (hide) .4f else if (pr) .93f else 1f, spring(.55f, 500f), label = "sc")
-    val al by animateFloatAsState(if (hide) 0f else 1f, tween(250), label = "al")
-    val r by animateDpAsState(if (pr) 16.dp else 26.dp, spring(.6f, 500f), label = "r")
+    val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
+    val gone = hide || FabFx.drag
+    val sc by animateFloatAsState(if (gone) .4f else if (pr) .93f else 1f, spring(.55f, 500f), label = "sc")
+    val al by animateFloatAsState(if (gone) 0f else 1f, tween(if (FabFx.drag) 80 else 250), label = "al")
+    val r by animateDpAsState(if (pr) 22.dp else 32.dp, spring(.6f, 500f), label = "r")
     val ly by animateDpAsState(lift, spring(.7f, 400f), label = "ly")
     if (hide && al <= .01f) return
     val sab = sabDp()
     val dens = LocalDensity.current.density
     val shape = RoundedCornerShape(r)
-    Box(Modifier.fillMaxSize().padding(end = 16.dp, bottom = 20.dp + sab), contentAlignment = Alignment.BottomEnd) {
-        // tanpa animateContentSize (itu yang memotong bayangan); label dianimasikan lewat AnimatedVisibility
+    Box(Modifier.fillMaxSize().padding(end = 20.dp, bottom = 24.dp + sab), contentAlignment = Alignment.BottomEnd) {
         Row(
             Modifier.offset(y = -ly)
                 .onGloballyPositioned { c ->
                     val b = c.boundsInWindow()
-                    if (!hide && b.width > 0f) vm.fabMorph = Morph(b.left, b.top, b.right, b.bottom, 26f * dens, pal.pc, card = true)
+                    if (!hide && b.width > 0f) vm.fabMorph = Morph(b.left, b.top, b.right, b.bottom, 32f * dens, pal.pc, card = true)
                 }
                 .graphicsLayer { scaleX = sc; scaleY = sc; alpha = al; transformOrigin = TransformOrigin(1f, 1f) }
                 .shadow(
@@ -993,20 +1022,102 @@ fun Fab(vm: AppVM, small: Boolean, hide: Boolean, lift: Dp, onClick: () -> Unit)
                     ambientColor = pal.p.copy(alpha = if (pal.dark) .35f else .22f),
                     spotColor = pal.p.copy(alpha = if (pal.dark) .45f else .32f)
                 )
-                .height(72.dp).widthIn(min = 72.dp).clip(shape).background(pal.pc)
-                .clickable(interactionSource = src, indication = LocalIndication.current, enabled = !hide, onClick = onClick)
-                .padding(horizontal = 21.dp),
+                .height(88.dp).widthIn(min = 88.dp).clip(shape).background(pal.pc)
+                .indication(src, LocalIndication.current)
+                .semantics(mergeDescendants = true) {
+                    role = Role.Button
+                    onClick("Catatan baru") { if (!hide) openNewFromFab(vm); true }
+                    onLongClick("Tambah catatan suara") { if (!hide) vm.addOn = true; true }
+                }
+                .pointerInput(hide) {
+                    if (hide) return@pointerInput
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val press = PressInteraction.Press(down.position)
+                        scope.launch { src.emit(press) }
+                        val slop = viewConfiguration.touchSlop
+                        val sx = down.position.x
+                        val sy = down.position.y
+                        var res = 0   // 0 batal, 1 ketuk, 2 tarik ke atas
+                        val held = withTimeoutOrNull(FAB_HOLD_MS) {
+                            var done = false
+                            while (!done) {
+                                val ev = awaitPointerEvent()
+                                val c = ev.changes.firstOrNull { it.id == down.id }
+                                if (c == null || c.isConsumed) { res = 0; done = true }
+                                else if (c.changedToUpIgnoreConsumed()) { res = 1; done = true }
+                                else {
+                                    val dx = c.position.x - sx
+                                    val dy = c.position.y - sy
+                                    if (dy < -slop && abs(dy) > abs(dx)) { res = 2; done = true }
+                                    else if (abs(dx) > slop * 2f || dy > slop * 2f) { res = 0; done = true }
+                                }
+                            }
+                            true
+                        }
+                        if (held == null) {
+                            // ditahan cukup lama tanpa bergerak: sheet tambah
+                            scope.launch { src.emit(PressInteraction.Release(press)) }
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            vm.addOn = true
+                            return@awaitEachGesture
+                        }
+                        when (res) {
+                            1 -> {
+                                scope.launch { src.emit(PressInteraction.Release(press)) }
+                                openNewFromFab(vm)
+                            }
+                            2 -> {
+                                scope.launch { src.emit(PressInteraction.Cancel(press)) }
+                                val n = vm.newNote()
+                                FabFx.drag = true
+                                scope.launch { vm.openP.snapTo(0f) }
+                                vm.nav.openNote(n.id, vm.fabMorph, false)
+                                val dist = 260.dp.toPx()
+                                val tracker = VelocityTracker()
+                                tracker.addPosition(down.uptimeMillis, down.position)
+                                var p = 0f
+                                while (true) {
+                                    val ev = awaitPointerEvent()
+                                    val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                                    tracker.addPosition(c.uptimeMillis, c.position)
+                                    val up = c.changedToUpIgnoreConsumed()
+                                    c.consume()
+                                    if (up) break
+                                    p = ((sy - c.position.y) / dist).coerceIn(0f, 1f)
+                                    val v = p
+                                    scope.launch { vm.openP.snapTo(v) }
+                                }
+                                val vy = tracker.calculateVelocity().y
+                                val commit = p > .3f || vy < -1100f
+                                scope.launch {
+                                    if (commit) {
+                                        vm.openP.animateTo(1f, spring(.85f, 560f))
+                                        FabFx.drag = false
+                                        vm.ed?.let { it.focusAt(it.blocks[0].id, 0) }   // keyboard baru muncul setelah halaman terbuka
+                                    } else {
+                                        vm.openP.animateTo(0f, spring(1f, 700f))
+                                        vm.nav.pop()
+                                        FabFx.drag = false
+                                    }
+                                }
+                            }
+                            else -> scope.launch { src.emit(PressInteraction.Cancel(press)) }
+                        }
+                    }
+                }
+                .padding(horizontal = 28.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center
         ) {
-            Ic("plus", pal.opc, 30.dp)
+            Ic("plus", pal.opc, 36.dp)
             AnimatedVisibility(
                 visible = !small,
                 enter = expandHorizontally(tween(320, easing = Emph), expandFrom = Alignment.Start) + fadeIn(tween(240, 60)),
                 exit = shrinkHorizontally(tween(280, easing = Emph), shrinkTowards = Alignment.Start) + fadeOut(tween(120))
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Spacer(Modifier.width(12.dp))
-                    T("Baru", 20f, 900, pal.opc, maxLines = 1)
+                    Spacer(Modifier.width(14.dp))
+                    T("Baru", 22f, 900, pal.opc, maxLines = 1)
                 }
             }
         }
@@ -1326,16 +1437,15 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                 SGroup("Tampilan", 0) {
                     SCard(POS_TOP) {
                         T("Tema", 16f, 500, pal.os)
-                        val modes = listOf("auto" to "phone", "light" to "lm", "tonal" to "pal", "dark" to "dm", "amoled" to "am")
-                        val cap = when (pr.mode) {
+                        val modes = listOf("auto" to "phone", "light" to "lm", "dark" to "dm")
+                        val curMode = normMode(pr.mode)
+                        val cap = when (curMode) {
                             "auto" -> "Otomatis: terang atau gelap mengikuti perangkat"
                             "light" -> "Terang"
-                            "tonal" -> "Tonal"
-                            "dark" -> "Gelap"
-                            else -> "AMOLED (hitam pekat)"
+                            else -> "Gelap (AMOLED, hitam pekat)"
                         }
                         Crossfade(cap, Modifier.padding(top = 2.dp, bottom = 14.dp), tween(200), label = "cap") { T(it, 14f, 400, pal.osv) }
-                        SegPill(5, modes.indexOfFirst { it.first == pr.mode }.coerceAtLeast(0), { vm.setPr(pr.copy(mode = modes[it].first)) }) { i, fg ->
+                        SegPill(3, modes.indexOfFirst { it.first == curMode }.coerceAtLeast(0), { vm.setPr(pr.copy(mode = modes[it].first)) }) { i, fg ->
                             Ic(modes[i].second, fg, 24.dp)
                         }
                     }
