@@ -806,6 +806,11 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                 .graphicsLayer { translationX = -84.dp.toPx() * sa; scaleX = 1f - .4f * sa; scaleY = 1f - .4f * sa; alpha = 1f - sa }
         ) { IconBtn("menu", pal.osv, { if (sa < .5f) openDrawer() }) }
 
+        Box(
+            Modifier.align(Alignment.TopEnd).padding(end = 10.dp, top = sat + 10.dp)
+                .graphicsLayer { translationX = 84.dp.toPx() * sa; scaleX = 1f - .4f * sa; scaleY = 1f - .4f * sa; alpha = 1f - sa }
+        ) { IconBtn(if (cols == 1) "cols" else "rows", pal.osv, { if (sa < .5f) vm.setPr(vm.pr.copy(cols = if (cols == 1) 2 else 1)) }) }
+
         val q = vm.query.trim().lowercase()
         val res by remember(vm) {
             derivedStateOf {
@@ -818,7 +823,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         // saat dibuka, tepi-tepinya melebar ke seluruh layar, sudutnya meluruh jadi 0, warnanya beralih ke latar, dan jadilah
         // satu halaman pencarian baru (panah kembali + kolom ketik + garis pemisah + hasil). Teks di bilah tidak berpindah tempat.
         val padStartIdle = with(dens) { 72.dp.toPx() }
-        val padEndIdle = with(dens) { 12.dp.toPx() }
+        val padEndIdle = with(dens) { 72.dp.toPx() }
         val topIdle = with(dens) { (sat + 8.dp).toPx() }
         val botIdle = with(dens) { (sat + 64.dp).toPx() }
         val radIdle = with(dens) { 28.dp.toPx() }
@@ -885,7 +890,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                 Modifier.padding(
                     top = sat + 8.dp,
                     start = androidx.compose.ui.unit.lerp(76.dp, 4.dp, sa),
-                    end = androidx.compose.ui.unit.lerp(10.dp, 8.dp, sa)
+                    end = androidx.compose.ui.unit.lerp(80.dp, 8.dp, sa)
                 ).fillMaxWidth().height(56.dp)
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !vm.searchOn) { vm.searchOn = true },
                 verticalAlignment = Alignment.CenterVertically
@@ -913,14 +918,6 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     enter = fadeIn(tween(140)) + scaleIn(tween(180, easing = Emph), .6f),
                     exit = fadeOut(tween(100)) + scaleOut(tween(120), .6f)
                 ) { IconBtn("x", pal.osv, { vm.query = "" }, size = 44.dp) }
-                // tombol 1 / 2 kolom: di dalam pil, menghilang saat pencarian terbuka
-                AnimatedVisibility(
-                    visible = !vm.searchOn,
-                    enter = fadeIn(tween(160, 80)) + scaleIn(tween(200, 80, easing = Emph), .6f) + expandHorizontally(tween(260, easing = Emph)),
-                    exit = fadeOut(tween(100)) + scaleOut(tween(140), .6f) + shrinkHorizontally(tween(220, easing = Emph))
-                ) {
-                    IconBtn(if (cols == 1) "cols" else "rows", pal.osv, { if (sa < .5f) vm.setPr(vm.pr.copy(cols = if (cols == 1) 2 else 1)) }, size = 44.dp)
-                }
             }
         }
     }
