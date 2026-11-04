@@ -518,7 +518,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
                             val sc = rememberCoroutineScope()
                             val ed = remember(id) {
                                 Ed(vm, id, sc).also {
-                                    if (nav.pendingTitle) { it.titleReq++; nav.pendingTitle = false }
+                                    if (nav.pendingTitle) { it.focusAt(it.blocks[0].id, 0); nav.pendingTitle = false }
                                 }
                             }
                             SideEffect { vm.ed = ed }
