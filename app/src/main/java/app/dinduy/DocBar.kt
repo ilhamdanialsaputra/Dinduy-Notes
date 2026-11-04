@@ -90,7 +90,7 @@ import androidx.compose.ui.unit.dp
 // =====================================================================================
 //  Toolbar gaya Google Docs.
 //  - Bilah atas (mode ketik): centang (masuk tampilan penuh), undo, redo, "+" (sheet Sisipkan).
-//  - Bilah bawah datar: "A" (sheet Format) | B  I  U  stabilo | perataan ▾ | poin ▾.
+//  - Bilah bawah datar: "A" (sheet Format) | B  I  U  stabilo coret | mic  poin ▾ | perataan ▾  stabilo ketik.
 //  - Perataan dan poin membuka sub-bilah kecil di atas bilah utama (tombolnya tetap satu).
 //  - Gambar / tabel / kutipan: bilah bawah berganti jadi alatnya sendiri.
 //  - Sheet bawah tingginya dibatasi dan bisa digulir, jadi tidak memanjang kalau isinya bertambah.
@@ -205,7 +205,7 @@ private fun AddImgIcon(c: Color) {
     Box(Modifier.size(26.dp)) {
         Ic("img", c, 22.dp, Modifier.align(Alignment.BottomStart))
         Canvas(Modifier.size(13.dp).align(Alignment.TopEnd)) {
-            drawCircle(pal.c3)
+            drawCircle(pal.tb)
             val u = size.width
             drawLine(c, Offset(u * .25f, u * .5f), Offset(u * .75f, u * .5f), 1.8f * density, StrokeCap.Round)
             drawLine(c, Offset(u * .5f, u * .25f), Offset(u * .5f, u * .75f), 1.8f * density, StrokeCap.Round)
@@ -251,7 +251,7 @@ fun DocBar(ed: Ed, act: Actions) {
         if (ed.sub != 0) subShown = ed.sub
     }
 
-    Column(Modifier.fillMaxWidth().background(pal.c3)) {
+    Column(Modifier.fillMaxWidth().background(pal.tb)) {
         // sub-bilah: perataan atau poin (mengembang di atas bilah utama)
         AnimatedVisibility(
             visible = ed.sub != 0 && kindNow == 0,
@@ -260,7 +260,7 @@ fun DocBar(ed: Ed, act: Actions) {
         ) {
             Box(Modifier.fillMaxWidth().padding(vertical = 6.dp), Alignment.Center) {
                 Row(
-                    Modifier.clip(RoundedCornerShape(26.dp)).background(pal.c4).padding(4.dp),
+                    Modifier.clip(RoundedCornerShape(26.dp)).background(pal.tb2).padding(4.dp),
                     horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically
                 ) {
                     if (subShown == 1) {
@@ -325,7 +325,7 @@ fun DocBar(ed: Ed, act: Actions) {
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     listOf("ar" to "+ Baris", "ac" to "+ Kolom", "dr" to "− Baris", "dc" to "− Kolom").forEach { (k, l) ->
-                        Chip(l, pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.tOp(k) }
+                        Chip(l, pal.tb2, pal.os, RoundedCornerShape(23.dp)) { ed.tOp(k) }
                     }
                     Chip("Hapus tabel", pal.ec, pal.oec, RoundedCornerShape(23.dp)) { ed.tOp("dt") }
                 }
@@ -335,9 +335,9 @@ fun DocBar(ed: Ed, act: Actions) {
                 ) {
                     VARS.forEach { (k, l) ->
                         val q = qs(k, pal)
-                        Chip(l, if (k == "def") pal.c4 else q.bg, q.fg, q.shape, 52.dp, 104.dp) { ed.pickQuote = false; ed.setQuote(k) }
+                        Chip(l, if (k == "def") pal.tb2 else q.bg, q.fg, q.shape, 52.dp, 104.dp) { ed.pickQuote = false; ed.setQuote(k) }
                     }
-                    if (ty == "q") Chip("Teks biasa", pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.pickQuote = false; ed.setPlain() }
+                    if (ty == "q") Chip("Teks biasa", pal.tb2, pal.os, RoundedCornerShape(23.dp)) { ed.pickQuote = false; ed.setPlain() }
                 }
                 else -> Row(Modifier.fillMaxWidth().height(54.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Tbn({ c -> T("A", 21f, 900, c) }, ed.sheet == 2, true) {
@@ -352,21 +352,7 @@ fun DocBar(ed: Ed, act: Actions) {
                         Tbn({ Ic("b", it) }, K.B in fl && !noB, !noB) { ed.sub = 0; ed.toggleFmt(K.B) }
                         Tbn({ Ic("i", it) }, K.I in fl && !noI, !noI) { ed.sub = 0; ed.toggleFmt(K.I) }
                         Tbn({ Ic("u", it) }, K.U in fl && !noI, !noI) { ed.sub = 0; ed.toggleFmt(K.U) }
-                        Tbn({ Ic("mark", it) }, K.M in fl && !noI, !noI) { ed.sub = 0; ed.toggleFmt(K.M) }
-                        Sep()
-                        val ta = blk?.ta ?: ""
-                        DropBtn(false, ed.sub == 1, !cell && ty != "code" && ty != "img", { ed.sub = if (ed.sub == 1) 0 else 1 }) { AlignIcon(ta, it) }
-                        DropBtn(isLi, ed.sub == 2, !convOff, { ed.sub = if (ed.sub == 2) 0 else 2 }) { Ic("ul", it) }
-                        Sep()
-                        // voice note: sekarang di bilah utama (tidak lagi di sheet Sisipkan)
-                        Tbn({ Ic("mic", it) }, ed.recActive, !ed.recActive && !selMode) {
-                            ed.sub = 0
-                            act.requestMic {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                ed.startVoice()
-                            }
-                        }
-                        // stabilo coretan (alat Stabilo di mode coret). Stabilo teks (ikon di atas) tetap ada: jadi ada dua stabilo di bilah ini
+                        // stabilo coretan (alat Stabilo di mode coret) sekarang di posisi stabilo ketik
                         Tbn({ InkToolIcon(1, it) }, ed.ink.on && ed.ink.tool == 1, true) {
                             ed.sub = 0
                             val ik = ed.ink
@@ -375,6 +361,21 @@ fun DocBar(ed: Ed, act: Actions) {
                             ik.tool = 1; ik.pop = false; ik.sel = emptySet(); ik.box = null
                             ik.stamp = System.currentTimeMillis()
                         }
+                        Sep()
+                        // voice note: di posisi tombol perataan ("lines") yang lama
+                        Tbn({ Ic("mic", it) }, ed.recActive, !ed.recActive && !selMode) {
+                            ed.sub = 0
+                            act.requestMic {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                ed.startVoice()
+                            }
+                        }
+                        DropBtn(isLi, ed.sub == 2, !convOff, { ed.sub = if (ed.sub == 2) 0 else 2 }) { Ic("ul", it) }
+                        Sep()
+                        // tombol yang tergeser tetap ada: perataan dan stabilo ketik pindah ke belakang
+                        val ta = blk?.ta ?: ""
+                        DropBtn(false, ed.sub == 1, !cell && ty != "code" && ty != "img", { ed.sub = if (ed.sub == 1) 0 else 1 }) { AlignIcon(ta, it) }
+                        Tbn({ Ic("mark", it) }, K.M in fl && !noI, !noI) { ed.sub = 0; ed.toggleFmt(K.M) }
                     }
                 }
             }
@@ -392,7 +393,7 @@ private fun SRow(on: Boolean = false, enabled: Boolean = true, icon: @Composable
             .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(Modifier.size(40.dp).clip(RoundedCornerShape(13.dp)).background(if (on) pal.p.copy(alpha = .16f) else pal.c4), Alignment.Center) { icon() }
+        Box(Modifier.size(40.dp).clip(RoundedCornerShape(13.dp)).background(if (on) pal.p.copy(alpha = .16f) else pal.tb2), Alignment.Center) { icon() }
         Spacer(Modifier.width(16.dp))
         Box(Modifier.weight(1f)) { label() }
         if (on) Ic("ok", pal.p)
@@ -404,9 +405,9 @@ private fun Stepper(label: String, v: Int, lo: Int, hi: Int, onChange: (Int) -> 
     val pal = LocalPal.current
     Row(Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
         T(label, 17f, 500, pal.os, Modifier.weight(1f))
-        Chip("−", pal.c4, pal.os, CircleShape, 44.dp, 44.dp) { if (v > lo) onChange(v - 1) }
+        Chip("−", pal.tb2, pal.os, CircleShape, 44.dp, 44.dp) { if (v > lo) onChange(v - 1) }
         Box(Modifier.width(56.dp), Alignment.Center) { T("$v", 20f, 800, pal.os) }
-        Chip("+", pal.c4, pal.os, CircleShape, 44.dp, 44.dp) { if (v < hi) onChange(v + 1) }
+        Chip("+", pal.tb2, pal.os, CircleShape, 44.dp, 44.dp) { if (v < hi) onChange(v + 1) }
     }
 }
 
@@ -506,7 +507,7 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM, holdH: Int = 0) {
         // kotak penuh: tanpa sudut bundar, tanpa pegangan
         Column(
             Modifier.fillMaxWidth().graphicsLayer { translationY = drag.value }
-                .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)).background(pal.c3)
+                .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)).background(pal.tb)
                 .then(if (fixed) Modifier.height(holdDp) else Modifier)
                 .windowInsetsPadding(WindowInsets.navigationBars)
         ) {
