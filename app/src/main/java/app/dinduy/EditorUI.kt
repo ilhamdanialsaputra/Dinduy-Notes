@@ -3,6 +3,9 @@
 package app.dinduy
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.text.style.TextIndent
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
@@ -278,18 +281,20 @@ private fun justifySpans(
 
 /** Terapkan pemotongan baris buatan (teks mengelilingi gambar) pada teks bergaya. z = awalan tak terlihat di depan. */
 private fun Fold.applyTo(a: AnnotatedString, z: Int): AnnotatedString = buildAnnotatedString {
-    val pad = SpanStyle(letterSpacing = ls.sp)
-    val ps = "\u2003".repeat(padLen)
+    fun pad(j: Int) {
+        val n = if (j < pn.size) pn[j] else 0
+        if (n > 0) withStyle(SpanStyle(letterSpacing = pl[j].sp)) { append("\u2003".repeat(n)) }
+    }
     var from = 0
-    if (padLen > 0) {
+    if (pn.isNotEmpty() && pn[0] > 0) {
         append(a.subSequence(0, z)); from = z
-        withStyle(pad) { append(ps) }
+        pad(0)
     }
     for (k in cuts.indices) {
         val at = (cuts[k] + z).coerceIn(from, a.length)
         append(a.subSequence(from, at)); from = at
         append("\n")
-        if (k < padCnt) withStyle(pad) { append(ps) }
+        pad(k + 1)
     }
     append(a.subSequence(from, a.length))
 }
@@ -611,6 +616,7 @@ fun BlockView(ed: Ed, vm: AppVM, b: Blk, ordN: Int, dm: Dm, fold: Fold? = null, 
         )
         "tbl" -> TableView(ed, b, dm, pal)
         "img" -> ImgView(ed, vm, b, dm)
+        "lnk" -> LinkCard(ed, b, dm)
     }
 }
 
@@ -622,6 +628,21 @@ fun ParaRow(ed: Ed, b: Blk, ordN: Int, dm: Dm, pal: Pal, fold: Fold?, mk: Float,
     val mw = when (b.lt) { "o" -> 2.2f; "c" -> 1.9f; else -> 1.7f } * fs
     val done = li && b.lt == "c" && b.x
     val (il, ir) = fitInd(b.il, b.ir, ed.widthDp)
+    val st = baseStyle(pal, dm).let {
+        if (done) it.copy(color = it.color.copy(alpha = .6f), textDecoration = TextDecoration.LineThrough) else it
+    }.aligned(b)
+    val dn = LocalDensity.current
+    val tm = rememberTextMeasurer()
+    // garis dasar baris pertama (dp dari atas kolom teks): penanda disejajarkan dengan tengah huruf kecil baris pertama, bukan tengah kotak baris
+    val baseDp = if (li) remember(st.fontFamily, st.fontSize, st.lineHeight, st.fontWeight, dn.density) {
+        tm.measure("x", st).getLineBaseline(0) / dn.density
+    } else 0f
+    val fsDp = with(dn) { st.fontSize.toDp().value }
+    val cy = baseDp - .31f * fsDp
+    // teks yang dipotong di sekitar gambar: inden baris pertama tidak dipakai (tiap pemotongan memulai paragraf baru), diganti penggeser di Fold
+    val stF = if (fold == null) st else st.copy(
+        textIndent = if (b.fi < 0 && (b.ty == "p" || b.ty == "li")) TextIndent(0.sp, with(dn) { (-b.fi).coerceIn(0, IND_MAX_FI).dp.toSp() }) else null
+    )
     Row(
         Modifier.fillMaxWidth().padding(
             start = (if (li) (b.d * 1.4f * fs).dp else 0.dp) + il.dp,
@@ -630,41 +651,42 @@ fun ParaRow(ed: Ed, b: Blk, ordN: Int, dm: Dm, pal: Pal, fold: Fold?, mk: Float,
         )
     ) {
         if (li) {
-            // penanda dipusatkan secara vertikal pada tinggi baris, lalu sedikit dinaikkan agar sejajar dengan x-height teks
             Box(
                 Modifier.offset(mk.dp, 0.dp).width(mw.dp).height(lineH.dp).then(
                     if (b.lt == "c") Modifier.clickable(
                         interactionSource = remember { MutableInteractionSource() }, indication = null
                     ) { ed.toggleCheck(b.id) } else Modifier
-                ),
-                contentAlignment = Alignment.CenterStart
+                )
             ) {
                 when (b.lt) {
-                    "o" -> Box(
-                        Modifier.offset(0.dp, (-.04f * fs).dp).size((1.55f * fs).dp).clip(CircleShape).background(pal.p),
-                        Alignment.Center
-                    ) { T(ordN.toString(), fs * .85f, 900, pal.op) }
-                    "c" -> {
-                        val sz = (1.15f * fs).dp
-                        val shape = RoundedCornerShape((.3f * 1.15f * fs).dp)
+                    "o" -> {
+                        val sz = 1.55f * fs
                         Box(
-                            Modifier.offset((.1f * fs).dp, (-.04f * fs).dp).size(sz).clip(shape)
+                            Modifier.offset(0.dp, (cy - sz / 2f).dp).size(sz.dp).clip(CircleShape).background(pal.p),
+                            Alignment.Center
+                        ) { T(ordN.toString(), fs * .85f, 900, pal.op) }
+                    }
+                    "c" -> {
+                        val sz = 1.15f * fs
+                        val shape = RoundedCornerShape((.3f * sz).dp)
+                        Box(
+                            Modifier.offset((.1f * fs).dp, (cy - sz / 2f).dp).size(sz.dp).clip(shape)
                                 .then(if (done) Modifier.background(pal.p) else Modifier.border((.14f * fs).dp, pal.p, shape)),
                             Alignment.Center
-                        ) { if (done) Ic("ok", Color.White, sz * .78f) }
+                        ) { if (done) Ic("ok", Color.White, (sz * .78f).dp) }
                     }
-                    else -> Box(
-                        Modifier.offset((.3f * fs).dp, (-.04f * fs).dp).size((.5f * fs).dp).clip(
-                            RoundedCornerShape(topStartPercent = 40, topEndPercent = 60, bottomEndPercent = 55, bottomStartPercent = 45)
-                        ).background(pal.p)
-                    )
+                    else -> {
+                        val sz = .5f * fs
+                        Box(
+                            Modifier.offset((.3f * fs).dp, (cy - sz / 2f).dp).size(sz.dp).clip(
+                                RoundedCornerShape(topStartPercent = 40, topEndPercent = 60, bottomEndPercent = 55, bottomStartPercent = 45)
+                            ).background(pal.p)
+                        )
+                    }
                 }
             }
         }
-        val st = baseStyle(pal, dm).let {
-            if (done) it.copy(color = it.color.copy(alpha = .6f), textDecoration = TextDecoration.LineThrough) else it
-        }.aligned(b)
-        TF(ed, b.id, st, Modifier.weight(1f), hint = hint, fold = fold)
+        TF(ed, b.id, stF, Modifier.weight(1f), hint = hint, fold = fold)
     }
 }
 
@@ -682,7 +704,8 @@ fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal) {
     val fk = fkS.value
     val fRC = if (fk != null) cellRC(fk) else null
     HBox(
-        Modifier.fillMaxWidth().padding(bottom = (dm.fs * 1.1f).dp).clip(RoundedCornerShape(24.dp)).background(pal.c2)
+        Modifier.fillMaxWidth().padding(bottom = (dm.fs * 1.1f).dp).clip(RoundedCornerShape(4.dp)).background(pal.c2)
+            .border(1.5.dp, pal.osv.copy(alpha = .75f), RoundedCornerShape(4.dp))   // garis luar jelas di tema terang maupun gelap
             .horizontalScroll(rememberScrollState())
     ) {
         Column {
@@ -1185,7 +1208,6 @@ private fun planFloat(ed: Ed, i: Int, dm: Dm, pal: Pal, tm: TextMeasurer, dn: De
     val imgW = ed.widthDp * m.w.coerceIn(.2f, 1f)
     val imgH = imgW / m.a.coerceIn(.2f, 5f)
     val indent = imgW + SIDE_GAP
-    val narrowW = ed.widthDp - indent
     var rem = (imgH + fs * 1.1f) * d
     val out = ArrayList<Pair<Blk, FSpec>>()
     var j = i + 1
@@ -1195,33 +1217,51 @@ private fun planFloat(ed: Ed, i: Int, dm: Dm, pal: Pal, tm: TextMeasurer, dn: De
         val top = bm.top * d
         if (top >= rem) break
         val fsz = bm.style.fontSize.value
-        val avail = ((narrowW - bm.inset - 4f) * d).toInt().coerceAtLeast(1)
-        val res = tm.measure(styled(x.r, x.r.t, 0, pal, fsz), bm.style, constraints = Constraints(maxWidth = avail))
+        val isLi = x.ty == "li"
+        val mwLi = if (isLi) (when (x.lt) { "o" -> 2.2f; "c" -> 1.9f; else -> 1.7f } * fs) else 0f
+        // inden kiri / kanan paragraf ikut dihitung: kolom teks mulai di base0 (dp dari tepi kiri) dan berakhir di W - irf
+        val (ilf, irf) = fitInd(x.il, x.ir, ed.widthDp)
+        val base0 = (if (isLi) x.d * 1.4f * fs else 0f) + ilf
+        val startX = if (left) maxOf(indent, base0) else base0
+        val endX = if (left) ed.widthDp - irf else ed.widthDp - maxOf(indent, irf)
+        val gapDp = startX - base0   // geseran baris sempit ke kanan gambar (gambar di kiri); 0 bila kolom sudah di kanan gambar
+        val avail = ((endX - startX - mwLi - 4f) * d).toInt().coerceAtLeast(1)
+        // inden baris pertama / menggantung dipakai juga saat mengukur, jadi pemenggalan baris sama dengan tampilan akhir
+        val fiDp = x.fi.coerceIn(-IND_MAX_FI, IND_MAX_FI)
+        val mst = if (fiDp != 0) bm.style.copy(
+            textIndent = TextIndent(with(dn) { maxOf(fiDp, 0).dp.toSp() }, with(dn) { maxOf(-fiDp, 0).dp.toSp() })
+        ) else bm.style
+        val res = tm.measure(styled(x.r, x.r.t, 0, pal, fsz), mst, constraints = Constraints(maxWidth = avail))
         val h = maxOf(res.size.height.toFloat(), with(dn) { bm.style.lineHeight.toPx() })
         val fits = top + h <= rem
         var fold: Fold? = null
         var mk = 0f
-        val indented = x.il != 0 || x.ir != 0 || x.fi != 0
-        if (!fits && !indented && (x.ty == "p" || x.ty == "li") && x.r.t.indexOf('\n') < 0) {
+        if (!fits && (x.ty == "p" || x.ty == "li") && x.r.t.indexOf('\n') < 0) {
             var k = 0
             while (k < res.lineCount && top + res.getLineTop(k) < rem) k++
             if (k in 1 until res.lineCount) {
                 val cuts = IntArray(k) { res.getLineEnd(it) }
-                // poin/nomor: kolom teks berawal sesudah penanda (x0), jadi geseran baris sempit = indent - x0, dan penanda ikut digeser ke kanan gambar
-                val x0 = if (x.ty == "li") bm.inset - when (x.lt) { "o" -> 2.2f; "c" -> 1.9f; else -> 1.7f } * fs else 0f
-                val gapDp = maxOf(0f, indent - x0)
-                fold = if (left && gapDp > 0f) {
-                    val em = tm.measure("\u2003", bm.style).size.width.toFloat().let { if (it < 1f) fsz * d else it }
-                    val indPx = gapDp * d
-                    val n = (indPx / em).roundToInt().coerceIn(1, 40)
-                    val ls = (indPx - n * em) / n
-                    mk = gapDp
-                    Fold(cuts, n, k - 1, with(dn) { ls.toSp() }.value)
-                } else Fold(cuts, 0, 0, 0f, if (!left) indent * d else 0f)
+                val em = tm.measure("\u2003", bm.style).size.width.toFloat().let { if (it < 1f) fsz * d else it }
+                val first = if (fiDp > 0) fiDp.toFloat() else 0f
+                val hang = if (fiDp < 0) -fiDp.toFloat() else 0f
+                // geseran tiap baris (dp): baris sempit = geseran gambar + inden; baris pertama setelah pemotongan terakhir = inden menggantung
+                val pn = IntArray(k + 1)
+                val pl = FloatArray(k + 1)
+                for (jj in 0..k) {
+                    val offDp = if (jj < k) gapDp + (if (jj == 0) first else hang) else hang
+                    val offPx = offDp * d
+                    if (offPx >= 1f) {
+                        val n = (offPx / em).roundToInt().coerceIn(1, 40)
+                        pn[jj] = n
+                        pl[jj] = with(dn) { ((offPx - n * em) / n).toSp() }.value
+                    }
+                }
+                mk = if (left) gapDp else 0f
+                fold = Fold(cuts, pn, pl, if (!left) maxOf(0f, indent - irf) * d else 0f)
             }
         }
         val narrow = fold == null
-        out.add(x to FSpec(if (narrow && left) indent else 0f, if (narrow && !left) indent else 0f, 0f, fold, mk))
+        out.add(x to FSpec(if (narrow && left) gapDp else 0f, if (narrow && !left) maxOf(0f, indent - irf) else 0f, 0f, fold, mk))
         j++
         if (!fits) { rem = 0f; break }
         rem -= top + h + bm.bottom * d
@@ -1512,6 +1552,11 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     LaunchedEffect(ed.clearReq) {
         if (ed.clearReq > 0) { focusMgr.clearFocus(); kb?.hide() }
     }
+    // "ganti foto": pemilih galeri milik editor sendiri; hasilnya langsung mengisi bingkai gambar yang dipilih
+    val replLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) ed.replaceFromUri(uri) else ed.replT = null
+    }
+    SideEffect { ed.replPick = { replLauncher.launch("image/*") } }
     val od = remember(ed.blocks) { ords(ed.blocks) }
     val plans = floatPlans(ed, dm)
     SideEffect {
@@ -1598,6 +1643,19 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     }
     val haptic = LocalHapticFeedback.current
     val hasAu = vm.note(ed.noteId)?.au?.isNotEmpty() == true
+    // voice note baru: layar menggulir halus ke kartu rekaman di bawah catatan
+    val auN = vm.note(ed.noteId)?.au?.size ?: 0
+    val auSeen = remember { intArrayOf(auN) }
+    val audBox = remember { floatArrayOf(0f, 0f) }   // [atas, tinggi] bagian rekaman di ruang gulir
+    LaunchedEffect(auN) {
+        if (auN > auSeen[0]) {
+            delay(350)
+            val m = 24f * ed.dens
+            val want = audBox[0] + audBox[1] - (ed.viewH - ed.cursorClear()) + m
+            if (audBox[1] > 0f && want > scroll.value + 1f) scroll.animateScrollTo(want.toInt().coerceIn(0, scroll.maxValue), tween(420, easing = Emph))
+        }
+        auSeen[0] = auN
+    }
     SideEffect {
         ed.scroll = scroll
         ed.dens = density.density
@@ -1787,7 +1845,10 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                 }
                 // kartu suara + transkrip: selalu di bawah isi catatan (editor dan mode baca), di luar area seleksi teks
                 if (hasAu) {
-                    Box(Modifier.widthIn(max = 700.dp).fillMaxWidth().padding(horizontal = 24.dp)) {
+                    Box(
+                        Modifier.widthIn(max = 700.dp).fillMaxWidth().padding(horizontal = 24.dp)
+                            .onGloballyPositioned { c -> audBox[0] = c.positionInParent().y; audBox[1] = c.size.height.toFloat() }
+                    ) {
                         AudioSection(vm, ed.noteId, act)
                     }
                     Box(
