@@ -92,7 +92,25 @@ class Pal(
     val c1: Color, val c2: Color, val c3: Color, val c4: Color,
     val wc: Color, val owc: Color, val ec: Color, val oec: Color, val ac: Color, val oac: Color,
     // s = "kertas" (kartu catatan, latar editor, bilah cari); bg = latar belakang aplikasi (satu tingkat lebih redup dari kertas, pola Google Keep)
-    val bg: Color
+    val bg: Color,
+    // tb = wadah tonal berwarna (toolbar, sheet editor, kartu halaman opsi); tb2 = elemen di dalamnya (chip, ikon, sub-bilah)
+    val tb: Color,
+    val tb2: Color,
+    // true = mode Monochrome: seluruh warna sudah dijadikan abu-abu (dipakai untuk warna tetap seperti titik rekam / tinta)
+    val mono: Boolean = false
+)
+
+/** Abu-abu dengan kecerahan yang sama (bobot persepsi mata), alpha tetap. */
+fun Color.gray(): Color {
+    val l = 0.299f * red + 0.587f * green + 0.114f * blue
+    return Color(l, l, l, alpha)
+}
+
+/** Mode Monochrome: semua warna palet dijadikan abu-abu. Terang atau gelap tetap mengikuti palet asalnya. */
+fun Pal.toMono(): Pal = Pal(
+    dark, p.gray(), op.gray(), pc.gray(), opc.gray(), sc.gray(), osc.gray(), tc.gray(), otc.gray(),
+    s.gray(), os.gray(), osv.gray(), ol.gray(), c1.gray(), c2.gray(), c3.gray(), c4.gray(),
+    wc.gray(), owc.gray(), ec.gray(), oec.gray(), ac.gray(), oac.gray(), bg.gray(), tb.gray(), tb2.gray(), true
 )
 
 fun hsl(h: Float, s: Float, l: Float): Color {
@@ -156,7 +174,8 @@ fun buildPal(mode: String, seed: String): Pal {
             false, t(40f), Color.White, t(90f), t(12f), t(88f, .4f), t(14f, .4f), t(88f, .7f, 60f), t(14f, .7f, 60f),
             paper, t(10f, .12f), t(35f, .15f), t(78f, .15f),
             t(96f, .25f), paper, t(92f, .25f), t(89f, .25f), wc, owc, ec, oec, ac, oac,
-            hsl(h, 52f, 92f)                   // dulu 0xFFF5EDE0
+            hsl(h, 52f, 92f),                  // dulu 0xFFF5EDE0
+            t(87f, .75f), t(80f, .8f)          // tb, tb2: wadah tonal berwarna (bukan abu netral)
         )
     } else {
         val ns = minOf(sat * .35f, 26f)
@@ -165,7 +184,8 @@ fun buildPal(mode: String, seed: String): Pal {
             true, t(80f), t(20f), t(24f, .85f), t(90f), t(22f, .45f), t(90f, .35f), t(22f, .6f, 60f), t(90f, .5f, 60f),
             Color.Black, n(90f, .4f), n(75f, .5f), n(30f),
             n(7f), Color.Black, n(12f), n(17f), wc, owc, ec, oec, ac, oac,
-            n(9f)
+            n(9f),
+            t(19f, .5f), t(26f, .55f)          // tb, tb2: wadah tonal berwarna, tetap berwarna walau perangkat < Android 12
         )
     }
 }
@@ -193,7 +213,8 @@ fun dynamicPal(ctx: android.content.Context, mode: String): Pal? {
                 base.s, n1(900), n2(700), n2(200),
                 base.c1, base.c2, base.c3, base.c4,
                 base.wc, base.owc, base.ec, base.oec, base.ac, base.oac,
-                base.bg
+                base.bg,
+                lerp(a2(100), a1(100), .3f), a2(200)      // tb, tb2: tonal dari palet secondary/primary sistem (gaya Gboard)
             )
         } else {
             // gelap: kertas (kartu & editor) hitam pekat, latar beranda sedikit terangkat dan bercorak wallpaper
@@ -205,7 +226,8 @@ fun dynamicPal(ctx: android.content.Context, mode: String): Pal? {
                 Color.Black, n1(100), n2(200), n2(700),
                 lerp(bg, Color.Black, .55f), Color.Black, c3, lerp(c3, a2(700), .45f),
                 base.wc, base.owc, base.ec, base.oec, base.ac, base.oac,
-                bg
+                bg,
+                lerp(a2(800), a1(900), .5f), lerp(a2(700), a1(800), .5f)   // tb, tb2: tonal gelap berwarna
             )
         }
     } catch (e: Exception) {
@@ -220,7 +242,8 @@ fun lerpPal(a: Pal, b: Pal, f: Float): Pal = Pal(
     lerp(a.c1, b.c1, f), lerp(a.c2, b.c2, f), lerp(a.c3, b.c3, f), lerp(a.c4, b.c4, f),
     lerp(a.wc, b.wc, f), lerp(a.owc, b.owc, f), lerp(a.ec, b.ec, f), lerp(a.oec, b.oec, f),
     lerp(a.ac, b.ac, f), lerp(a.oac, b.oac, f),
-    lerp(a.bg, b.bg, f)
+    lerp(a.bg, b.bg, f),
+    lerp(a.tb, b.tb, f), lerp(a.tb2, b.tb2, f), b.mono
 )
 
 val LocalPal = compositionLocalOf { buildPal("light", "#6750A4") }
