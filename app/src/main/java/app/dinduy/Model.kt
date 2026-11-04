@@ -192,7 +192,7 @@ data class Ink(
     val o: List<Float> = emptyList()
 )
 
-/** ty: p, h, li, q, code, tbl, hr, img */
+/** ty: p, h, li, q, code, tbl, hr, img, lnk (kartu pratinjau tautan) */
 @androidx.compose.runtime.Immutable
 @Serializable
 data class Blk(
@@ -212,10 +212,12 @@ data class Blk(
     val ta: String = "",              // perataan teks: "" kiri, c tengah, r kanan, j rata kiri-kanan
     val il: Int = 0,                  // inden kiri (dp)
     val ir: Int = 0,                  // inden kanan (dp)
-    val fi: Int = 0                   // > 0 inden baris pertama, < 0 inden menggantung (dp, nilai mutlak = jaraknya)
+    val fi: Int = 0,                  // > 0 inden baris pertama, < 0 inden menggantung (dp, nilai mutlak = jaraknya)
+    val st: Int = 0,                  // butir bernomor: > 0 = mulai dari angka ini (mis. ketik "4." -> nomor 4); 0 = lanjut dari butir sebelumnya
+    val pi: String = ""               // kartu tautan (ty = "lnk"): alamat gambar og:image; alamat tautan di l, judul di r.t
 ) {
     val isText: Boolean get() = ty == "p" || ty == "h" || ty == "li" || ty == "q" || ty == "code"
-    val isObj: Boolean get() = ty == "tbl" || ty == "img" || ty == "hr"
+    val isObj: Boolean get() = ty == "tbl" || ty == "img" || ty == "hr" || ty == "lnk"
     val isMulti: Boolean get() = ty == "q" || ty == "code"
 }
 
@@ -294,6 +296,7 @@ fun plainOf(bl: List<Blk>): String = bl.joinToString("\n") {
     when (it.ty) {
         "hr" -> ""
         "img" -> it.r.t.replace('\n', ' ')
+        "lnk" -> (it.r.t.replace('\n', ' ') + " " + it.l).trim()
         "tbl" -> it.tb.flatten().joinToString(" ") { c -> c.t }
         else -> it.r.t.replace('\n', ' ')
     }
@@ -307,7 +310,8 @@ fun ords(bl: List<Blk>): Map<String, Int> {
             val d = b.d.coerceIn(0, 4)
             for (k in d + 1 until 6) c[k] = 0
             if (b.lt == "o") {
-                c[d]++; m[b.id] = c[d]
+                if (b.st > 0) c[d] = b.st else c[d]++
+                m[b.id] = c[d]
             } else c[d] = 0
         } else java.util.Arrays.fill(c, 0)
     }
