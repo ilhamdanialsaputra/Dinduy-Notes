@@ -786,16 +786,21 @@ fun Modifier.holdDrag(
             if (early != null) return@awaitEachGesture
             if (!st(down.position)) return@awaitEachGesture
             var ok = true
-            while (true) {
-                val ev = awaitPointerEvent(PointerEventPass.Initial)
-                val c = ev.changes.firstOrNull { it.id == down.id }
-                if (c == null) { ok = false; break }
-                if (!c.pressed) { c.consume(); break }
-                val d = c.positionChange()
-                if (d != Offset.Zero) mo(c.position, d)
-                ev.changes.forEach { it.consume() }
+            try {
+                while (true) {
+                    val ev = awaitPointerEvent(PointerEventPass.Initial)
+                    val c = ev.changes.firstOrNull { it.id == down.id }
+                    if (c == null) { ok = false; break }
+                    if (!c.pressed) { c.consume(); break }
+                    val d = c.positionChange()
+                    if (d != Offset.Zero) mo(c.position, d)
+                    ev.changes.forEach { it.consume() }
+                }
+            } catch (e: Throwable) {
+                ok = false; throw e
+            } finally {
+                en(ok)   // gesture dibatalkan di tengah jalan pun tetap diakhiri, jadi gulir-tepi seleksi tidak pernah nyangkut
             }
-            en(ok)
         }
     }
 }
@@ -1569,6 +1574,28 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     // derivedStateOf: hanya berubah saat keyboard benar-benar buka/tutup, bukan tiap frame animasinya (dulu seluruh layar recompose per frame)
     val imeInsets = WindowInsets.ime
     val imeOpen by remember(density) { androidx.compose.runtime.derivedStateOf { imeInsets.getBottom(density) > 0 } }
+    // tinggi keyboard yang stabil (px). Bukan state: hanya dibaca saat sheet dibuka, jadi tidak membuat NoteScreen recompose tiap frame keyboard.
+    // Naik langsung mengikuti keyboard; turun baru diterapkan setelah tenang. Dibekukan selama sheet terbuka.
+    val kbBox = remember { intArrayOf(0) }
+    LaunchedEffect(imeInsets, density) {
+        androidx.compose.runtime.snapshotFlow { imeInsets.getBottom(density) to ed.sheet }.collectLatest { (v, sh) ->
+            if (sh != 0) return@collectLatest
+            if (v > kbBox[0]) kbBox[0] = v
+            else { delay(250); if (ed.sheet == 0) kbBox[0] = v }
+        }
+    }
+    // Sheet terbuka => area catatan TIDAK lagi mengikuti keyboard (sheet menggantikan tempat keyboard), jadi layar tidak loncat saat keyboard turun.
+    // Dibaca di fase ukur (bukan komposisi), jadi cukup re-layout, tidak recompose.
+    val navInsets = WindowInsets.navigationBars
+    val areaInsets = remember(imeInsets, navInsets, ed) {
+        val base = imeInsets.union(navInsets)
+        object : WindowInsets {
+            override fun getLeft(density: androidx.compose.ui.unit.Density, layoutDirection: androidx.compose.ui.unit.LayoutDirection) = base.getLeft(density, layoutDirection)
+            override fun getTop(density: androidx.compose.ui.unit.Density) = base.getTop(density)
+            override fun getRight(density: androidx.compose.ui.unit.Density, layoutDirection: androidx.compose.ui.unit.LayoutDirection) = base.getRight(density, layoutDirection)
+            override fun getBottom(density: androidx.compose.ui.unit.Density) = if (ed.sheet != 0) 0 else base.getBottom(density)
+        }
+    }
     val haptic = LocalHapticFeedback.current
     val hasAu = vm.note(ed.noteId)?.au?.isNotEmpty() == true
     SideEffect {
@@ -1633,7 +1660,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
         TopBar()
         // area catatan berhenti tepat di atas keyboard / navbar; kapsul melayang di atasnya tanpa latar
         Box(
-            Modifier.weight(1f).fillMaxWidth().windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
+            Modifier.weight(1f).fillMaxWidth().windowInsetsPadding(areaInsets)
                 .onSizeChanged { ed.viewH = it.height.toFloat() }
                 .clipToBounds()
                 .inkPinch(ed, scroll)
@@ -1779,7 +1806,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
             }
             }
             InkFrame(ed)
-            BottomBars(ed, vm, act, (!ed.reading || ed.selEdit) && !ed.titleFocus && !ed.findOn && !ed.ink.on, imeOpen)
+            BottomBars(ed, vm, act, (!ed.reading || ed.selEdit) && !ed.titleFocus && !ed.findOn && !ed.ink.on, imeOpen) { kbBox[0] }
             InkBar(ed, vm)
         }
     }
@@ -1959,7 +1986,7 @@ fun SelHandles(ed: Ed) {
 
 /** Dipisah dari NoteScreen supaya tidak terjebak receiver ColumnScope milik Column di luarnya. */
 @Composable
-fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boolean) {
+fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boolean, holdH: () -> Int) {
     val recOn = ed.recActive
     SideEffect { ed.barOn = showBar || recOn || ed.sheet != 0 }
     // Tinggi bilah berubah tiap frame saat bilah / sheet beranimasi. Kalau langsung ditulis ke ed.barH, SETIAP blok teks
@@ -1982,12 +2009,14 @@ fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boole
             ) {
                 RecordCard(vm)
             }
-            DocSheet(ed, act, vm)
+            DocSheet(ed, act, vm, holdH())
             // bilah datar: gerak kecil + pudar, karena keyboard sudah ikut bergerak sendiri
             AnimatedVisibility(
                 visible = showBar && ed.sheet == 0,
                 enter = fadeIn(tween(200)) + expandVertically(tween(300, easing = Emph), expandFrom = Alignment.Top),
-                exit = fadeOut(tween(140)) + shrinkVertically(tween(260, easing = Emph), shrinkTowards = Alignment.Top)
+                // sheet membuka => kapsul hilang seketika (tanpa menyusut), supaya tidak ada gerakan ganda di atas sheet
+                exit = if (ed.sheet != 0) androidx.compose.animation.ExitTransition.None
+                else fadeOut(tween(140)) + shrinkVertically(tween(260, easing = Emph), shrinkTowards = Alignment.Top)
             ) {
                 DocBar(ed, act)
             }
