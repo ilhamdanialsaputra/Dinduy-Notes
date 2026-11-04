@@ -198,6 +198,21 @@ private fun AlignIcon(a: String, c: Color) = when (a) {
     else -> Ic("aL", c)
 }
 
+/** Ikon gambar dengan tanda plus kecil di pojok kanan atas: tambah gambar lain. */
+@Composable
+private fun AddImgIcon(c: Color) {
+    val pal = LocalPal.current
+    Box(Modifier.size(26.dp)) {
+        Ic("img", c, 22.dp, Modifier.align(Alignment.BottomStart))
+        Canvas(Modifier.size(13.dp).align(Alignment.TopEnd)) {
+            drawCircle(pal.c3)
+            val u = size.width
+            drawLine(c, Offset(u * .25f, u * .5f), Offset(u * .75f, u * .5f), 1.8f * density, StrokeCap.Round)
+            drawLine(c, Offset(u * .5f, u * .25f), Offset(u * .5f, u * .75f), 1.8f * density, StrokeCap.Round)
+        }
+    }
+}
+
 /** Tombol dengan segitiga kecil di sudut: tanda bahwa ia mengembangkan sub-bilah. */
 @Composable
 private fun DropBtn(on: Boolean, open: Boolean, enabled: Boolean, onClick: () -> Unit, icon: @Composable (Color) -> Unit) {
@@ -283,8 +298,14 @@ fun DocBar(ed: Ed, act: Actions) {
                             horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically
                         ) {
                             // ganti isi bingkai dengan foto lain (galeri / kamera); ukuran bingkai tidak berubah
-                            Chip("Ganti foto", pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.replT = ed.selImg ?: lastSel; act.replaceImage() }
+                            Tbn({ Ic("swap", it) }, false, true) {
+                                ed.replT = ed.selImg ?: lastSel
+                                val pick = ed.replPick
+                                if (pick != null) pick() else act.replaceImage()
+                            }
                             Tbn({ Ic("cam", it) }, false, true) { ed.replT = ed.selImg ?: lastSel; act.takePhoto(true) }
+                            // tambah gambar lain (disisipkan tepat sesudah gambar ini)
+                            Tbn({ AddImgIcon(it) }, false, true) { ed.replT = null; act.pickImages() }
                             Sep()
                             if (!inRow) {
                                 val al = b?.im?.getOrNull(s.second)?.al
