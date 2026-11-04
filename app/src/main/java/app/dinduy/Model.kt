@@ -276,6 +276,7 @@ data class Prefs(
     val ff: String = "def",  // jenis huruf: def / flex / times
     val cols: Int = 1,       // jumlah kolom kartu di beranda (1 / 2)
     val dyn: Boolean = true, // true = warna mengikuti perangkat (Material You, Android 12+); false = warna kustom (seed)
+    val mono: Boolean = false, // true = Monochrome: seluruh warna aplikasi jadi abu-abu (terang dan gelap)
     val wm: String = "base", // model offline aktif: base / small
     val eng: String = "groq",// mesin transkripsi pilihan: groq (API key, online) / off (model offline)
     val gl: String = "",     // bahasa ucapan: "" otomatis, atau kode ISO (id, en)
