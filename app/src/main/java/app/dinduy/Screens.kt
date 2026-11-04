@@ -362,12 +362,8 @@ fun CardBody(d: Note, kind: String, c2: Boolean, fg: Color, padH: Dp, padV: Dp, 
 @Composable
 fun GhostCard(d: Note, g: Ghost, modifier: Modifier = Modifier) {
     Box(modifier) {
+        // tanpa ikon pin: kartu asli di beranda juga tidak menampilkannya, jadi tidak ada ikon yang berkedip saat morph
         CardBody(d, g.kind, g.c2, g.fg, g.padH, g.padV, g.insTL, g.insBL, 0L)
-        if (d.p) {
-            Box(Modifier.align(Alignment.TopEnd).padding(top = 12.dp, end = 12.dp).graphicsLayer { rotationZ = 32f; alpha = .6f }) {
-                Ic("pin", g.fg, 16.dp)
-            }
-        }
     }
 }
 
@@ -402,7 +398,7 @@ fun SwipeCard(enabled: Boolean, shape: androidx.compose.ui.graphics.Shape, onArc
     var dir by remember { mutableStateOf(1) }
     val dens = androidx.compose.ui.platform.LocalDensity.current.density
     val p = (Math.abs(off.value) / (w * .34f)).coerceIn(0f, 1f)
-    val errC = if (pal.dark) Color(0xFFF2B8B5) else Color(0xFFB3261E)
+    val errC = (if (pal.dark) Color(0xFFF2B8B5) else Color(0xFFB3261E)).let { if (pal.mono) it.gray() else it }
     val pop = remember { Animatable(0f) }
     val wig = remember { Animatable(1f) }
     // pegas kurang teredam: melompat melewati nilai akhir lalu berosilasi mengendap = efek "pop" dan goyangan
@@ -1009,7 +1005,7 @@ fun Fab(vm: AppVM, small: Boolean, hide: Boolean, lift: Dp) {
     val sab = sabDp()
     val dens = LocalDensity.current.density
     val shape = RoundedCornerShape(r)
-    Box(Modifier.fillMaxSize().padding(end = 20.dp, bottom = 24.dp + sab), contentAlignment = Alignment.BottomEnd) {
+    Box(Modifier.fillMaxSize().padding(end = 20.dp, bottom = 44.dp + sab), contentAlignment = Alignment.BottomEnd) {
         Row(
             Modifier.offset(y = -ly)
                 .onGloballyPositioned { c ->
@@ -1345,6 +1341,9 @@ fun SGroup(title: String, wait: Int, content: @Composable androidx.compose.found
     }
 }
 
+/** true di dalam PageScaffold (halaman opsi catatan, transkripsi, dst.): kartu memakai wadah tonal + border tipis supaya tidak menyatu dengan latar. */
+val LocalToneCards = androidx.compose.runtime.compositionLocalOf { false }
+
 /** Kartu bersambung: sudut luar besar, sudut antar kartu kecil. Saat ditekan semua sudut membulat (morph). */
 @Composable
 fun SCard(
@@ -1362,8 +1361,10 @@ fun SCard(
     val tr by animateFloatAsState(if (press) 28f else top, spring(.6f, 500f), label = "tr")
     val br by animateFloatAsState(if (press) 28f else bot, spring(.6f, 500f), label = "br")
     val shape = RoundedCornerShape(tr.coerceAtLeast(0f).dp, tr.coerceAtLeast(0f).dp, br.coerceAtLeast(0f).dp, br.coerceAtLeast(0f).dp)
+    val tone = LocalToneCards.current
     Column(
-        Modifier.fillMaxWidth().clip(shape).background(bg ?: pal.c2)
+        Modifier.fillMaxWidth().clip(shape).background(bg ?: if (tone) pal.tb else pal.c2)
+            .then(if (tone) Modifier.border(1.dp, pal.ol, shape) else Modifier)
             .then(if (onClick != null) Modifier.clickable(interactionSource = src, indication = LocalIndication.current, onClick = onClick) else Modifier)
             .animateContentSize(SizeSpring).padding(pad),
         content = content
@@ -1449,7 +1450,7 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                             Ic(modes[i].second, fg, 24.dp)
                         }
                     }
-                    SCard(POS_BOT) {
+                    SCard(POS_MID) {
                         T("Warna aplikasi", 16f, 500, pal.os, Modifier.padding(bottom = 12.dp))
                         val dynAvail = android.os.Build.VERSION.SDK_INT >= 31
                         val dynOn = pr.dyn && dynAvail
@@ -1480,13 +1481,22 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                                     .padding(vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
-                                Box(Modifier.size(40.dp).clip(CircleShape).background(hsl(ch, cs.coerceIn(35f, 88f), 50f)))
+                                Box(Modifier.size(40.dp).clip(CircleShape).background(hsl(ch, cs.coerceIn(35f, 88f), 50f).let { if (pal.mono) it.gray() else it }))
                                 Column(Modifier.weight(1f)) {
                                     T("Warna kustom", 16f, 400, pal.os)
                                     T("Atur corak dan intensitas sendiri", 14f, 400, pal.osv)
                                 }
                                 Ic("chr", pal.osv, 24.dp)
                             }
+                        }
+                    }
+                    SCard(POS_BOT, onClick = { vm.setPr(pr.copy(mono = !pr.mono)) }) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Column(Modifier.weight(1f)) {
+                                T("Monochrome", 16f, 500, pal.os)
+                                T("Turn all app colors to grayscale", 14f, 400, pal.osv)
+                            }
+                            MorphSwitch(pr.mono)
                         }
                     }
                 }
