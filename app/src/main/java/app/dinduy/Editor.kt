@@ -1979,22 +1979,25 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
      * Coretan lama (atau yang belum berjangkar) dipasangi jangkar huruf berdasarkan posisinya sekarang di layar, jadi tidak ada lompatan.
      * Diam-diam: tidak membuat langkah riwayat dan tidak menandai catatan berubah. Hanya jalan kalau tidak ada ketikan yang belum di-commit.
      */
+    private fun Ink.upg(): Boolean = (!anc && !img) || (t == 0 && (av == 2 || av == 7))
+
     fun inkUpgrade() {
-        if (blocks.none { b -> b.ik.any { !it.anc && !it.img } }) return
+        if (blocks.none { b -> b.ik.any { it.upg() } }) return
         if (hist[hi].bl !== blocks && hist[hi].bl != blocks) return
         val W = (contentCoords?.size?.width ?: 0).toFloat()
         if (W <= 0f) return
         val adds = HashMap<String, ArrayList<Ink>>()
         val drop = HashSet<String>()
         for (b in blocks) {
-            if (b.ik.none { !it.anc && !it.img }) continue
+            if (b.ik.none { it.upg() }) continue
             val top = bpos[b.id]?.get(0) ?: continue
             for (s in b.ik) {
-                if (s.anc || s.img || s.p.isEmpty()) continue
+                if (!s.upg() || s.p.isEmpty()) continue
                 val raw = s.copy(an = emptyList(), ah = 0f, av = 0)
                 val a = inkPts(s, b.id, top, W, dens)          // posisi sekarang (goresan berskala ikut ukuran huruf), bukan p mentah
                 val ps = inkBuild(raw, a, a.size / 3, W)
-                if (ps.none { it.second.anc }) continue          // tidak bisa dijangkarkan: biarkan seperti semula
+                // goresan pena model lama (satu jangkar / per titik) dipindah ke model multi-jangkar; selain itu cukup berhasil menempel
+                if (ps.none { if (s.av == 2 || s.av == 7) (it.second.av == 8 || it.second.av == 9) else it.second.anc }) continue
                 drop.add(s.id)
                 for ((bid, st) in ps) adds.getOrPut(bid) { ArrayList() }.add(st)
             }
