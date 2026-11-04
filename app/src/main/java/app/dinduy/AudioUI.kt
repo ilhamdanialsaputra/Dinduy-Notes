@@ -142,7 +142,7 @@ fun WavyBar(progress: () -> Float, playing: Boolean, modifier: Modifier = Modifi
         val a = amp * 3.dp.toPx()
         val wl = 26.dp.toPx()
         val ts = endX + gap
-        if (ts < w) drawLine(pal.pc, Offset(ts, cy), Offset(w, cy), th, StrokeCap.Round)
+        if (ts < w) drawLine(pal.p.copy(alpha = .28f), Offset(ts, cy), Offset(w, cy), th, StrokeCap.Round)
         val stop = (endX - gap * .2f).coerceAtLeast(0f)
         if (stop > 1f) {
             val path = Path()
@@ -312,10 +312,14 @@ fun AudioCard(vm: AppVM, noteId: String, a: Aud, idx: Int, total: Int, title: St
     val src = remember { MutableInteractionSource() }
     val pr by src.collectIsPressedAsState()
     val ps by animateFloatAsState(if (pr) .92f else 1f, spring(.5f, 600f), label = "ps")
+    // kartu suara bercorak warna utama: beda dari gambar (netral) dan dari kertas, jadi tidak menyatu
+    val cardBg = androidx.compose.ui.graphics.lerp(pal.s, pal.p, if (pal.dark) .20f else .14f)
+    val btnBg = androidx.compose.ui.graphics.lerp(cardBg, pal.os, .10f)
+    val btnTr = androidx.compose.ui.graphics.lerp(cardBg, pal.p, .30f)
 
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Column(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(pal.c2)
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(cardBg)
                 .animateContentSize(spring(.8f, 400f)).padding(14.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -372,15 +376,15 @@ fun AudioCard(vm: AppVM, noteId: String, a: Aud, idx: Int, total: Int, title: St
                         T(st, 15f, 600, pal.opc, maxLines = 1)
                         if (vm.trInfo.isNotEmpty()) T(vm.trInfo, 12f, 500, pal.opc, alpha = .8f, maxLines = 1)
                     }
-                    GBtn(3, null, "Batal", pal.c1, pal.os, enabled = vm.trStage != 3) { vm.cancelTranscribe() }
+                    GBtn(3, null, "Batal", btnBg, pal.os, enabled = vm.trStage != 3) { vm.cancelTranscribe() }
                 }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                GBtn(0, "dl", "Simpan suara", pal.c4, pal.os, enabled = exists, modifier = Modifier.weight(1f)) {
+                GBtn(0, "dl", "Simpan suara", btnBg, pal.os, enabled = exists, modifier = Modifier.weight(1f)) {
                     val name = (title.ifBlank { "Suara" }) + (if (total > 1) "-${idx + 1}" else "") + ".m4a"
                     act.saveAudio(a, name)
                 }
-                GBtn(1, "notes", if (a.tb.isEmpty()) "Transkripsi" else "Ulangi", pal.sc, pal.osc, enabled = exists && !busy && !otherBusy, modifier = Modifier.weight(1f)) {
+                GBtn(1, "notes", if (a.tb.isEmpty()) "Transkripsi" else "Ulangi", btnTr, pal.os, enabled = exists && !busy && !otherBusy, modifier = Modifier.weight(1f)) {
                     vm.transcribe(noteId, a.id)
                 }
                 GBtn(2, "del", null, pal.ec, pal.oec) { vm.removeAudio(noteId, a.id) }
