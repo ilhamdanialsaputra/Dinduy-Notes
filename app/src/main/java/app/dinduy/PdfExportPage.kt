@@ -193,7 +193,7 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
     val ready = info != null && !busy && !failed
     val name = note?.let { notePdfName(it) } ?: "catatan.pdf"
 
-    Box(Modifier.fillMaxSize().background(pal.s)) {
+    Box(Modifier.fillMaxSize().background(pal.bg)) {
         Column(Modifier.fillMaxSize()) {
             Row(
                 Modifier.fillMaxWidth().height(sat + 64.dp).padding(top = sat, start = 8.dp, end = 20.dp),
