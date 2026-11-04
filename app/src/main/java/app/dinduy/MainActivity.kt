@@ -90,6 +90,11 @@ import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import kotlin.math.abs
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Dp
@@ -165,8 +170,8 @@ class Nav(private val vm: AppVM) {
 fun ViewLayer(on: Boolean, under: Boolean, keep: Boolean = false, base: Boolean = false, content: @Composable () -> Unit) {
     val pal = LocalPal.current
     // geser horizontal penuh (opak, tanpa fade): layar baru masuk dari kanan, layar di bawahnya bergeser pelan + meredup
-    val t by animateFloatAsState(if (on || base) 1f else 0f, tween(460, easing = Emph), label = "t")
-    val u by animateFloatAsState(if (under) 1f else 0f, tween(460, easing = Emph), label = "u")
+    val t by animateFloatAsState(if (on || base) 1f else 0f, tween(340, easing = EmphDecel), label = "t")
+    val u by animateFloatAsState(if (under) 1f else 0f, tween(340, easing = EmphDecel), label = "u")
     if (!keep && !on && t == 0f) return
     Box(
         Modifier.fillMaxSize()
@@ -199,7 +204,8 @@ fun ViewLayer(on: Boolean, under: Boolean, keep: Boolean = false, base: Boolean 
 fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, content: @Composable () -> Unit) {
     val pal = LocalPal.current
     // sama dengan ViewLayer: saat halaman opsi menutupi editor, editor bergeser pelan + meredup
-    val u by animateFloatAsState(if (under) 1f else 0f, tween(460, easing = Emph), label = "nu")
+    val u by animateFloatAsState(if (under) 1f else 0f, tween(340, easing = EmphDecel), label = "nu")
+    val gscope = rememberCoroutineScope()
     // satu progres bersama (vm.openP): morph kartu <-> layar penuh DAN kartu lain yang memberi ruang membaca nilai yang sama,
     // jadi selalu sinkron. Spring spatial M3 Expressive: membuka sedikit lentur, menutup lebih rapat (tanpa overshoot keluar layar).
     // Mode 1 kolom dan 2 kolom memakai satu animasi yang sama (container transform): wadah tumbuh dari kartu, isi catatan
@@ -208,11 +214,14 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
         if (on) {
             vm.closing = false
             CloseFx.err = null
-            vm.openP.animateTo(1f, spring(.86f, 320f))
+            // dibuka dengan tarikan jari dari FAB: progres dikendalikan jari, bukan animasi
+            if (FabFx.drag) return@LaunchedEffect
+            // spring cepat (kaku) dengan sedikit lentur: terasa snappy tapi tetap punya gerak
+            vm.openP.animateTo(1f, spring(.8f, 620f))
         } else {
             val follow = vm.closing
             val job = if (follow) launch { followCard(vm) } else null
-            vm.openP.animateTo(0f, if (follow) spring(.9f, 330f) else spring(.92f, 400f))
+            vm.openP.animateTo(0f, if (follow) spring(.9f, 640f) else spring(.95f, 760f))
             job?.cancel()
             CloseFx.err = null
             vm.closing = false
@@ -222,7 +231,44 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
     if (!on && t0 <= .01f) return
     vm.ghostVer
     Box(
-        Modifier.fillMaxSize().graphicsLayer { translationX = -u * size.width * .26f }.pointerInput(Unit) { }.drawWithContent {
+        Modifier.fillMaxSize().graphicsLayer { translationX = -u * size.width * .26f }.pointerInput(Unit) { }
+            // catatan masih kosong: seret ke bawah untuk menguncup kembali ke tombol FAB
+            .pointerInput(on) {
+                if (!on) return@pointerInput
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    if (vm.openP.value < .98f || !noteBlank(vm)) return@awaitEachGesture
+                    val slop = viewConfiguration.touchSlop
+                    val dist = 320.dp.toPx()
+                    val tracker = VelocityTracker()
+                    tracker.addPosition(down.uptimeMillis, down.position)
+                    var drag = false
+                    var lp = 1f
+                    while (true) {
+                        val ev = awaitPointerEvent(PointerEventPass.Initial)
+                        val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                        if (c.changedToUpIgnoreConsumed()) break
+                        tracker.addPosition(c.uptimeMillis, c.position)
+                        val dx = c.position.x - down.position.x
+                        val dy = c.position.y - down.position.y
+                        if (!drag) {
+                            if (dy < -slop || (abs(dx) > slop && abs(dx) > abs(dy))) return@awaitEachGesture
+                            if (dy > slop) drag = true
+                        }
+                        if (drag) {
+                            c.consume()
+                            lp = (1f - (dy - slop).coerceAtLeast(0f) / dist).coerceIn(0f, 1f)
+                            val v = lp
+                            gscope.launch { vm.openP.snapTo(v) }
+                        }
+                    }
+                    if (drag) {
+                        val vy = tracker.calculateVelocity().y
+                        if (lp < .82f || vy > 1000f) vm.nav.pop()
+                        else gscope.launch { vm.openP.animateTo(1f, spring(.8f, 560f)) }
+                    }
+                }
+            }.drawWithContent {
             val tt = vm.openP.value.coerceIn(0f, 1f)
             vm.morphTick
             val m = effMorph(vm) ?: Morph(size.width * .12f, size.height * .4f, size.width * .88f, size.height * .6f, 32.dp.toPx(), pal.s)
@@ -250,7 +296,7 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
                 val tt = vm.openP.value.coerceIn(0f, 1f)
                 vm.morphTick
                 val mm = effMorph(vm)
-                val x = ((vm.openP.value - .2f) / .5f).coerceIn(0f, 1f)
+                val x = ((vm.openP.value - .08f) / .4f).coerceIn(0f, 1f)
                 val a = x * x * (3f - 2f * x)
                 alpha = a
                 if (mm != null && mm.card) {
@@ -298,13 +344,30 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
                         translationX = lerp(mm.l, 0f, tt)
                         translationY = lerp(mm.t, 0f, tt)
                         transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
-                        val x = (1f - (vm.openP.value - .02f) / .3f).coerceIn(0f, 1f)
+                        val x = (1f - (vm.openP.value - .02f) / .24f).coerceIn(0f, 1f)
                         alpha = x * x * (3f - 2f * x)
                     }
             ) { GhostCard(gn, g) }
         }
         if (u > .001f) Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = (if (pal.dark) .16f else .05f) * u)))
     }
+}
+
+/** Keadaan gestur tombol FAB (tarik ke atas untuk membuka catatan baru). */
+object FabFx {
+    var drag by mutableStateOf(false)
+}
+
+/** Catatan yang sedang terbuka belum berisi apa pun (syarat yang sama dengan dropIfEmpty). */
+fun noteBlank(vm: AppVM): Boolean {
+    if (vm.nav.top !is Scr.Note) return false
+    val ed = vm.ed ?: return false
+    if (ed.noteId != vm.nav.noteId) return false
+    if (ed.sheet != 0 || ed.reading || ed.findOn || ed.selImg != null || ed.pickQuote || vm.rec.active) return false
+    val n = vm.note(ed.noteId)
+    return ed.title.isBlank() && plainOf(ed.blocks).isEmpty() &&
+        ed.blocks.none { it.isObj && it.ty != "hr" } && ed.blocks.none { it.ik.isNotEmpty() } &&
+        (n == null || (n.au.isEmpty() && n.rm == 0L))
 }
 
 /** Selisih posisi awal morph terhadap kartu tujuan; mengecil linear mengikuti progres menutup (tanpa pengejaran ekstra). */
@@ -397,7 +460,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
     val dynOn = vm.pr.dyn && Build.VERSION.SDK_INT >= 31
     // mode "auto" = ikuti terang/gelap perangkat
     val sysDark = androidx.compose.foundation.isSystemInDarkTheme()
-    val effMode = if (vm.pr.mode == "auto") (if (sysDark) "dark" else "light") else vm.pr.mode
+    val effMode = normMode(vm.pr.mode).let { if (it == "auto") (if (sysDark) "dark" else "light") else it }
     val target = remember(effMode, vm.pr.seed, dynOn) {
         (if (dynOn) dynamicPal(ctx, effMode) else null) ?: buildPal(effMode, vm.pr.seed)
     }
@@ -545,9 +608,10 @@ fun AppRoot(vm: AppVM, act: Actions) {
 
                     SelBar(vm)
                     Fab(
-                        vm, small = fabSmall, hide = !isHome || vm.sel.isNotEmpty() || vm.searchOn || vm.addOn || vm.remFilter,
-                        lift = if (vm.snack != null) 76.dp else 0.dp
-                    ) { vm.addOn = true }
+                        vm, small = fabSmall,
+                        hide = (!isHome && !FabFx.drag) || vm.sel.isNotEmpty() || vm.searchOn || vm.addOn || vm.remFilter,
+                        lift = if (vm.snack != null) 92.dp else 0.dp
+                    )
                     SnackHost(vm, if (inNote) 84.dp else 20.dp + sabDp(), inNote)
                     AddNoteLayer(vm, act)
                     SheetHost(vm, nav, act)
