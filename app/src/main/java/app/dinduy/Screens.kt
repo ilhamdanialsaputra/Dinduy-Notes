@@ -122,6 +122,15 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -189,6 +198,13 @@ private fun fdate(u: Long): String {
 }
 
 private val WS_RX = Regex("\\s+")
+private val SP_RX = Regex("[ \\t]+")
+private val NL_RX = Regex("\\s*\\n\\s*\\n\\s*(\\n\\s*)*")
+
+/** Kartu catatan ala Google Keep: persegi dengan sudut sedikit membulat, bergaris tipis, tanpa bentuk ekspresif. */
+private const val CARD_R = 12f
+private val CARD_PAD_H = 16.dp
+private val CARD_PAD_V = 14.dp
 
 /** Spring "spatial" Material 3 Expressive untuk perpindahan kartu antar posisi di daftar. */
 private val PlaceSpec = spring<IntOffset>(0.8f, 380f, IntOffset.VisibilityThreshold)
@@ -249,51 +265,15 @@ fun NoteCard(
 ) {
     val pal = LocalPal.current
     val c2 = cols == 2
-    fun scheme(k: Int) = when (k % 4) {
-        0 -> pal.pc to pal.opc
-        1 -> pal.sc to pal.osc
-        2 -> pal.tc to pal.otc
-        else -> pal.c4 to pal.os
-    }
-    // warna & bentuk sudut tidak "pop" saat urutan berubah (pencarian, arsip, hapus): dicampur mulus
-    var fromI by remember { mutableIntStateOf(i) }
-    var toI by remember { mutableIntStateOf(i) }
-    val mixA = remember { Animatable(1f) }
-    LaunchedEffect(i) {
-        if (i != toI) {
-            fromI = toI; toI = i
-            mixA.snapTo(0f)
-            mixA.animateTo(1f, spring(.9f, 320f))
-        }
-    }
-    val mx = mixA.value
-    val csA = scheme(fromI)
-    val csB = scheme(toI)
-    // paper = true (dipakai di panel pencarian): kartu polos berwarna sama dengan kertas editor, bukan warna-warni,
-    // supaya kontras dengan wadah pencarian yang sedang aktif
-    val cs = if (paper) pal.s to pal.os
-    else androidx.compose.ui.graphics.lerp(csA.first, csB.first, mx) to androidx.compose.ui.graphics.lerp(csA.second, csB.second, mx)
-    val shA = SH[fromI % 5]
-    val shB = SH[toI % 5]
-    val sh = FloatArray(4) { shA[it] + (shB[it] - shA[it]) * mx }
+    // semua kartu satu warna (kertas) dengan garis tepi tipis; saat dipilih garisnya menebal sedikit dan berwarna utama
+    val cardC = pal.s
+    val fg = pal.os
+    val edge = androidx.compose.ui.graphics.lerp(pal.bg, pal.os, .13f)
+    val shape = RoundedCornerShape(CARD_R.dp)
     val src = remember { MutableInteractionSource() }
     val pressed by src.collectIsPressedAsState()
     val selA by animateFloatAsState(if (selected) 1f else 0f, spring(.6f, 400f), label = "sel")
-    val pa by animateFloatAsState(if (pressed && !selected) 1f else 0f, spring(.7f, 300f), label = "pa")
     val sc by animateFloatAsState(if (selected || pressed) .97f else 1f, spring(.55f, 500f), label = "sc")
-    fun cr(k: Int): Dp {
-        // kartu sempit (2 kolom): sudut terpilih dibatasi supaya ceklis di pojok kanan atas tidak terpotong
-        val a = sh[k] + ((if (c2) 36f else 58f) - sh[k]).coerceAtMost(if (c2) 0f else 999f) * pa
-        return (a + ((if (c2) 44f else 84f) - a).coerceAtMost(if (c2) 0f else 999f) * selA).dp
-    }
-    val shape = RoundedCornerShape(cr(0), cr(1), cr(2), cr(3))
-    // 2 kolom: sudut besar memotong teks di pojok, jadi teks digeser menjauhi lengkungan (kiri-atas untuk judul, kiri-bawah untuk lencana/footer)
-    val insTL = if (c2) ((sh[0] - 40f).coerceAtLeast(0f) * .45f).dp else 0.dp
-    // sudut kiri-bawah memakai bentuk statis (bukan yang beranimasi saat ditekan) supaya tata letak tidak bergetar; ambangnya
-    // lebih rendah daripada kiri-atas karena baris teks terakhir (descender, footer) menempel di dasar kartu
-    val insBL = if (c2) ((sh[3] - 28f).coerceAtLeast(0f) * .5f).dp else 0.dp
-    val padV by animateDpAsState(if (selected) (if (c2) 16.dp else 26.dp) else if (c2) 16.dp else if (kind == "t") 22.dp else if (kind == "s") 20.dp else 24.dp, spring(.7f, 400f), label = "pv")
-    val padH by animateDpAsState(if (selected) (if (c2) 16.dp else 32.dp) else if (c2) 16.dp else 24.dp, spring(.7f, 400f), label = "ph")
     var rect by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
     val dens = LocalDensity.current.density
     val haptic = LocalHapticFeedback.current
@@ -302,9 +282,9 @@ fun NoteCard(
         val c = coords[0]
         val rc = if (c != null && c.isAttached) c.boundsInWindow() else rect
         return Morph(
-            rc.left, rc.top, rc.right, rc.bottom, sh.average().toFloat() * dens, cs.first,
-            FloatArray(4) { (if (live) cr(it).value else sh[it]) * dens },
-            Ghost(kind, c2, cs.second, padH, padV, insTL, insBL), card = true
+            rc.left, rc.top, rc.right, rc.bottom, CARD_R * dens, cardC,
+            FloatArray(4) { CARD_R * dens },
+            Ghost("f", c2, fg, CARD_PAD_H, CARD_PAD_V, 0.dp, 0.dp), card = true
         )
     }
     // posisi dilaporkan ulang setelah layar selesai bergeser masuk (arsip/sampah), supaya morph keluar akurat
@@ -316,75 +296,56 @@ fun NoteCard(
             track?.invoke(morphNow(false))
         }
             .graphicsLayer { scaleX = sc; scaleY = sc }
-            .fillMaxWidth().clip(shape).background(cs.first)
+            .fillMaxWidth().clip(shape).background(cardC)
+            .border((1f + selA).dp, androidx.compose.ui.graphics.lerp(edge, pal.p, selA), shape)
             .combinedClickable(
                 interactionSource = src, indication = LocalIndication.current,
                 onClick = { onClick(morphNow(true)) },
                 onLongClick = if (onLong != null) ({ haptic.performHapticFeedback(HapticFeedbackType.LongPress); onLong() }) else null
             )
     ) {
-        CardBody(d, kind, c2, cs.second, padH, padV, insTL, insBL, delTime)
+        CardBody(d, "f", c2, fg, CARD_PAD_H, CARD_PAD_V, 0.dp, 0.dp, delTime)
         if (d.p) {
-            Box(Modifier.align(Alignment.TopEnd).padding(top = if (c2) 14.dp else 22.dp, end = if (c2) 12.dp else 24.dp).graphicsLayer { rotationZ = 32f; alpha = .7f * (1f - selA) }) {
-                Ic("pin", cs.second, if (c2) 18.dp else 20.dp)
+            Box(Modifier.align(Alignment.TopEnd).padding(top = 12.dp, end = 12.dp).graphicsLayer { rotationZ = 32f; alpha = .6f }) {
+                Ic("pin", fg, 16.dp)
             }
         }
-        Box(
-            Modifier.align(Alignment.TopEnd).padding(top = if (c2) 12.dp else 24.dp, end = if (c2) 12.dp else 28.dp).size(if (c2) 28.dp else 32.dp)
-                .graphicsLayer { scaleX = selA; scaleY = selA }.clip(CircleShape).background(pal.p),
-            Alignment.Center
-        ) { Ic("ok", pal.op, 20.dp) }
     }
 }
 
-/** Isi teks kartu (judul, cuplikan, label, footer). Dipakai kartu asli dan bayangan teks saat morph buka/tutup. */
+/**
+ * Isi teks kartu ala Keep: judul (bila ada), isi dengan tinggi mengikuti panjang teks (dibatasi supaya tidak terlalu tinggi),
+ * lalu label / pengingat. Dipakai kartu asli dan bayangan teks saat morph buka/tutup.
+ */
 @Composable
 fun CardBody(d: Note, kind: String, c2: Boolean, fg: Color, padH: Dp, padV: Dp, insTL: Dp, insBL: Dp, delTime: Long) {
+    val remOn = d.rm > 0L && d.dt == 0L
+    val body = remember(d.x) { d.x.take(900).replace(SP_RX, " ").replace(NL_RX, "\n\n").trim() }
+    val hasTitle = d.t.isNotBlank()
+    val shownBody = body.ifEmpty { if (!hasTitle) (if (d.au.isNotEmpty()) "Catatan suara" else "Kosong") else "" }
     Column(
-        Modifier.fillMaxWidth().padding(horizontal = padH, vertical = padV).let { if (kind == "f") it.defaultMinSize(minHeight = if (c2) 96.dp else 102.dp) else it },
-        verticalArrangement = Arrangement.spacedBy(if (kind == "t") 0.dp else if (kind == "s") 6.dp else 10.dp)
+        Modifier.fillMaxWidth().padding(horizontal = padH, vertical = padV),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // elemen terakhir yang menempel di pojok kiri-bawah ikut digeser menjauhi lengkungan (trik yang sama dengan kiri-atas)
-        val remOn = d.rm > 0L && d.dt == 0L
-        val titleLast = kind == "t" && d.lb.isEmpty() && !remOn
-        val bodyLast = kind == "s" && d.lb.isEmpty() && !remOn
-        T(
-            d.t.ifEmpty { "Tanpa judul" }, if (c2) 16f else if (kind == "s") 19f else 21f, 900, fg,
-            Modifier.padding(
-                start = if (titleLast) maxOf(insTL, insBL) else insTL, top = insTL, end = if (c2) 30.dp else 44.dp,
-                bottom = if (titleLast) insBL else 0.dp
-            ), ls = -.015f, lh = 1.1f,
-            maxLines = if (c2) 3 else Int.MAX_VALUE
-        )
-        if (kind != "t") {
-            T(
-                remember(d.x) { d.x.take(1000).replace(WS_RX, " ").trim().take(150) }.ifEmpty { if (d.au.isNotEmpty()) "Catatan suara" else "Kosong" }, if (c2) 13.5f else 15f, 450, fg,
-                modifier = Modifier.padding(start = if (bodyLast) insBL else 0.dp, bottom = if (bodyLast) insBL else 0.dp),
-                maxLines = if (kind == "s") (if (c2) 2 else 1) else (if (c2) 4 else 3), lh = 1.45f, alpha = .8f
-            )
+        if (hasTitle) {
+            T(d.t.trim(), 17f, 500, fg, Modifier.padding(end = if (d.p) 18.dp else 0.dp), lh = 1.25f, maxLines = 3)
+        }
+        if (shownBody.isNotEmpty()) {
+            T(shownBody, 15f, 400, fg, lh = 1.4f, maxLines = if (c2) 10 else 6, alpha = .88f)
         }
         if (remOn) {
-            // chip pengingat (seperti Google Keep): jam bunyi berikutnya, dicoret bila sudah terlewat
-            Box(
-                Modifier.padding(top = if (kind == "t") 8.dp else 0.dp)
-                    .padding(start = if (d.lb.isEmpty()) insBL else 0.dp, bottom = if (d.lb.isEmpty() && kind != "f") insBL else 0.dp)
-            ) { RemChip(Rem.stamp(d), fg, Rem.overdue(d), d.rr.isNotEmpty()) }
+            Box { RemChip(Rem.stamp(d), fg, Rem.overdue(d), d.rr.isNotEmpty()) }
         }
         if (d.lb.isNotEmpty()) {
-            val maxShow = if (c2) 1 else 2
-            Row(
-                Modifier.fillMaxWidth().padding(top = if (kind == "t") 8.dp else 0.dp).padding(start = insBL, bottom = if (kind == "f") 0.dp else insBL),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                d.lb.take(maxShow).forEach { n -> Capsule(n, fg, Modifier.weight(1f, fill = false)) }
-                if (d.lb.size > maxShow) Capsule("+" + (d.lb.size - maxShow), fg)
+            val maxShow = if (c2) 1 else 3
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                d.lb.take(maxShow).forEach { n -> KeepChip(n, fg, Modifier.weight(1f, fill = false)) }
+                if (d.lb.size > maxShow) KeepChip("+" + (d.lb.size - maxShow), fg)
             }
         }
-        if (kind == "f") {
-            Row(Modifier.fillMaxWidth().padding(start = insBL, bottom = insBL), horizontalArrangement = if (c2) Arrangement.Start else Arrangement.SpaceBetween) {
-                if (!c2) T(remember(d.x) { wordCount(d.x) }.toString() + " kata", 13f, 700, fg, ls = .02f, alpha = .75f)
-                T(remember(delTime, d.u) { (if (delTime != 0L) "Dihapus " else "") + fdate(if (delTime != 0L) delTime else d.u) }, if (c2) 12f else 13f, 700, fg, ls = .02f, alpha = .75f)
-            }
+        if (delTime != 0L) {
+            // hanya di sampah: tanggal penghapusan
+            T("Dihapus " + fdate(delTime), 12f, 600, fg, alpha = .65f)
         }
     }
 }
@@ -395,10 +356,18 @@ fun GhostCard(d: Note, g: Ghost, modifier: Modifier = Modifier) {
     Box(modifier) {
         CardBody(d, g.kind, g.c2, g.fg, g.padH, g.padV, g.insTL, g.insBL, 0L)
         if (d.p) {
-            Box(Modifier.align(Alignment.TopEnd).padding(top = if (g.c2) 14.dp else 22.dp, end = if (g.c2) 12.dp else 24.dp).graphicsLayer { rotationZ = 32f; alpha = .7f }) {
-                Ic("pin", g.fg, if (g.c2) 18.dp else 20.dp)
+            Box(Modifier.align(Alignment.TopEnd).padding(top = 12.dp, end = 12.dp).graphicsLayer { rotationZ = 32f; alpha = .6f }) {
+                Ic("pin", g.fg, 16.dp)
             }
         }
+    }
+}
+
+/** Label di kartu ala Keep: kotak membulat kecil, bukan kapsul. */
+@Composable
+fun KeepChip(text: String, color: Color, modifier: Modifier = Modifier) {
+    Box(modifier.clip(RoundedCornerShape(8.dp)).background(color.copy(alpha = .10f)).padding(horizontal = 8.dp, vertical = 4.dp)) {
+        T(text, 12f, 500, color, maxLines = 1, alpha = .85f)
     }
 }
 
@@ -687,7 +656,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
     val focusMgr = LocalFocusManager.current
     val state = rememberLazyStaggeredGridState()
     // tween tanpa overshoot supaya buka/tutup pencarian tidak bergetar
-    val saRaw by animateFloatAsState(if (vm.searchOn) 1f else 0f, tween(if (vm.searchOn) 360 else 260, easing = Emph), label = "sa")
+    val saRaw by animateFloatAsState(if (vm.searchOn) 1f else 0f, if (vm.searchOn) spring(.9f, 380f) else spring(.95f, 460f), label = "sa")
     val sa = saRaw.coerceIn(0f, 1f)
     val fabConn = remember {
         object : NestedScrollConnection {
@@ -782,11 +751,11 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         val wPx = with(dens) { maxWidth.toPx() }
         // perkiraan slot kartu paling atas: titik awal morph menutup saat kartu tujuan belum tampil di layar
         run {
-            val gap = 12f * dens.density
-            val padS = 16f * dens.density
+            val gap = 8f * dens.density
+            val padS = 8f * dens.density
             val cw = if (cols == 2) (wPx - 2 * padS - gap) / 2f else wPx - 2 * padS
             val t0 = with(dens) { (sat + 78.dp).toPx() }
-            vm.topSlot = Morph(padS, t0, padS + cw, t0 + 92f * dens.density, 28f * dens.density, pal.pc, card = true)
+            vm.topSlot = Morph(padS, t0, padS + cw, t0 + 92f * dens.density, 12f * dens.density, pal.s, card = true)
         }
         val livePanelH = (maxHeight - imeH - (sat + 8.dp) - 10.dp).coerceAtLeast(160.dp)
         // saat menutup, tinggi panel dibekukan agar tidak ikut naik-turun mengikuti keyboard yang menghilang
@@ -803,9 +772,9 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         LazyVerticalStaggeredGrid(
             columns = StaggeredGridCells.Fixed(cols),
             state = state, modifier = Modifier.fillMaxSize().nestedScroll(fabConn).graphicsLayer { alpha = 1f - sa },
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = sat + 78.dp, bottom = 130.dp + sab),
-            verticalItemSpacing = 12.dp,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = sat + 78.dp, bottom = 130.dp + sab),
+            verticalItemSpacing = 8.dp,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             if (live.isEmpty()) {
                 item(key = "empty", span = full) {
@@ -817,29 +786,25 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                 }
             }
             if (sections) item(key = "h-pin", span = full) {
-                T("Disematkan", 13f, 900, pal.p, Modifier.padding(start = 12.dp, top = 8.dp, bottom = 4.dp), ls = .08f)
+                T("Disematkan", 13f, 500, pal.osv, Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp), ls = .01f)
             }
             gridItems(pinned, key = { it.id }) { d ->
                 HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, wPx, dens.density, pos, flowItemG())
             }
             if (sections) item(key = "h-other", span = full) {
-                T("Lainnya", 13f, 900, pal.p, Modifier.padding(start = 12.dp, top = 8.dp, bottom = 4.dp), ls = .08f)
+                T("Lainnya", 13f, 500, pal.osv, Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp), ls = .01f)
             }
             gridItems(others, key = { it.id }) { d ->
                 HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, wPx, dens.density, pos, flowItemG())
             }
         }
 
-        // header lengket: tombol menu, pil pencarian, tombol 1/2 kolom
-        Box(Modifier.fillMaxWidth().height(sat + 72.dp).background(pal.s).graphicsLayer { alpha = 1f - sa * 0f })
+        // header lengket: latar belakang di belakang bilah cari
+        Box(Modifier.fillMaxWidth().height(sat + 72.dp).background(pal.bg))
         Box(
             Modifier.padding(start = 10.dp, top = sat + 10.dp)
                 .graphicsLayer { translationX = -84.dp.toPx() * sa; scaleX = 1f - .4f * sa; scaleY = 1f - .4f * sa; alpha = 1f - sa }
         ) { IconBtn("menu", pal.osv, { if (sa < .5f) openDrawer() }) }
-        Box(
-            Modifier.align(Alignment.TopEnd).padding(end = 10.dp, top = sat + 10.dp)
-                .graphicsLayer { translationX = 84.dp.toPx() * sa; scaleX = 1f - .4f * sa; scaleY = 1f - .4f * sa; alpha = 1f - sa }
-        ) { IconBtn(if (cols == 1) "cols" else "rows", pal.osv, { if (sa < .5f) vm.setPr(vm.pr.copy(cols = if (cols == 1) 2 else 1)) }) }
 
         val q = vm.query.trim().lowercase()
         val res by remember(vm) {
@@ -848,71 +813,114 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                 vm.sorted(vm.liveF().filter { qq.isEmpty() || (it.t + " " + it.x).lowercase().contains(qq) })
             }
         }
-        // hasil pencarian: halaman penuh di bawah bilah (seperti Google Keep). Bilah tetap ramping dan tidak mengubah ukuran tiap frame
-        if (sa > 0.001f || vm.searchOn) {
-            Box(
-                Modifier.fillMaxSize()
-                    .graphicsLayer { alpha = sa; compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.ModulateAlpha }
-                    .background(pal.s)
-                    .pointerInput(vm.searchOn) { if (vm.searchOn) detectTapGestures { } }
-            ) {
-                LazyColumn(
-                    Modifier.fillMaxSize().graphicsLayer { translationY = (1f - sa) * 18.dp.toPx() },
-                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = sat + 76.dp, bottom = imeH + 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    if (res.isEmpty() && vm.searchOn) item(key = "empty-search") {
-                        T(if (q.isNotEmpty()) "Tidak ada hasil" else "Belum ada catatan", 17f, 600, pal.osv,
-                            flowItem().fillMaxWidth().padding(vertical = 48.dp), align = androidx.compose.ui.text.style.TextAlign.Center)
+
+        // Bilah cari ala Google Keep: satu wadah yang MORPHING. Saat diam ia pil kertas di antara tombol menu dan tepi layar;
+        // saat dibuka, tepi-tepinya melebar ke seluruh layar, sudutnya meluruh jadi 0, warnanya beralih ke latar, dan jadilah
+        // satu halaman pencarian baru (panah kembali + kolom ketik + garis pemisah + hasil). Teks di bilah tidak berpindah tempat.
+        val padStartIdle = with(dens) { 72.dp.toPx() }
+        val padEndIdle = with(dens) { 12.dp.toPx() }
+        val topIdle = with(dens) { (sat + 8.dp).toPx() }
+        val botIdle = with(dens) { (sat + 64.dp).toPx() }
+        val radIdle = with(dens) { 28.dp.toPx() }
+        val divY = with(dens) { (sat + 72.dp).toPx() }
+        val divH = with(dens) { 1.dp.toPx() }
+        val divC = androidx.compose.ui.graphics.lerp(pal.bg, pal.os, .13f)
+        Box(
+            Modifier.fillMaxSize()
+                .drawWithContent {
+                    val k = sa
+                    val l = androidx.compose.ui.util.lerp(padStartIdle, 0f, k)
+                    val r = androidx.compose.ui.util.lerp(size.width - padEndIdle, size.width, k)
+                    val t = androidx.compose.ui.util.lerp(topIdle, 0f, k)
+                    val b = androidx.compose.ui.util.lerp(botIdle, size.height, k)
+                    val rad = androidx.compose.ui.util.lerp(radIdle, 0f, k)
+                    val path = Path().apply { addRoundRect(RoundRect(Rect(l, t, r, b), CornerRadius(rad))) }
+                    clipPath(path) {
+                        drawRect(androidx.compose.ui.graphics.lerp(pal.s, pal.bg, (k * 1.6f).coerceAtMost(1f)))
+                        this@drawWithContent.drawContent()
+                        if (k > 0.001f) drawRect(divC.copy(alpha = divC.alpha * k), Offset(l, divY), Size(r - l, divH))
                     }
-                    // indeks warna/bentuk memakai posisi di daftar penuh, jadi kartu tidak berganti warna saat tersaring;
-                    // kartu yang cocok bergeser mulus, yang tidak cocok memudar keluar
-                    itemsIndexed(res, key = { _, it -> "s" + it.id }) { ri, d ->
+                }
+                .then(if (vm.searchOn) Modifier.pointerInput(Unit) { detectTapGestures { } } else Modifier)
+        ) {
+            // hasil pencarian: tampil di bawah bilah dengan tata letak yang sama seperti beranda (1 atau 2 kolom)
+            if (sa > 0.001f || vm.searchOn) {
+                LazyVerticalStaggeredGrid(
+                    columns = StaggeredGridCells.Fixed(cols),
+                    modifier = Modifier.fillMaxSize()
+                        .graphicsLayer {
+                            alpha = ((sa - .35f) / .65f).coerceIn(0f, 1f)
+                            translationY = (1f - sa) * 18.dp.toPx()
+                        },
+                    contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = sat + 80.dp, bottom = imeH + 16.dp),
+                    verticalItemSpacing = 8.dp,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (res.isEmpty() && vm.searchOn) item(key = "empty-search", span = full) {
+                        T(if (q.isNotEmpty()) "Tidak ada hasil" else "Belum ada catatan", 17f, 600, pal.osv,
+                            Modifier.fillMaxWidth().padding(vertical = 48.dp), align = androidx.compose.ui.text.style.TextAlign.Center)
+                    }
+                    gridItems(res, key = { "s" + it.id }) { d ->
+                        val ri = res.indexOfFirst { it.id == d.id }.coerceAtLeast(0)
                         NoteCard(
-                            d, pos[d.id] ?: ri, vm.pr.cd, false,
-                            flowItem().makeRoom(vm, d.id, ri, { res.indexOfFirst { it.id == vm.openId } }, hPx, dens.density)
+                            d, pos[d.id] ?: ri, "f", false,
+                            flowItemG().makeRoom(vm, d.id, ri, { res.indexOfFirst { it.id == vm.openId } }, hPx, dens.density),
+                            cols = cols
                         ) { m ->
                             focusMgr.clearFocus(); vm.cardMorph[d.id] = m; nav.openNote(d.id, m)
                         }
                     }
                 }
             }
-        }
 
-        val padH = lerp(72.dp, 8.dp, sa)
-        Box(
-            Modifier.padding(top = sat + 8.dp, start = padH, end = padH).fillMaxWidth().height(56.dp)
-                .clip(RoundedCornerShape(28.dp)).background(pal.c3)
-        ) {
+            if (sa > 0.001f || vm.searchOn) {
+                Box(
+                    Modifier.fillMaxWidth().height(sat + 72.dp)
+                        .graphicsLayer { alpha = ((sa - .35f) / .65f).coerceIn(0f, 1f) }
+                        .background(pal.bg)
+                )
+            }
+            // baris bilah: posisinya mengikuti tepi kiri/kanan wadah yang melebar
             Row(
-                Modifier.fillMaxSize().clickable(
-                    interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !vm.searchOn
-                ) { vm.searchOn = true }.padding(start = 4.dp, end = 6.dp),
+                Modifier.padding(
+                    top = sat + 8.dp,
+                    start = androidx.compose.ui.unit.lerp(76.dp, 4.dp, sa),
+                    end = androidx.compose.ui.unit.lerp(10.dp, 8.dp, sa)
+                ).fillMaxWidth().height(56.dp)
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !vm.searchOn) { vm.searchOn = true },
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // ikon kiri: kaca pembesar berputar jadi panah kembali (seperti Keep)
                 Box(Modifier.size(48.dp).clip(CircleShape).clickable(enabled = vm.searchOn) { vm.searchOn = false }, Alignment.Center) {
                     Box(Modifier.graphicsLayer { alpha = 1f - sa; scaleX = 1f - .5f * sa; scaleY = 1f - .5f * sa; rotationZ = -90f * sa }) { Ic("search", pal.osv) }
-                    Box(Modifier.graphicsLayer { alpha = sa; scaleX = .5f + .5f * sa; scaleY = .5f + .5f * sa; rotationZ = 90f * (1f - sa) }) { Ic("chl", pal.p) }
+                    Box(Modifier.graphicsLayer { alpha = sa; scaleX = .5f + .5f * sa; scaleY = .5f + .5f * sa; rotationZ = 90f * (1f - sa) }) { Ic("back", pal.os) }
                 }
                 Spacer(Modifier.width(6.dp))
                 BasicTextField(
                     value = vm.query, onValueChange = { vm.query = it },
                     modifier = Modifier.weight(1f).focusRequester(fr).onFocusChanged { if (it.isFocused && !vm.searchOn) vm.searchOn = true },
-                    textStyle = TextStyle(color = pal.os, fontFamily = LocalFF.current, fontSize = 17.sp, fontWeight = FontWeight(500)),
+                    textStyle = TextStyle(color = pal.os, fontFamily = LocalFF.current, fontSize = 17.sp, fontWeight = FontWeight(400)),
                     singleLine = true, cursorBrush = SolidColor(pal.p),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { focusMgr.clearFocus() }),
                     decorationBox = { inner ->
-                        Box { if (vm.query.isEmpty()) T(if (vm.remFilter) "Cari di Pengingat" else vm.filter?.let { "Cari di $it" } ?: "Cari catatan", 17f, 500, pal.osv, maxLines = 1); inner() }
+                        Box { if (vm.query.isEmpty()) T(if (vm.remFilter) "Cari di Pengingat" else vm.filter?.let { "Cari di $it" } ?: "Cari catatan", 17f, 400, pal.osv, maxLines = 1); inner() }
                     }
                 )
                 // hapus teks: hanya muncul saat ada ketikan
-                androidx.compose.animation.AnimatedVisibility(
+                AnimatedVisibility(
                     visible = vm.searchOn && vm.query.isNotEmpty(),
-                    enter = androidx.compose.animation.fadeIn(tween(140)) + androidx.compose.animation.scaleIn(tween(180, easing = Emph), .6f),
-                    exit = androidx.compose.animation.fadeOut(tween(100)) + androidx.compose.animation.scaleOut(tween(120), .6f)
+                    enter = fadeIn(tween(140)) + scaleIn(tween(180, easing = Emph), .6f),
+                    exit = fadeOut(tween(100)) + scaleOut(tween(120), .6f)
                 ) { IconBtn("x", pal.osv, { vm.query = "" }, size = 44.dp) }
+                // tombol 1 / 2 kolom: di dalam pil, menghilang saat pencarian terbuka
+                AnimatedVisibility(
+                    visible = !vm.searchOn,
+                    enter = fadeIn(tween(160, 80)) + scaleIn(tween(200, 80, easing = Emph), .6f) + expandHorizontally(tween(260, easing = Emph)),
+                    exit = fadeOut(tween(100)) + scaleOut(tween(140), .6f) + shrinkHorizontally(tween(220, easing = Emph))
+                ) {
+                    IconBtn(if (cols == 1) "cols" else "rows", pal.osv, { if (sa < .5f) vm.setPr(vm.pr.copy(cols = if (cols == 1) 2 else 1)) }, size = 44.dp)
+                }
             }
         }
     }
@@ -941,7 +949,7 @@ fun HomeCard(
             onDelete = { vm.mark(listOf(d.id), "Dipindah ke sampah") { it.copy(dt = System.currentTimeMillis()) } }
         ) {
             NoteCard(
-                d, i, vm.pr.cd, d.id in sel,
+                d, i, "f", d.id in sel,
                 Modifier.graphicsLayer {
                     val pv = prog.value
                     alpha = pv.coerceIn(0f, 1f); translationY = (1f - pv) * 32.dp.toPx()
@@ -1017,7 +1025,7 @@ fun SelBar(vm: AppVM) {
         enter = slideInVertically(tween(450, easing = Emph)) { -it }, exit = slideOutVertically(tween(450, easing = Emph)) { -it }
     ) {
         Row(
-            Modifier.fillMaxWidth().height(sat + 72.dp).background(pal.s).padding(top = sat + 12.dp, start = 10.dp, end = 10.dp),
+            Modifier.fillMaxWidth().height(sat + 72.dp).background(pal.bg).padding(top = sat + 12.dp, start = 10.dp, end = 10.dp),
             verticalAlignment = Alignment.Top
         ) {
             IconBtn("x", pal.os, { vm.sel.clear() }, size = 48.dp)
@@ -1057,7 +1065,7 @@ fun ListScreen(
     var tick by remember { mutableIntStateOf(0) }
     val seen = remember { HashSet<String>() }
     LaunchedEffect(Unit) { delay(560); tick++ }
-    Column(Modifier.fillMaxSize().background(pal.s).onSizeChanged { hPx = it.height.toFloat() }) {
+    Column(Modifier.fillMaxSize().background(pal.bg).onSizeChanged { hPx = it.height.toFloat() }) {
         Row(
             Modifier.fillMaxWidth().padding(top = sat + 8.dp, bottom = 8.dp, start = 12.dp, end = 12.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -1069,8 +1077,8 @@ fun ListScreen(
         if (hint != null) T(hint, 14f, 600, pal.osv, Modifier.padding(start = 24.dp, end = 24.dp, bottom = 8.dp))
         LazyColumn(
             Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 40.dp + sab),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 40.dp + sab),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             if (notes.isEmpty()) item(key = "empty-list") {
                 T(empty, 17f, 600, pal.osv, flowItem().fillMaxWidth().padding(vertical = 48.dp), align = androidx.compose.ui.text.style.TextAlign.Center)
@@ -1086,7 +1094,7 @@ fun ListScreen(
                     }
                 }
                 NoteCard(
-                    d, ix, vm.pr.cd, false,
+                    d, ix, "f", false,
                     flowItem()
                         .makeRoom(vm, d.id, ix, { notes.indexOfFirst { it.id == vm.openId } }, hPx, dens)
                         .graphicsLayer {
@@ -1298,7 +1306,7 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
     val pr = vm.pr
     val scroll = rememberScrollState()
     var custom by remember { mutableStateOf(false) }
-    Box(Modifier.fillMaxSize().background(pal.s)) {
+    Box(Modifier.fillMaxSize().background(pal.bg)) {
         Column(Modifier.fillMaxSize().verticalScroll(scroll)) {
             Spacer(Modifier.height(sat + 64.dp))
             Column(
@@ -1338,7 +1346,7 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                         val dynOn = pr.dyn && dynAvail
                         if (dynAvail) {
                             Row(
-                                Modifier.fillMaxWidth().padding(bottom = 16.dp).clip(RoundedCornerShape(20.dp))
+                                Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
                                     .clickable { vm.setPr(pr.copy(dyn = !dynOn)) }
                                     .padding(vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)
@@ -1350,57 +1358,31 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                                 MorphSwitch(dynOn)
                             }
                         }
-                        val dim by animateFloatAsState(if (dynOn) .38f else 1f, tween(260), label = "dim")
-                        val seeds = listOf("#6750A4", "#0B57D0", "#00796B", "#2E7D32", "#C77700", "#B3261E", "#C2185B", "#5D4037")
-                        val all: List<String?> = seeds + listOf<String?>(null)
-                        Column(Modifier.graphicsLayer { alpha = dim }) {
-                            all.chunked(5).forEachIndexed { ri, row ->
-                                Row(Modifier.fillMaxWidth().padding(top = if (ri == 0) 0.dp else 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    for (k in 0 until 5) {
-                                        val c = row.getOrNull(k)
-                                        Box(Modifier.weight(1f).aspectRatio(1f)) {
-                                            if (c != null) {
-                                                val sel = !dynOn && c.equals(pr.seed, true)
-                                                val rp by animateFloatAsState(if (sel) 30f else 50f, spring(.6f, 400f), label = "rp")
-                                                val ck by animateFloatAsState(if (sel) 1f else 0f, spring(.6f, 400f), label = "ck")
-                                                Box(
-                                                    Modifier.fillMaxSize().clip(RoundedCornerShape(rp.toInt().coerceIn(0, 50)))
-                                                        .background(Color(android.graphics.Color.parseColor(c)))
-                                                        .clickable { vm.setPr(pr.copy(seed = c, dyn = false)) },
-                                                    Alignment.Center
-                                                ) { Box(Modifier.graphicsLayer { scaleX = ck; scaleY = ck; alpha = ck.coerceIn(0f, 1f) }) { Ic("ok", Color.White) } }
-                                            } else if (k < row.size) {
-                                                Box(
-                                                    Modifier.fillMaxSize().clip(CircleShape).background(
-                                                        androidx.compose.ui.graphics.Brush.sweepGradient(
-                                                            listOf(Color(0xFFFF4444), Color(0xFFFFBB33), Color(0xFF44DD66), Color(0xFF33CCFF), Color(0xFF7744FF), Color(0xFFFF44AA), Color(0xFFFF4444))
-                                                        )
-                                                    ).clickable { custom = true },
-                                                    Alignment.Center
-                                                ) { Box(Modifier.size(30.dp).clip(CircleShape).background(pal.c2), Alignment.Center) { Ic("plus", pal.os, 18.dp) } }
-                                            }
-                                        }
-                                    }
+                        // satu-satunya pilihan warna manual: tombol warna kustom (dengan slider), hanya tampil saat Material You mati
+                        AnimatedVisibility(
+                            visible = !dynOn,
+                            enter = expandVertically(spring(.9f, 420f)) + fadeIn(tween(220)),
+                            exit = shrinkVertically(spring(1f, 500f)) + fadeOut(tween(140))
+                        ) {
+                            val (ch, cs) = hueSat(pr.seed)
+                            Row(
+                                Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
+                                    .clickable { custom = true }
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                Box(Modifier.size(40.dp).clip(CircleShape).background(hsl(ch, cs.coerceIn(35f, 88f), 50f)))
+                                Column(Modifier.weight(1f)) {
+                                    T("Warna kustom", 16f, 400, pal.os)
+                                    T("Atur corak dan intensitas sendiri", 14f, 400, pal.osv)
                                 }
+                                Ic("chr", pal.osv, 24.dp)
                             }
                         }
                     }
                 }
                 SGroup("Catatan", 60) {
-                    SCard(POS_TOP) {
-                        T("Tampilan kartu", 16f, 500, pal.os, Modifier.padding(bottom = 14.dp))
-                        val kinds = listOf("t" to "Judul", "s" to "Ringkas", "f" to "Lengkap")
-                        SegPill(3, kinds.indexOfFirst { it.first == pr.cd }.coerceAtLeast(0), { vm.setPr(pr.copy(cd = kinds[it].first)) }) { i, fg ->
-                            T(kinds[i].second, 15f, 500, fg)
-                        }
-                        Box(Modifier.padding(top = 16.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(pal.s).animateContentSize(SizeSpring).padding(12.dp)) {
-                            NoteCard(
-                                Note(id = "pv", t = "Rencana minggu ini", x = "Selesaikan tinjauan pustaka, kirim proposal ke dosen, lalu rapikan catatan kuliah sebelum Jumat.", u = System.currentTimeMillis()),
-                                0, pr.cd, false
-                            ) { }
-                        }
-                    }
-                    SCard(POS_BOT) {
+                    SCard(POS_ONE) {
                         T("Urutan catatan", 16f, 500, pal.os, Modifier.padding(bottom = 14.dp))
                         val sorts = listOf("u" to "Diubah", "c" to "Dibuat")
                         SegPill(2, sorts.indexOfFirst { it.first == pr.sort }.coerceAtLeast(0), { vm.setPr(pr.copy(sort = sorts[it].first)) }) { i, fg ->
@@ -1486,7 +1468,7 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
             Modifier.fillMaxWidth().height(sat + 64.dp)
                 .drawBehind {
                     val k = (scroll.value / 80.dp.toPx()).coerceIn(0f, 1f)
-                    drawRect(androidx.compose.ui.graphics.lerp(pal.s, pal.c2, k))
+                    drawRect(androidx.compose.ui.graphics.lerp(pal.bg, pal.c2, k))
                 }
                 .padding(top = sat, start = 8.dp, end = 12.dp),
             verticalAlignment = Alignment.CenterVertically
