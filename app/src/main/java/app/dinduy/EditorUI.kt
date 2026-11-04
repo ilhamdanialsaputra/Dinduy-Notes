@@ -1979,7 +1979,7 @@ fun SelBubble(ed: Ed, vm: AppVM, act: Actions, scrollY: Int) {
             }
             .onSizeChanged { bs = it }
             .shadow(if (pal.dark) 6.dp else 3.dp, RoundedCornerShape(20.dp)).clip(RoundedCornerShape(20.dp))
-            .background(pal.c4).padding(horizontal = 3.dp, vertical = 2.dp),
+            .background(pal.tb).padding(horizontal = 3.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         val enter = fadeIn(tween(180, 40)) + expandHorizontally(tween(260, easing = Emph))
