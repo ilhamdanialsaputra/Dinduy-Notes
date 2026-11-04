@@ -73,6 +73,11 @@ object PdfExport {
         val zones = ArrayList<FloatArray>()    // rentang yang tidak boleh dipotong (gambar, judul)
         val strokes = ArrayList<PStroke>()
         val texts = HashMap<String, TL>()      // id blok -> tata letak teksnya
+        val bpos = HashMap<String, FloatArray>()   // id blok -> [atas, bawah] di ruang aliran (pt), termasuk jarak bawah
+        val ipos = HashMap<String, FloatArray>()   // id gambar -> [kiri, atas, lebar, tinggi] (pt)
+        val pend = ArrayList<Pair<Blk, Ink>>()     // coretan ruang kosong: dihitung sesudah semua blok tertata
+        var bl: List<Blk> = emptyList()
+        var last = -1
         var y = 0f
     }
 
@@ -813,6 +818,7 @@ object PdfExport {
             val cell = cellBitmap(cx, m, w, h)
             val float = m.al != "c" && m.w.coerceIn(.2f, 1f) <= maxSide + .001f
             val x = when (m.al) { "l" -> 0f; "r" -> cx.cw - w; else -> (cx.cw - w) / 2f }
+            f.ipos[m.id] = floatArrayOf(x, y0, w, h)
             val ww = w
             val hh = h
             f.pieces.add(Piece(y0, h, x, null) { c -> drawCell(c, cx, cell, 0f, ww, hh) })
@@ -836,6 +842,7 @@ object PdfExport {
                 if (top >= rem) break
                 val sy = f.y
                 val em = emitText(f, cx, x2, FloatCtx(rem, indent, left))
+                f.bpos[x2.id] = floatArrayOf(sy, f.y)
                 inkOf(f, cx, x2, sy)
                 val fits = top + em.textH <= rem
                 j++
@@ -861,6 +868,10 @@ object PdfExport {
         val totalW = widths.sum() + (n - 1) * gap
         val x0 = (cx.cw - totalW) / 2f
         val cells = b.im.mapIndexed { ix, m -> cellBitmap(cx, m, widths[ix], h) }
+        run {
+            var xr = x0
+            for (ix in widths.indices) { f.ipos[b.im[ix].id] = floatArrayOf(xr, y0, widths[ix], h); xr += widths[ix] + gap }
+        }
         val hh = h
         f.pieces.add(Piece(y0, h, x0, null) { c ->
             var xx = 0f
@@ -895,6 +906,19 @@ object PdfExport {
             }
             return
         }
+        if (s.av == 8) {                                // pena multi-jangkar: logika sama persis dengan editor (solveSim)
+            val txt = l.lay.text
+            val sol = solveSim(s, em, tl.ox, tl.oy) { c ->
+                val bx = l.charBox(c)
+                floatArrayOf(bx[0], bx[1], bx[2], l.lay.getLineForOffset(c.coerceIn(0, max(0, txt.length - 1))).toFloat())
+            } ?: return
+            val sp = solPath(sol, s, wPx).asAndroidPath()
+            val sr = RectF()
+            sp.computeBounds(sr, true)
+            val spad = if (s.t == 1) wPx / 2f else 0f
+            f.strokes.add(PStroke(sp, s.t, col, wPx, sr.top - spad, sr.bottom + spad))
+            return
+        }
         val n = s.p.size / 3
         val a = FloatArray(n * 3)
         if (s.av == 7) {
@@ -920,6 +944,23 @@ object PdfExport {
         for (s in b.ik) {
             val n = s.p.size / 3
             if (n == 0) continue
+            if (s.av == 9) { f.pend.add(b to s); continue }
+            val ir = if (s.img) f.ipos[s.ai] else null
+            if (ir != null) {                           // coretan di atas gambar: titik relatif kotak gambar, tebal ikut lebar gambar
+                val ia = FloatArray(n * 3)
+                for (q in 0 until n) {
+                    ia[q * 3] = ir[0] + s.an[q * 2] * ir[2]
+                    ia[q * 3 + 1] = ir[1] + s.an[q * 2 + 1] * ir[3]
+                    ia[q * 3 + 2] = s.p[q * 3 + 2]
+                }
+                val iw = s.w * ir[2] / s.ah
+                val ip = inkPath(ia, n, s.t, iw, s.sh).asAndroidPath()
+                val irf = RectF()
+                ip.computeBounds(irf, true)
+                val ipad = if (s.t == 1) iw / 2f else 0f
+                f.strokes.add(PStroke(ip, s.t, inkColor(cx.pal, s.c, s.t == 1).toArgb(), iw, irf.top - ipad, irf.bottom + ipad))
+                continue
+            }
             if (tl != null && s.anc && tl.lay.lay.text.isNotEmpty()) { anchoredInk(f, cx, s, tl); continue }
             val a = FloatArray(n * 3)
             for (q in 0 until n) {
@@ -929,6 +970,42 @@ object PdfExport {
             }
             val wPx = s.w * cx.r
             val ap = inkPath(a, n, s.t, wPx, s.sh).asAndroidPath()
+            val rf = RectF()
+            ap.computeBounds(rf, true)
+            val pad = if (s.t == 1) wPx / 2f else 0f
+            f.strokes.add(PStroke(ap, s.t, inkColor(cx.pal, s.c, s.t == 1).toArgb(), wPx, rf.top - pad, rf.bottom + pad))
+        }
+    }
+
+    /**
+     * Coretan ruang kosong (av = 9): dihitung sesudah semua blok tertata, karena butuh tepi atas / bawah deretan paragraf kosong.
+     * Rumus sama dengan editor (gapSolve): ukuran ikut ukuran huruf, mengecil seragam kalau ruang kosongnya lebih sempit.
+     */
+    private fun resolveGaps(f: Flow, cx: Cx) {
+        val bl = f.bl
+        val huge = Float.MAX_VALUE / 4f
+        fun gapB(x: Blk) = x.isGapBlk()
+        for ((b, s) in f.pend) {
+            val i = bl.indexOfFirst { it.id == b.id }
+            val tl = f.texts[b.id]
+            val bp = f.bpos[b.id]
+            if (i < 0 || tl == null || bp == null) continue
+            var rTop = -huge
+            var rBot = huge
+            if (gapB(b)) {
+                var a = i
+                var z = i
+                while (a > 0 && gapB(bl[a - 1]) && f.bpos[bl[a - 1].id] != null) a--
+                while (z < bl.lastIndex && z < f.last && gapB(bl[z + 1]) && f.bpos[bl[z + 1].id] != null) z++
+                rTop = f.bpos[bl[a].id]!![0]
+                rBot = if (z >= f.last || z == bl.lastIndex) huge else f.bpos[bl[z].id]!![1]
+            }
+            val em = tl.lay.em
+            val g = gapSolve(s, cx.cw, em, bp[0], rTop, rBot) ?: continue
+            val n = g.pts.size / 3
+            if (n == 0) continue
+            val wPx = s.w * g.sc * em / s.ah
+            val ap = inkPath(g.pts, n, s.t, wPx, s.sh).asAndroidPath()
             val rf = RectF()
             ap.computeBounds(rf, true)
             val pad = if (s.t == 1) wPx / 2f else 0f
@@ -958,6 +1035,8 @@ object PdfExport {
             if (!empty) break
             last--
         }
+        f.bl = bl
+        f.last = last
         var i = 0
         while (i <= last) {
             val b = bl[i]
@@ -971,9 +1050,11 @@ object PdfExport {
                 "hr" -> emitHr(f, cx)
                 "img" -> used = emitImg(f, cx, bl, i, last, maxSide)
             }
+            f.bpos[b.id] = floatArrayOf(y0, f.y)
             inkOf(f, cx, b, y0)
             i += used
         }
+        resolveGaps(f, cx)
         return f
     }
 
