@@ -63,7 +63,7 @@ private fun EngineCard(pos: Int, on: Boolean, icon: String, title: String, badge
     val pal = LocalPal.current
     SCard(pos, onClick, PaddingValues(horizontal = 20.dp, vertical = 16.dp), bg = if (on) pal.pc else null) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            Box(Modifier.size(44.dp).clip(CircleShape).background(if (on) pal.p else pal.c4), Alignment.Center) {
+            Box(Modifier.size(44.dp).clip(CircleShape).background(if (on) pal.p else pal.tb2), Alignment.Center) {
                 Ic(icon, if (on) pal.op else pal.os, 22.dp)
             }
             Column(Modifier.weight(1f)) {
@@ -87,7 +87,7 @@ private fun EngineCard(pos: Int, on: Boolean, icon: String, title: String, badge
 private fun Step(n: Int, text: String) {
     val pal = LocalPal.current
     Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Box(Modifier.size(24.dp).clip(CircleShape).background(pal.pc), Alignment.Center) { T(n.toString(), 13f, 700, pal.opc) }
+        Box(Modifier.size(24.dp).clip(CircleShape).background(pal.tb2), Alignment.Center) { T(n.toString(), 13f, 700, pal.os) }
         T(text, 14f, 400, pal.osv, Modifier.weight(1f), lh = 1.4f)
     }
 }
@@ -163,7 +163,7 @@ fun ModelsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                 SCard(if (linked) POS_ONE else POS_TOP) {
                     if (linked) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                            Box(Modifier.size(44.dp).clip(CircleShape).background(pal.pc), Alignment.Center) { Ic("ok", pal.opc, 24.dp) }
+                            Box(Modifier.size(44.dp).clip(CircleShape).background(pal.tb2), Alignment.Center) { Ic("ok", pal.os, 24.dp) }
                             Column(Modifier.weight(1f)) {
                                 T("Terhubung", 17f, 600, pal.os)
                                 T("Kunci " + vm.gqHint, 14f, 400, pal.osv)
@@ -171,14 +171,14 @@ fun ModelsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                         }
                         Spacer(Modifier.height(14.dp))
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                            GBtn(0, "restore", "Tes", pal.c4, pal.os, enabled = vm.gqState != 1, modifier = Modifier.weight(1f)) { vm.testSavedKey() }
-                            GBtn(1, "pen", "Ganti", pal.c4, pal.os, modifier = Modifier.weight(1f)) { vm.gqState = 0; changing = true }
+                            GBtn(0, "restore", "Tes", pal.tb2, pal.os, enabled = vm.gqState != 1, modifier = Modifier.weight(1f)) { vm.testSavedKey() }
+                            GBtn(1, "pen", "Ganti", pal.tb2, pal.os, modifier = Modifier.weight(1f)) { vm.gqState = 0; changing = true }
                             GBtn(2, "del", "Hapus", pal.ec, pal.oec, modifier = Modifier.weight(1f)) { vm.removeGroqKey() }
                         }
                     } else {
                         T("Tempel kunci dari Groq", 17f, 600, pal.os)
                         T("Gratis dan hanya perlu dibuat sekali.", 14f, 400, pal.osv, Modifier.padding(top = 2.dp, bottom = 12.dp))
-                        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(pal.c4).padding(horizontal = 16.dp, vertical = 14.dp)) {
+                        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(pal.tb2).padding(horizontal = 16.dp, vertical = 14.dp)) {
                             if (keyText.isEmpty()) T("gsk_…", 16f, 400, pal.osv)
                             BasicTextField(
                                 value = keyText,
@@ -195,7 +195,7 @@ fun ModelsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                         Spacer(Modifier.height(10.dp))
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                             if (vm.gqSet) {
-                                GBtn(0, "x", "Batal", pal.c4, pal.os, modifier = Modifier.weight(1f)) { keyText = ""; changing = false; vm.gqState = 0 }
+                                GBtn(0, "x", "Batal", pal.tb2, pal.os, modifier = Modifier.weight(1f)) { keyText = ""; changing = false; vm.gqState = 0 }
                             } else {
                                 GBtn(0, "up", "Buka Groq", pal.sc, pal.osc, modifier = Modifier.weight(1f)) {
                                     try { uri.openUri("https://console.groq.com/keys") } catch (e: Exception) { vm.show("Tidak ada peramban untuk membuka tautan") }
@@ -284,12 +284,12 @@ fun ModelsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                                     }
                                     if (m.got > 0L) GBtn(2, "del", null, pal.ec, pal.oec) { vm.models.delete(m) }
                                 }
-                                1 -> GBtn(3, "x", "Batal", pal.c4, pal.os, modifier = Modifier.fillMaxWidth()) {
+                                1 -> GBtn(3, "x", "Batal", pal.tb2, pal.os, modifier = Modifier.fillMaxWidth()) {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     vm.models.cancel(m)
                                 }
                                 else -> {
-                                    GBtn(0, "ok", if (active) "Sedang dipakai" else "Pakai", if (active) pal.c4 else pal.p, if (active) pal.os else pal.op, enabled = !active, modifier = Modifier.weight(1f)) {
+                                    GBtn(0, "ok", if (active) "Sedang dipakai" else "Pakai", if (active) pal.tb2 else pal.p, if (active) pal.os else pal.op, enabled = !active, modifier = Modifier.weight(1f)) {
                                         vm.setPr(vm.pr.copy(wm = info.key, eng = "off"))
                                     }
                                     GBtn(2, "del", null, pal.ec, pal.oec) { vm.models.delete(m) }
