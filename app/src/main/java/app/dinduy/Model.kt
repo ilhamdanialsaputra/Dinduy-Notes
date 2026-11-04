@@ -267,7 +267,7 @@ data class Note(
 data class Prefs(
     val mode: String = "auto",   // auto (ikuti perangkat) / light / tonal / dark / amoled
     val seed: String = "#6750A4",
-    val fs: Int = 14,
+    val fs: Int = 16,
     val lh: Float = 1.65f,
     val sort: String = "u",
     val cd: String = "f",
