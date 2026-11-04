@@ -2013,7 +2013,7 @@ fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boole
             // bilah datar: gerak kecil + pudar, karena keyboard sudah ikut bergerak sendiri
             AnimatedVisibility(
                 visible = showBar && ed.sheet == 0,
-                enter = fadeIn(tween(200)) + expandVertically(tween(300, easing = Emph), expandFrom = Alignment.Top),
+                enter = fadeIn(tween(160, delayMillis = 140)) + expandVertically(tween(280, easing = EmphDecel), expandFrom = Alignment.Top),
                 // sheet membuka => kapsul hilang seketika (tanpa menyusut), supaya tidak ada gerakan ganda di atas sheet
                 exit = if (ed.sheet != 0) androidx.compose.animation.ExitTransition.None
                 else fadeOut(tween(140)) + shrinkVertically(tween(260, easing = Emph), shrinkTowards = Alignment.Top)
