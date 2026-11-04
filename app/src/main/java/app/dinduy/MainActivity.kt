@@ -236,6 +236,8 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
             val r4 = m.r4 ?: FloatArray(4) { m.rad }
             fun rr(k: Int) = CornerRadius(lerp(r4[k], 0f, tt))
             val path = Path().apply { addRoundRect(RoundRect(Rect(l, tp, r, b), rr(0), rr(1), rr(2), rr(3))) }
+            // latar di luar kartu meredup selama morph (ikut progres buka/tutup, jadi memudar balik saat ditutup)
+            drawRect(Color.Black.copy(alpha = (if (pal.dark) .45f else .32f) * tt))
             clipPath(path) {
                 drawRect(androidx.compose.ui.graphics.lerp(m.color, pal.s, tt))
                 this@drawWithContent.drawContent()
