@@ -1690,9 +1690,9 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                                 }
                             }
                         }
-                        Box(Modifier.padding(top = 6.dp, bottom = 12.dp)) {
+                        Box(Modifier.padding(top = 48.dp, bottom = 20.dp)) {
                             if (ed.title.isEmpty()) {
-                                T("Judul", 34f, 1000, pal.osv, alpha = .5f, ls = -.02f)
+                                T("Judul", 46f, 1000, pal.osv, alpha = .5f, ls = -.02f)
                             }
                             androidx.compose.foundation.text.BasicTextField(
                                 value = ed.title,
@@ -1700,8 +1700,8 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                                 readOnly = ed.reading,
                                 visualTransformation = titleVt,
                                 textStyle = TextStyle(
-                                    color = pal.p, fontFamily = dm.ff, fontSize = 34.sp, fontWeight = FontWeight(1000),
-                                    lineHeight = (34 * 1.1f).sp, letterSpacing = (-.02f).em
+                                    color = pal.p, fontFamily = dm.ff, fontSize = 46.sp, fontWeight = FontWeight(1000),
+                                    lineHeight = (46 * 1.1f).sp, letterSpacing = (-.02f).em
                                 ),
                                 cursorBrush = SolidColor(pal.p),
                                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
