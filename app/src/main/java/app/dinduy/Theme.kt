@@ -51,6 +51,8 @@ import androidx.compose.ui.unit.sp
 val Emph = CubicBezierEasing(0.2f, 0f, 0f, 1f)
 /** Emphasized decelerate: cepat di awal lalu mengendap, dipakai untuk geser halaman supaya terasa snappy. */
 val EmphDecel = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
+/** Emphasized accelerate: dipakai saat sesuatu meninggalkan layar (sheet turun). */
+val EmphAccel = CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)
 
 // ---------- jenis huruf ----------
 // Berkas font TIDAK ada di repository: Gradle mengunduhnya ke assets/fonts saat build (lihat app/build.gradle.kts).
