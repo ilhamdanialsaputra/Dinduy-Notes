@@ -219,12 +219,8 @@ internal fun inkRescue(prev: List<Blk>, cur: List<Blk>, pos: Map<String, FloatAr
                 val ty = pos[r[ti].id]?.get(0)
                 if (oy != null && ty != null && dens > 0f) dy = (oy - ty) / dens
             }
-            // coretan ruang kosong: kalau paragraf kosong pemiliknya hilang, pindah ke paragraf kosong tetangga; kalau tidak ada lagi, ikut hilang
-            if (s.av == 9 && r[ti].id != pb.id && !(r[ti].ty == "p" && r[ti].r.t.isBlank())) { have.add(s.id); continue }
             val np = if (dy == 0f) s.p else s.p.mapIndexed { i, v -> if (i % 3 == 1) v + dy else v }
-            val moved = if (r[ti].id == pb.id) s.copy(p = np)
-            else if (s.av == 9 && s.an.size == 5 && s.ah > 0f) s.copy(p = np, an = listOf(s.an[0], s.an[1] + dy / s.ah, s.an[2] + dy / s.ah, s.an[3], s.an[4]))
-            else s.copy(p = np, an = emptyList(), ah = 0f, av = 0, ai = "", o = emptyList())
+            val moved = if (r[ti].id == pb.id) s.copy(p = np) else s.copy(p = np, an = emptyList(), ah = 0f, av = 0, ai = "", o = emptyList())
             r[ti] = r[ti].copy(ik = r[ti].ik + moved)
             have.add(s.id)
         }
@@ -268,8 +264,6 @@ val Ink.anc: Boolean get() = ah > 0f && when (av) {
     3 -> an.size == 6
     4 -> an.size >= 12 && an.size % 6 == 0
     7 -> an.size == 3 && o.size * 3 == p.size * 2      // pena kaku: satu titik acuan di huruf + bentuk (o) dalam satuan ukuran huruf
-    8 -> an.size >= 8 && an.size % 4 == 0 && o.size * 3 == p.size * 2   // pena multi-jangkar: beberapa titik kunci menempel ke huruf, bentuk di antaranya ikut skala + putar
-    9 -> an.size == 5 && o.size * 3 == p.size * 2      // pena di ruang kosong: ikut ukuran huruf dan mengecil kalau ruang kosongnya menyempit
     else -> false
 }
 
@@ -300,8 +294,7 @@ internal fun inkRemap(ik: List<Ink>, old: String, new: String): List<Ink> {
         else -> pre + (c - pre) * (insLen.toFloat() / (delEnd - pre))
     }
     return ik.map { s ->
-        if (s.an.isEmpty() || s.av == 5 || s.av == 9) s
-        else if (s.av == 8) s.copy(an = s.an.mapIndexed { i, v -> if (i % 4 == 1) mp(v).roundToInt().coerceAtLeast(0).toFloat() else v })
+        if (s.an.isEmpty() || s.av == 5) s
         else s.copy(an = s.an.mapIndexed { i, v -> if (i % 3 == 0) mp(v).roundToInt().coerceAtLeast(0).toFloat() else v })
     }
 }
@@ -446,9 +439,7 @@ private fun smoothInk(a: FloatArray, n: Int, o: List<Float>, em: Float) {
 internal fun Ed.withAnchor(s: Ink, tgt: Blk, a: FloatArray, n: Int, skip: Int = 0): Ink {
     val none = s.copy(an = emptyList(), ah = 0f, av = 0, ai = "", o = emptyList())
     if (tgt.ty == "img") return imgAnchor(none, tgt, a, n) ?: none
-    if (tgt.ty == "p" && tgt.r.t.isEmpty()) gapAnchor(none, tgt, a, n)?.let { return it }
-    if (s.t == 0) simAnchor(tgt, a, n)?.let { return none.copy(an = it.first, ah = it.second, av = 8, o = it.third) }
-    if (s.t == 0) rigidAnchor(tgt, a, n)?.let { return none.copy(an = it.first, ah = it.second, av = 7, o = it.third) }
+    if (s.t == 0) return none      // pena: konvensional seperti Samsung Notes, posisi tetap di halaman (tidak menempel ke huruf, tidak ikut ukuran huruf)
     val r = inkAnchor(tgt, a, n, s.t == 1, skip)
     if (r != null) return none.copy(an = r.first, ah = r.second, av = r.third, o = if (r.third == 2) shapeOf(a, n, r.second * dens) else emptyList())
     // tidak bisa menempel ke huruf (paragraf kosong, titik jauh dari teks): tetap relatif blok, tapi ikut skala ukuran huruf
@@ -527,9 +518,7 @@ fun Ed.inkPts(s: Ink, bid: String, top: Float, W: Float, d: Float, local: Boolea
             return g
         }
     }
-    if (s.av == 8) simSol(s, bid, local)?.let { return it.pts }
-    if (s.av == 9) gapRes(s, bid)?.let { g -> if (local) for (i in 0 until g.pts.size / 3) g.pts[i * 3 + 1] -= top; return g.pts }
-    val lay = if (s.anc && s.av != 8 && s.av != 9) lays[bid] else null
+    val lay = if (s.anc) lays[bid] else null
     val pos = if (lay != null) kpos[bid] else null
     if (lay != null && pos != null && lay.layoutInput.text.isNotEmpty()) {
         val len = lay.layoutInput.text.length
@@ -580,7 +569,6 @@ fun Ed.inkPts(s: Ink, bid: String, top: Float, W: Float, d: Float, local: Boolea
 
 /** Path goresan berjangkar relatif kolom teks (digambar dengan translate ke posisi kolom). */
 internal fun Ed.inkLocalPath(s: Ink, bid: String, W: Float, d: Float, wpx: Float): Path {
-    if (s.av == 8) simSol(s, bid, true)?.let { return solPath(it, s, wpx) }
     val pa = inkPts(s, bid, 0f, W, d, local = true)
     val m = pa.size / 3
     if (s.isRun) {
@@ -594,7 +582,6 @@ internal fun Ed.inkLocalPath(s: Ink, bid: String, W: Float, d: Float, wpx: Float
 
 /** Pengali tebal goresan berjangkar: ukuran huruf sekarang dibanding saat dicoret (stabilo ikut menebal / menipis saat huruf diubah ukurannya). */
 fun Ed.inkScale(s: Ink, bid: String): Float {
-    if (s.av == 9) { val g = gapRes(s, bid) ?: return 1f; return (g.sc * g.em / (s.ah * dens)).coerceIn(0f, 5f) }
     if (s.img) {
         val r = ipos[s.ai] ?: return 1f
         return (r.width / (s.ah * dens)).coerceIn(.3f, 5f)
@@ -621,7 +608,7 @@ fun Ed.inkSyncP(bl: List<Blk>): List<Blk> {
             } else {
                 val lay = lays[b.id]
                 if (lay == null || kpos[b.id] == null) s
-                else if (s.anc) { val a = inkPts(s, b.id, top, W, d); if (a.isEmpty() || (s.av >= 8 && a.size != s.p.size)) s else s.copy(p = relPts(a, a.size / 3, top, W, d), o = if (s.av == 2 && s.o.isEmpty()) shapeOf(a, a.size / 3, emPx(lay)) else s.o) }
+                else if (s.anc) { val a = inkPts(s, b.id, top, W, d); s.copy(p = relPts(a, a.size / 3, top, W, d), o = if (s.av == 2 && s.o.isEmpty()) shapeOf(a, a.size / 3, emPx(lay)) else s.o) }
                 else if (s.fz) { val a = inkPts(s, b.id, top, W, d); s.copy(p = relPts(a, a.size / 3, top, W, d), ah = emPx(lay) / d) }
                 else s
             }
@@ -1680,23 +1667,17 @@ fun BoxScope.InkLayers(ed: Ed, vm: AppVM, scroll: ScrollState) {
                 total++
                 // goresan berjangkar: posisi dari huruf (layout teks blok); path disimpan relatif kolom teks dan dibangun ulang
                 // hanya kalau layout-nya diganti, bukan tiap kali blok bergeser
-                val gr = if (s.av == 9) ed.gapRes(s, b.id) else null    // coretan ruang kosong: posisi + skala dari ruang kosong sekarang
                 val rr = if (s.img) ed.ipos[s.ai] else null          // gambar yang ditempeli (kalau ada)
-                val lay = if (s.anc && s.av != 9) ed.lays[b.id] else null
+                val lay = if (s.anc) ed.lays[b.id] else null
                 val kp = if (lay != null) ed.kpos[b.id] else null
                 val anch = rr != null || (lay != null && kp != null)
-                val fsc = if (gr != null) gr.sc * gr.em / (s.ah * d) else if (s.fz && !anch) ed.inkScale(s, b.id) else 1f
-                val rw = if (gr != null) gr.off else rr?.width ?: 0f
-                val rh = if (gr != null) gr.sc else rr?.height ?: 0f
+                val fsc = if (s.fz && !anch) ed.inkScale(s, b.id) else 1f
+                val rw = rr?.width ?: 0f
+                val rh = rr?.height ?: 0f
                 var cs = ik.cache[s.id]
                 if (cs == null || cs.src !== s || cs.w != W || cs.d != d || cs.anch != anch || (anch && cs.lay !== lay) ||
                     cs.rw != rw || cs.rh != rh || (!anch && cs.sc != fsc)) {
-                    cs = if (gr != null) {
-                        val gn = gr.pts.size / 3
-                        val ga = gr.pts.copyOf()
-                        for (gi in 0 until gn) ga[gi * 3 + 1] -= top
-                        CS(s, 0f, W, d, inkPath(ga, gn, s.t, s.w * d * fsc, s.sh), null, false, fsc, rw, rh)
-                    } else if (anch) {
+                    cs = if (anch) {
                         val sc = ed.inkScale(s, b.id)
                         CS(s, 0f, W, d, ed.inkLocalPath(s, b.id, W, d, s.w * d * sc), lay, true, sc, rw, rh)
                     } else CS(s, 0f, W, d, storedPath(s, 0f, W, d, fsc), null, false, fsc)
@@ -1963,230 +1944,4 @@ fun BoxScope.InkBar(ed: Ed, vm: AppVM) {
             }
         }
     }
-}
-
-
-// =====================================================================================
-//  MODEL BARU: PENA MULTI-JANGKAR (av = 8) DAN COERETAN RUANG KOSONG (av = 9)
-//  Satu logika untuk editor dan PDF (fungsi murni di bawah ini).
-//
-//  av = 8: beberapa titik kunci sepanjang goresan (ujung awal, ujung akhir, dan titik-titik antara tiap ~2,2 em) masing-masing menempel
-//          ke SATU huruf (indeks huruf, selisih x dan y dalam satuan em dari kiri huruf / garis dasar). Bagian goresan di antara dua titik
-//          kunci digeser, diskalakan dan DIPUTAR utuh (transformasi kesebangunan) sehingga kedua ujungnya persis jatuh di huruf yang sama,
-//          bentuk di antaranya tidak pernah melar. Kalau dua titik kunci yang tadinya sebaris sekarang terpisah baris, goresannya dipotong.
-//          an = [indeksTitik, indeksHuruf, dx, dy] x K; o = bentuk tiap titik (dx, dy dari titik pertama, satuan em); ah = em saat dicoret (dp).
-//  av = 9: goresan di paragraf kosong. Bentuk (o, satuan em dari titik tengah-atas kotak goresan) ikut ukuran huruf. Selama ruang kosong
-//          (deretan paragraf kosong) cukup, ukuran tetap; begitu ruang menyempit (baris kosong dihapus / ketemu teks lain) goresan
-//          mengecil seragam sampai hilang total. an = [xTengah/lebar, atas, bawah, lebihAtas, lebihBawah] (em terhadap atas paragraf pemilik).
-// =====================================================================================
-
-/** Hasil jangkar: titik (x, y, k) dan indeks titik tempat potongan baru dimulai (goresan terputus di situ). */
-internal class Sol(val pts: FloatArray, val cuts: IntArray)
-
-internal class GapRes(val pts: FloatArray, val sc: Float, val off: Float, val em: Float)
-
-/** Path dari hasil jangkar; potongan digambar terpisah. */
-internal fun solPath(sol: Sol, s: Ink, wPx: Float): Path {
-    val n = sol.pts.size / 3
-    if (sol.cuts.isEmpty()) return inkPath(sol.pts, n, s.t, wPx, s.sh)
-    val p = Path()
-    var st = 0
-    for (k in 0..sol.cuts.size) {
-        val en = if (k < sol.cuts.size) sol.cuts[k] else n
-        if (en > st) p.addPath(inkPath(sol.pts.copyOfRange(st * 3, en * 3), en - st, s.t, wPx, s.sh))
-        st = en
-    }
-    return p
-}
-
-/**
- * Selesaikan goresan av = 8. at(indeksHuruf) = [kiri, lebar, garisDasar, nomorBaris] huruf itu di kolom teks (piksel / pt), ox, oy = pojok kolom.
- * Dipakai sama persis oleh editor dan PDF.
- */
-internal fun solveSim(s: Ink, em: Float, ox: Float, oy: Float, at: (Int) -> FloatArray?): Sol? {
-    val n = s.p.size / 3
-    val kk = s.an.size / 4
-    if (n < 2 || kk < 2 || s.o.size != n * 2 || em <= 0f) return null
-    val ix = IntArray(kk)
-    val qx = FloatArray(kk); val qy = FloatArray(kk); val ln = FloatArray(kk)
-    val px = FloatArray(kk); val py = FloatArray(kk)
-    for (j in 0 until kk) {
-        val idx = s.an[j * 4].toInt().coerceIn(0, n - 1)
-        val bx = at(s.an[j * 4 + 1].toInt()) ?: return null
-        ix[j] = idx
-        qx[j] = ox + bx[0] + s.an[j * 4 + 2] * em
-        qy[j] = oy + bx[2] + s.an[j * 4 + 3] * em
-        ln[j] = bx[3]
-        px[j] = s.o[idx * 2] * em; py[j] = s.o[idx * 2 + 1] * em
-    }
-    for (j in 1 until kk) if (ix[j] <= ix[j - 1]) return null
-    val out = FloatArray(n * 3)
-    val cuts = ArrayList<Int>()
-    for (j in 0 until kk - 1) {
-        val i0 = ix[j]; val i1 = ix[j + 1]
-        val dpx = px[j + 1] - px[j]; val dpy = py[j + 1] - py[j]
-        val dqx = qx[j + 1] - qx[j]; val dqy = qy[j + 1] - qy[j]
-        val lp = dpx * dpx + dpy * dpy
-        var ar = 1f; var ai = 0f
-        var brk = false
-        if (lp > (.05f * em) * (.05f * em)) {
-            ar = (dqx * dpx + dqy * dpy) / lp
-            ai = (dqy * dpx - dqx * dpy) / lp
-            val sc = hypot(ar, ai)
-            val sameLine = abs(dpy) < .6f * em
-            if (i1 - i0 >= 3 && (sc < .3f || sc > 3.5f || (sameLine && ln[j] != ln[j + 1]))) brk = true
-        }
-        val mid = (i0 + i1 + 1) / 2
-        if (brk) cuts.add(mid)
-        val st = if (j == 0) i0 else i0 + 1
-        for (i in st..i1) {
-            val zx: Float; val zy: Float
-            val bx: Float; val by: Float
-            if (brk && i >= mid) { zx = s.o[i * 2] * em - px[j + 1]; zy = s.o[i * 2 + 1] * em - py[j + 1]; bx = qx[j + 1]; by = qy[j + 1] }
-            else { zx = s.o[i * 2] * em - px[j]; zy = s.o[i * 2 + 1] * em - py[j]; bx = qx[j]; by = qy[j] }
-            if (brk) { out[i * 3] = bx + zx; out[i * 3 + 1] = by + zy }
-            else { out[i * 3] = bx + ar * zx - ai * zy; out[i * 3 + 1] = by + ai * zx + ar * zy }
-            out[i * 3 + 2] = s.p[i * 3 + 2]
-        }
-    }
-    return Sol(out, cuts.toIntArray())
-}
-
-/**
- * Selesaikan goresan av = 9 (ruang kosong). runTop / runBot = tepi atas dan bawah deretan paragraf kosong pemilik (bawah sangat besar
- * kalau deretan itu sampai ujung catatan, atas sangat kecil kalau pemiliknya bukan paragraf kosong).
- */
-internal fun gapSolve(s: Ink, W: Float, em: Float, ownTop: Float, runTop: Float, runBot: Float): GapRes? {
-    val n = s.p.size / 3
-    if (n == 0 || s.an.size != 5 || s.o.size != n * 2 || em <= 0f || W <= 0f) return null
-    val need = max(s.an[2] - s.an[1], .02f) * em
-    val wTop = runTop - s.an[3] * em
-    val wBot = if (runBot > 1e8f) runBot else runBot + s.an[4] * em
-    val sc = ((wBot - wTop) / need).coerceIn(0f, 1f)
-    if (sc < .03f) return GapRes(FloatArray(0), 0f, 0f, em)
-    val topY = (ownTop + s.an[1] * em).coerceIn(wTop, max(wTop, wBot - need * sc))
-    val cx = s.an[0] * W
-    val out = FloatArray(n * 3)
-    for (i in 0 until n) {
-        out[i * 3] = cx + s.o[i * 2] * em * sc
-        out[i * 3 + 1] = topY + s.o[i * 2 + 1] * em * sc
-        out[i * 3 + 2] = s.p[i * 3 + 2]
-    }
-    return GapRes(out, sc, topY - ownTop, em)
-}
-
-/** Paragraf kosong (tempat menggambar). */
-internal fun Blk.isGapBlk(): Boolean = ty == "p" && r.t.isBlank()
-
-/** Tepi atas / bawah deretan paragraf kosong yang memuat blok bid. */
-internal fun Ed.gapRun(bid: String): FloatArray? {
-    val i = blocks.indexOfFirst { it.id == bid }
-    if (i < 0) return null
-    val huge = Float.MAX_VALUE / 4f
-    if (!blocks[i].isGapBlk()) return floatArrayOf(-huge, huge)      // pemilik sudah berisi teks: tidak ada batas, coretan tetap utuh
-    var a = i; var z = i
-    while (a > 0 && blocks[a - 1].isGapBlk() && bpos[blocks[a - 1].id] != null) a--
-    while (z < blocks.lastIndex && blocks[z + 1].isGapBlk() && bpos[blocks[z + 1].id] != null) z++
-    val ta = bpos[blocks[a].id] ?: return null
-    val tz = bpos[blocks[z].id] ?: return null
-    return floatArrayOf(ta[0], if (z == blocks.lastIndex) huge else tz[0] + tz[1])
-}
-
-internal fun Ed.gapRes(s: Ink, bid: String): GapRes? {
-    val lay = lays[bid] ?: return null
-    val W = (contentCoords?.size?.width ?: 0).toFloat()
-    val top = bpos[bid]?.get(0) ?: return null
-    val run = gapRun(bid) ?: return null
-    return gapSolve(s, W, emPx(lay), top, run[0], run[1])
-}
-
-internal fun Ed.simSol(s: Ink, bid: String, local: Boolean): Sol? {
-    val lay = lays[bid] ?: return null
-    val pos = kpos[bid] ?: return null
-    val len = lay.layoutInput.text.length
-    if (len == 0) return null
-    return solveSim(s, emPx(lay), if (local) 0f else pos.x, if (local) 0f else pos.y) { c ->
-        val o = toLay(bid, c).coerceIn(0, len - 1)
-        val bx = lay.getBoundingBox(o)
-        val ln = lay.getLineForOffset(o)
-        floatArrayOf(bx.left, bx.width, lay.getLineBaseline(ln), ln.toFloat())
-    }
-}
-
-/** Titik kunci: ujung awal, ujung akhir, dan titik tiap ~2,2 em sepanjang jalur (maksimal 24). */
-private fun pickAnchors(a: FloatArray, n: Int, em: Float): IntArray {
-    val gap = 2.2f * em
-    val out = ArrayList<Int>()
-    out.add(0)
-    var acc = 0f
-    for (i in 1 until n) {
-        acc += hypot(a[i * 3] - a[i * 3 - 3], a[i * 3 + 1] - a[i * 3 - 2])
-        if (acc >= gap && i < n - 1) { out.add(i); acc = 0f }
-    }
-    if (out.size > 1 && acc < gap * .5f) out.removeAt(out.size - 1)
-    out.add(n - 1)
-    if (out.size > 24) {
-        val mid = out.subList(1, out.size - 1)
-        val keep = ArrayList<Int>()
-        keep.add(0)
-        val want = 22
-        for (q in 0 until want) keep.add(mid[(q * mid.size / want).coerceAtMost(mid.size - 1)])
-        keep.add(n - 1)
-        return keep.distinct().sorted().toIntArray()
-    }
-    return out.toIntArray()
-}
-
-/** Pasang jangkar multi-titik (av = 8) untuk goresan pena di atas teks blok b. Null kalau layout belum siap / bukan teks. */
-internal fun Ed.simAnchor(b: Blk, a: FloatArray, n: Int): Triple<List<Float>, Float, List<Float>>? {
-    if (!b.isText || n < 2 || b.r.t.isEmpty()) return null
-    val lay = lays[b.id] ?: return null
-    val pos = kpos[b.id] ?: return null
-    val len = lay.layoutInput.text.length
-    val z = lsh[b.id] ?: 0
-    if (len <= z) return null
-    if (folds[b.id] == null && len != b.r.t.length + z) return null
-    val em = emPx(lay)
-    if (em <= 0f) return null
-    val h = lay.size.height.toFloat()
-    fun r3(v: Float) = (v * 1000f).roundToInt() / 1000f
-    val idx = pickAnchors(a, n, em)
-    val an = ArrayList<Float>(idx.size * 4)
-    for (i in idx) {
-        val lx = a[i * 3] - pos.x; val ly = a[i * 3 + 1] - pos.y
-        val line = lay.getLineForVerticalPosition(ly.coerceIn(0f, max(0f, h - 1f)))
-        val base = lay.getLineBaseline(line)
-        val ls = max(lay.getLineStart(line), z)
-        val le = lay.getLineEnd(line, true)
-        var c = lay.getOffsetForPosition(Offset(lx, base - 1f))
-        c = c.coerceIn(ls, max(ls, le - 1)).coerceIn(0, len - 1)
-        val box = lay.getBoundingBox(c)
-        an.add(i.toFloat()); an.add(fromLay(b.id, c).toFloat()); an.add(r3((lx - box.left) / em)); an.add(r3((ly - base) / em))
-    }
-    val o = ArrayList<Float>(n * 2)
-    for (i in 0 until n) { o.add(r3((a[i * 3] - a[0]) / em)); o.add(r3((a[i * 3 + 1] - a[1]) / em)) }
-    return Triple(an, em / dens, o)
-}
-
-/** Goresan di paragraf kosong b (av = 9). Null kalau layout / posisi belum siap. */
-internal fun Ed.gapAnchor(s: Ink, b: Blk, a: FloatArray, n: Int): Ink? {
-    if (n < 1 || !b.isText) return null
-    val lay = lays[b.id] ?: return null
-    val em = emPx(lay)
-    if (em <= 0f) return null
-    val top = bpos[b.id]?.get(0) ?: return null
-    val run = gapRun(b.id) ?: return null
-    val W = (contentCoords?.size?.width ?: 0).toFloat()
-    if (W <= 0f) return null
-    var x0 = a[0]; var x1 = a[0]; var y0 = a[1]; var y1 = a[1]
-    for (i in 1 until n) { x0 = min(x0, a[i * 3]); x1 = max(x1, a[i * 3]); y0 = min(y0, a[i * 3 + 1]); y1 = max(y1, a[i * 3 + 1]) }
-    val cx = (x0 + x1) / 2f
-    fun r3(v: Float) = (v * 1000f).roundToInt() / 1000f
-    val huge = Float.MAX_VALUE / 8f
-    val exUp = if (run[0] < -huge) 0f else max(0f, run[0] - y0) / em
-    val exDn = if (run[1] > huge) 0f else max(0f, y1 - run[1]) / em
-    val o = ArrayList<Float>(n * 2)
-    for (i in 0 until n) { o.add(r3((a[i * 3] - cx) / em)); o.add(r3((a[i * 3 + 1] - y0) / em)) }
-    val an = listOf(r3(cx / W), r3((y0 - top) / em), r3((y1 - top) / em), r3(exUp), r3(exDn))
-    return s.copy(an = an, ah = em / dens, av = 9, o = o)
 }
