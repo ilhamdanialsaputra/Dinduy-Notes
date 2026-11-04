@@ -41,6 +41,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -271,7 +272,8 @@ fun PageScaffold(title: String, sub: String?, onBack: () -> Unit, content: @Comp
                     T(title, 40f, 400, pal.os, ls = -.01f, maxLines = 1)
                     if (sub != null) T(sub, 16f, 400, pal.osv, Modifier.padding(top = 6.dp), maxLines = 1)
                 }
-                content()
+                // kartu di halaman ini tonal + border tipis (lihat SCard), tidak menyatu dengan latar
+                CompositionLocalProvider(LocalToneCards provides true) { content() }
             }
         }
         Row(
@@ -303,8 +305,8 @@ fun MRow(pos: Int, icon: String, title: String, sub: String? = null, danger: Boo
     val pal = LocalPal.current
     SCard(pos, onClick, PaddingValues(horizontal = 20.dp, vertical = 14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(16.dp)) {
-            Box(Modifier.size(44.dp).clip(CircleShape).background(if (danger) pal.ec else pal.pc), Alignment.Center) {
-                Ic(icon, if (danger) pal.oec else pal.opc, 22.dp)
+            Box(Modifier.size(44.dp).clip(CircleShape).background(if (danger) pal.ec else pal.tb2), Alignment.Center) {
+                Ic(icon, if (danger) pal.oec else pal.os, 22.dp)
             }
             Column(Modifier.weight(1f)) {
                 T(title, 16f, 500, pal.os)
@@ -328,50 +330,64 @@ fun MorphCheck(on: Boolean) {
     }
 }
 
-/** Halaman titik tiga di editor. */
+/** Satu baris untuk tiga aksi Markdown: bagikan, simpan, salin. */
+@Composable
+private fun MdRow(pos: Int, onShare: () -> Unit, onSave: () -> Unit, onCopy: () -> Unit) {
+    val pal = LocalPal.current
+    SCard(pos, null, PaddingValues(start = 20.dp, end = 8.dp, top = 10.dp, bottom = 10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                T("Markdown (.md)", 16f, 500, pal.os)
+                T("Share, save or copy", 14f, 400, pal.osv, lh = 1.3f)
+            }
+            IconBtn("up", pal.os, onShare, size = 44.dp, bg = pal.tb2)
+            Spacer(Modifier.width(6.dp))
+            IconBtn("dl", pal.os, onSave, size = 44.dp, bg = pal.tb2)
+            Spacer(Modifier.width(6.dp))
+            IconBtn("dup", pal.os, onCopy, size = 44.dp, bg = pal.tb2)
+        }
+    }
+}
+
+/**
+ * Halaman titik tiga di editor, diringkas dan diurutkan dari yang paling sering dipakai.
+ * Pengingat tidak ada di sini karena sudah ada tombol lonceng di bilah atas editor.
+ * Bagikan / simpan / salin Markdown digabung jadi satu baris.
+ */
 @Composable
 fun NoteMenuPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
     val d = vm.note(id)
     val pinned = d?.p == true
     val archived = d?.a == true
-    val hasRem = (d?.rm ?: 0L) > 0L
     PageScaffold("Opsi catatan", d?.t?.ifEmpty { null } ?: "Tanpa judul", { nav.pop() }) {
         SGroup("Catatan ini", 0) {
-            MRow(POS_TOP, "search", "Cari dalam catatan", "Temukan dan sorot kata di catatan ini") {
-                nav.pop(); vm.ed?.openFind()
-            }
-            MRow(
-                POS_MID, if (hasRem) "bell" else "bellplus", "Pengingat",
-                if (hasRem && d != null) Rem.stamp(d) + (if (d.rr.isNotEmpty()) " · " + Rem.repeatName(d.rr) else "") else "Ingatkan saya di tanggal dan waktu tertentu",
-                chevron = true
-            ) { vm.remDlg = id }
-            MRow(POS_MID, "pin", if (pinned) "Lepas sematan" else "Sematkan", "Catatan yang disematkan tampil di bagian atas") {
+            MRow(POS_TOP, "pin", if (pinned) "Lepas sematan" else "Sematkan", "Catatan yang disematkan tampil di bagian atas") {
                 vm.mark(listOf(id), if (pinned) "Sematan dilepas" else "Catatan disematkan") { it.copy(p = !it.p) }
             }
-            MRow(POS_BOT, "label", "Label", d?.lb?.joinToString(", ")?.ifEmpty { null } ?: "Atur label untuk catatan ini", chevron = true) {
+            MRow(POS_MID, "label", "Label", d?.lb?.joinToString(", ")?.ifEmpty { null } ?: "Atur label untuk catatan ini", chevron = true) {
                 nav.push(Scr.NoteLabels(id))
+            }
+            MRow(POS_BOT, "search", "Cari dalam catatan", "Temukan dan sorot kata di catatan ini") {
+                nav.pop(); vm.ed?.openFind()
             }
         }
         SGroup("Bagikan dan ekspor", 60) {
             MRow(POS_TOP, "txt", "Ekspor PDF", "Pratinjau per halaman, atur ukuran huruf, lalu simpan atau bagikan. Coretan ikut, rekaman suara tidak", chevron = true) {
                 nav.push(Scr.PdfExport(id))
             }
-            MRow(POS_MID, "up", "Bagikan sebagai .md", "Kirim catatan sebagai berkas Markdown lewat WhatsApp, Berkas, dan lainnya") {
-                d?.let { act.shareMd(noteFileName(it), noteToMd(it)) }
-            }
-            MRow(POS_MID, "dl", "Simpan sebagai .md", "Simpan berkas Markdown ke perangkat") {
-                d?.let { act.saveMd(noteFileName(it), noteToMd(it)) }
-            }
-            MRow(POS_BOT, "dup", "Salin sebagai Markdown", "Salin teks catatan ke papan klip") {
-                d?.let { act.copyText(noteToMd(it)); vm.show("Disalin ke papan klip") }
-            }
+            MdRow(
+                POS_BOT,
+                onShare = { d?.let { act.shareMd(noteFileName(it), noteToMd(it)) } },
+                onSave = { d?.let { act.saveMd(noteFileName(it), noteToMd(it)) } },
+                onCopy = { d?.let { act.copyText(noteToMd(it)); vm.show("Disalin ke papan klip") } }
+            )
         }
         SGroup("Kelola", 120) {
-            MRow(POS_TOP, "lib", "Gandakan", "Buat salinan catatan ini") { vm.duplicate(id) }
-            MRow(POS_MID, if (archived) "unarc" else "arc", if (archived) "Keluarkan dari arsip" else "Arsipkan", "Disimpan di Arsip, tidak muncul di beranda") {
+            MRow(POS_TOP, if (archived) "unarc" else "arc", if (archived) "Keluarkan dari arsip" else "Arsipkan", "Disimpan di Arsip, tidak muncul di beranda") {
                 if (archived) vm.mark(listOf(id), "Dikeluarkan dari arsip") { it.copy(a = false) }
                 else { nav.pop(); nav.pop(); vm.mark(listOf(id), "Catatan diarsipkan") { it.copy(a = true, p = false) } }
             }
+            MRow(POS_MID, "lib", "Gandakan", "Buat salinan catatan ini") { vm.duplicate(id) }
             MRow(POS_BOT, "del", "Hapus catatan", "Dipindah ke sampah selama 30 hari", danger = true) {
                 nav.pop(); nav.pop(); vm.mark(listOf(id), "Dipindah ke sampah") { it.copy(dt = System.currentTimeMillis()) }
             }
@@ -415,7 +431,7 @@ fun NoteLabelsPage(vm: AppVM, nav: Nav, id: String) {
                     val on = d != null && n in d.lb
                     SCard(pos, { vm.toggleLabel(id, n) }, PaddingValues(horizontal = 20.dp, vertical = 14.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(16.dp)) {
-                            Box(Modifier.size(44.dp).clip(CircleShape).background(pal.pc), Alignment.Center) { Ic("label", pal.opc, 22.dp) }
+                            Box(Modifier.size(44.dp).clip(CircleShape).background(pal.tb2), Alignment.Center) { Ic("label", pal.os, 22.dp) }
                             T(n, 16f, 500, pal.os, Modifier.weight(1f), maxLines = 1)
                             MorphCheck(on)
                         }
