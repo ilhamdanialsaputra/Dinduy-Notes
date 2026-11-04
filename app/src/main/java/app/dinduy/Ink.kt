@@ -162,7 +162,9 @@ class InkCtl {
 }
 
 // ------------------------------------------------------------------ warna (ikut tema)
-fun inkColor(pal: Pal, i: Int, hl: Boolean): Color {
+fun inkColor(pal: Pal, i: Int, hl: Boolean): Color = inkColor0(pal, i, hl).let { if (pal.mono) it.gray() else it }
+
+private fun inkColor0(pal: Pal, i: Int, hl: Boolean): Color {
     val dk = pal.dark
     if (!hl) return when (i) {
         0 -> pal.os
@@ -1746,7 +1748,7 @@ fun BoxScope.InkLayers(ed: Ed, vm: AppVM, scroll: ScrollState) {
             if (ik.sel.isNotEmpty()) {
                 // satu pegangan pojok kanan bawah: tarik = ubah ukuran, putar = memutar (ikon panah diagonal)
                 drawLine(pal.p, box.bottomRight, h.tf, 1.4f * d)
-                drawCircle(pal.c3, r, h.tf); drawCircle(pal.p, r, h.tf, style = Stroke(1.6f * d))
+                drawCircle(pal.tb, r, h.tf); drawCircle(pal.p, r, h.tf, style = Stroke(1.6f * d))
                 val a = Offset(q * .75f, q * .75f)
                 drawLine(pal.p, h.tf - a, h.tf + a, 2f * d, StrokeCap.Round)
                 drawLine(pal.p, h.tf + a, h.tf + a + Offset(-q * .8f, 0f), 2f * d, StrokeCap.Round)
@@ -1757,7 +1759,7 @@ fun BoxScope.InkLayers(ed: Ed, vm: AppVM, scroll: ScrollState) {
             }
             if (ik.sel.isNotEmpty()) {                                                                           // x = hapus isi frame
                 drawLine(pal.p, box.topCenter, h.del, 1.4f * d)
-                drawCircle(pal.c3, r, h.del); drawCircle(pal.p, r, h.del, style = Stroke(1.6f * d))
+                drawCircle(pal.tb, r, h.del); drawCircle(pal.p, r, h.del, style = Stroke(1.6f * d))
                 drawLine(pal.p, h.del + Offset(-q, -q), h.del + Offset(q, q), 2f * d, StrokeCap.Round)
                 drawLine(pal.p, h.del + Offset(-q, q), h.del + Offset(q, -q), 2f * d, StrokeCap.Round)
             }
@@ -1880,7 +1882,7 @@ fun BoxScope.InkBar(ed: Ed, vm: AppVM) {
                 val shape = RoundedCornerShape(28.dp)
                 Column(
                     Modifier.padding(bottom = 8.dp).widthIn(max = 320.dp).fillMaxWidth()
-                        .shadow(if (pal.dark) 6.dp else 2.dp, shape).clip(shape).background(pal.c3).padding(16.dp)
+                        .shadow(if (pal.dark) 6.dp else 2.dp, shape).clip(shape).background(pal.tb).padding(16.dp)
                 ) {
                     if (tool != 2) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -1888,7 +1890,7 @@ fun BoxScope.InkBar(ed: Ed, vm: AppVM) {
                                 val sel = pr.ic.getOrElse(tool) { 0 } == i
                                 Box(
                                     Modifier.size(40.dp).clip(CircleShape)
-                                        .background(if (tool == 1 && i == 0) hsl(52f, 100f, 55f) else inkColor(pal, i, false))
+                                        .background(if (tool == 1 && i == 0) hsl(52f, 100f, 55f).let { c -> if (pal.mono) c.gray() else c } else inkColor(pal, i, false))
                                         .then(if (sel) Modifier.border(3.dp, pal.p, CircleShape) else Modifier.border(1.dp, pal.ol, CircleShape))
                                         .clickable {
                                             vm.setPr(pr.copy(ic = pr.ic.toMutableList().also { l -> while (l.size < 3) l.add(0); l[tool] = i }))
@@ -1922,7 +1924,7 @@ fun BoxScope.InkBar(ed: Ed, vm: AppVM) {
             }
             val cap = RoundedCornerShape(30.dp)
             Row(
-                Modifier.shadow(if (pal.dark) 6.dp else 2.dp, cap).clip(cap).background(pal.c3).padding(horizontal = 10.dp, vertical = 8.dp),
+                Modifier.shadow(if (pal.dark) 6.dp else 2.dp, cap).clip(cap).background(pal.tb).padding(horizontal = 10.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
