@@ -86,7 +86,9 @@ class Pal(
     val sc: Color, val osc: Color, val tc: Color, val otc: Color,
     val s: Color, val os: Color, val osv: Color, val ol: Color,
     val c1: Color, val c2: Color, val c3: Color, val c4: Color,
-    val wc: Color, val owc: Color, val ec: Color, val oec: Color, val ac: Color, val oac: Color
+    val wc: Color, val owc: Color, val ec: Color, val oec: Color, val ac: Color, val oac: Color,
+    // s = "kertas" (kartu catatan, latar editor, bilah cari); bg = latar belakang aplikasi (satu tingkat lebih redup dari kertas, pola Google Keep)
+    val bg: Color
 )
 
 fun hsl(h: Float, s: Float, l: Float): Color {
@@ -131,23 +133,32 @@ fun buildPal(mode: String, seed: String): Pal {
     val ec = hsl(4f, 70f, cl); val oec = hsl(4f, 70f, ol)
     val ac = hsl(h + 150f, 45f, cl); val oac = hsl(h + 150f, 45f, ol)
     return when (mode) {
-        "light" -> Pal(
-            false, t(40f), Color.White, t(90f), t(12f), t(88f, .4f), t(14f, .4f), t(88f, .7f, 60f), t(14f, .7f, 60f),
-            t(98f, .25f), t(10f, .12f), t(35f, .15f), t(78f, .15f),
-            t(96f, .25f), t(94f, .25f), t(92f, .25f), t(89f, .25f), wc, owc, ec, oec, ac, oac
-        )
-        "tonal" -> Pal(
-            false, t(34f), Color.White, t(80f, .9f), t(10f), t(82f, .5f), t(12f, .5f), t(80f, .75f, 60f), t(12f, .75f, 60f),
-            t(92f, .45f), t(10f, .2f), t(30f, .2f), t(70f, .2f),
-            t(90f, .45f), t(87f, .45f), t(84f, .45f), t(80f, .45f), wc, owc, ec, oec, ac, oac
-        )
+        "light" -> {
+            val paper = t(96.5f, .95f)
+            Pal(
+                false, t(40f), Color.White, t(90f), t(12f), t(88f, .4f), t(14f, .4f), t(88f, .7f, 60f), t(14f, .7f, 60f),
+                paper, t(10f, .12f), t(35f, .15f), t(78f, .15f),
+                t(96f, .25f), paper, t(92f, .25f), t(89f, .25f), wc, owc, ec, oec, ac, oac,
+                t(92f, .7f)
+            )
+        }
+        "tonal" -> {
+            val paper = t(94f, .55f)
+            Pal(
+                false, t(34f), Color.White, t(80f, .9f), t(10f), t(82f, .5f), t(12f, .5f), t(80f, .75f, 60f), t(12f, .75f, 60f),
+                paper, t(10f, .2f), t(30f, .2f), t(70f, .2f),
+                t(90f, .45f), paper, t(84f, .45f), t(80f, .45f), wc, owc, ec, oec, ac, oac,
+                t(88f, .5f)
+            )
+        }
         else -> Pal(
             true, t(80f), t(20f), t(if (amoled) 24f else 30f, .85f), t(90f),
             t(if (amoled) 22f else 26f, .3f), t(90f, .3f), t(if (amoled) 22f else 28f, .5f, 60f), t(90f, .5f, 60f),
-            if (amoled) Color.Black else t(8f, .15f), t(90f, .1f), t(75f, .12f), t(30f, .1f),
+            if (amoled) Color(0xFF0F0F0F) else t(13f, .15f), t(90f, .1f), t(75f, .12f), t(30f, .1f),
             if (amoled) Color(0xFF080808) else t(11f, .15f), if (amoled) Color(0xFF0F0F0F) else t(13f, .15f),
             if (amoled) Color(0xFF161616) else t(17f, .15f), if (amoled) Color(0xFF1F1F1F) else t(21f, .15f),
-            wc, owc, ec, oec, ac, oac
+            wc, owc, ec, oec, ac, oac,
+            if (amoled) Color.Black else t(8f, .15f)
         )
     }
 }
@@ -168,31 +179,42 @@ fun dynamicPal(ctx: android.content.Context, mode: String): Pal? {
         val seed = a1(500)
         val base = buildPal(mode, String.format("#%06X", seed.toArgb() and 0xFFFFFF))   // sumber warna peringatan/error/aksen
         when (mode) {
-            "light" -> Pal(
-                false, a1(600), a1(0), a1(100), a1(900), a2(100), a2(900), a3(100), a3(900),
-                n1(10), n1(900), n2(700), n2(200),
-                n1(50), lerp(n1(50), n1(100), .5f), n1(100), lerp(n1(100), n1(200), .35f),
-                base.wc, base.owc, base.ec, base.oec, base.ac, base.oac
-            )
-            "tonal" -> Pal(
-                false, a1(700), a1(0), a1(200), a1(900), a2(200), a2(900), a3(200), a3(900),
-                a2(50), n1(900), n2(700), n2(300),
-                a2(100), lerp(a2(100), a2(200), .3f), lerp(a2(100), a2(200), .6f), a2(200),
-                base.wc, base.owc, base.ec, base.oec, base.ac, base.oac
-            )
+            "light" -> {
+                // pola Keep: kertas = permukaan paling terang (≈ tone 98), latar = satu tingkat di bawahnya (≈ tone 94)
+                val paper = lerp(n1(10), n1(50), .25f)
+                Pal(
+                    false, a1(600), a1(0), a1(100), a1(900), a2(100), a2(900), a3(100), a3(900),
+                    paper, n1(900), n2(700), n2(200),
+                    n1(50), paper, n1(100), lerp(n1(100), n1(200), .35f),
+                    base.wc, base.owc, base.ec, base.oec, base.ac, base.oac,
+                    lerp(n1(50), n1(100), .2f)
+                )
+            }
+            "tonal" -> {
+                val paper = a2(50)
+                Pal(
+                    false, a1(700), a1(0), a1(200), a1(900), a2(200), a2(900), a3(200), a3(900),
+                    paper, n1(900), n2(700), n2(300),
+                    a2(100), paper, lerp(a2(100), a2(200), .6f), a2(200),
+                    base.wc, base.owc, base.ec, base.oec, base.ac, base.oac,
+                    lerp(a2(50), a2(100), .6f)
+                )
+            }
             else -> {
                 val am = mode == "amoled"
                 val s = if (am) Color.Black else lerp(n1(900), n1(1000), .4f)
                 val hi = n1(800)
+                val paper = if (am) Color(0xFF0F0F0F) else lerp(s, hi, .32f)
                 Pal(
                     true, a1(200), a1(800),
                     if (am) lerp(a1(700), a1(800), .5f) else a1(700), a1(100),
                     if (am) lerp(a2(700), a2(800), .5f) else a2(700), a2(100),
                     if (am) lerp(a3(700), a3(800), .5f) else a3(700), a3(100),
-                    s, n1(100), n2(200), n2(700),
-                    if (am) Color(0xFF080808) else lerp(s, hi, .18f), if (am) Color(0xFF0F0F0F) else lerp(s, hi, .32f),
+                    paper, n1(100), n2(200), n2(700),
+                    if (am) Color(0xFF080808) else lerp(s, hi, .18f), paper,
                     if (am) Color(0xFF161616) else lerp(s, hi, .5f), if (am) Color(0xFF1F1F1F) else lerp(s, hi, .75f),
-                    base.wc, base.owc, base.ec, base.oec, base.ac, base.oac
+                    base.wc, base.owc, base.ec, base.oec, base.ac, base.oac,
+                    s
                 )
             }
         }
@@ -207,7 +229,8 @@ fun lerpPal(a: Pal, b: Pal, f: Float): Pal = Pal(
     lerp(a.s, b.s, f), lerp(a.os, b.os, f), lerp(a.osv, b.osv, f), lerp(a.ol, b.ol, f),
     lerp(a.c1, b.c1, f), lerp(a.c2, b.c2, f), lerp(a.c3, b.c3, f), lerp(a.c4, b.c4, f),
     lerp(a.wc, b.wc, f), lerp(a.owc, b.owc, f), lerp(a.ec, b.ec, f), lerp(a.oec, b.oec, f),
-    lerp(a.ac, b.ac, f), lerp(a.oac, b.oac, f)
+    lerp(a.ac, b.ac, f), lerp(a.oac, b.oac, f),
+    lerp(a.bg, b.bg, f)
 )
 
 val LocalPal = compositionLocalOf { buildPal("light", "#6750A4") }
