@@ -299,9 +299,9 @@ fun DocBar(ed: Ed, act: Actions) {
                         ) {
                             // ganti isi bingkai dengan foto lain (galeri / kamera); ukuran bingkai tidak berubah
                             Tbn({ Ic("swap", it) }, false, true) {
-                                ed.replT = ed.selImg ?: lastSel
-                                val pick = ed.replPick
-                                if (pick != null) pick() else act.replaceImage()
+                                val tgt = ed.selImg ?: lastSel
+                                ed.replT = tgt
+                                if (tgt != null) act.replaceImage(ed.noteId, tgt.first, tgt.second)
                             }
                             Tbn({ Ic("cam", it) }, false, true) { ed.replT = ed.selImg ?: lastSel; act.takePhoto(true) }
                             // tambah gambar lain (disisipkan tepat sesudah gambar ini)
