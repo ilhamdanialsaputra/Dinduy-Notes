@@ -47,7 +47,7 @@ val LocalVM = staticCompositionLocalOf<AppVM?> { null }
 const val EDIT_RATIO = 1.28f
 
 /** Rasio lebar/tinggi sampul di kartu beranda: 2 kolom lebih tinggi, 1 kolom berbentuk banner. */
-fun coverAspect(c2: Boolean): Float = if (c2) .8f else 1.6f
+fun coverAspect(c2: Boolean): Float = if (c2) .95f else 1.85f
 
 private fun cSmooth(x: Float): Float {
     val k = x.coerceIn(0f, 1f)
@@ -136,10 +136,10 @@ fun EditorCover(vm: AppVM, d: Note, scroll: () -> Int) {
                 drawRect(
                     Brush.verticalGradient(
                         colorStops = arrayOf(
-                            0f to pal.s.copy(alpha = .5f * e),
+                            0f to (if (pal.dark) pal.s.copy(alpha = .5f * e) else clear),
                             .28f to clear,
                             .42f to clear,
-                            1f to pal.s.copy(alpha = e)
+                            1f to pal.s.copy(alpha = (if (pal.dark) 1f else .55f) * e)
                         )
                     )
                 )
