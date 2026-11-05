@@ -9,6 +9,21 @@ plugins {
 // (yang berubah tiap build, jadi update-an harus uninstall dulu).
 val ksFile: String? = System.getenv("KS_FILE")
 
+// Aturan R8 tambahan untuk pembaca teks PDF (PDFBox-Android) dibuat otomatis saat build, jadi proguard-rules.pro tidak perlu disentuh.
+val extraRules = layout.buildDirectory.file("generated/extra-rules.pro").get().asFile.also {
+    it.parentFile.mkdirs()
+    it.writeText(
+        "-keep class com.tom_roush.pdfbox.** { *; }\n" +
+            "-keep class com.tom_roush.fontbox.** { *; }\n" +
+            "-dontwarn com.tom_roush.pdfbox.**\n" +
+            "-dontwarn com.tom_roush.fontbox.**\n" +
+            "-dontwarn com.gemalto.jp2.**\n" +
+            "-dontwarn org.bouncycastle.**\n" +
+            "-dontwarn javax.xml.**\n" +
+            "-dontwarn org.apache.commons.logging.**\n"
+    )
+}
+
 // Font (Roboto Flex & Tinos/"Times New Roman") diunduh otomatis saat build ke folder build/, TIDAK disimpan di repository.
 // Kalau unduhan gagal, build tetap jalan dan aplikasi memakai font sistem sebagai cadangan.
 val fontAssets = layout.buildDirectory.dir("generated/font-assets")
@@ -68,7 +83,7 @@ android {
         release {
             isMinifyEnabled = true      // R8: kode lebih kecil & lebih cepat dimuat
             isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro", extraRules)
             signingConfig = if (ksFile != null) signingConfigs.getByName("ci") else signingConfigs.getByName("debug")
         }
         debug {
@@ -102,6 +117,10 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.jsoup:jsoup:1.18.1")
+    // Pembaca teks PDF (pencarian kata di PDF): murni Java, offline, dari Maven Central
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    // OCR foto offline (model Latin ikut di dalam aplikasi, tanpa Play Services dan tanpa unduhan): dari Google Maven
+    implementation("com.google.mlkit:text-recognition:16.0.1")
     // Transkripsi suara ke teks offline (whisper.cpp), Maven Central
     implementation("dev.ffmpegkit-maintained:whisper-android:1.0.0")
     // memasang baseline profile bawaan Compose/AndroidX saat instal: startup & scroll jauh lebih cepat di HP lama
