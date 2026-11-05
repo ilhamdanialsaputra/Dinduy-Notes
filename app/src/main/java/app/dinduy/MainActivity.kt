@@ -530,6 +530,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
             val imgSel = vm.ed?.selImg != null && isNote
             val selE = vm.ed?.selEdit == true && isNote
             val finding = vm.ed?.findOn == true && isNote
+            val menuKept = nav.stack.any { it is Scr.NoteMenu }   // halaman titik tiga tetap 'hidup' selama halaman anak (label/PDF/sampul) menumpuk di atasnya
             val pageIds = remember { arrayOfNulls<String>(4) }
             (top as? Scr.NoteMenu)?.let { pageIds[0] = it.id }
             (top as? Scr.NoteLabels)?.let { pageIds[1] = it.id }
@@ -613,7 +614,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     }
 
                     // halaman titik tiga & label: satu halaman penuh bergaya Pengaturan, di atas editor
-                    ViewLayer(on = top is Scr.NoteMenu, under = top is Scr.NoteLabels || top is Scr.PdfExport || top is Scr.Cover) {
+                    ViewLayer(on = menuKept, under = menuKept && (top is Scr.NoteLabels || top is Scr.PdfExport || top is Scr.Cover || top is Scr.Models)) {
                         pageIds[0]?.let { NoteMenuPage(vm, nav, act, it) }
                     }
                     ViewLayer(on = top is Scr.NoteLabels, under = false) {
