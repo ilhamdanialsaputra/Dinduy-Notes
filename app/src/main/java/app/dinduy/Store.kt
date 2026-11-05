@@ -89,7 +89,8 @@ class Pending(
 class LblDlg(val old: String?, val forNote: String?)
 
 object Imgs {
-    private val cache = object : android.util.LruCache<String, ImageBitmap>(48 * 1024 * 1024) {
+    // sampul harus sudah ada di cache saat catatan dibuka (kalau tidak, ia muncul belakangan = kedip), jadi cache dibuat lega
+    private val cache = object : android.util.LruCache<String, ImageBitmap>(maxOf(48L * 1024 * 1024, Runtime.getRuntime().maxMemory() / 6).toInt()) {
         override fun sizeOf(key: String, value: ImageBitmap): Int = value.width * value.height * 4
     }
 
@@ -337,6 +338,44 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     // ---------- sampul catatan ----------
     fun setCover(id: String, img: String) = upd(id) { it.copy(cv = img, cx = .5f, cy = .5f, cz = 1f) }
 
+    /** Muat sampul ke cache lebih dulu (dipanggil saat catatan mulai dibuka). */
+    fun prefetchImg(id: String) {
+        if (id.isEmpty() || Imgs.peek(id) != null) return
+        viewModelScope.launch(Dispatchers.IO) { try { Imgs.load(imgDir, id) } catch (e: Throwable) { } }
+    }
+
+    fun setTitleStyle(id: String, bold: Boolean, italic: Boolean, color: Int) {
+        val n = note(id) ?: return
+        if (n.tbo == bold && n.tit == italic && n.tcl == color) return
+        upd(id) { it.copy(tbo = bold, tit = italic, tcl = color) }
+    }
+
+    /** Tambah gambar di akhir catatan langsung ke data (dipakai bila editornya sudah tidak ada, mis. aplikasi sempat dimatikan sistem selama galeri terbuka). */
+    fun appendImages(id: String, imgs: List<Img>) {
+        if (imgs.isEmpty()) return
+        upd(id) { n ->
+            val add = imgs.map { Blk(ty = "img", im = listOf(it)) }
+            val tail = if (n.bl.lastOrNull()?.isText == true) emptyList() else listOf(Blk())
+            val nb = n.bl + add + tail
+            n.copy(bl = nb, x = plainOf(nb), u = System.currentTimeMillis())
+        }
+    }
+
+    /** Ganti isi bingkai gambar langsung di data (padanan [appendImages] untuk "ganti foto"). */
+    fun replaceImgData(id: String, bid: String, ix: Int, img: Img): Boolean {
+        val n = note(id) ?: return false
+        val b = n.bl.firstOrNull { it.id == bid } ?: return false
+        if (ix !in b.im.indices) return false
+        upd(id) { nn ->
+            val nb = nn.bl.map { k ->
+                if (k.id != bid) k
+                else k.copy(im = k.im.mapIndexed { j, m -> if (j == ix) m.copy(id = img.id, o = img.o, px = .5f, py = .5f, z = 1f) else m })
+            }
+            nn.copy(bl = nb, x = plainOf(nb), u = System.currentTimeMillis())
+        }
+        return true
+    }
+
     fun setCoverCrop(id: String, cv: String, x: Float, y: Float, z: Float) {
         val n = note(id) ?: return
         if (n.cv != cv || (n.cx == x && n.cy == y && n.cz == z)) return
@@ -347,7 +386,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         val n = note(id) ?: return
         if (n.cv.isEmpty()) return
         upd(id) { it.copy(cv = "", cx = .5f, cy = .5f, cz = 1f) }
-        snack = Snack("Sampul dihapus", undo = { upd(id) { it.copy(cv = n.cv, cx = n.cx, cy = n.cy, cz = n.cz) } })
+        snack = Snack("Sampul dihapus") { upd(id) { it.copy(cv = n.cv, cx = n.cx, cy = n.cy, cz = n.cz) } }
     }
 
     fun live() = docs.filter { !it.a && it.dt == 0L }
@@ -787,10 +826,15 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     }
 
     // ---------- gambar ----------
-    suspend fun importImage(uri: Uri): Img? = withContext(Dispatchers.IO) {
-        try {
-            val bm: Bitmap = if (Build.VERSION.SDK_INT >= 28) {
-                ImageDecoder.decodeBitmap(ImageDecoder.createSource(ctx.contentResolver, uri)) { dec, info, _ ->
+    /** Sebab kegagalan impor terakhir (ditampilkan di snackbar supaya penyebabnya kelihatan). */
+    var lastImgErr: String = ""
+
+    /** Dekode gambar dari Uri galeri / kamera, sisi terpanjang <= 1600 px, sudah terputar sesuai EXIF. Dua jalur: ImageDecoder, lalu BitmapFactory. */
+    private fun decodeUri(uri: Uri): Bitmap {
+        var err: Throwable? = null
+        if (Build.VERSION.SDK_INT >= 28) {
+            try {
+                return ImageDecoder.decodeBitmap(ImageDecoder.createSource(ctx.contentResolver, uri)) { dec, info, _ ->
                     dec.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
                     val mx = maxOf(info.size.width, info.size.height)
                     if (mx > 1600) {
@@ -801,37 +845,55 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                         )
                     }
                 }
-            } else {
-                val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, o) }
-                var s = 1
-                while (maxOf(o.outWidth, o.outHeight) / (s * 2) >= 1600) s *= 2
-                val raw = ctx.contentResolver.openInputStream(uri)?.use {
-                    BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = s })
-                } ?: return@withContext null
-                // BitmapFactory tidak memutar gambar sesuai EXIF (foto kamera potret jadi miring), jadi diputar di sini
-                val deg = try {
-                    ctx.contentResolver.openInputStream(uri)?.use { st ->
-                        when (android.media.ExifInterface(st).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, android.media.ExifInterface.ORIENTATION_NORMAL)) {
-                            android.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90f
-                            android.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180f
-                            android.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270f
-                            else -> 0f
-                        }
-                    } ?: 0f
-                } catch (e: Exception) { 0f }
-                if (deg != 0f) Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, android.graphics.Matrix().apply { postRotate(deg) }, true) else raw
+            } catch (e: Throwable) {
+                err = e   // lanjut ke jalur BitmapFactory (mis. format yang ditolak ImageDecoder)
             }
+        }
+        try {
+            val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, o) }
+            var s = 1
+            while (maxOf(o.outWidth, o.outHeight) / (s * 2) >= 1600) s *= 2
+            val raw = ctx.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = s })
+            } ?: throw IllegalStateException("gambar tidak terbaca")
+            // BitmapFactory tidak memutar gambar sesuai EXIF (foto kamera potret jadi miring), jadi diputar di sini
+            val deg = try {
+                ctx.contentResolver.openInputStream(uri)?.use { st ->
+                    when (android.media.ExifInterface(st).getAttributeInt(
+                        android.media.ExifInterface.TAG_ORIENTATION,
+                        android.media.ExifInterface.ORIENTATION_NORMAL
+                    )) {
+                        android.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+                        android.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+                        android.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+                        else -> 0f
+                    }
+                } ?: 0f
+            } catch (e: Throwable) { 0f }
+            return if (deg != 0f) Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, android.graphics.Matrix().apply { postRotate(deg) }, true) else raw
+        } catch (e: Throwable) {
+            throw if (err != null) IllegalStateException(err.javaClass.simpleName + ": " + (err.message ?: "") + " / " + e.javaClass.simpleName, e) else e
+        }
+    }
+
+    suspend fun importImage(uri: Uri): Img? = withContext(Dispatchers.IO) {
+        lastImgErr = ""
+        try {
+            val bm = decodeUri(uri)
             val out = Bitmap.createBitmap(bm.width, bm.height, Bitmap.Config.ARGB_8888)
             val cv = android.graphics.Canvas(out)
             cv.drawColor(android.graphics.Color.WHITE)
             cv.drawBitmap(bm, 0f, 0f, null)
             val id = uid()
             imgDir.mkdirs()
-            FileOutputStream(File(imgDir, "$id.jpg")).use { out.compress(Bitmap.CompressFormat.JPEG, 85, it) }
+            val f = File(imgDir, "$id.jpg")
+            FileOutputStream(f).use { if (!out.compress(Bitmap.CompressFormat.JPEG, 85, it)) throw IllegalStateException("gagal menyimpan JPEG") }
+            if (f.length() == 0L) throw IllegalStateException("berkas gambar kosong")
             val a = bm.width.toFloat() / bm.height
             Img(id = id, a = a, o = a)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            lastImgErr = e.javaClass.simpleName + (e.message?.let { ": " + it.take(80) } ?: "")
             null
         }
     }
