@@ -21,6 +21,13 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.draggable
@@ -199,9 +206,9 @@ private val SH = listOf(
     floatArrayOf(60f, 28f, 28f, 28f), floatArrayOf(28f, 28f, 60f, 28f)
 )
 
-private val FD_ID = Locale("id", "ID")
-private val FD_SHORT = SimpleDateFormat("d MMM", FD_ID)
-private val FD_LONG = SimpleDateFormat("d MMM yyyy", FD_ID)
+private val FD_ID = Locale.US
+private val FD_SHORT = SimpleDateFormat("MMM d", FD_ID)
+private val FD_LONG = SimpleDateFormat("MMM d, yyyy", FD_ID)
 private val FD_YEAR = SimpleDateFormat("yyyy", Locale.US)
 
 // dipanggil hanya dari thread UI; formatter dibuat sekali (SimpleDateFormat mahal dibuat berulang per kartu)
@@ -349,7 +356,7 @@ private fun CardText(d: Note, kind: String, c2: Boolean, fg: Color, padH: Dp, pa
     val remOn = d.rm > 0L && d.dt == 0L
     val body = remember(d.x) { d.x.take(900).replace(SP_RX, " ").replace(NL_RX, "\n\n").trim() }
     val hasTitle = d.t.isNotBlank()
-    val shownBody = body.ifEmpty { if (!hasTitle) (if (d.au.isNotEmpty()) "Catatan suara" else if (d.cv.isNotEmpty()) "" else "Kosong") else "" }
+    val shownBody = body.ifEmpty { if (!hasTitle) (if (d.au.isNotEmpty()) "Voice note" else if (d.cv.isNotEmpty()) "" else "Empty") else "" }
     Column(
         Modifier.fillMaxWidth().padding(horizontal = padH, vertical = padV),
         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -372,7 +379,7 @@ private fun CardText(d: Note, kind: String, c2: Boolean, fg: Color, padH: Dp, pa
         }
         if (delTime != 0L) {
             // hanya di sampah: tanggal penghapusan
-            T("Dihapus " + fdate(delTime), 12f, 600, fg, alpha = .65f)
+            T("Deleted " + fdate(delTime), 12f, 600, fg, alpha = .65f)
         }
     }
 }
@@ -489,7 +496,7 @@ fun SwipeCard(enabled: Boolean, shape: androidx.compose.ui.graphics.Shape, onArc
                         Alignment.Center
                     ) { Ic(if (r) "arc" else "del", tint.copy(alpha = .5f + .5f * e), 30.dp) }
                     T(
-                        if (r) "Arsip" else "Hapus", 12f, 800, tint,
+                        if (r) "Archive" else "Delete", 12f, 800, tint,
                         Modifier.graphicsLayer { alpha = pop.value.coerceIn(0f, 1f); translationY = (1f - pop.value) * 6.dp.toPx() }
                     )
                 }
@@ -546,14 +553,14 @@ fun FontRow(name: String, fam: FontFamily, on: Boolean, onClick: () -> Unit) {
         ) {
             Column(Modifier.weight(1f)) {
                 T(name, 21f, 700, fg)
-                T("Catatan rapi, cepat, nyaman 0123", 14f, 400, fg, alpha = .75f)
+                T("Neat notes, fast and cozy 0123", 14f, 400, fg, alpha = .75f)
             }
             if (on) Ic("ok", fg, 24.dp)
         }
     }
 }
 
-/** Pilihan "Ikuti perangkat" (Material You): warna aplikasi mengikuti wallpaper. */
+/** Pilihan "Follow device" (Material You): warna aplikasi mengikuti wallpaper. */
 @Composable
 fun DeviceColorRow(on: Boolean, onClick: () -> Unit) {
     val pal = LocalPal.current
@@ -575,8 +582,8 @@ fun DeviceColorRow(on: Boolean, onClick: () -> Unit) {
             Ic("pal", pal.op, 24.dp)
         }
         Column(Modifier.weight(1f)) {
-            T("Ikuti perangkat", 19f, 800, fg)
-            T("Material You, warna mengikuti wallpaper", 14f, 400, fg, alpha = .75f)
+            T("Follow device", 19f, 800, fg)
+            T("Material You, colors follow your wallpaper", 14f, 400, fg, alpha = .75f)
         }
         if (on) Ic("ok", fg, 24.dp)
     }
@@ -617,12 +624,12 @@ fun DrawerContent(vm: AppVM, close: () -> Unit, go: (Scr) -> Unit) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             T("Dinduy", 28f, 800, pal.p, Modifier.padding(start = 16.dp, top = 28.dp, bottom = 24.dp), ls = -.01f)
             // sorotan (highlight) menandai posisi pengguna: "Catatan" = semua, atau satu label
-            DrawerItem("bulb", "Catatan", selected = vm.filter == null && !vm.remFilter) { vm.filter = null; vm.remFilter = false; close() }
+            DrawerItem("bulb", "Notes", selected = vm.filter == null && !vm.remFilter) { vm.filter = null; vm.remFilter = false; close() }
             DrawerItem(
-                "bell", "Pengingat", selected = vm.remFilter,
+                "bell", "Reminder", selected = vm.remFilter,
                 trailing = vm.live().count { it.rm > 0L }.takeIf { it > 0 }?.toString()
             ) { vm.filter = null; vm.remFilter = true; close() }
-            T("Label", 14f, 700, pal.osv, Modifier.padding(start = 26.dp, top = 16.dp, bottom = 6.dp))
+            T("Labels", 14f, 700, pal.osv, Modifier.padding(start = 26.dp, top = 16.dp, bottom = 6.dp))
             vm.sortedLabels().forEach { n ->
                 DrawerItem(
                     "label", n, selected = vm.filter == n,
@@ -630,14 +637,14 @@ fun DrawerContent(vm: AppVM, close: () -> Unit, go: (Scr) -> Unit) {
                     onLong = { vm.sheet = Sheet.LblEdit(n) }
                 ) { vm.remFilter = false; vm.filter = n; close() }
             }
-            DrawerItem("plus", "Buat label baru") { close(); vm.lblDlg = LblDlg(null, null) }
+            DrawerItem("plus", "Create new label") { close(); vm.lblDlg = LblDlg(null, null) }
             Divider()
-            DrawerItem("arc", "Arsip", trailing = vm.archived().size.takeIf { it > 0 }?.toString()) { go(Scr.Archive) }
-            DrawerItem("del", "Baru saja dihapus", trailing = vm.trashed().size.takeIf { it > 0 }?.toString()) { go(Scr.Trash) }
+            DrawerItem("arc", "Archive", trailing = vm.archived().size.takeIf { it > 0 }?.toString()) { go(Scr.Archive) }
+            DrawerItem("del", "Trash", trailing = vm.trashed().size.takeIf { it > 0 }?.toString()) { go(Scr.Trash) }
             Spacer(Modifier.height(12.dp))
         }
         Divider()
-        DrawerItem("set", "Pengaturan") { go(Scr.Settings) }
+        DrawerItem("set", "Settings") { go(Scr.Settings) }
         Spacer(Modifier.height(12.dp))
     }
 }
@@ -657,7 +664,7 @@ fun LabelDialogHost(vm: AppVM) {
     AlertDialog(
         onDismissRequest = { vm.lblDlg = null },
         containerColor = pal.c3,
-        title = { T(if (d.old != null) "Ganti nama label" else "Label baru", 22f, 900, pal.os) },
+        title = { T(if (d.old != null) "Rename label" else "New label", 22f, 900, pal.os) },
         text = {
             Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(pal.c4).padding(horizontal = 20.dp, vertical = 16.dp)) {
                 BasicTextField(
@@ -667,16 +674,40 @@ fun LabelDialogHost(vm: AppVM) {
                     singleLine = true, cursorBrush = SolidColor(pal.p),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { done() }),
-                    decorationBox = { inner -> Box { if (text.isEmpty()) T("Nama label", 18f, 600, pal.osv); inner() } }
+                    decorationBox = { inner -> Box { if (text.isEmpty()) T("Label name", 18f, 600, pal.osv); inner() } }
                 )
             }
         },
-        confirmButton = { TextButton(onClick = { done() }) { T(if (d.old != null) "Simpan" else "Buat", 16f, 900, pal.p) } },
-        dismissButton = { TextButton(onClick = { vm.lblDlg = null }) { T("Batal", 16f, 700, pal.osv) } }
+        confirmButton = { TextButton(onClick = { done() }) { T(if (d.old != null) "Save" else "Create", 16f, 900, pal.p) } },
+        dismissButton = { TextButton(onClick = { vm.lblDlg = null }) { T("Cancel", 16f, 700, pal.osv) } }
     )
 }
 
 // ---------- beranda ----------
+/**
+ * Keadaan seret-dan-lepas kartu beranda (ala Google Keep). Selama menyeret, urutan satu kelompok (disematkan / lainnya)
+ * disimpan sementara di `order`; kartu lain bergeser dengan animasi karena grid mengikuti urutan itu.
+ * Urutan baru baru disimpan permanen (AppVM.moveOrder) saat kartu dilepas.
+ */
+@androidx.compose.runtime.Stable
+class NoteDrag {
+    var id by mutableStateOf<String?>(null)
+    var group = 0                                   // 0 = kelompok atas (disematkan / semua), 1 = lainnya
+    var order by mutableStateOf<List<String>>(emptyList())
+    var orig: List<String> = emptyList()
+    var finger by mutableStateOf(Offset.Zero)       // posisi jari di dalam grid
+    var grab = Offset.Zero                          // titik sentuh relatif terhadap pojok kiri-atas kartu
+    var dropping by mutableStateOf(false)
+    var resid = Offset.Zero                         // jarak kartu dari tempat barunya saat dilepas
+    val settle = Animatable(0f)                     // 1 -> 0: kartu meluncur ke tempatnya
+
+    fun begin(key: String, g: Int, ord: List<String>, grabAt: Offset, at: Offset) {
+        group = g; orig = ord; order = ord; grab = grabAt; finger = at; dropping = false; id = key
+    }
+
+    fun reset() { id = null; dropping = false; order = emptyList() }
+}
+
 @Composable
 fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmall: (Boolean) -> Unit) {
     val pal = LocalPal.current
@@ -685,6 +716,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
     val dens = LocalDensity.current
     val focusMgr = LocalFocusManager.current
     val state = rememberLazyStaggeredGridState()
+    val nd = remember { NoteDrag() }
     // tween tanpa overshoot supaya buka/tutup pencarian tidak bergetar
     val saRaw by animateFloatAsState(if (vm.searchOn) 1f else 0f, if (vm.searchOn) spring(.9f, 380f) else spring(.95f, 460f), label = "sa")
     val sa = saRaw.coerceIn(0f, 1f)
@@ -796,12 +828,126 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         // daftar (grid 1 atau 2 kolom)
         val np = live.count { it.p }
         val sections = !vm.remFilter && np > 0 && np < live.size
-        val pinned = if (sections) live.filter { it.p } else live
-        val others = if (sections) live.filter { !it.p } else emptyList()
+        val pinnedBase = if (sections) live.filter { it.p } else live
+        val othersBase = if (sections) live.filter { !it.p } else emptyList()
+        // saat menyeret, satu kelompok memakai urutan sementara supaya kartu lain bergeser mengikuti
+        fun shown(base: List<Note>, g: Int): List<Note> {
+            if (nd.id == null || nd.group != g || nd.order.isEmpty()) return base
+            val byId = base.associateBy { it.id }
+            val o = nd.order.mapNotNull { byId[it] }
+            return if (o.size == base.size) o else base
+        }
+        val pinned = shown(pinnedBase, 0)
+        val others = shown(othersBase, 1)
         val full = StaggeredGridItemSpan.FullLine
+
+        // ---- seret & lepas ----
+        val scope = rememberCoroutineScope()
+        val hapticDrag = LocalHapticFeedback.current
+        val dragCtx by rememberUpdatedState(Triple(sections, pinnedBase.map { it.id }, othersBase.map { it.id }))
+        val canDrag = !vm.searchOn && !vm.remFilter && vm.openId == null && live.size > 1
+        fun endDrag() {
+            val id = nd.id ?: return
+            if (nd.dropping) return
+            val info = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id }
+            nd.resid = if (info != null) Offset(nd.finger.x - nd.grab.x - info.offset.x, nd.finger.y - nd.grab.y - info.offset.y) else Offset.Zero
+            if (nd.order != nd.orig) vm.moveOrder(nd.order)
+            nd.dropping = true
+            scope.launch {
+                nd.settle.snapTo(1f)
+                nd.settle.animateTo(0f, spring(.8f, 380f))
+                nd.reset()
+            }
+        }
+        LaunchedEffect(canDrag) { if (!canDrag && nd.id != null) nd.reset() }
+        // tiap frame selama menyeret: gulir otomatis di tepi layar + cek kartu yang sedang ditindih
+        LaunchedEffect(nd.id) {
+            val id = nd.id ?: return@LaunchedEffect
+            while (nd.id == id && !nd.dropping) {
+                withFrameNanos { }
+                val li = state.layoutInfo
+                val vis = li.visibleItemsInfo
+                val zone = 72f * dens.density
+                val topLine = with(dens) { (sat + 72.dp + 24.dp).toPx() }
+                val botLine = li.viewportSize.height - 110f * dens.density
+                val fy = nd.finger.y
+                val dy = when {
+                    fy < topLine -> -22f * dens.density * ((topLine - fy) / zone).coerceIn(0.1f, 1f)
+                    fy > botLine -> 22f * dens.density * ((fy - botLine) / zone).coerceIn(0.1f, 1f)
+                    else -> 0f
+                }
+                if (dy != 0f) state.scrollBy(dy)
+                val me = vis.firstOrNull { it.key == id } ?: continue
+                val ctx = dragCtx
+                val startIdx = if (nd.group == 0) (if (ctx.first) 1 else 0) else 2 + ctx.second.size
+                val grp = nd.order
+                val cur = grp.indexOf(id)
+                // tunggu sampai grid selesai menata ulang setelah pertukaran sebelumnya
+                if (cur < 0 || me.index != startIdx + cur) continue
+                val cx = nd.finger.x - nd.grab.x + me.size.width / 2f
+                val cy = nd.finger.y - nd.grab.y + me.size.height / 2f
+                var target = -1
+                for (it in vis) {
+                    val k = it.key as? String ?: continue
+                    if (k == id) continue
+                    val ti = grp.indexOf(k)
+                    if (ti < 0) continue
+                    val mx = it.size.width * .1f
+                    val my = it.size.height * .2f
+                    if (cx >= it.offset.x + mx && cx <= it.offset.x + it.size.width - mx &&
+                        cy >= it.offset.y + my && cy <= it.offset.y + it.size.height - my
+                    ) { target = ti; break }
+                }
+                if (target < 0) {
+                    // di luar semua kartu: ujung bawah / atas kolom berarti pindah ke akhir / awal kelompok
+                    val laneW = li.viewportSize.width / cols.toFloat()
+                    val lane = (cx / laneW).toInt().coerceIn(0, cols - 1)
+                    val mine = vis.filter { v -> (v.key as? String)?.let { k -> grp.indexOf(k) >= 0 } == true && v.lane == lane }
+                    if (mine.isNotEmpty()) {
+                        val bottom = mine.maxOf { it.offset.y + it.size.height }
+                        val topY = mine.minOf { it.offset.y }
+                        if (cy > bottom && vis.any { it.key == grp.last() }) target = grp.size - 1
+                        else if (cy < topY && vis.any { it.key == grp.first() }) target = 0
+                    }
+                }
+                if (target >= 0 && target != cur) {
+                    nd.order = grp.toMutableList().also { it.removeAt(cur); it.add(target, id) }
+                    hapticDrag.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                }
+            }
+        }
         LazyVerticalStaggeredGrid(
             columns = StaggeredGridCells.Fixed(cols),
-            state = state, modifier = Modifier.fillMaxSize().nestedScroll(fabConn).graphicsLayer { alpha = 1f - sa },
+            state = state,
+            modifier = Modifier.fillMaxSize().nestedScroll(fabConn).graphicsLayer { alpha = 1f - sa }
+                .pointerInput(canDrag) {
+                    if (!canDrag) return@pointerInput
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        val (_, pin, oth) = dragCtx
+                        val hit = state.layoutInfo.visibleItemsInfo.firstOrNull { v ->
+                            val k = v.key as? String
+                            k != null && (k in pin || k in oth) &&
+                                down.position.x >= v.offset.x && down.position.x <= v.offset.x + v.size.width &&
+                                down.position.y >= v.offset.y && down.position.y <= v.offset.y + v.size.height
+                        } ?: return@awaitEachGesture
+                        // tekan lama: kartu terangkat (dan terpilih, seperti Keep); geser untuk memindahkan
+                        val lp = awaitLongPressOrCancellation(down.id) ?: return@awaitEachGesture
+                        val key = hit.key as String
+                        val g = if (key in pin) 0 else 1
+                        if (key !in vm.sel) vm.sel.add(key)
+                        hapticDrag.performHapticFeedback(HapticFeedbackType.LongPress)
+                        nd.begin(key, g, if (g == 0) pin else oth, lp.position - Offset(hit.offset.x.toFloat(), hit.offset.y.toFloat()), lp.position)
+                        while (true) {
+                            val ev = awaitPointerEvent(PointerEventPass.Initial)
+                            val ch = ev.changes.firstOrNull { it.id == lp.id } ?: break
+                            ch.consume()
+                            if (!ch.pressed) break
+                            nd.finger = ch.position
+                        }
+                        endDrag()
+                    }
+                },
             contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = sat + 78.dp, bottom = 160.dp + sab),
             verticalItemSpacing = 8.dp,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -809,23 +955,23 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
             if (live.isEmpty()) {
                 item(key = "empty", span = full) {
                     T(
-                        if (vm.remFilter) "Belum ada pengingat. Buka catatan, lalu ketuk ikon lonceng."
-                        else if (vm.filter != null) "Belum ada catatan berlabel" else "Ketuk Baru untuk memulai", 17f, 600, pal.osv,
+                        if (vm.remFilter) "No reminders yet. Open a note and tap the bell icon."
+                        else if (vm.filter != null) "No notes with this label yet" else "Tap New to get started", 17f, 600, pal.osv,
                         Modifier.fillMaxWidth().padding(vertical = 48.dp), align = androidx.compose.ui.text.style.TextAlign.Center
                     )
                 }
             }
             if (sections) item(key = "h-pin", span = full) {
-                T("Disematkan", 13f, 500, pal.osv, Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp), ls = .01f)
+                T("Pinned", 13f, 500, pal.osv, Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp), ls = .01f)
             }
             gridItems(pinned, key = { it.id }) { d ->
-                HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, wPx, dens.density, pos, flowItemG())
+                HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, wPx, dens.density, pos, if (nd.id == d.id) Modifier else flowItemG(), nd, state)
             }
             if (sections) item(key = "h-other", span = full) {
-                T("Lainnya", 13f, 500, pal.osv, Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp), ls = .01f)
+                T("Others", 13f, 500, pal.osv, Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp), ls = .01f)
             }
             gridItems(others, key = { it.id }) { d ->
-                HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, wPx, dens.density, pos, flowItemG())
+                HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, wPx, dens.density, pos, if (nd.id == d.id) Modifier else flowItemG(), nd, state)
             }
         }
 
@@ -892,7 +1038,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     if (res.isEmpty() && vm.searchOn) item(key = "empty-search", span = full) {
-                        T(if (q.isNotEmpty()) "Tidak ada hasil" else "Belum ada catatan", 17f, 600, pal.osv,
+                        T(if (q.isNotEmpty()) "No results" else "No notes yet", 17f, 600, pal.osv,
                             Modifier.fillMaxWidth().padding(vertical = 48.dp), align = androidx.compose.ui.text.style.TextAlign.Center)
                     }
                     gridItems(res, key = { "s" + it.id }) { d ->
@@ -939,7 +1085,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { focusMgr.clearFocus() }),
                     decorationBox = { inner ->
-                        Box { if (vm.query.isEmpty()) T(if (vm.remFilter) "Cari di Pengingat" else vm.filter?.let { "Cari di $it" } ?: "Cari catatan", 17f, 400, pal.osv, maxLines = 1); inner() }
+                        Box { if (vm.query.isEmpty()) T(if (vm.remFilter) "Search in Reminders" else vm.filter?.let { "Search in $it" } ?: "Search notes", 17f, 400, pal.osv, maxLines = 1); inner() }
                     }
                 )
                 // hapus teks: hanya muncul saat ada ketikan
@@ -956,11 +1102,29 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
 @Composable
 fun HomeCard(
     vm: AppVM, nav: Nav, d: Note, i: Int, selMode: Boolean, cols: Int, hPx: Float, wPx: Float, dens: Float,
-    pos: Map<String, Int>, base: Modifier
+    pos: Map<String, Int>, base: Modifier, nd: NoteDrag, gs: LazyStaggeredGridState
 ) {
     val sel = vm.sel
     androidx.compose.runtime.DisposableEffect(d.id) { onDispose { vm.cardMorph.remove(d.id) } }
-    Column(base.makeRoom(vm, d.id, i, { vm.openId?.let { pos[it] } ?: -1 }, hPx, dens, cols, wPx)) {
+    val dragging = nd.id == d.id
+    Column(
+        base.makeRoom(vm, d.id, i, { vm.openId?.let { pos[it] } ?: -1 }, hPx, dens, cols, wPx).then(
+            if (dragging) Modifier.zIndex(1f).graphicsLayer {
+                // kartu yang diseret mengikuti jari; posisi layout-nya bisa berubah saat urutan bertukar, jadi selisihnya dihitung tiap frame
+                val info = gs.layoutInfo.visibleItemsInfo.firstOrNull { it.key == d.id }
+                val tr = if (nd.dropping) nd.resid * nd.settle.value
+                    else if (info != null) Offset(nd.finger.x - nd.grab.x - info.offset.x, nd.finger.y - nd.grab.y - info.offset.y)
+                    else Offset.Zero
+                translationX = tr.x; translationY = tr.y
+                val k = if (nd.dropping) nd.settle.value.coerceIn(0f, 1f) else 1f
+                val s = 1f + .035f * k
+                scaleX = s; scaleY = s
+                shadowElevation = 12.dp.toPx() * k
+                shape = RoundedCornerShape(12.dp)
+                clip = false
+            } else Modifier
+        )
+    ) {
         val first = remember(d.id) { !vm.seen.contains(d.id) }
         val prog = remember(d.id) { Animatable(if (first) 0f else 1f) }
         LaunchedEffect(d.id) {
@@ -972,8 +1136,8 @@ fun HomeCard(
         SwipeCard(
             enabled = !selMode,
             shape = SH[i % 5].let { RoundedCornerShape(it[0].dp, it[1].dp, it[2].dp, it[3].dp) },
-            onArchive = { vm.mark(listOf(d.id), "Catatan diarsipkan") { it.copy(a = true, p = false) } },
-            onDelete = { vm.mark(listOf(d.id), "Dipindah ke sampah") { it.copy(dt = System.currentTimeMillis()) } }
+            onArchive = { vm.mark(listOf(d.id), "Note archived") { it.copy(a = true, p = false) } },
+            onDelete = { vm.mark(listOf(d.id), "Moved to Trash") { it.copy(dt = System.currentTimeMillis()) } }
         ) {
             NoteCard(
                 d, i, "f", d.id in sel,
@@ -1041,8 +1205,8 @@ fun Fab(vm: AppVM, small: Boolean, hide: Boolean, lift: Dp) {
                 .indication(src, LocalIndication.current)
                 .semantics(mergeDescendants = true) {
                     role = Role.Button
-                    onClick("Catatan baru") { if (!hide) openNewFromFab(vm); true }
-                    onLongClick("Tambah catatan suara") { if (!hide) vm.addOn = true; true }
+                    onClick("New note") { if (!hide) openNewFromFab(vm); true }
+                    onLongClick("Add voice note") { if (!hide) vm.addOn = true; true }
                 }
                 .pointerInput(hide) {
                     if (hide) return@pointerInput
@@ -1132,7 +1296,7 @@ fun Fab(vm: AppVM, small: Boolean, hide: Boolean, lift: Dp) {
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Spacer(Modifier.width(14.dp))
-                    T("Baru", 22f, 900, pal.opc, maxLines = 1)
+                    T("New", 22f, 900, pal.opc, maxLines = 1)
                 }
             }
         }
@@ -1154,23 +1318,23 @@ fun SelBar(vm: AppVM) {
             verticalAlignment = Alignment.Top
         ) {
             IconBtn("x", pal.os, { vm.sel.clear() }, size = 48.dp)
-            Box(Modifier.weight(1f).height(48.dp).padding(start = 6.dp), Alignment.CenterStart) { T("$count dipilih", 18f, 900, pal.os) }
+            Box(Modifier.weight(1f).height(48.dp).padding(start = 6.dp), Alignment.CenterStart) { T("$count selected", 18f, 900, pal.os) }
             IconBtn("all", pal.os, { vm.liveF().forEach { if (it.id !in vm.sel) vm.sel.add(it.id) } }, size = 48.dp)
             IconBtn("pin", pal.os, {
                 val ids = vm.sel.toList()
                 if (ids.isNotEmpty()) {
                     val all = ids.all { vm.note(it)?.p == true }
                     vm.sel.clear()
-                    vm.mark(ids, if (all) "Sematan dilepas" else "${ids.size} catatan disematkan") { it.copy(p = !all) }
+                    vm.mark(ids, if (all) "Note unpinned" else "${cnt(ids.size, "note")} pinned") { it.copy(p = !all) }
                 }
             }, size = 48.dp)
             IconBtn("arc", pal.os, {
                 val ids = vm.sel.toList()
-                if (ids.isNotEmpty()) { vm.sel.clear(); vm.mark(ids, "${ids.size} catatan diarsipkan") { it.copy(a = true, p = false) } }
+                if (ids.isNotEmpty()) { vm.sel.clear(); vm.mark(ids, "${cnt(ids.size, "note")} archived") { it.copy(a = true, p = false) } }
             }, size = 48.dp)
             IconBtn("del", pal.os, {
                 val ids = vm.sel.toList()
-                if (ids.isNotEmpty()) { vm.sel.clear(); vm.mark(ids, "${ids.size} catatan dipindah ke sampah") { it.copy(dt = System.currentTimeMillis()) } }
+                if (ids.isNotEmpty()) { vm.sel.clear(); vm.mark(ids, "${cnt(ids.size, "note")} moved to Trash") { it.copy(dt = System.currentTimeMillis()) } }
             }, size = 48.dp)
         }
     }
@@ -1421,7 +1585,7 @@ fun FontChoice(name: String, fam: FontFamily, on: Boolean, onClick: () -> Unit) 
         ) {
             Column(Modifier.weight(1f)) {
                 T(name, 18f, 500, fg)
-                T("Catatan rapi, cepat, nyaman 0123", 14f, 400, fg, alpha = .75f)
+                T("Neat notes, fast and cozy 0123", 14f, 400, fg, alpha = .75f)
             }
             Box(Modifier.size(24.dp).graphicsLayer { scaleX = k; scaleY = k; alpha = k }) { Ic("ok", fg, 24.dp) }
         }
@@ -1445,7 +1609,7 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
             ) {
                 // judul besar: mengecil dan memudar saat digulir, digantikan judul kecil di bilah atas
                 T(
-                    "Pengaturan", 40f, 400, pal.os,
+                    "Settings", 40f, 400, pal.os,
                     Modifier.padding(start = 8.dp, top = 20.dp, bottom = 32.dp).graphicsLayer {
                         val k = (scroll.value / 110.dp.toPx()).coerceIn(0f, 1f)
                         alpha = 1f - (k * 1.6f).coerceAtMost(1f)
@@ -1454,15 +1618,16 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                     },
                     ls = -.01f, maxLines = 1
                 )
-                SGroup("Tampilan", 0) {
+                // Urutan kelompok: yang paling sering dipakai di atas (tampilan, catatan), yang jarang diubah di bawah (suara, cadangan)
+                SGroup("Appearance", 0) {
                     SCard(POS_TOP) {
-                        T("Tema", 16f, 500, pal.os)
+                        T("Theme", 16f, 500, pal.os)
                         val modes = listOf("auto" to "phone", "light" to "lm", "dark" to "dm")
                         val curMode = normMode(pr.mode)
                         val cap = when (curMode) {
-                            "auto" -> "Otomatis: terang atau gelap mengikuti perangkat"
-                            "light" -> "Terang"
-                            else -> "Gelap (AMOLED, hitam pekat)"
+                            "auto" -> "Auto: light or dark follows your device"
+                            "light" -> "Light"
+                            else -> "Dark (AMOLED, pure black)"
                         }
                         Crossfade(cap, Modifier.padding(top = 2.dp, bottom = 14.dp), tween(200), label = "cap") { T(it, 14f, 400, pal.osv) }
                         SegPill(3, modes.indexOfFirst { it.first == curMode }.coerceAtLeast(0), { vm.setPr(pr.copy(mode = modes[it].first)) }) { i, fg ->
@@ -1470,7 +1635,7 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                         }
                     }
                     SCard(POS_MID) {
-                        T("Warna aplikasi", 16f, 500, pal.os, Modifier.padding(bottom = 12.dp))
+                        T("Colors", 16f, 500, pal.os, Modifier.padding(bottom = 12.dp))
                         val dynAvail = android.os.Build.VERSION.SDK_INT >= 31
                         val dynOn = pr.dyn && dynAvail
                         if (dynAvail) {
@@ -1481,8 +1646,8 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
                                 Column(Modifier.weight(1f)) {
-                                    T("Warna dinamis", 16f, 400, pal.os)
-                                    T("Material You, mengikuti wallpaper", 14f, 400, pal.osv)
+                                    T("Dynamic color", 16f, 400, pal.os)
+                                    T("Material You, follows your wallpaper", 14f, 400, pal.osv)
                                 }
                                 MorphSwitch(dynOn)
                             }
@@ -1502,14 +1667,14 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                             ) {
                                 Box(Modifier.size(40.dp).clip(CircleShape).background(hsl(ch, cs.coerceIn(35f, 88f), 50f).let { if (pal.mono) it.gray() else it }))
                                 Column(Modifier.weight(1f)) {
-                                    T("Warna kustom", 16f, 400, pal.os)
-                                    T("Atur corak dan intensitas sendiri", 14f, 400, pal.osv)
+                                    T("Custom color", 16f, 400, pal.os)
+                                    T("Pick your own hue and intensity", 14f, 400, pal.osv)
                                 }
                                 Ic("chr", pal.osv, 24.dp)
                             }
                         }
                     }
-                    SCard(POS_BOT, onClick = { vm.setPr(pr.copy(mono = !pr.mono)) }) {
+                    SCard(POS_MID, onClick = { vm.setPr(pr.copy(mono = !pr.mono)) }) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             Column(Modifier.weight(1f)) {
                                 T("Monochrome", 16f, 500, pal.os)
@@ -1518,86 +1683,73 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                             MorphSwitch(pr.mono)
                         }
                     }
-                }
-                SGroup("Catatan", 60) {
-                    SCard(POS_ONE) {
-                        T("Urutan catatan", 16f, 500, pal.os, Modifier.padding(bottom = 14.dp))
-                        val sorts = listOf("u" to "Diubah", "c" to "Dibuat")
-                        SegPill(2, sorts.indexOfFirst { it.first == pr.sort }.coerceAtLeast(0), { vm.setPr(pr.copy(sort = sorts[it].first)) }) { i, fg ->
-                            T(sorts[i].second, 15f, 500, fg)
-                        }
-                        Crossfade(if (pr.sort == "c") "Yang terbaru dibuat di atas" else "Yang terakhir diedit di atas", Modifier.padding(top = 12.dp, start = 4.dp), tween(200), label = "scap") {
-                            T(it, 14f, 400, pal.osv)
-                        }
-                    }
-                }
-                SGroup("Coretan", 90) {
-                    SCard(POS_TOP) {
-                        T("Sentuhan", 16f, 500, pal.os, Modifier.padding(bottom = 14.dp))
-                        val tsl = listOf("auto" to "Otomatis", "stylus" to "Hanya stylus", "finger" to "Jari juga")
-                        SegPill(3, tsl.indexOfFirst { it.first == pr.ts }.coerceAtLeast(0), { vm.setPr(pr.copy(ts = tsl[it].first)) }) { i, fg ->
-                            T(tsl[i].second, 14f, 500, fg)
-                        }
-                        Crossfade(
-                            when (pr.ts) {
-                                "stylus" -> "Hanya stylus yang menggambar; jari tetap untuk teks dan gulir"
-                                "finger" -> "Stylus dan jari menggambar; satu jari menggambar, dua jari menggulir"
-                                else -> "Ada stylus: hanya stylus yang menggambar. Tanpa stylus: satu jari menggambar, dua jari menggulir"
-                            }, Modifier.padding(top = 12.dp, start = 4.dp), tween(200), label = "tscap"
-                        ) { T(it, 14f, 400, pal.osv) }
-                    }
-                    SCard(POS_BOT) {
-                        T("Kembali ke mode teks otomatis", 16f, 500, pal.os, Modifier.padding(bottom = 14.dp))
-                        val atl = listOf(0 to "Mati", 5 to "5 dtk", 10 to "10 dtk", 30 to "30 dtk")
-                        SegPill(4, atl.indexOfFirst { it.first == pr.iat }.coerceAtLeast(0), { vm.setPr(pr.copy(iat = atl[it].first)) }) { i, fg ->
-                            T(atl[i].second, 14f, 500, fg)
-                        }
-                    }
-                }
-                SGroup("Teks", 120) {
-                    SCard(POS_TOP) {
-                        T("Jarak baris", 16f, 500, pal.os, Modifier.padding(bottom = 14.dp))
-                        val lhs = listOf(1.45f to "Rapat", 1.65f to "Normal", 1.95f to "Lega")
-                        SegPill(3, lhs.indexOfFirst { it.first == pr.lh }.let { if (it < 0) 1 else it }, { vm.setPr(pr.copy(lh = lhs[it].first)) }) { i, fg ->
-                            T(lhs[i].second, 15f, 500, fg)
-                        }
-                    }
-                    SCard(POS_MID) {
-                        T("Pratinjau", pr.fs * 1.4f, 500, pal.p, lh = 1.1f, ls = -.01f)
-                        Spacer(Modifier.height((pr.fs * .35f).dp))
-                        T("Dinduy menjaga catatan tetap rapi, dengan huruf tebal dan jarak yang nyaman untuk mata.", pr.fs.toFloat(), 400, pal.os, lh = pr.lh)
-                    }
                     SCard(POS_BOT, pad = PaddingValues(start = 12.dp, end = 12.dp, top = 18.dp, bottom = 12.dp)) {
-                        T("Jenis huruf", 16f, 500, pal.os, Modifier.padding(start = 8.dp, bottom = 10.dp))
+                        T("Font", 16f, 500, pal.os, Modifier.padding(start = 8.dp, bottom = 10.dp))
                         val am = LocalContext.current.assets
-                        listOf("def" to "Bawaan", "flex" to "Roboto Flex", "times" to "Times New Roman").forEach { (id, name) ->
+                        listOf("def" to "Default", "flex" to "Roboto Flex", "times" to "Times New Roman", "reenie" to "Reenie Beanie").forEach { (id, name) ->
                             val fam = remember(id) { loadFont(am, id) }
                             FontChoice(name, fam, pr.ff == id) { vm.setPr(pr.copy(ff = id)) }
                         }
                     }
                 }
-                SGroup("Cadangan", 180) {
+                SGroup("Notes", 60) {
+                    SCard(POS_ONE) {
+                        T("Sort notes", 16f, 500, pal.os, Modifier.padding(bottom = 14.dp))
+                        val sorts = listOf("u" to "Edited", "c" to "Created")
+                        SegPill(2, sorts.indexOfFirst { it.first == pr.sort }.coerceAtLeast(0), { vm.setSort(sorts[it].first) }) { i, fg ->
+                            T(sorts[i].second, 15f, 500, fg)
+                        }
+                        Crossfade(if (pr.sort == "c") "Most recently created on top" else "Most recently edited on top", Modifier.padding(top = 12.dp, start = 4.dp), tween(200), label = "scap") {
+                            T(it, 14f, 400, pal.osv)
+                        }
+                        T("Press, hold, and drag a card on the home screen to move it. Picking an order here clears those moves.", 14f, 400, pal.osv, Modifier.padding(top = 8.dp, start = 4.dp), lh = 1.3f)
+                    }
+                }
+                SGroup("Drawing", 90) {
+                    SCard(POS_TOP) {
+                        T("Touch input", 16f, 500, pal.os, Modifier.padding(bottom = 14.dp))
+                        val tsl = listOf("auto" to "Auto", "stylus" to "Stylus only", "finger" to "Finger too")
+                        SegPill(3, tsl.indexOfFirst { it.first == pr.ts }.coerceAtLeast(0), { vm.setPr(pr.copy(ts = tsl[it].first)) }) { i, fg ->
+                            T(tsl[i].second, 14f, 500, fg)
+                        }
+                        Crossfade(
+                            when (pr.ts) {
+                                "stylus" -> "Only the stylus draws. Fingers still type and scroll."
+                                "finger" -> "Stylus and fingers both draw. One finger draws, two fingers scroll."
+                                else -> "With a stylus, only the stylus draws. Without one, one finger draws and two fingers scroll."
+                            }, Modifier.padding(top = 12.dp, start = 4.dp), tween(200), label = "tscap"
+                        ) { T(it, 14f, 400, pal.osv) }
+                    }
+                    SCard(POS_BOT) {
+                        T("Back to text mode automatically", 16f, 500, pal.os, Modifier.padding(bottom = 14.dp))
+                        val atl = listOf(0 to "Off", 5 to "5 s", 10 to "10 s", 30 to "30 s")
+                        SegPill(4, atl.indexOfFirst { it.first == pr.iat }.coerceAtLeast(0), { vm.setPr(pr.copy(iat = atl[it].first)) }) { i, fg ->
+                            T(atl[i].second, 14f, 500, fg)
+                        }
+                    }
+                }
+                SGroup("Voice", 120) {
+                    val ready = vm.models.list.filter { it.status == 2 }.joinToString { it.info.name }
+                    SActionRow(
+                        POS_ONE, "mic", "Voice transcription",
+                        if (vm.gqSet) "Groq API key saved" + (if (ready.isNotEmpty()) " · offline model: $ready" else "")
+                        else if (ready.isNotEmpty()) "Offline model ready: $ready"
+                        else "Add a Groq API key (fast) or download an offline model"
+                    ) { vm.nav.push(Scr.Models) }
+                }
+                SGroup("Backup", 150) {
                     val n = vm.docs.size
                     val ni = vm.imgIds().size
                     val na = vm.docs.sumOf { it.au.size }
                     val old = vm.lastBk != 0L && System.currentTimeMillis() - vm.lastBk > 7 * 86400000L
-                    val info = "$n catatan, $ni foto, $na suara. " + (if (vm.lastBk != 0L) {
-                        "Cadangan terakhir: " + SimpleDateFormat("d MMM yyyy, HH.mm", Locale("id", "ID")).format(Date(vm.lastBk)) +
-                            (if (old) ". Sudah lebih dari seminggu, cadangkan lagi." else ".")
-                    } else "Belum pernah dicadangkan.") + " Berkas cadangan disimpan di perangkat, tanpa server."
+                    val info = cnt(n, "note") + ", " + cnt(ni, "photo") + ", " + cnt(na, "audio file") + ". " + (if (vm.lastBk != 0L) {
+                        "Last backup: " + SimpleDateFormat("MMM d, yyyy, HH:mm", Locale.US).format(Date(vm.lastBk)) +
+                            (if (old) ". It's been over a week, so back up again." else ".")
+                    } else "No backup yet.") + " Backup files stay on your device. No server is involved."
                     SCard(POS_TOP) { T(info, 14f, 400, pal.osv, lh = 1.5f) }
-                    SActionRow(POS_MID, "dl", "Simpan cadangan", "Satu berkas .dinduy berisi catatan, foto, dan suara") { act.saveBackup() }
-                    SActionRow(POS_MID, "up", "Bagikan cadangan", "Kirim lewat WhatsApp, Berkas, dan lainnya") { act.shareBackup() }
-                    SActionRow(POS_BOT, "restore", "Pulihkan cadangan", "Pilih berkas .dinduy dari perangkat (termasuk dari versi web)") { act.restoreBackup() }
-                }
-                SGroup("Suara", 240) {
-                    val ready = vm.models.list.filter { it.status == 2 }.joinToString { it.info.name }
-                    SActionRow(
-                        POS_ONE, "mic", "Transkripsi suara",
-                        if (vm.gqSet) "API key Groq tersimpan" + (if (ready.isNotEmpty()) " · model offline: $ready" else "")
-                        else if (ready.isNotEmpty()) "Model offline siap: $ready"
-                        else "Atur API key Groq (cepat) atau unduh model offline"
-                    ) { vm.nav.push(Scr.Models) }
+                    SActionRow(POS_MID, "dl", "Save backup", "One .dinduy file with your notes, photos, and audio") { act.saveBackup() }
+                    SActionRow(POS_MID, "up", "Share backup", "Send it with WhatsApp, Files, and more") { act.shareBackup() }
+                    SActionRow(POS_BOT, "restore", "Restore backup", "Pick a .dinduy file from your device (web version files work too)") { act.restoreBackup() }
                 }
             }
         }
@@ -1613,7 +1765,7 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
         ) {
             IconBtn("back", pal.os, onBack)
             T(
-                "Pengaturan", 22f, 400, pal.os,
+                "Settings", 22f, 400, pal.os,
                 Modifier.padding(start = 8.dp).graphicsLayer {
                     val k = (scroll.value / 110.dp.toPx()).coerceIn(0f, 1f)
                     val a = ((k - .5f) * 2f).coerceIn(0f, 1f)
@@ -1632,23 +1784,23 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
             onDismissRequest = { custom = false },
             containerColor = pal.c3,
             shape = RoundedCornerShape(28.dp),
-            title = { T("Warna kustom", 24f, 400, pal.os) },
+            title = { T("Custom color", 24f, 400, pal.os) },
             text = {
                 Column {
                     Box(Modifier.fillMaxWidth().height(56.dp).clip(RoundedCornerShape(28.dp)).background(col))
                     Spacer(Modifier.height(16.dp))
-                    T("Corak", 14f, 500, pal.osv)
+                    T("Hue", 14f, 500, pal.osv)
                     BigSlider(h, 0f, 360f) { h = it }
-                    T("Intensitas", 14f, 500, pal.osv)
+                    T("Intensity", 14f, 500, pal.osv)
                     BigSlider(s, 35f, 88f) { s = it }
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
                     vm.setPr(pr.copy(seed = String.format("#%06X", hsl(h, s, 50f).toArgb() and 0xFFFFFF), dyn = false)); custom = false
-                }) { T("Pakai", 15f, 600, pal.p) }
+                }) { T("Use", 15f, 600, pal.p) }
             },
-            dismissButton = { TextButton(onClick = { custom = false }) { T("Batal", 15f, 500, pal.osv) } }
+            dismissButton = { TextButton(onClick = { custom = false }) { T("Cancel", 15f, 500, pal.osv) } }
         )
     }
 }
@@ -1669,37 +1821,37 @@ fun SheetHost(vm: AppVM, nav: Nav, act: Actions) {
         }
     ) {
         Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 24.dp).navigationBarsPadding()) {
-            fun title(id: String) = vm.note(id)?.t?.ifEmpty { "Tanpa judul" } ?: "Tanpa judul"
+            fun title(id: String) = vm.note(id)?.t?.ifEmpty { "Untitled" } ?: "Untitled"
             when (s) {
                 is Sheet.LblEdit -> {
                     T(s.name, 26f, 1000, pal.os, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 14.dp), ls = -.01f)
-                    Opt(1, "pen", "Ganti nama") { close(); vm.lblDlg = LblDlg(s.name, null) }
-                    Opt(2, "del", "Hapus label", "Catatan tidak ikut terhapus") { close(); vm.deleteLabel(s.name) }
+                    Opt(1, "pen", "Rename") { close(); vm.lblDlg = LblDlg(s.name, null) }
+                    Opt(2, "del", "Delete label", "Notes aren't deleted") { close(); vm.deleteLabel(s.name) }
                 }
                 is Sheet.Arc -> {
                     T(title(s.id), 26f, 1000, pal.os, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 14.dp), ls = -.01f)
-                    Opt(1, "txt", "Buka catatan") { close(); nav.openNote(s.id, vm.cardMorph[s.id]) }
-                    Opt(2, "unarc", "Keluarkan dari arsip") { close(); vm.mark(listOf(s.id), "Dikeluarkan dari arsip") { it.copy(a = false) } }
-                    Opt(3, "del", "Hapus catatan") { close(); vm.mark(listOf(s.id), "Dipindah ke sampah") { it.copy(dt = System.currentTimeMillis()) } }
+                    Opt(1, "txt", "Open note") { close(); nav.openNote(s.id, vm.cardMorph[s.id]) }
+                    Opt(2, "unarc", "Unarchive") { close(); vm.mark(listOf(s.id), "Note unarchived") { it.copy(a = false) } }
+                    Opt(3, "del", "Delete note") { close(); vm.mark(listOf(s.id), "Moved to Trash") { it.copy(dt = System.currentTimeMillis()) } }
                 }
                 is Sheet.Trs -> {
                     T(title(s.id), 26f, 1000, pal.os, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 14.dp), ls = -.01f)
-                    Opt(1, "restore", "Pulihkan") { close(); vm.mark(listOf(s.id), "Catatan dipulihkan") { it.copy(dt = 0L) } }
-                    Opt(2, "del", "Hapus permanen") { close(); vm.purge(s.id) }
+                    Opt(1, "restore", "Restore") { close(); vm.mark(listOf(s.id), "Note restored") { it.copy(dt = 0L) } }
+                    Opt(2, "del", "Delete forever") { close(); vm.purge(s.id) }
                 }
                 is Sheet.Bk -> {
                     val p = vm.pending
-                    T("Pulihkan cadangan", 26f, 1000, pal.os, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp), ls = -.01f)
+                    T("Restore backup", 26f, 1000, pal.os, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp), ls = -.01f)
                     if (p != null) T(
-                        "${p.notes.size} catatan, ${p.nImg} foto, " + (if (p.aids.isNotEmpty()) "${p.aids.size} suara, " else "") + "dibuat " + SimpleDateFormat("d MMM yyyy, HH.mm", Locale("id", "ID")).format(Date(p.at)),
+                        cnt(p.notes.size, "note") + ", " + cnt(p.nImg, "photo") + ", " + (if (p.aids.isNotEmpty()) cnt(p.aids.size, "audio file") + ", " else "") + "created " + SimpleDateFormat("MMM d, yyyy, HH:mm", Locale.US).format(Date(p.at)),
                         14f, 400, pal.osv, Modifier.padding(start = 4.dp, bottom = 12.dp)
                     )
-                    Opt(1, "lib", "Gabungkan", "Tambahkan dari cadangan, catatan yang ada tetap aman") { close(); vm.applyBackup(false) }
-                    Opt(2, "restore", "Timpa semua", "Ganti semua catatan di perangkat ini dengan isi cadangan") { close(); vm.applyBackup(true) }
+                    Opt(1, "lib", "Merge", "Add from the backup. Your current notes stay safe") { close(); vm.applyBackup(false) }
+                    Opt(2, "restore", "Replace all", "Replace all notes on this device with the backup") { close(); vm.applyBackup(true) }
                 }
                 is Sheet.EmptyTrash -> {
-                    T("Kosongkan sampah?", 26f, 1000, pal.os, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 14.dp), ls = -.01f)
-                    Opt(1, "del", "Hapus semua permanen", "Tidak bisa dibatalkan") { close(); vm.purgeAll() }
+                    T("Empty Trash?", 26f, 1000, pal.os, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 14.dp), ls = -.01f)
+                    Opt(1, "del", "Delete all forever", "This can't be undone") { close(); vm.purgeAll() }
                 }
             }
         }
