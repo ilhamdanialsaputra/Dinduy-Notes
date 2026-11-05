@@ -120,6 +120,13 @@ class Pal(
     val mono: Boolean = false
 )
 
+/** Warna toolbar editor: mengikuti warna kertas (pal.s), hanya digeser sangat tipis ke warna teks supaya tetap terbaca sebagai bilah. */
+fun Pal.bar(): Color = lerp(s, os, if (dark) .07f else .035f)
+/** Elemen di dalam toolbar (sub-bilah) : sedikit lebih tegas dari bar(). */
+fun Pal.bar2(): Color = lerp(s, os, if (dark) .13f else .07f)
+/** Abu-abu netral mutlak (tanpa corak warna) turunan dari kertas dan teks; dipakai untuk trek toggle. */
+fun Pal.neutral(k: Float): Color = lerp(s.gray(), os.gray(), k)
+
 /** Abu-abu dengan kecerahan yang sama (bobot persepsi mata), alpha tetap. */
 fun Color.gray(): Color {
     val l = 0.299f * red + 0.587f * green + 0.114f * blue
