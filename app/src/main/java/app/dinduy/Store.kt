@@ -161,6 +161,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     var remDlg by mutableStateOf<String?>(null)   // id catatan yang sedang diatur pengingatnya (lembar bawah)
     var remFilter by mutableStateOf(false)        // true = beranda hanya menampilkan catatan berpengingat
     var permTick by mutableStateOf(0)             // dinaikkan saat status izin notifikasi mungkin berubah
+    var importTick by mutableStateOf(0)           // dinaikkan dari menu samping: AppRoot membuka pemilih berkas impor
     private val scheduled = HashMap<String, Long>()   // id catatan -> waktu alarm yang sudah dipasang
 
     // penutupan catatan: kartu tujuan bisa sedang bergerak (daftar digulir otomatis), jadi morph mengikutinya
@@ -520,11 +521,11 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     }
 
     fun purge(id: String) {
-        docs.removeAll { it.id == id }; save(); gcAudio(); show("Deleted forever")
+        docs.removeAll { it.id == id }; save(); gcAudio(); gcPdf(); show("Deleted forever")
     }
 
     fun purgeAll() {
-        docs.removeAll { it.dt != 0L }; save(); gcAudio(); show("Trash emptied")
+        docs.removeAll { it.dt != 0L }; save(); gcAudio(); gcPdf(); show("Trash emptied")
     }
 
     // ---------- suara ----------
