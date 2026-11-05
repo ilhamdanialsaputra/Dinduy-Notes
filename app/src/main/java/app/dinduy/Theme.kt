@@ -40,6 +40,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontLoadingStrategy
+import androidx.compose.ui.text.googlefonts.GoogleFont
+import androidx.compose.ui.text.googlefonts.Font as GFont
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -54,10 +57,27 @@ val EmphDecel = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
 /** Emphasized accelerate: dipakai saat sesuatu meninggalkan layar (sheet turun). */
 val EmphAccel = CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)
 
-// ---------- jenis huruf ----------
+// ---------- jenis huruf (def / flex / times / reenie) ----------
 // Berkas font TIDAK ada di repository: Gradle mengunduhnya ke assets/fonts saat build (lihat app/build.gradle.kts).
 // Kalau berkasnya belum ada (unduhan gagal), otomatis jatuh ke font sistem supaya aplikasi tidak crash.
 val LocalFF = compositionLocalOf<FontFamily> { FontFamily.Default }
+
+// Reenie Beanie: font Google Fonts yang diunduh lewat Google Play services saat dibutuhkan (androidx.compose.ui:ui-text-google-fonts),
+// jadi tidak ada berkas fontnya di repository maupun di assets. Sertifikat penyedia ada di res/values/font_certs.xml.
+// Selama belum selesai diunduh (atau tanpa Play services / internet) teks memakai font sistem, tanpa crash.
+@OptIn(ExperimentalTextApi::class)
+private val GoogleProvider by lazy {
+    GoogleFont.Provider(
+        providerAuthority = "com.google.android.gms.fonts",
+        providerPackage = "com.google.android.gms",
+        certificates = R.array.com_google_android_gms_fonts_certs
+    )
+}
+
+@OptIn(ExperimentalTextApi::class)
+private val ReenieFamily: FontFamily by lazy {
+    FontFamily(GFont(GoogleFont("Reenie Beanie"), GoogleProvider, FontWeight.Normal, FontStyle.Normal, FontLoadingStrategy.Async))
+}
 
 @OptIn(ExperimentalTextApi::class)
 fun loadFont(am: AssetManager, id: String): FontFamily {
@@ -76,6 +96,7 @@ fun loadFont(am: AssetManager, id: String): FontFamily {
                 Font("fonts/tinos_italic.ttf", am, FontWeight.Normal, FontStyle.Italic),
                 Font("fonts/tinos_bolditalic.ttf", am, FontWeight.Bold, FontStyle.Italic)
             ) else FontFamily.Serif
+            "reenie" -> ReenieFamily
             else -> FontFamily.Default
         }
     } catch (e: Exception) {
