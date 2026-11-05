@@ -121,6 +121,7 @@ sealed class Scr {
     class NoteMenu(val id: String) : Scr()     // halaman titik tiga di editor
     class NoteLabels(val id: String) : Scr()   // halaman label untuk satu catatan
     class PdfExport(val id: String) : Scr()    // halaman Ekspor PDF dari menu titik tiga
+    class Cover(val id: String) : Scr()        // halaman sampul catatan (pilih & pangkas)
     object Models : Scr()                      // unduh model transkripsi
 }
 
@@ -367,7 +368,7 @@ fun noteBlank(vm: AppVM): Boolean {
     val n = vm.note(ed.noteId)
     return ed.title.isBlank() && plainOf(ed.blocks).isEmpty() &&
         ed.blocks.none { it.isObj && it.ty != "hr" } && ed.blocks.none { it.ik.isNotEmpty() } &&
-        (n == null || (n.au.isEmpty() && n.rm == 0L))
+        (n == null || (n.au.isEmpty() && n.rm == 0L && n.cv.isEmpty()))
 }
 
 /** Selisih posisi awal morph terhadap kartu tujuan; mengecil linear mengikuti progres menutup (tanpa pengejaran ekstra). */
@@ -497,6 +498,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
     MaterialTheme(colorScheme = cs) {
         CompositionLocalProvider(
             LocalFF provides ff,
+            LocalVM provides vm,
             LocalPal provides pal,
             LocalContentColor provides pal.os,
             LocalTextSelectionColors provides TextSelectionColors(handleColor = pal.p, backgroundColor = pal.pc)
@@ -510,15 +512,16 @@ fun AppRoot(vm: AppVM, act: Actions) {
             // catatan tetap "terbuka" selama halaman titik tiga / label ada di atasnya
             val modelsOnNote = top is Scr.Models && nav.stack.any { it is Scr.Note }
             val modelsOnSettings = top is Scr.Models && !modelsOnNote
-            val inNote = isNote || top is Scr.NoteMenu || top is Scr.NoteLabels || top is Scr.PdfExport || modelsOnNote
+            val inNote = isNote || top is Scr.NoteMenu || top is Scr.NoteLabels || top is Scr.PdfExport || top is Scr.Cover || modelsOnNote
             val reading = vm.ed?.reading == true && isNote
             val imgSel = vm.ed?.selImg != null && isNote
             val selE = vm.ed?.selEdit == true && isNote
             val finding = vm.ed?.findOn == true && isNote
-            val pageIds = remember { arrayOfNulls<String>(3) }
+            val pageIds = remember { arrayOfNulls<String>(4) }
             (top as? Scr.NoteMenu)?.let { pageIds[0] = it.id }
             (top as? Scr.NoteLabels)?.let { pageIds[1] = it.id }
             (top as? Scr.PdfExport)?.let { pageIds[2] = it.id }
+            (top as? Scr.Cover)?.let { pageIds[3] = it.id }
 
             BackHandler(enabled = nav.stack.size > 1 || drawer.isOpen || vm.addOn || vm.sel.isNotEmpty() || vm.searchOn || (isHome && (vm.filter != null || vm.remFilter)) || reading || imgSel || selE || finding) {
                 when {
@@ -578,7 +581,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
                         SettingsScreen(vm, act, onBack = { nav.pop() })
                     }
                     AddScrim(vm)
-                    NoteLayer(vm, on = inNote, morph = vm.morph, under = top is Scr.NoteMenu || top is Scr.NoteLabels || top is Scr.PdfExport || modelsOnNote) {
+                    NoteLayer(vm, on = inNote, morph = vm.morph, under = top is Scr.NoteMenu || top is Scr.NoteLabels || top is Scr.PdfExport || top is Scr.Cover || modelsOnNote) {
                         val id = nav.noteId
                         if (id != null) {
                             val sc = rememberCoroutineScope()
@@ -593,7 +596,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     }
 
                     // halaman titik tiga & label: satu halaman penuh bergaya Pengaturan, di atas editor
-                    ViewLayer(on = top is Scr.NoteMenu, under = top is Scr.NoteLabels || top is Scr.PdfExport) {
+                    ViewLayer(on = top is Scr.NoteMenu, under = top is Scr.NoteLabels || top is Scr.PdfExport || top is Scr.Cover) {
                         pageIds[0]?.let { NoteMenuPage(vm, nav, act, it) }
                     }
                     ViewLayer(on = top is Scr.NoteLabels, under = false) {
@@ -601,6 +604,9 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     }
                     ViewLayer(on = top is Scr.PdfExport, under = false) {
                         pageIds[2]?.let { PdfExportPage(vm, nav, act, it) }
+                    }
+                    ViewLayer(on = top is Scr.Cover, under = false) {
+                        pageIds[3]?.let { CoverPage(vm, nav, act, it) }
                     }
                     // halaman transkripsi: digambar PALING ATAS (di atas editor), kalau tidak tersembunyi di balik lapisan catatan
                     ViewLayer(on = top is Scr.Models, under = false) {
@@ -645,6 +651,22 @@ class MainActivity : ComponentActivity(), Actions {
         lifecycleScope.launch {
             val img = vm.importImage(uri)
             if (img == null) vm.show("Gambar gagal dimuat") else vm.ed?.replaceImg(img)
+        }
+    }
+
+    // sampul catatan: satu gambar dari galeri; langsung dipasang lalu halaman pangkas dibuka
+    private var coverFor: String? = null
+    private val coverPicker = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        val id = coverFor
+        coverFor = null
+        if (uri == null || id == null) return@registerForActivityResult
+        lifecycleScope.launch {
+            val img = vm.importImage(uri)
+            if (img == null) vm.show("Gambar gagal dimuat") else {
+                vm.setCover(id, img.id)
+                val t = vm.nav.top
+                if (!(t is Scr.Cover && t.id == id)) vm.nav.push(Scr.Cover(id))
+            }
         }
     }
 
@@ -895,6 +917,11 @@ class MainActivity : ComponentActivity(), Actions {
                 vm.show("Kamera tidak bisa dibuka")
             }
         }
+    }
+
+    override fun pickCover(id: String) {
+        coverFor = id
+        coverPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
     }
 
     override fun replaceImage() {
