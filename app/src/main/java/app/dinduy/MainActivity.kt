@@ -458,7 +458,7 @@ fun SnackHost(vm: AppVM, bottom: Dp, aboveKeyboard: Boolean) {
                         Box(
                             Modifier.clip(RoundedCornerShape(18.dp)).clickable { vm.snack = null; s.undo.invoke() }
                                 .padding(horizontal = 16.dp, vertical = 12.dp)
-                        ) { T("Urungkan", 15f, 900, pal.pc) }
+                        ) { T("Undo", 15f, 900, pal.pc) }
                     }
                 }
             }
@@ -579,13 +579,13 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     }
                     ViewLayer(on = top is Scr.Archive || (inNote && nav.stack.any { it is Scr.Archive }), under = false) {
                         ListScreen(
-                            vm, "Arsip", vm.archived(), "Catatan yang diarsipkan tidak muncul di beranda.", "Arsip kosong", false,
+                            vm, "Archive", vm.archived(), "Archived notes don't show on the home screen.", "Archive is empty", false,
                             onBack = { nav.pop() }, onClick = { vm.sheet = Sheet.Arc(it.id) }
                         )
                     }
                     ViewLayer(on = top is Scr.Trash, under = false) {
                         ListScreen(
-                            vm, "Baru saja dihapus", vm.trashed(), "Catatan di sini dihapus otomatis setelah 30 hari.", "Sampah kosong", true,
+                            vm, "Trash", vm.trashed(), "Notes here are deleted after 30 days.", "Trash is empty", true,
                             onBack = { nav.pop() }, onClick = { vm.sheet = Sheet.Trs(it.id) },
                             onClear = { vm.sheet = Sheet.EmptyTrash }
                         )
@@ -678,7 +678,7 @@ class MainActivity : ComponentActivity(), Actions {
     private inline fun openPicker(f: () -> Unit) {
         try { f() } catch (e: Throwable) {
             setPick(null)
-            vm.show("Galeri tidak bisa dibuka (" + e.javaClass.simpleName + ")")
+            vm.show("Can't open the gallery (" + e.javaClass.simpleName + ")")
         }
     }
 
@@ -696,7 +696,7 @@ class MainActivity : ComponentActivity(), Actions {
         }
         val ok = if (rep != null) vm.replaceImgData(noteId, rep.first, rep.second, imgs[0])
         else if (vm.note(noteId) != null) { vm.appendImages(noteId, imgs); true } else false
-        if (!ok) { vm.show("Catatan tidak ditemukan, gambar tidak dipasang"); return }
+        if (!ok) { vm.show("Note not found, so the image wasn't added"); return }
         ensureNote(noteId)
     }
 
@@ -708,8 +708,8 @@ class MainActivity : ComponentActivity(), Actions {
         lifecycleScope.launch {
             val imgs = uris.mapNotNull { vm.importImage(it) }
             when {
-                imgs.isEmpty() -> vm.show(importFailMsg("Gambar gagal dimuat"))
-                nid == null -> vm.show("Catatan tidak ditemukan, gambar tidak disisipkan")
+                imgs.isEmpty() -> vm.show(importFailMsg("Couldn't load the image"))
+                nid == null -> vm.show("Note not found, so the image wasn't inserted")
                 else -> deliver(nid, imgs, null)
             }
         }
@@ -723,7 +723,7 @@ class MainActivity : ComponentActivity(), Actions {
         }
         lifecycleScope.launch {
             val img = vm.importImage(uri)
-            if (img == null) vm.show(importFailMsg("Gambar gagal dimuat")) else deliver(t.noteId, listOf(img), t.bid to t.ix)
+            if (img == null) vm.show(importFailMsg("Couldn't load the image")) else deliver(t.noteId, listOf(img), t.bid to t.ix)
         }
     }
 
@@ -737,8 +737,8 @@ class MainActivity : ComponentActivity(), Actions {
         lifecycleScope.launch {
             val img = vm.importImage(uri)
             when {
-                img == null -> vm.show(importFailMsg("Gambar gagal dimuat"))
-                vm.note(id) == null -> vm.show("Catatan tidak ditemukan, sampul tidak dipasang")
+                img == null -> vm.show(importFailMsg("Couldn't load the image"))
+                vm.note(id) == null -> vm.show("Note not found, so the cover wasn't set")
                 else -> {
                     vm.setCover(id, img.id)
                     ensureNote(id)
@@ -754,7 +754,7 @@ class MainActivity : ComponentActivity(), Actions {
     private val camPerm = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         val cb = camCb
         camCb = null
-        if (ok) cb?.invoke() else vm.show("Izin kamera ditolak, foto tidak bisa diambil")
+        if (ok) cb?.invoke() else vm.show("Camera permission denied. Can't take a photo.")
     }
     private var camFile: File? = null
     private var camRepl = false
@@ -776,8 +776,8 @@ class MainActivity : ComponentActivity(), Actions {
             withContext(Dispatchers.IO) { f.delete() }
             val ed = vm.ed
             when {
-                img == null -> vm.show("Foto gagal dimuat")
-                ed == null -> vm.show("Catatan tidak terbuka, foto tidak disisipkan")
+                img == null -> vm.show("Couldn't load the photo")
+                ed == null -> vm.show("No note is open, so the photo wasn't added")
                 repl -> ed.replaceImg(img)
                 else -> ed.addImages(listOf(img))
             }
@@ -787,7 +787,7 @@ class MainActivity : ComponentActivity(), Actions {
         if (uris.isNotEmpty()) lifecycleScope.launch {
             val ns = vm.importMd(uris)
             if (ns.size == 1) vm.nav.openNote(ns[0].id, null)
-            else vm.show(if (ns.isEmpty()) "Tidak ada berkas yang bisa dibaca" else "${ns.size} catatan diimpor")
+            else vm.show(if (ns.isEmpty()) "No readable files" else "Imported ${cnt(ns.size, "note")}")
         }
     }
     private val bkSaver = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
@@ -798,19 +798,19 @@ class MainActivity : ComponentActivity(), Actions {
                     true
                 } catch (e: Exception) { false }
             }
-            if (ok) { vm.markBackedUp(); vm.show("Cadangan tersimpan") } else vm.show("Gagal menyimpan cadangan")
+            if (ok) { vm.markBackedUp(); vm.show("Backup saved") } else vm.show("Couldn't save the backup")
         }
     }
     private val bkOpener = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) lifecycleScope.launch {
-            if (vm.stageBackup(uri)) vm.sheet = Sheet.Bk else vm.show("Berkas bukan cadangan Dinduy yang valid")
+            if (vm.stageBackup(uri)) vm.sheet = Sheet.Bk else vm.show("This isn't a valid Dinduy backup")
         }
     }
     private var micCb: (() -> Unit)? = null
     private val micPerm = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         val cb = micCb
         micCb = null
-        if (ok) cb?.invoke() else vm.show("Izin mikrofon ditolak, suara tidak bisa direkam")
+        if (ok) cb?.invoke() else vm.show("Microphone permission denied. Can't record.")
     }
     private var pendingAud: Aud? = null
     private val audSaver = registerForActivityResult(ActivityResultContracts.CreateDocument("audio/mp4")) { uri ->
@@ -824,19 +824,19 @@ class MainActivity : ComponentActivity(), Actions {
                     true
                 } catch (e: Exception) { false }
             }
-            vm.show(if (ok) "Suara tersimpan" else "Gagal menyimpan suara")
+            vm.show(if (ok) "Audio saved" else "Couldn't save the audio")
         }
     }
     private val notifPerm = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         vm.permTick++
-        if (!ok) vm.show("Izin notifikasi ditolak, pengingat tidak akan muncul")
+        if (!ok) vm.show("Notification permission denied. Reminders won't show.")
     }
     private val mdSaver = registerForActivityResult(ActivityResultContracts.CreateDocument("text/markdown")) { uri ->
         if (uri != null) {
             try {
                 contentResolver.openOutputStream(uri)?.use { it.write(pendingMd.toByteArray(Charsets.UTF_8)) }
-                vm.show("Berkas tersimpan")
-            } catch (e: Exception) { vm.show("Gagal menyimpan berkas") }
+                vm.show("File saved")
+            } catch (e: Exception) { vm.show("Couldn't save the file") }
         }
     }
 
@@ -850,7 +850,7 @@ class MainActivity : ComponentActivity(), Actions {
                         true
                     } catch (e: Exception) { false }
                 }
-                vm.show(if (ok) "PDF tersimpan" else "Gagal menyimpan PDF")
+                vm.show(if (ok) "PDF saved" else "Couldn't save the PDF")
             }
         }
     }
@@ -950,7 +950,7 @@ class MainActivity : ComponentActivity(), Actions {
         val asked = sp.getBoolean("mp", false)
         if (asked && !shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)) {
             // ditolak permanen: arahkan ke Pengaturan aplikasi
-            vm.show("Izin mikrofon dimatikan. Aktifkan lewat Pengaturan aplikasi.")
+            vm.show("Microphone permission is off. Turn it on in app settings.")
             try {
                 startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
             } catch (e: Exception) { }
@@ -970,7 +970,7 @@ class MainActivity : ComponentActivity(), Actions {
         val asked = sp.getBoolean("cp", false)
         if (asked && !shouldShowRequestPermissionRationale(Manifest.permission.CAMERA)) {
             // ditolak permanen: arahkan ke Pengaturan aplikasi
-            vm.show("Izin kamera dimatikan. Aktifkan lewat Pengaturan aplikasi.")
+            vm.show("Camera permission is off. Turn it on in app settings.")
             try {
                 startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
             } catch (e: Exception) { }
@@ -993,7 +993,7 @@ class MainActivity : ComponentActivity(), Actions {
                 camShot.launch(uri)
             } catch (e: Exception) {
                 camFile = null
-                vm.show("Kamera tidak bisa dibuka")
+                vm.show("Can't open the camera")
             }
         }
     }
@@ -1039,7 +1039,7 @@ class MainActivity : ComponentActivity(), Actions {
                 putExtra(Intent.EXTRA_STREAM, uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            startActivity(Intent.createChooser(i, "Bagikan cadangan"))
+            startActivity(Intent.createChooser(i, "Share backup"))
         }
     }
 
@@ -1064,7 +1064,7 @@ class MainActivity : ComponentActivity(), Actions {
                 putExtra(Intent.EXTRA_SUBJECT, name.removeSuffix(".md"))
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            startActivity(Intent.createChooser(i, "Bagikan catatan"))
+            startActivity(Intent.createChooser(i, "Share note"))
         }
     }
 
@@ -1088,7 +1088,7 @@ class MainActivity : ComponentActivity(), Actions {
                 putExtra(Intent.EXTRA_SUBJECT, name.removeSuffix(".pdf"))
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            startActivity(Intent.createChooser(i, "Bagikan PDF"))
+            startActivity(Intent.createChooser(i, "Share PDF"))
         }
     }
 
