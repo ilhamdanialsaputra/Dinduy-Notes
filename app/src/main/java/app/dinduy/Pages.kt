@@ -227,7 +227,7 @@ fun AddNoteLayer(vm: AppVM, act: Actions) {
                     T("Add note", 26f, 1000, pal.os, stag(1).padding(start = 12.dp, end = 12.dp, bottom = 14.dp), ls = -.01f)
                     Box(stag(2)) { Opt(1, "txt", "Write a note", "Tap, or pull this card up") { openNew() } }
                     Box(stag(3)) {
-                        Opt(2, "up", "Import file", ".md or .txt files") {
+                        Opt(2, "up", "Import file", "PDF, .md, or .txt files. Pick as many as you like") {
                             if (!vm.addHand) { vm.addOn = false; act.importMd() }
                         }
                     }
