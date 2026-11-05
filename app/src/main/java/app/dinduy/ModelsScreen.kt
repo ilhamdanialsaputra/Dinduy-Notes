@@ -55,7 +55,7 @@ import androidx.compose.ui.unit.sp
 
 private fun mb(b: Long): String = String.format(java.util.Locale.US, "%.0f MB", b / 1048576.0)
 
-private val LANGS = listOf("" to "Otomatis", "id" to "Indonesia", "en" to "English")
+private val LANGS = listOf("" to "Auto", "id" to "Indonesian", "en" to "English")
 
 /** Kartu pilihan (satu terpilih), ditandai kotak centang yang berubah bentuk. */
 @Composable
@@ -108,7 +108,7 @@ private fun StatusBanner(state: Int, msg: String) {
     }
 }
 
-/** Halaman "Transkripsi suara": sesederhana mungkin. Pilih cara, siapkan, selesai. */
+/** Halaman "Voice transcription": sesederhana mungkin. Pilih cara, siapkan, selesai. */
 @Composable
 fun ModelsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
     val pal = LocalPal.current
@@ -144,40 +144,40 @@ fun ModelsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
     val grOn = vm.pr.eng != "off"
     val linked = vm.gqSet && !changing
 
-    PageScaffold("Transkripsi suara", "Ubah suara jadi teks", onBack) {
-        SGroup("Pilih cara", 0) {
+    PageScaffold("Voice transcription", "Turn speech into text", onBack) {
+        SGroup("Choose a method", 0) {
             EngineCard(
-                POS_TOP, grOn, "mic", "Online (Groq)", "Disarankan",
-                "Cepat dan paling akurat",
-                if (vm.gqSet) "Siap dipakai" else "Perlu kunci Groq"
+                POS_TOP, grOn, "mic", "Online (Groq)", "Recommended",
+                "Fast and most accurate",
+                if (vm.gqSet) "Ready" else "Needs a Groq key"
             ) { vm.setPr(vm.pr.copy(eng = "groq")) }
             EngineCard(
-                POS_BOT, !grOn, "phone", "Tanpa internet", null,
-                "Berjalan di HP, lebih lambat",
-                if (offReady) "Siap dipakai" else "Perlu unduh model"
+                POS_BOT, !grOn, "phone", "No internet needed", null,
+                "Runs on your phone, slower",
+                if (offReady) "Ready" else "Needs a model download"
             ) { vm.setPr(vm.pr.copy(eng = "off")) }
         }
 
         AnimatedVisibility(visible = grOn, enter = enter, exit = exit) {
-            SGroup("Akun Groq", 0) {
+            SGroup("Groq account", 0) {
                 SCard(if (linked) POS_ONE else POS_TOP) {
                     if (linked) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                             Box(Modifier.size(44.dp).clip(CircleShape).background(pal.tb2), Alignment.Center) { Ic("ok", pal.os, 24.dp) }
                             Column(Modifier.weight(1f)) {
-                                T("Terhubung", 17f, 600, pal.os)
-                                T("Kunci " + vm.gqHint, 14f, 400, pal.osv)
+                                T("Connected", 17f, 600, pal.os)
+                                T("Key " + vm.gqHint, 14f, 400, pal.osv)
                             }
                         }
                         Spacer(Modifier.height(14.dp))
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                            GBtn(0, "restore", "Tes", pal.tb2, pal.os, enabled = vm.gqState != 1, modifier = Modifier.weight(1f)) { vm.testSavedKey() }
-                            GBtn(1, "pen", "Ganti", pal.tb2, pal.os, modifier = Modifier.weight(1f)) { vm.gqState = 0; changing = true }
-                            GBtn(2, "del", "Hapus", pal.ec, pal.oec, modifier = Modifier.weight(1f)) { vm.removeGroqKey() }
+                            GBtn(0, "restore", "Test", pal.tb2, pal.os, enabled = vm.gqState != 1, modifier = Modifier.weight(1f)) { vm.testSavedKey() }
+                            GBtn(1, "pen", "Replace", pal.tb2, pal.os, modifier = Modifier.weight(1f)) { vm.gqState = 0; changing = true }
+                            GBtn(2, "del", "Remove", pal.ec, pal.oec, modifier = Modifier.weight(1f)) { vm.removeGroqKey() }
                         }
                     } else {
-                        T("Tempel kunci dari Groq", 17f, 600, pal.os)
-                        T("Gratis dan hanya perlu dibuat sekali.", 14f, 400, pal.osv, Modifier.padding(top = 2.dp, bottom = 12.dp))
+                        T("Paste your Groq key", 17f, 600, pal.os)
+                        T("Free, and you only need to make it once.", 14f, 400, pal.osv, Modifier.padding(top = 2.dp, bottom = 12.dp))
                         Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(pal.tb2).padding(horizontal = 16.dp, vertical = 14.dp)) {
                             if (keyText.isEmpty()) T("gsk_…", 16f, 400, pal.osv)
                             BasicTextField(
@@ -195,14 +195,14 @@ fun ModelsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                         Spacer(Modifier.height(10.dp))
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                             if (vm.gqSet) {
-                                GBtn(0, "x", "Batal", pal.tb2, pal.os, modifier = Modifier.weight(1f)) { keyText = ""; changing = false; vm.gqState = 0 }
+                                GBtn(0, "x", "Cancel", pal.tb2, pal.os, modifier = Modifier.weight(1f)) { keyText = ""; changing = false; vm.gqState = 0 }
                             } else {
-                                GBtn(0, "up", "Buka Groq", pal.sc, pal.osc, modifier = Modifier.weight(1f)) {
-                                    try { uri.openUri("https://console.groq.com/keys") } catch (e: Exception) { vm.show("Tidak ada peramban untuk membuka tautan") }
+                                GBtn(0, "up", "Open Groq", pal.sc, pal.osc, modifier = Modifier.weight(1f)) {
+                                    try { uri.openUri("https://console.groq.com/keys") } catch (e: Exception) { vm.show("No browser found to open the link") }
                                 }
                             }
                             GBtn(
-                                2, "ok", "Simpan", pal.p, pal.op,
+                                2, "ok", "Save", pal.p, pal.op,
                                 enabled = keyText.isNotBlank() && vm.gqState != 1, modifier = Modifier.weight(1f)
                             ) {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -218,15 +218,15 @@ fun ModelsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                 if (!linked) {
                     SCard(POS_BOT, onClick = { howOpen = !howOpen }) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            T("Cara mendapatkan kunci", 16f, 600, pal.os, Modifier.weight(1f))
+                            T("How to get a key", 16f, 600, pal.os, Modifier.weight(1f))
                             Ic(if (howOpen) "hide" else "chr", pal.osv, 24.dp)
                         }
                         if (howOpen) {
-                            Step(1, "Ketuk Buka Groq, lalu masuk dengan Google.")
-                            Step(2, "Pilih Create API Key, lalu salin kuncinya.")
-                            Step(3, "Kembali ke sini, tempel, dan ketuk Simpan.")
+                            Step(1, "Tap Open Groq, then sign in with Google.")
+                            Step(2, "Choose Create API Key, then copy the key.")
+                            Step(3, "Come back here, paste it, and tap Save.")
                             T(
-                                "Kunci disimpan terenkripsi di HP ini dan hanya dipakai untuk menghubungi Groq.",
+                                "The key is stored encrypted on this phone and only used to contact Groq.",
                                 13f, 400, pal.osv, Modifier.padding(top = 12.dp), lh = 1.4f
                             )
                         }
@@ -236,7 +236,7 @@ fun ModelsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
         }
 
         AnimatedVisibility(visible = !grOn, enter = enter, exit = exit) {
-            SGroup("Model di HP", 0) {
+            SGroup("Models on your phone", 0) {
                 val list = vm.models.list
                 list.forEachIndexed { i, m ->
                     val pos = if (i == list.size - 1) POS_BOT else if (i == 0) POS_TOP else POS_MID
@@ -250,12 +250,12 @@ fun ModelsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                             }
                             if (m.status == 2) {
                                 Box(Modifier.clip(RoundedCornerShape(12.dp)).background(pal.pc).padding(horizontal = 12.dp, vertical = 6.dp)) {
-                                    T(if (active) "Dipakai" else "Siap", 13f, 700, pal.opc, maxLines = 1)
+                                    T(if (active) "In use" else "Ready", 13f, 700, pal.opc, maxLines = 1)
                                 }
                             }
                         }
                         T(
-                            if (info.key == "small") "Lebih teliti, tapi lebih lambat." else "Cepat dan cukup untuk kebanyakan catatan.",
+                            if (info.key == "small") "More accurate, but slower." else "Fast and good enough for most notes.",
                             14f, 400, pal.osv, Modifier.padding(top = 6.dp), lh = 1.4f
                         )
                         if (m.status == 1 || (m.status == 0 && m.got > 0L)) {
@@ -263,33 +263,33 @@ fun ModelsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                             Spacer(Modifier.height(10.dp))
                             WavyBar(progress = { if (m.total > 0L) (m.got.toFloat() / m.total).coerceIn(0f, 1f) else 0f }, playing = m.status == 1)
                             T(
-                                (if (m.status == 1) "Mengunduh " else "Terjeda ") + (frac * 100f).toInt() + "%",
+                                (if (m.status == 1) "Downloading " else "Paused ") + (frac * 100f).toInt() + "%",
                                 13f, 600, pal.osv, Modifier.padding(top = 2.dp)
                             )
                             if (m.status == 1) {
-                                T("Aman ditinggal. Unduhan tetap jalan di latar belakang.", 13f, 400, pal.osv, Modifier.padding(top = 2.dp), lh = 1.4f)
+                                T("Safe to leave. The download keeps running in the background.", 13f, 400, pal.osv, Modifier.padding(top = 2.dp), lh = 1.4f)
                             }
                         }
                         if (m.err != null && m.status == 0) {
-                            T("Unduhan terhenti. Ketuk Lanjutkan untuk mencoba lagi.", 13f, 500, pal.oec, Modifier.padding(top = 8.dp), lh = 1.3f)
+                            T("Download stopped. Tap Resume to try again.", 13f, 500, pal.oec, Modifier.padding(top = 8.dp), lh = 1.3f)
                         }
                         Spacer(Modifier.height(14.dp))
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                             when (m.status) {
                                 0 -> {
-                                    GBtn(if (m.got > 0L) 0 else 3, "dl", if (m.got > 0L) "Lanjutkan" else "Unduh", pal.p, pal.op, modifier = Modifier.weight(1f)) {
+                                    GBtn(if (m.got > 0L) 0 else 3, "dl", if (m.got > 0L) "Resume" else "Download", pal.p, pal.op, modifier = Modifier.weight(1f)) {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         askNotifOnce()
                                         vm.models.start(m)
                                     }
                                     if (m.got > 0L) GBtn(2, "del", null, pal.ec, pal.oec) { vm.models.delete(m) }
                                 }
-                                1 -> GBtn(3, "x", "Batal", pal.tb2, pal.os, modifier = Modifier.fillMaxWidth()) {
+                                1 -> GBtn(3, "x", "Cancel", pal.tb2, pal.os, modifier = Modifier.fillMaxWidth()) {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     vm.models.cancel(m)
                                 }
                                 else -> {
-                                    GBtn(0, "ok", if (active) "Sedang dipakai" else "Pakai", if (active) pal.tb2 else pal.p, if (active) pal.os else pal.op, enabled = !active, modifier = Modifier.weight(1f)) {
+                                    GBtn(0, "ok", if (active) "In use" else "Use", if (active) pal.tb2 else pal.p, if (active) pal.os else pal.op, enabled = !active, modifier = Modifier.weight(1f)) {
                                         vm.setPr(vm.pr.copy(wm = info.key, eng = "off"))
                                     }
                                     GBtn(2, "del", null, pal.ec, pal.oec) { vm.models.delete(m) }
@@ -301,20 +301,20 @@ fun ModelsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
             }
         }
 
-        SGroup("Hasil", 120) {
+        SGroup("Result", 120) {
             SCard(if (grOn) POS_TOP else POS_ONE) {
-                T("Bahasa ucapan", 16f, 500, pal.os, Modifier.padding(bottom = 12.dp))
+                T("Spoken language", 16f, 500, pal.os, Modifier.padding(bottom = 12.dp))
                 SegPill(3, LANGS.indexOfFirst { it.first == vm.pr.gl }.coerceAtLeast(0), { vm.setPr(vm.pr.copy(gl = LANGS[it].first)) }) { i, fg ->
                     T(LANGS[i].second, 15f, 500, fg)
                 }
-                T("Pilih bahasa yang kamu pakai supaya hasilnya lebih tepat.", 13f, 400, pal.osv, Modifier.padding(top = 10.dp), lh = 1.4f)
+                T("Pick the language you speak for better results.", 13f, 400, pal.osv, Modifier.padding(top = 10.dp), lh = 1.4f)
             }
             AnimatedVisibility(visible = grOn, enter = enter, exit = exit) {
                 SCard(POS_BOT, onClick = { vm.setPr(vm.pr.copy(gf = !vm.pr.gf)) }) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                         Column(Modifier.weight(1f)) {
-                            T("Rapikan otomatis", 16f, 500, pal.os)
-                            T("Tanda baca, huruf tebal dan miring. Kata-katamu tidak diubah.", 13f, 400, pal.osv, lh = 1.4f)
+                            T("Auto format", 16f, 500, pal.os)
+                            T("Punctuation, bold and italics. Your words stay the same.", 13f, 400, pal.osv, lh = 1.4f)
                         }
                         MorphSwitch(vm.pr.gf)
                     }
