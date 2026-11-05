@@ -135,17 +135,18 @@ fun EditorCover(vm: AppVM, d: Note, scroll: () -> Int) {
                 val e = cSmooth(vm.openP.value)
                 drawRect(
                     Brush.verticalGradient(
-                        colorStops = arrayOf(
-                            0f to (if (pal.dark) pal.s.copy(alpha = .5f * e) else clear),
+                        colorStops = if (pal.dark) arrayOf(
+                            0f to pal.s.copy(alpha = .5f * e),
                             .28f to clear,
-                            (if (pal.dark) .42f else .30f) to (if (pal.dark) clear else pal.s.copy(alpha = 0f)),
-                            // terang: kurva halus (ease) yang mulai lebih tinggi, jadi peralihan ke kertas tidak terasa bertahap kasar
-                            (if (pal.dark) .75f else .46f) to pal.s.copy(alpha = (if (pal.dark) .6f else .05f) * e),
-                            (if (pal.dark) .88f else .62f) to pal.s.copy(alpha = (if (pal.dark) .85f else .20f) * e),
-                            (if (pal.dark) .95f else .80f) to pal.s.copy(alpha = (if (pal.dark) .95f else .50f) * e),
-                            (if (pal.dark) 1f else .92f) to pal.s.copy(alpha = (if (pal.dark) 1f else .82f) * e),
+                            .42f to clear,
                             1f to pal.s.copy(alpha = e)
-                        )
+                        ) else Array(16) { i ->
+                            // terang: kurva smootherstep (awal dan akhirnya sangat landai) dari 18% sampai tepi bawah:
+                            // foto larut ke kertas tanpa tepi tegas, tanpa pita kabut di tengah
+                            val u = i / 15f
+                            val a = u * u * u * (u * (u * 6f - 15f) + 10f)
+                            (.18f + .82f * u) to pal.s.copy(alpha = a * e)
+                        }
                     )
                 )
             }
