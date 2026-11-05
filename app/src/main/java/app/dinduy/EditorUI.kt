@@ -134,6 +134,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -1577,7 +1578,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
         // pil pencarian tumbuh dari tombol titik tiga ke kiri dan menguncup kembali ke sana; tombol kembali satu-satunya
         // dan tidak pernah memudar, jadi tidak ada kedipan saat bilah berganti
         val fa by animateFloatAsState(if (ed.findOn) 1f else 0f, spring(.9f, 380f), label = "fa")
-        Box(Modifier.fillMaxWidth().background(pal.s).windowInsetsPadding(WindowInsets.statusBars)) {
+        Box(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.statusBars)) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -1714,7 +1715,14 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
         }.collect { (d, _) -> if (d != 0f) ed.csApplied(d, scroll.dispatchRawDelta(d)) }
     }
 
-    Column(Modifier.fillMaxSize().background(pal.s)) {
+    // sampul: lapisan di belakang bilah atas, ikut tergulir; judul turun supaya menimpa bagian bawah banner
+    val coverNote = vm.note(ed.noteId)?.takeIf { it.cv.isNotEmpty() }
+    val sat = satDp()
+    val coverInset = if (coverNote == null) 0.dp
+    else (LocalConfiguration.current.screenWidthDp.dp / EDIT_RATIO - sat - 64.dp - 72.dp - 48.dp).coerceAtLeast(0.dp)
+    Box(Modifier.fillMaxSize().background(pal.s)) {
+    if (coverNote != null) EditorCover(vm, coverNote) { scroll.value }
+    Column(Modifier.fillMaxSize()) {
         TopBar()
         // area catatan berhenti tepat di atas keyboard / navbar; kapsul melayang di atasnya tanpa latar
         Box(
@@ -1775,7 +1783,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                                 }
                             }
                         }
-                        Box(Modifier.padding(top = 48.dp, bottom = 20.dp)) {
+                        Box(Modifier.padding(top = 48.dp + coverInset, bottom = 20.dp)) {
                             if (ed.title.isEmpty()) {
                                 T("Judul", 46f, 1000, pal.osv, alpha = .5f, ls = -.02f)
                             }
@@ -1870,6 +1878,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
             BottomBars(ed, vm, act, (!ed.reading || ed.selEdit) && !ed.titleFocus && !ed.findOn && !ed.ink.on, imeOpen) { kbBox[0] }
             InkBar(ed, vm)
         }
+    }
     }
 }
 
