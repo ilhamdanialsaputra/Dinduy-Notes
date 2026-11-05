@@ -1949,6 +1949,65 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         return sb.toString()
     }
 
+    /** Markdown yang terakhir disalin dari seleksi (dipakai supaya tempel di catatan ini memulihkan format aslinya). */
+    var lastMd: String = ""
+    private var lastMdBlocky = false
+
+    /** Isi seleksi sebagai Markdown (tebal, miring, judul, butir, kutipan, kode, tabel ikut terbawa). */
+    fun selMd(): String {
+        val segs = selSegs()
+        if (segs.isEmpty()) return ""
+        val od = ords(blocks)
+        val out = ArrayList<Blk>()
+        var i = 0
+        while (i < segs.size) {
+            val (k, s, e) = segs[i]
+            if (isCellKey(k)) {
+                val bid = keyBlock(k)
+                var j = i
+                while (j < segs.size && isCellKey(segs[j].first) && keyBlock(segs[j].first) == bid) j++
+                val grp = segs.subList(i, j)
+                val tb = blocks.firstOrNull { it.id == bid }
+                val total = tb?.tb?.sumOf { it.size } ?: -1
+                val full = tb != null && grp.size == total && grp.all { (ck, cs, ce) -> cs == 0 && ce >= rtOf(ck).t.length }
+                if (full && tb != null) out.add(tb)
+                else {
+                    val rows = ArrayList<String>()
+                    var prev: String? = null
+                    val cur = StringBuilder()
+                    for ((ck, cs, ce) in grp) {
+                        if (prev != null) {
+                            if (cellRC(ck).first == cellRC(prev).first) cur.append('\t') else { rows.add(cur.toString()); cur.setLength(0) }
+                        }
+                        cur.append(rtOf(ck).t.substring(cs, ce))
+                        prev = ck
+                    }
+                    rows.add(cur.toString())
+                    rows.forEach { out.add(Blk(ty = "p", r = Rt(it))) }
+                }
+                i = j
+                continue
+            }
+            val b = blockOfKey(k)
+            if (b != null) {
+                val rt = rtOf(k)
+                val part = rt.slice(s, e)
+                val whole = s <= 0 && e >= rt.t.length
+                val keep = b.isText && (segs.size > 1 || whole)
+                out.add(
+                    if (keep) b.copy(r = part, ik = emptyList(), st = if (b.ty == "li" && b.lt == "o" && out.isEmpty()) (od[b.id] ?: 1) else b.st)
+                    else Blk(ty = "p", r = part)
+                )
+            }
+            i++
+        }
+        val md = toMd(out).trimEnd('\n')
+        if (md.isBlank()) return selText()
+        lastMd = md
+        lastMdBlocky = out.size > 1 || out.firstOrNull()?.ty != "p"
+        return md
+    }
+
     private fun fmtTargets(kind: Int) = selSegs().filter { (k, s, e) ->
         e > s && blockOfKey(k)?.let { it.ty != "code" && !(it.ty == "h" && kind == K.B) } == true
     }
@@ -2002,23 +2061,27 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (s.isEmpty()) return
         val (lo, _) = selSpan() ?: return
         selDelete()
-        typeAt(lo.key, lo.off, s)
+        // teks yang ditempel = Markdown yang baru disalin dari catatan: pulihkan formatnya (blok maupun sebaris)
+        val mine = lastMd.isNotEmpty() && s.trimEnd('\n') == lastMd
+        if (mine && lastMdBlocky && !isCellKey(lo.key) && blockOfKey(lo.key)?.isMulti != true) paste(lo.key, lo.off, s)
+        else typeAt(lo.key, lo.off, s, mine)
     }
 
     /** Sisipkan teks s di posisi off (dipakai tempel dan mengetik di atas seleksi), lalu kursor di akhir teks itu. */
-    private fun typeAt(key: String, off: Int, s: String) {
+    private fun typeAt(key: String, off: Int, s: String, rich: Boolean = false) {
         val b = blockOfKey(key) ?: return
         if (s.indexOf('\n') >= 0 && !b.isMulti && !isCellKey(key)) {
             if (s == "\n") enter(key, off) else paste(key, off, s)
             return
         }
         val clean = if (isCellKey(key)) s.replace('\n', ' ') else s
+        val ins = if (rich && !b.isMulti && !isCellKey(key)) inl(clean) else Rt(clean)
         val rt = rtOf(key)
-        val nr = rt.slice(0, off) + Rt(clean) + rt.slice(off, rt.t.length)
+        val nr = rt.slice(0, off) + ins + rt.slice(off, rt.t.length)
         putRt(key, nr)
-        tf[key] = TextFieldValue(Z + nr.t, TextRange(off + clean.length + 1))
+        tf[key] = TextFieldValue(Z + nr.t, TextRange(off + ins.t.length + 1))
         dirty(); commit()
-        focusAt(key, off + clean.length)
+        focusAt(key, off + ins.t.length)
     }
 
     /** Ada seleksi di mode ketik lalu pengguna mengetik / menekan hapus: seleksi diganti ketikan itu, seperti editor biasa. */
