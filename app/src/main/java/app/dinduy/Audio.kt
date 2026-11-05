@@ -163,7 +163,7 @@ class Player(private val ctx: Context, private val scope: CoroutineScope) {
         stop()
         val f = AudioFiles.file(ctx, a.id)
         if (!f.exists()) {
-            onError("Berkas suara tidak ditemukan")
+            onError("Audio file not found")
             return false
         }
         val p = MediaPlayer()
@@ -178,7 +178,7 @@ class Player(private val ctx: Context, private val scope: CoroutineScope) {
             }
         } catch (e: Exception) {
             try { p.release() } catch (x: Exception) { }
-            onError("Suara tidak bisa diputar")
+            onError("Can't play this audio")
             return false
         }
         mp = p
@@ -201,7 +201,7 @@ class Player(private val ctx: Context, private val scope: CoroutineScope) {
             tick()
         } catch (e: Exception) {
             stop()
-            onError("Suara tidak bisa diputar")
+            onError("Can't play this audio")
         }
     }
 
@@ -316,10 +316,10 @@ object WavDecoder {
                 val mime = f.getString(MediaFormat.KEY_MIME) ?: ""
                 if (mime.startsWith("audio/")) { track = i; fmt = f; break }
             }
-            val format: MediaFormat = fmt ?: throw IOException("Tidak ada trek audio")
-            if (track < 0) throw IOException("Tidak ada trek audio")
+            val format: MediaFormat = fmt ?: throw IOException("No audio track")
+            if (track < 0) throw IOException("No audio track")
             ex.selectTrack(track)
-            val mime = format.getString(MediaFormat.KEY_MIME) ?: throw IOException("Format tidak dikenal")
+            val mime = format.getString(MediaFormat.KEY_MIME) ?: throw IOException("Unknown format")
             val dec = MediaCodec.createDecoderByType(mime)
             codec = dec
             dec.configure(format, null, null, 0)
@@ -394,7 +394,7 @@ object WavDecoder {
                 raf.seek(0)
                 raf.write(header(total))
             }
-            if (total <= 0L) throw IOException("Suara kosong")
+            if (total <= 0L) throw IOException("Audio is empty")
         } finally {
             try { codec?.stop() } catch (e: Exception) { }
             try { codec?.release() } catch (e: Exception) { }
@@ -425,8 +425,8 @@ class Models(
     private val onBusy: () -> Unit = { }
 ) {
     val list: List<MS> = listOf(
-        MInfo("base", "ggml-base.bin", "Base", "~142 MB", 147951465L, "Cepat dan hemat memori. Cocok untuk sebagian besar catatan suara."),
-        MInfo("small", "ggml-small.bin", "Small", "~466 MB", 487601967L, "Lebih akurat, tetapi lebih besar dan lebih lambat.")
+        MInfo("base", "ggml-base.bin", "Base", "~142 MB", 147951465L, "Fast and light on memory. Good for most voice notes."),
+        MInfo("small", "ggml-small.bin", "Small", "~466 MB", 487601967L, "More accurate, but larger and slower.")
     ).map { MS(it) }
 
     private val sp = ctx.getSharedPreferences("dinduy", 0)
@@ -492,8 +492,8 @@ class Models(
                 throw e
             } catch (e: Throwable) {
                 if (m.gen == g) {
-                    m.err = e.message ?: "Gagal mengunduh"
-                    onMsg("Unduhan gagal. Ketuk Lanjutkan untuk mencoba lagi.")
+                    m.err = e.message ?: "Download failed"
+                    onMsg("Download failed. Tap Resume to try again.")
                 }
             } finally {
                 if (m.gen == g && m.status == 1) {
@@ -544,7 +544,7 @@ class Models(
                 val loc = c.getHeaderField("Location")
                 c.disconnect()
                 hops++
-                if (loc == null || hops > 8) throw IOException("Pengalihan unduhan tidak valid")
+                if (loc == null || hops > 8) throw IOException("Invalid download redirect")
                 url = URL(URL(url), loc).toString()
                 continue
             }
@@ -564,7 +564,7 @@ class Models(
                 if (code == 416) {
                     part.delete()
                     if (retry) { retry = false; continue }
-                    throw IOException("Server menolak melanjutkan unduhan")
+                    throw IOException("Server refused to resume the download")
                 }
                 var total: Long
                 if (code == 206) {
@@ -574,10 +574,10 @@ class Models(
                     have = 0L
                     total = c.contentLengthLong
                 } else {
-                    throw IOException("Server membalas HTTP $code")
+                    throw IOException("Server replied HTTP $code")
                 }
                 if (total <= 0L) total = m.info.bytes
-                if (total < 30000000L) throw IOException("Ukuran berkas tidak wajar")
+                if (total < 30000000L) throw IOException("Unexpected file size")
                 m.total = total
                 m.got = have
                 var last = 0L
@@ -596,10 +596,10 @@ class Models(
                     }
                 }
                 m.got = have
-                if (part.length() != total) throw IOException("Unduhan belum lengkap")
+                if (part.length() != total) throw IOException("Download is incomplete")
                 val f = finalFile(m)
                 f.delete()
-                if (!part.renameTo(f)) throw IOException("Gagal menyimpan model")
+                if (!part.renameTo(f)) throw IOException("Couldn't save the model")
                 sp.edit().putLong("mdl_" + m.info.key, total).apply()
                 return@withContext
             } finally {
