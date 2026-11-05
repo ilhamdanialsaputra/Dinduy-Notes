@@ -262,7 +262,11 @@ data class Note(
     val rm: Long = 0L,                   // pengingat: waktu bunyi pertama (epoch ms), 0 = tanpa pengingat
     val rr: String = "",                 // ulangi pengingat: "" tidak / d harian / w mingguan / m bulanan / y tahunan
     val rd: Long = 0L,                   // waktu pengingat tidak-berulang yang sudah dibunyikan (supaya tidak dobel setelah HP menyala ulang)
-    val au: List<Aud> = emptyList()      // rekaman suara (ditampilkan di bawah catatan)
+    val au: List<Aud> = emptyList(),     // rekaman suara (ditampilkan di bawah catatan)
+    val cv: String = "",                 // sampul: id gambar (img/<id>.jpg), "" = tanpa sampul
+    val cx: Float = .5f,                 // sampul: titik fokus horizontal (0..1)
+    val cy: Float = .5f,                 // sampul: titik fokus vertikal (0..1)
+    val cz: Float = 1f                   // sampul: zoom (1..4)
 )
 
 @Serializable
