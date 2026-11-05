@@ -40,7 +40,7 @@ fun notePdfName(n: Note): String = noteFileName(n).removeSuffix(".md") + ".pdf"
  * seperti di editor (x = pecahan lebar, y = dp dari atas blok). Rekaman suara tidak ikut.
  *
  * Satuan: 1 pt halaman = 1 satuan kanvas. r = pt per dp (lebar konten PDF dibagi lebar konten editor), jadi bentuk catatan
- * sama dengan di layar. k = pengali ukuran huruf dari geser "Ukuran huruf"; coretan tidak ikut k.
+ * sama dengan di layar. k = pengali ukuran huruf dari geser "Text size"; coretan tidak ikut k.
  */
 object PdfExport {
     const val PW = 595
@@ -516,13 +516,13 @@ object PdfExport {
 
     // ------------------------------------------------------------------ kutipan
     private fun qst(k: String, p: Pal): QSt = when (k) {
-        "note" -> QSt(p.pc, p.opc, floatArrayOf(28f, 28f, 28f, 28f), "Catatan")
-        "tip" -> QSt(p.sc, p.osc, floatArrayOf(40f, 12f, 40f, 12f), "Tips")
-        "imp" -> QSt(p.p, p.op, floatArrayOf(12f, 40f, 12f, 40f), "Penting")
-        "warn" -> QSt(p.wc, p.owc, floatArrayOf(24f, 24f, 24f, 24f), "Peringatan", bar = true)
-        "cau" -> QSt(p.ec, p.oec, floatArrayOf(6f, 32f, 32f, 32f), "Awas")
-        "idea" -> QSt(p.ac, p.oac, floatArrayOf(44f, 44f, 12f, 44f), "Ide")
-        "def" -> QSt(Color.Transparent, p.os, floatArrayOf(32f, 32f, 32f, 32f), "Definisi", border = true)
+        "note" -> QSt(p.pc, p.opc, floatArrayOf(28f, 28f, 28f, 28f), "Note")
+        "tip" -> QSt(p.sc, p.osc, floatArrayOf(40f, 12f, 40f, 12f), "Tip")
+        "imp" -> QSt(p.p, p.op, floatArrayOf(12f, 40f, 12f, 40f), "Important")
+        "warn" -> QSt(p.wc, p.owc, floatArrayOf(24f, 24f, 24f, 24f), "Warning", bar = true)
+        "cau" -> QSt(p.ec, p.oec, floatArrayOf(6f, 32f, 32f, 32f), "Caution")
+        "idea" -> QSt(p.ac, p.oac, floatArrayOf(44f, 44f, 12f, 44f), "Idea")
+        "def" -> QSt(Color.Transparent, p.os, floatArrayOf(32f, 32f, 32f, 32f), "Definition", border = true)
         else -> QSt(p.tc, p.otc, floatArrayOf(28f, 28f, 28f, 8f), null)
     }
 
@@ -1051,7 +1051,7 @@ object PdfExport {
         val r = CW / widthDp.coerceAtLeast(120f)
         val fs = bodyPt.coerceIn(5f, 80f)
         val k = fs / (pr.fs * r)
-        val cx = Cx(imgDir, pal, fonts, CW, r, fs, pr.lh, r * k, CH, ords(note.bl))
+        val cx = Cx(imgDir, pal, fonts, CW, r, fs, LH, r * k, CH, ords(note.bl))
         val dir = File(app.cacheDir, "pdfx")
         dir.mkdirs()
         val out = File(dir, "p" + seq.incrementAndGet() + ".pdf")
