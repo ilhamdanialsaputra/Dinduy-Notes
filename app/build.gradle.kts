@@ -32,7 +32,7 @@ val fetchFonts by tasks.registering {
                 uri(url).toURL().openStream().use { i -> f.outputStream().use { o -> i.copyTo(o) } }
             } catch (e: Exception) {
                 f.delete()
-                logger.warn("Font $name gagal diunduh: ${e.message}")
+                logger.warn("Font $name failed to download: ${e.message}")
             }
         }
     }
@@ -93,6 +93,8 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
+    // Font Google Fonts yang diunduh saat dipakai (Reenie Beanie); versinya diatur BOM di atas
+    implementation("androidx.compose.ui:ui-text-google-fonts")
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.core:core-ktx:1.16.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
