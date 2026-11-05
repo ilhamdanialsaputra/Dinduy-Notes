@@ -908,12 +908,12 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
                 target = "$bid:$r:${c + 1}"
             }
             "dr" -> {
-                if (r == 0 || b.tb.size < 3) { vm.show("Baris ini tidak bisa dihapus"); return }
+                if (r == 0 || b.tb.size < 3) { vm.show("This row can't be deleted"); return }
                 nb = b.copy(tb = b.tb.filterIndexed { k, _ -> k != r })
                 target = "$bid:${minOf(r, nb.tb.size - 1)}:$c"
             }
             "dc" -> {
-                if (cols < 2) { vm.show("Minimal satu kolom"); return }
+                if (cols < 2) { vm.show("At least one column is needed"); return }
                 nb = b.copy(tb = b.tb.map { row -> row.filterIndexed { k, _ -> k != c } }, ca = b.ca.filterIndexed { k, _ -> k != c })
                 target = "$bid:$r:${minOf(c, cols - 2)}"
             }
@@ -1105,7 +1105,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             prev = false
             tgt = if (j < blocks.size && blocks[j].ty == "img" && blocks[j].im.size < 3) j else -1
         }
-        if (tgt < 0) { vm.show("Belum ada gambar lain di dekatnya untuk dijejerkan"); return }
+        if (tgt < 0) { vm.show("No nearby image to place side by side"); return }
         val t = blocks[tgt]
         val me = b.im[0].copy(al = "c", w = 1f)
         val merged = if (prev) t.im + me else listOf(me) + t.im
@@ -1459,7 +1459,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val src = blocks[si]
         val tgt = blocks[ti]
         val mi = src.im.firstOrNull { it.id == imgId } ?: return
-        if (tgt.im.size >= 3) { vm.show("Satu baris kolase maksimal 3 foto"); return }
+        if (tgt.im.size >= 3) { vm.show("A photo row holds up to 3 photos"); return }
         val tx = tgt.im.indexOfFirst { it.id == t.imgId }.coerceAtLeast(0)
         val ins = if (t.after) tx + 1 else tx
         val row = tgt.im.toMutableList().also { it.add(ins, mi) }
