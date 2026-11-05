@@ -40,7 +40,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.font.FontLoadingStrategy
 import androidx.compose.ui.text.googlefonts.GoogleFont
 import androidx.compose.ui.text.googlefonts.Font as GFont
 import androidx.compose.ui.text.style.TextAlign
@@ -76,7 +75,7 @@ private val GoogleProvider by lazy {
 
 @OptIn(ExperimentalTextApi::class)
 private val ReenieFamily: FontFamily by lazy {
-    FontFamily(GFont(GoogleFont("Reenie Beanie"), GoogleProvider, FontWeight.Normal, FontStyle.Normal, FontLoadingStrategy.Async))
+    FontFamily(GFont(GoogleFont("Reenie Beanie"), GoogleProvider, FontWeight.Normal, FontStyle.Normal))
 }
 
 @OptIn(ExperimentalTextApi::class)
