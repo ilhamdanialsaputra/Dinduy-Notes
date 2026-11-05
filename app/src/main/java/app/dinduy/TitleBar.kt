@@ -44,7 +44,7 @@ private fun fromHsl(h: Float, s: Float, l: Float): Color =
  * Warna judul. Semuanya mengikuti palet aktif (Material You / warna kustom / Monochrome):
  * 0 Utama (primary, bawaan), 1 Sekunder (rona sama, kroma diturunkan seperti peran secondary M3),
  * 2 Tersier (rona digeser +60 derajat seperti peran tertiary M3), 3 Pekat (on-primary-container), 4 Hitam.
- * Pada tema gelap, hitam murni tidak terbaca di atas latar gelap, jadi "Hitam" memakai warna teks tema (putih lembut).
+ * Pada tema gelap, hitam murni tidak terbaca di atas latar gelap, jadi "Black" memakai warna teks tema (putih lembut).
  */
 @Composable
 fun titleColor(k: Int): Color {
@@ -58,7 +58,7 @@ fun titleColor(k: Int): Color {
     }
 }
 
-private val TITLE_COLOR_NAMES = listOf("Utama", "Sekunder", "Tersier", "Pekat", "Hitam")
+private val TITLE_COLOR_NAMES = listOf("Primary", "Secondary", "Tertiary", "Strong", "Black")
 
 /** Kapsul alat untuk judul catatan: tebal, miring, dan warna huruf. Tampil selama judul sedang diketik. */
 @Composable
