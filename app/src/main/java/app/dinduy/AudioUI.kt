@@ -267,7 +267,7 @@ fun RecordCard(vm: AppVM) {
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 vm.cancelRec()
             }
-            GBtn(2, "stop", "Selesai", pal.p, pal.op) {
+            GBtn(2, "stop", "Done", pal.p, pal.op) {
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 vm.stopRec()
             }
@@ -334,7 +334,7 @@ fun AudioCard(vm: AppVM, noteId: String, a: Aud, idx: Int, total: Int, title: St
                 ) { PlayPauseIcon(f, pal.op, 28.dp) }
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
-                    if (total > 1) T("Suara ${idx + 1}", 13f, 700, pal.osv, maxLines = 1)
+                    if (total > 1) T("Voice ${idx + 1}", 13f, 700, pal.osv, maxLines = 1)
                     if (exists) {
                         WavyBar(
                             progress = { if (mine && pl.dur > 0L) pl.pos.toFloat() / pl.dur else 0f },
@@ -347,7 +347,7 @@ fun AudioCard(vm: AppVM, noteId: String, a: Aud, idx: Int, total: Int, title: St
                             T(fmtTime(dur), 13f, 600, pal.osv)
                         }
                     } else {
-                        T("Berkas suara tidak ada di perangkat ini", 14f, 500, pal.osv, Modifier.padding(vertical = 6.dp), lh = 1.3f)
+                        T("Audio file not found on this device", 14f, 500, pal.osv, Modifier.padding(vertical = 6.dp), lh = 1.3f)
                     }
                 }
             }
@@ -365,26 +365,26 @@ fun AudioCard(vm: AppVM, noteId: String, a: Aud, idx: Int, total: Int, title: St
                     LoadingBlob(Modifier.size(44.dp))
                     Spacer(Modifier.width(10.dp))
                     val st = when (vm.trStage) {
-                        0 -> "Menyiapkan suara…"
-                        1 -> "Memuat model…"
-                        2 -> "Menranskripsi…"
-                        4 -> "Mengirim ke Groq…"
-                        5 -> "Merapikan format…"
-                        else -> "Membatalkan…"
+                        0 -> "Preparing audio…"
+                        1 -> "Loading model…"
+                        2 -> "Transcribing…"
+                        4 -> "Sending to Groq…"
+                        5 -> "Formatting…"
+                        else -> "Canceling…"
                     }
                     Column(Modifier.weight(1f)) {
                         T(st, 15f, 600, pal.opc, maxLines = 1)
                         if (vm.trInfo.isNotEmpty()) T(vm.trInfo, 12f, 500, pal.opc, alpha = .8f, maxLines = 1)
                     }
-                    GBtn(3, null, "Batal", btnBg, pal.os, enabled = vm.trStage != 3) { vm.cancelTranscribe() }
+                    GBtn(3, null, "Cancel", btnBg, pal.os, enabled = vm.trStage != 3) { vm.cancelTranscribe() }
                 }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                GBtn(0, "dl", "Simpan suara", btnBg, pal.os, enabled = exists, modifier = Modifier.weight(1f)) {
-                    val name = (title.ifBlank { "Suara" }) + (if (total > 1) "-${idx + 1}" else "") + ".m4a"
+                GBtn(0, "dl", "Save audio", btnBg, pal.os, enabled = exists, modifier = Modifier.weight(1f)) {
+                    val name = (title.ifBlank { "Voice" }) + (if (total > 1) "-${idx + 1}" else "") + ".m4a"
                     act.saveAudio(a, name)
                 }
-                GBtn(1, "notes", if (a.tb.isEmpty()) "Transkripsi" else "Ulangi", btnTr, pal.os, enabled = exists && !busy && !otherBusy, modifier = Modifier.weight(1f)) {
+                GBtn(1, "notes", if (a.tb.isEmpty()) "Transcribe" else "Redo", btnTr, pal.os, enabled = exists && !busy && !otherBusy, modifier = Modifier.weight(1f)) {
                     vm.transcribe(noteId, a.id)
                 }
                 GBtn(2, "del", null, pal.ec, pal.oec) { vm.removeAudio(noteId, a.id) }
@@ -405,10 +405,10 @@ fun ModelDialogHost(vm: AppVM) {
         onDismissRequest = { vm.needModel = false },
         containerColor = pal.c3,
         shape = RoundedCornerShape(28.dp),
-        title = { T("Belum ada model", 24f, 400, pal.os) },
+        title = { T("No model yet", 24f, 400, pal.os) },
         text = {
             T(
-                "Anda belum menerapkan model apa pun. Pilih API key Groq (online, cepat) atau unduh model offline di halaman berikutnya.",
+                "You haven't set up a model yet. Add a Groq API key (online, fast) or download an offline model on the next page.",
                 15f, 400, pal.osv, lh = 1.4f
             )
         },
@@ -416,8 +416,8 @@ fun ModelDialogHost(vm: AppVM) {
             TextButton(onClick = {
                 vm.needModel = false
                 if (vm.nav.top !is Scr.Models) vm.nav.push(Scr.Models)
-            }) { T("Atur model", 15f, 600, pal.p) }
+            }) { T("Set up", 15f, 600, pal.p) }
         },
-        dismissButton = { TextButton(onClick = { vm.needModel = false }) { T("Batal", 15f, 500, pal.osv) } }
+        dismissButton = { TextButton(onClick = { vm.needModel = false }) { T("Cancel", 15f, 500, pal.osv) } }
     )
 }
