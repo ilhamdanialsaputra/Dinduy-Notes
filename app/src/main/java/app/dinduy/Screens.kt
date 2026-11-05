@@ -181,6 +181,7 @@ interface Actions {
     fun replaceImage(noteId: String, bid: String, ix: Int)   // pilih satu foto dari galeri untuk mengisi bingkai gambar (blok bid, urutan ix) di catatan noteId; ukuran bingkai tetap
     fun takePhoto(replace: Boolean)         // buka kamera (minta izin bila perlu); hasilnya jadi gambar baru, atau mengisi bingkai terpilih bila replace
     fun importMd()
+    fun ocrImage(imgId: String, onText: (String) -> Unit)   // baca teks dari satu foto (OCR offline), hasilnya dikirim ke onText
     fun saveBackup()
     fun shareBackup()
     fun restoreBackup()
