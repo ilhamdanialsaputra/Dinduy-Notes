@@ -641,6 +641,7 @@ fun DrawerContent(vm: AppVM, close: () -> Unit, go: (Scr) -> Unit) {
             }
             DrawerItem("plus", "Create new label") { close(); vm.lblDlg = LblDlg(null, null) }
             Divider()
+            DrawerItem("up", "Import files") { close(); vm.importTick++ }
             DrawerItem("arc", "Archive", trailing = vm.archived().size.takeIf { it > 0 }?.toString()) { go(Scr.Archive) }
             DrawerItem("del", "Trash", trailing = vm.trashed().size.takeIf { it > 0 }?.toString()) { go(Scr.Trash) }
             Spacer(Modifier.height(12.dp))
