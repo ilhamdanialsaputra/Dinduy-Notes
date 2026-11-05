@@ -170,6 +170,7 @@ import kotlin.math.roundToInt
 
 interface Actions {
     fun pickImages()
+    fun pickCover(id: String)                // pilih satu foto galeri sebagai sampul catatan
     fun replaceImage()                      // pilih satu foto dari galeri untuk mengisi bingkai gambar yang terpilih (ukuran bingkai tetap)
     fun takePhoto(replace: Boolean)         // buka kamera (minta izin bila perlu); hasilnya jadi gambar baru, atau mengisi bingkai terpilih bila replace
     fun importMd()
@@ -327,10 +328,25 @@ fun NoteCard(
  */
 @Composable
 fun CardBody(d: Note, kind: String, c2: Boolean, fg: Color, padH: Dp, padV: Dp, insTL: Dp, insBL: Dp, delTime: Long) {
+    val vm = LocalVM.current
+    if (d.cv.isEmpty() || vm == null) {
+        CardText(d, kind, c2, fg, padH, padV, insTL, insBL, delTime)
+        return
+    }
+    // sampul di atas, tepi ke tepi kartu; teks (bila ada) di bawahnya
+    val hasText = d.t.isNotBlank() || d.x.isNotBlank() || d.au.isNotEmpty() || (d.rm > 0L && d.dt == 0L) || d.lb.isNotEmpty() || delTime != 0L
+    Column(Modifier.fillMaxWidth()) {
+        CoverImage(vm, d, Modifier.fillMaxWidth().aspectRatio(coverAspect(c2)))
+        if (hasText) CardText(d, kind, c2, fg, padH, padV, insTL, insBL, delTime)
+    }
+}
+
+@Composable
+private fun CardText(d: Note, kind: String, c2: Boolean, fg: Color, padH: Dp, padV: Dp, insTL: Dp, insBL: Dp, delTime: Long) {
     val remOn = d.rm > 0L && d.dt == 0L
     val body = remember(d.x) { d.x.take(900).replace(SP_RX, " ").replace(NL_RX, "\n\n").trim() }
     val hasTitle = d.t.isNotBlank()
-    val shownBody = body.ifEmpty { if (!hasTitle) (if (d.au.isNotEmpty()) "Catatan suara" else "Kosong") else "" }
+    val shownBody = body.ifEmpty { if (!hasTitle) (if (d.au.isNotEmpty()) "Catatan suara" else if (d.cv.isNotEmpty()) "" else "Kosong") else "" }
     Column(
         Modifier.fillMaxWidth().padding(horizontal = padH, vertical = padV),
         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -693,7 +709,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
             vm.sorted(vm.liveF()).let { l ->
                 // 1 & 2 kolom: catatan kosong yang sedang dibuka disembunyikan dari grid supaya kartu lain tidak bergeser
                 l.filterNot { d ->
-                    d.t.isBlank() && d.x.isBlank() && d.bl.none { it.isObj && it.ty != "hr" } && d.rm == 0L && d.au.isEmpty() &&
+                    d.t.isBlank() && d.x.isBlank() && d.bl.none { it.isObj && it.ty != "hr" } && d.rm == 0L && d.au.isEmpty() && d.cv.isEmpty() &&
                         vm.openId == d.id && vm.nav.stack.any { s -> s is Scr.Note && s.id == d.id }
                 }
             }
