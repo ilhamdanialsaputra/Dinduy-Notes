@@ -171,7 +171,7 @@ import kotlin.math.roundToInt
 interface Actions {
     fun pickImages()
     fun pickCover(id: String)                // pilih satu foto galeri sebagai sampul catatan
-    fun replaceImage()                      // pilih satu foto dari galeri untuk mengisi bingkai gambar yang terpilih (ukuran bingkai tetap)
+    fun replaceImage(noteId: String, bid: String, ix: Int)   // pilih satu foto dari galeri untuk mengisi bingkai gambar (blok bid, urutan ix) di catatan noteId; ukuran bingkai tetap
     fun takePhoto(replace: Boolean)         // buka kamera (minta izin bila perlu); hasilnya jadi gambar baru, atau mengisi bingkai terpilih bila replace
     fun importMd()
     fun saveBackup()
@@ -327,7 +327,7 @@ fun NoteCard(
  * lalu label / pengingat. Dipakai kartu asli dan bayangan teks saat morph buka/tutup.
  */
 @Composable
-fun CardBody(d: Note, kind: String, c2: Boolean, fg: Color, padH: Dp, padV: Dp, insTL: Dp, insBL: Dp, delTime: Long) {
+fun CardBody(d: Note, kind: String, c2: Boolean, fg: Color, padH: Dp, padV: Dp, insTL: Dp, insBL: Dp, delTime: Long, drawCover: Boolean = true) {
     val vm = LocalVM.current
     if (d.cv.isEmpty() || vm == null) {
         CardText(d, kind, c2, fg, padH, padV, insTL, insBL, delTime)
@@ -336,7 +336,10 @@ fun CardBody(d: Note, kind: String, c2: Boolean, fg: Color, padH: Dp, padV: Dp, 
     // sampul di atas, tepi ke tepi kartu; teks (bila ada) di bawahnya
     val hasText = d.t.isNotBlank() || d.x.isNotBlank() || d.au.isNotEmpty() || (d.rm > 0L && d.dt == 0L) || d.lb.isNotEmpty() || delTime != 0L
     Column(Modifier.fillMaxWidth()) {
-        CoverImage(vm, d, Modifier.fillMaxWidth().aspectRatio(coverAspect(c2)))
+        // drawCover = false (bayangan morph): ruangnya tetap ada supaya teks berada di tempat yang sama, tapi gambarnya tidak digambar
+        // dua kali; sampul di editor sudah menimpanya dengan buram penuh (lihat EditorCover), jadi tidak ada pudar-silang yang kedip.
+        if (drawCover) CoverImage(vm, d, Modifier.fillMaxWidth().aspectRatio(coverAspect(c2)))
+        else Spacer(Modifier.fillMaxWidth().aspectRatio(coverAspect(c2)))
         if (hasText) CardText(d, kind, c2, fg, padH, padV, insTL, insBL, delTime)
     }
 }
@@ -379,7 +382,7 @@ private fun CardText(d: Note, kind: String, c2: Boolean, fg: Color, padH: Dp, pa
 fun GhostCard(d: Note, g: Ghost, modifier: Modifier = Modifier) {
     Box(modifier) {
         // tanpa ikon pin: kartu asli di beranda juga tidak menampilkannya, jadi tidak ada ikon yang berkedip saat morph
-        CardBody(d, g.kind, g.c2, g.fg, g.padH, g.padV, g.insTL, g.insBL, 0L)
+        CardBody(d, g.kind, g.c2, g.fg, g.padH, g.padV, g.insTL, g.insBL, 0L, drawCover = false)
     }
 }
 
