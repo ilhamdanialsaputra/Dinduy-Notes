@@ -357,15 +357,17 @@ private fun CardText(d: Note, kind: String, c2: Boolean, fg: Color, padH: Dp, pa
     val body = remember(d.x) { d.x.take(900).replace(SP_RX, " ").replace(NL_RX, "\n\n").trim() }
     val hasTitle = d.t.isNotBlank()
     val shownBody = body.ifEmpty { if (!hasTitle) (if (d.au.isNotEmpty()) "Voice note" else if (d.cv.isNotEmpty()) "" else "Empty") else "" }
+    // kartu bersampul: sampul tetap utuh, yang dipendekkan hanya kotak tulisannya (padding, jarak, dan jumlah baris)
+    val cvd = d.cv.isNotEmpty()
     Column(
-        Modifier.fillMaxWidth().padding(horizontal = padH, vertical = padV),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        Modifier.fillMaxWidth().padding(horizontal = padH, vertical = if (cvd) padV * .72f else padV),
+        verticalArrangement = Arrangement.spacedBy(if (cvd) 5.dp else 8.dp)
     ) {
         if (hasTitle) {
-            T(d.t.trim(), 17f, 500, fg, Modifier.padding(end = if (d.p) 18.dp else 0.dp), lh = 1.25f, maxLines = 3)
+            T(d.t.trim(), 17f, 500, fg, Modifier.padding(end = if (d.p) 18.dp else 0.dp), lh = 1.25f, maxLines = if (cvd) 2 else 3)
         }
         if (shownBody.isNotEmpty()) {
-            T(shownBody, 15f, 400, fg, lh = 1.4f, maxLines = if (c2) 10 else 6, alpha = .88f)
+            T(shownBody, 15f, 400, fg, lh = 1.4f, maxLines = if (cvd) (if (c2) 4 else 3) else (if (c2) 10 else 6), alpha = .88f)
         }
         if (remOn) {
             Box { RemChip(Rem.stamp(d), fg, Rem.overdue(d), d.rr.isNotEmpty()) }
