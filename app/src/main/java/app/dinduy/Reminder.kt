@@ -123,14 +123,14 @@ object Rem {
     const val A_LATER = "app.dinduy.REM_LATER"    // tombol "Tunda 1 jam"
     const val A_TMR = "app.dinduy.REM_TMR"        // tombol "Besok pagi"
     private const val DAY = 86_400_000L
-    private val ID = Locale("id", "ID")
+    private val ID = Locale.US
 
     /** ViewModel yang sedang hidup (bila ada), supaya perubahan dari notifikasi lewat jalur data yang sama dengan aplikasi. */
     @Volatile
     var hook: AppVM? = null
 
-    val REPEATS = listOf("" to "Tidak berulang", "d" to "Setiap hari", "w" to "Setiap minggu", "m" to "Setiap bulan", "y" to "Setiap tahun")
-    fun repeatName(rr: String): String = REPEATS.firstOrNull { it.first == rr }?.second ?: "Tidak berulang"
+    val REPEATS = listOf("" to "Doesn't repeat", "d" to "Every day", "w" to "Every week", "m" to "Every month", "y" to "Every year")
+    fun repeatName(rr: String): String = REPEATS.firstOrNull { it.first == rr }?.second ?: "Doesn't repeat"
 
     // ---------- waktu ----------
     private fun occ(base: Long, rr: String, k: Int): Long {
@@ -196,15 +196,15 @@ object Rem {
     }
 
     fun fmt(t: Long, now: Long = System.currentTimeMillis()): String {
-        val tm = SimpleDateFormat("HH.mm", ID).format(Date(t))
+        val tm = SimpleDateFormat("HH:mm", ID).format(Date(t))
         val dd = dayDiff(t, now)
         return when {
-            dd == 0 -> "Hari ini, $tm"
-            dd == 1 -> "Besok, $tm"
-            dd == -1 -> "Kemarin, $tm"
+            dd == 0 -> "Today, $tm"
+            dd == 1 -> "Tomorrow, $tm"
+            dd == -1 -> "Yesterday, $tm"
             dd in 2..6 -> SimpleDateFormat("EEE", ID).format(Date(t)) + ", $tm"
-            year(t) == year(now) -> SimpleDateFormat("d MMM", ID).format(Date(t)) + ", $tm"
-            else -> SimpleDateFormat("d MMM yyyy", ID).format(Date(t)) + ", $tm"
+            year(t) == year(now) -> SimpleDateFormat("MMM d", ID).format(Date(t)) + ", $tm"
+            else -> SimpleDateFormat("MMM d, yyyy", ID).format(Date(t)) + ", $tm"
         }
     }
 
@@ -232,23 +232,23 @@ object Rem {
     /** Pilihan cepat ala Google Keep: nanti hari ini, besok pagi, minggu depan. */
     fun quick(now: Long = System.currentTimeMillis()): List<RQ> {
         val out = ArrayList<RQ>()
-        val hm = SimpleDateFormat("HH.mm", ID)
+        val hm = SimpleDateFormat("HH:mm", ID)
         for (h in intArrayOf(13, 18, 20)) {
             val t = at(now, 0, h, 0)
             if (t - now >= 45 * 60_000L) {
-                out.add(RQ("Nanti hari ini", if (h >= 18) "dm" else "clock", t, hm.format(Date(t))))
+                out.add(RQ("Later today", if (h >= 18) "dm" else "clock", t, hm.format(Date(t))))
                 break
             }
         }
         val tm = at(now, 1, 8, 0)
-        out.add(RQ("Besok pagi", "lm", tm, hm.format(Date(tm))))
+        out.add(RQ("Tomorrow morning", "lm", tm, hm.format(Date(tm))))
         val c = Calendar.getInstance()
         c.timeInMillis = now
         var add = (Calendar.MONDAY - c.get(Calendar.DAY_OF_WEEK) + 7) % 7
         if (add == 0) add = 7
         if (add != 1) {
             val nw = at(now, add, 8, 0)
-            out.add(RQ("Minggu depan", "cal", nw, SimpleDateFormat("EEE, HH.mm", ID).format(Date(nw))))
+            out.add(RQ("Next week", "cal", nw, SimpleDateFormat("EEE, HH:mm", ID).format(Date(nw))))
         }
         return out
     }
@@ -343,9 +343,17 @@ object Rem {
 
     fun ensureChannel(ctx: Context) {
         val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.getNotificationChannel(CHANNEL)?.let { old ->
+            // saluran lama (bahasa Indonesia): nama & deskripsi boleh diperbarui tanpa membuat ulang
+            if (old.name?.toString() != "Reminder") {
+                old.name = "Reminder"
+                old.description = "Note reminders at the date and time you set"
+                nm.createNotificationChannel(old)
+            }
+        }
         if (nm.getNotificationChannel(CHANNEL) == null) {
-            val ch = NotificationChannel(CHANNEL, "Pengingat", NotificationManager.IMPORTANCE_HIGH)
-            ch.description = "Pengingat catatan pada tanggal dan waktu yang kamu atur"
+            val ch = NotificationChannel(CHANNEL, "Reminder", NotificationManager.IMPORTANCE_HIGH)
+            ch.description = "Note reminders at the date and time you set"
             ch.enableVibration(true)
             ch.enableLights(true)
             ch.setShowBadge(true)
@@ -373,7 +381,7 @@ object Rem {
         val nmc = NotificationManagerCompat.from(ctx)
         if (!nmc.areNotificationsEnabled()) return
         ensureChannel(ctx)
-        val title = n.t.trim().ifEmpty { "Pengingat" }
+        val title = n.t.trim().ifEmpty { "Reminder" }
         val body = n.x.replace(Regex("\\s+"), " ").trim()
         val open = Intent(ctx, MainActivity::class.java)
             .setData(Uri.parse("dinduy://open/" + Uri.encode(n.id)))
@@ -383,8 +391,8 @@ object Rem {
         val b = NotificationCompat.Builder(ctx, CHANNEL)
             .setSmallIcon(statIcon())
             .setContentTitle(title)
-            .setContentText(body.ifEmpty { "Ketuk untuk membuka catatan" }.take(140))
-            .setStyle(NotificationCompat.BigTextStyle().bigText(body.ifEmpty { "Ketuk untuk membuka catatan" }.take(500)))
+            .setContentText(body.ifEmpty { "Tap to open the note" }.take(140))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body.ifEmpty { "Tap to open the note" }.take(500)))
             .setContentIntent(openPi)
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
@@ -393,9 +401,9 @@ object Rem {
             .setColor(0xFF6750A4.toInt())
             .setWhen(System.currentTimeMillis())
             .setShowWhen(true)
-            .addAction(0, "Selesai", pi(ctx, n.id, A_DONE))
-            .addAction(0, "Tunda 1 jam", pi(ctx, n.id, A_LATER))
-            .addAction(0, "Besok pagi", pi(ctx, n.id, A_TMR))
+            .addAction(0, "Done", pi(ctx, n.id, A_DONE))
+            .addAction(0, "Snooze 1 hour", pi(ctx, n.id, A_LATER))
+            .addAction(0, "Tomorrow morning", pi(ctx, n.id, A_TMR))
         try {
             nmc.notify(n.id.hashCode(), b.build())
         } catch (e: SecurityException) {
@@ -681,9 +689,9 @@ private fun DateDlg(initial: Long, onDone: (Int, Int, Int) -> Unit, onDismiss: (
                     u.timeInMillis = s
                     onDone(u.get(Calendar.YEAR), u.get(Calendar.MONTH), u.get(Calendar.DAY_OF_MONTH))
                 } else onDismiss()
-            }) { T("Pilih", 16f, 800, pal.p) }
+            }) { T("Select", 16f, 800, pal.p) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { T("Batal", 16f, 700, pal.osv) } }
+        dismissButton = { TextButton(onClick = onDismiss) { T("Cancel", 16f, 700, pal.osv) } }
     ) { DatePicker(state) }
 }
 
@@ -695,14 +703,14 @@ private fun TimeDlg(h: Int, m: Int, is24: Boolean, onDone: (Int, Int) -> Unit, o
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = RoundedCornerShape(28.dp), color = pal.c3, tonalElevation = 0.dp) {
             Column(Modifier.padding(24.dp)) {
-                T("Pilih waktu", 14f, 600, pal.osv, Modifier.padding(bottom = 20.dp), ls = .01f)
+                T("Select time", 14f, 600, pal.osv, Modifier.padding(bottom = 20.dp), ls = .01f)
                 Box(Modifier.fillMaxWidth(), Alignment.Center) {
                     if (typing) TimeInput(state = st) else TimePicker(state = st)
                 }
                 Row(Modifier.fillMaxWidth().padding(top = 20.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconBtn(if (typing) "clock" else "kbd", pal.osv, { typing = !typing }, size = 48.dp)
                     Spacer(Modifier.weight(1f))
-                    TextButton(onClick = onDismiss) { T("Batal", 16f, 700, pal.osv) }
+                    TextButton(onClick = onDismiss) { T("Cancel", 16f, 700, pal.osv) }
                     TextButton(onClick = { onDone(st.hour, st.minute) }) { T("OK", 16f, 800, pal.p) }
                 }
             }
@@ -831,8 +839,8 @@ private fun MainPage(
         ) {
             Box(Modifier.size(52.dp).clip(CircleShape).background(pal.pc), Alignment.Center) { Ic("bell", pal.opc, 26.dp) }
             Column(Modifier.weight(1f)) {
-                T("Pengingat", 26f, 1000, pal.os, ls = -.01f)
-                T(note?.t?.ifEmpty { null } ?: "Tanpa judul", 14f, 500, pal.osv, maxLines = 1)
+                T("Reminder", 26f, 1000, pal.os, ls = -.01f)
+                T(note?.t?.ifEmpty { null } ?: "Untitled", 14f, 500, pal.osv, maxLines = 1)
             }
         }
         if (!notifOk) {
@@ -844,10 +852,10 @@ private fun MainPage(
                 Ic("belloff", pal.oec, 24.dp)
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
-                    T("Notifikasi dimatikan", 15f, 800, pal.oec)
-                    T("Pengingat baru muncul setelah notifikasi diizinkan.", 13f, 500, pal.oec, lh = 1.3f, alpha = .85f)
+                    T("Notifications are off", 15f, 800, pal.oec)
+                    T("Reminders only show once notifications are allowed.", 13f, 500, pal.oec, lh = 1.3f, alpha = .85f)
                 }
-                TextButton(onClick = { act.askNotif() }) { T("Aktifkan", 15f, 800, pal.oec) }
+                TextButton(onClick = { act.askNotif() }) { T("Turn on", 15f, 800, pal.oec) }
             }
         }
         if (hasRem && note != null) {
@@ -857,7 +865,7 @@ private fun MainPage(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Ic("bell", fg, 18.dp)
                     Spacer(Modifier.width(8.dp))
-                    T(if (over) "Terlewat" else "Diatur untuk", 13f, 700, fg, ls = .02f, alpha = .85f)
+                    T(if (over) "Missed" else "Set for", 13f, 700, fg, ls = .02f, alpha = .85f)
                 }
                 T(Rem.stamp(note), 28f, 1000, fg, Modifier.padding(top = 6.dp), ls = -.01f)
                 if (note.rr.isNotEmpty()) {
@@ -868,18 +876,18 @@ private fun MainPage(
                     }
                 }
                 Row(Modifier.fillMaxWidth().padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    PillBtn("Hapus", "del", pal.s.copy(alpha = .55f), fg, Modifier.weight(1f), onClick = onClear)
-                    PillBtn("Ubah", "pen", pal.p, pal.op, Modifier.weight(1f), onClick = onCustom)
+                    PillBtn("Remove", "del", pal.s.copy(alpha = .55f), fg, Modifier.weight(1f), onClick = onClear)
+                    PillBtn("Edit", "pen", pal.p, pal.op, Modifier.weight(1f), onClick = onCustom)
                 }
             }
         }
-        T(if (hasRem) "Ganti ke" else "Ingatkan saya", 14f, 600, pal.p, Modifier.padding(start = 12.dp, bottom = 10.dp), ls = .01f)
+        T(if (hasRem) "Change to" else "Remind me", 14f, 600, pal.p, Modifier.padding(start = 12.dp, bottom = 10.dp), ls = .01f)
         val quick = remember { Rem.quick() }
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
             quick.forEachIndexed { i, q ->
                 RRow(if (i == 0) POS_TOP else POS_MID, q.icon, q.title, tail = q.tail) { commit(q.at, "") }
             }
-            RRow(POS_BOT, "cal", "Pilih tanggal dan waktu", sub = "Atur juga pengulangannya", chevron = true, onClick = onCustom)
+            RRow(POS_BOT, "cal", "Pick a date and time", sub = "You can also set a repeat", chevron = true, onClick = onCustom)
         }
     }
 }
@@ -891,19 +899,19 @@ private fun CustomPage(
 ) {
     val pal = LocalPal.current
     val ok = at > System.currentTimeMillis()
-    val ID = Locale("id", "ID")
-    val dateS = SimpleDateFormat("EEE, d MMM yyyy", ID).format(Date(at))
-    val timeS = SimpleDateFormat(if (is24) "HH.mm" else "hh.mm a", ID).format(Date(at))
+    val ID = Locale.US
+    val dateS = SimpleDateFormat("EEE, MMM d, yyyy", ID).format(Date(at))
+    val timeS = SimpleDateFormat(if (is24) "HH:mm" else "hh:mm a", ID).format(Date(at))
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().padding(bottom = 18.dp), verticalAlignment = Alignment.CenterVertically) {
             IconBtn("back", pal.os, onBack)
-            T("Atur pengingat", 26f, 1000, pal.os, Modifier.padding(start = 6.dp), ls = -.01f)
+            T("Set reminder", 26f, 1000, pal.os, Modifier.padding(start = 6.dp), ls = -.01f)
         }
         Row(Modifier.fillMaxWidth().padding(bottom = 24.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            PickTile("cal", "Tanggal", dateS, Modifier.weight(1.45f), onPickDate)
-            PickTile("clock", "Waktu", timeS, Modifier.weight(1f), onPickTime)
+            PickTile("cal", "Date", dateS, Modifier.weight(1.45f), onPickDate)
+            PickTile("clock", "Time", timeS, Modifier.weight(1f), onPickTime)
         }
-        T("Ulangi", 14f, 600, pal.p, Modifier.padding(start = 12.dp, bottom = 10.dp), ls = .01f)
+        T("Repeat", 14f, 600, pal.p, Modifier.padding(start = 12.dp, bottom = 10.dp), ls = .01f)
         FlowRow(
             Modifier.fillMaxWidth().padding(bottom = 22.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -911,8 +919,8 @@ private fun CustomPage(
             Rem.REPEATS.forEach { (code, name) -> RChip(name, rr == code) { onRepeat(code) } }
         }
         AnimatedVisibility(visible = !ok, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
-            T("Waktu ini sudah lewat. Pilih waktu yang akan datang.", 14f, 600, pal.oec, Modifier.padding(start = 12.dp, bottom = 14.dp))
+            T("That time has passed. Pick a future time.", 14f, 600, pal.oec, Modifier.padding(start = 12.dp, bottom = 14.dp))
         }
-        PillBtn("Simpan pengingat", "bell", pal.p, pal.op, Modifier.fillMaxWidth(), enabled = ok, onClick = onSave)
+        PillBtn("Save reminder", "bell", pal.p, pal.op, Modifier.fillMaxWidth(), enabled = ok, onClick = onSave)
     }
 }
