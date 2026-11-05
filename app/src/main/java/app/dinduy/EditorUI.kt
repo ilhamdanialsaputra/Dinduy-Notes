@@ -480,9 +480,9 @@ fun TF(
                         when {
                             ctrl && e.key == Key.A -> { ed.selectAllKey(key); true }
                             (ctrl && e.key == Key.C) || e.key == Key.Copy ->
-                                if (ed.selOn) { clipM.setText(androidx.compose.ui.text.AnnotatedString(ed.selText())); true } else false
+                                if (ed.selOn) { clipM.setText(androidx.compose.ui.text.AnnotatedString(ed.selMd())); true } else false
                             (ctrl && e.key == Key.X) || e.key == Key.Cut ->
-                                if (ed.selOn) { clipM.setText(androidx.compose.ui.text.AnnotatedString(ed.selText())); ed.selDelete(); true } else false
+                                if (ed.selOn) { clipM.setText(androidx.compose.ui.text.AnnotatedString(ed.selMd())); ed.selDelete(); true } else false
                             (ctrl && e.key == Key.V) || e.key == Key.Paste ->
                                 if (ed.selOn) {
                                     val s = clipM.getText()?.text
@@ -640,6 +640,14 @@ fun ParaRow(ed: Ed, b: Blk, ordN: Int, dm: Dm, pal: Pal, fold: Fold?, mk: Float,
     } else 0f
     val fsDp = with(dn) { st.fontSize.toDp().value }
     val cy = baseDp - .31f * fsDp
+    // butir terakhir sebuah daftar: jarak bawahnya sama dengan paragraf biasa (bukan jarak rapat antarbutir)
+    val lastLi = li && androidx.compose.runtime.remember(b.id, ed) {
+        androidx.compose.runtime.derivedStateOf {
+            val l = ed.blocks
+            val i = l.indexOfFirst { it.id == b.id }
+            i < 0 || i == l.size - 1 || l[i + 1].ty != "li"
+        }
+    }.value
     // teks yang dipotong di sekitar gambar: inden baris pertama tidak dipakai (tiap pemotongan memulai paragraf baru), diganti penggeser di Fold
     val stF = if (fold == null) st else st.copy(
         textIndent = if (b.fi < 0 && (b.ty == "p" || b.ty == "li")) TextIndent(0.sp, with(dn) { (-b.fi).coerceIn(0, IND_MAX_FI).dp.toSp() }) else null
@@ -648,7 +656,7 @@ fun ParaRow(ed: Ed, b: Blk, ordN: Int, dm: Dm, pal: Pal, fold: Fold?, mk: Float,
         Modifier.fillMaxWidth().padding(
             start = (if (li) (b.d * 1.4f * fs).dp else 0.dp) + il.dp,
             end = ir.dp,
-            bottom = (if (li) fs * .5f else fs * 1.1f).dp
+            bottom = (if (li && !lastLi) fs * .5f else fs * 1.1f).dp
         )
     ) {
         if (li) {
@@ -1924,6 +1932,22 @@ fun SelBubble(ed: Ed, vm: AppVM, act: Actions, scrollY: Int) {
     @Suppress("DEPRECATION")
     val clip = androidx.compose.ui.platform.LocalClipboardManager.current
     val hold = remember { BubbleHold() }
+    // Salin lewat jalur mana pun (menu keyboard, tombol Salin Gboard, dll): isi clipboard diganti Markdown seleksinya
+    val ctxClip = androidx.compose.ui.platform.LocalContext.current
+    androidx.compose.runtime.DisposableEffect(ed) {
+        val cm = ctxClip.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        val l = android.content.ClipboardManager.OnPrimaryClipChangedListener {
+            try {
+                if (!ed.selOn) return@OnPrimaryClipChangedListener
+                val t = cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.toString() ?: return@OnPrimaryClipChangedListener
+                if (t != ed.selText()) return@OnPrimaryClipChangedListener
+                val md = ed.selMd()
+                if (md.isNotEmpty() && md != t) cm.setPrimaryClip(android.content.ClipData.newPlainText("Dinduy", md))
+            } catch (_: Exception) {}
+        }
+        cm.addPrimaryClipChangedListener(l)
+        onDispose { cm.removePrimaryClipChangedListener(l) }
+    }
     var bs by remember { mutableStateOf(IntSize.Zero) }
     val vis = remember { Animatable(0f) }
     val corrX = remember { Animatable(0f) }
@@ -2004,10 +2028,10 @@ fun SelBubble(ed: Ed, vm: AppVM, act: Actions, scrollY: Int) {
             SelBtn(live, 10.dp, 9.dp, f) { T(label, 14f, 800, pal.os, maxLines = 1) }
         }
         AnimatedVisibility(edit && has, enter = enter, exit = exit) {
-            Act("Cut") { act.copyText(ed.selText()); ed.selDelete() }
+            Act("Cut") { act.copyText(ed.selMd()); ed.selDelete() }
         }
         AnimatedVisibility(has, enter = enter, exit = exit) {
-            Act("Copy") { act.copyText(ed.selText()); vm.show("Copied"); ed.clearSel() }
+            Act("Copy") { act.copyText(ed.selMd()); vm.show("Copied"); ed.clearSel() }
         }
         AnimatedVisibility(edit, enter = enter, exit = exit) {
             Act("Paste") {
