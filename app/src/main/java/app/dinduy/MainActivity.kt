@@ -159,6 +159,7 @@ class Nav(private val vm: AppVM) {
     }
 
     fun openNote(id: String, m: Morph?, newNote: Boolean = false) {
+        vm.note(id)?.cv?.let { vm.prefetchImg(it) }   // sampul sudah ada di cache saat editor tampil (tanpa muncul belakangan)
         vm.morph = m
         vm.openId = id
         noteId = id
@@ -299,7 +300,8 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
                 val mm = effMorph(vm)
                 val x = ((vm.openP.value - .08f) / .4f).coerceIn(0f, 1f)
                 val a = x * x * (3f - 2f * x)
-                alpha = a
+                // morph dari kartu: NoteScreen memudarkan latar + isi sendiri (noteFade) supaya sampulnya tetap buram penuh
+                alpha = if (mm != null && mm.card) 1f else a
                 if (mm != null && mm.card) {
                     // kartu (1 atau 2 kolom): isi editor ikut mengecil ke dalam kartu lalu tumbuh bersama wadah (container transform);
                     // di 1 kolom kartunya lebar, jadi skalanya hanya sedikit di bawah 1 dan yang terasa adalah wadah yang memanjang
@@ -352,6 +354,17 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
         }
         if (u > .001f) Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = (if (pal.dark) .16f else .05f) * u)))
     }
+}
+
+/**
+ * Pudar isi catatan selama morph (kurva sama dengan yang dulu dipasang NoteLayer pada seluruh isi). Hanya untuk morph dari kartu;
+ * selain itu NoteLayer sendiri yang memudarkan, jadi nilainya 1 supaya tidak memudar dua kali.
+ */
+fun noteFade(vm: AppVM): Float {
+    val mm = effMorph(vm)
+    if (mm == null || !mm.card) return 1f
+    val x = ((vm.openP.value - .08f) / .4f).coerceIn(0f, 1f)
+    return x * x * (3f - 2f * x)
 }
 
 /** Keadaan gestur tombol FAB (tarik ke atas untuk membuka catatan baru). */
@@ -590,6 +603,10 @@ fun AppRoot(vm: AppVM, act: Actions) {
                                     if (nav.pendingTitle) { it.focusAt(it.blocks[0].id, 0); nav.pendingTitle = false }
                                 }
                             }
+                            androidx.compose.runtime.DisposableEffect(ed) {
+                                ed.alive = true
+                                onDispose { ed.alive = false }
+                            }
                             SideEffect { vm.ed = ed }
                             NoteScreen(vm, ed, act)
                         }
@@ -636,36 +653,98 @@ class MainActivity : ComponentActivity(), Actions {
     private var pendingMd: String = ""
     private var pendingPdf: File? = null
 
-    private val imgPicker = registerForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(20)) { uris ->
-        if (uris.isNotEmpty()) lifecycleScope.launch {
-            val imgs = uris.mapNotNull { vm.importImage(it) }
-            if (imgs.isEmpty()) vm.show("Gambar gagal dimuat") else vm.ed?.addImages(imgs)
+    // ---- galeri ----
+    // Tujuan pilihan dicatat di SharedPreferences sebelum galeri dibuka. Selama galeri terbuka, Activity bahkan prosesnya boleh dimatikan
+    // sistem; kalau tujuan hanya disimpan di variabel Activity / editor, hasilnya tiba tanpa tahu mau dipasang ke mana dan diam-diam hilang.
+    private class PickTarget(val kind: String, val noteId: String, val bid: String = "", val ix: Int = 0)
+
+    private fun setPick(t: PickTarget?) {
+        getSharedPreferences("dinduy", 0).edit().apply {
+            if (t == null) remove("pk") else putString("pk", listOf(t.kind, t.noteId, t.bid, t.ix.toString()).joinToString("|"))
+        }.apply()
+    }
+
+    private fun takePick(): PickTarget? {
+        val sp = getSharedPreferences("dinduy", 0)
+        val raw = sp.getString("pk", null)
+        sp.edit().remove("pk").apply()
+        val p = raw?.split("|") ?: return null
+        if (p.size < 4) return null
+        return PickTarget(p[0], p[1], p[2], p[3].toIntOrNull() ?: 0)
+    }
+
+    private fun importFailMsg(what: String): String = what + (vm.lastImgErr.takeIf { it.isNotEmpty() }?.let { " ($it)" } ?: "")
+
+    private inline fun openPicker(f: () -> Unit) {
+        try { f() } catch (e: Throwable) {
+            setPick(null)
+            vm.show("Galeri tidak bisa dibuka (" + e.javaClass.simpleName + ")")
         }
     }
-    // ganti foto: satu gambar dari galeri mengisi bingkai gambar yang terpilih (ukuran bingkai tetap)
+
+    /** Pastikan catatan [id] terbuka (setelah proses dimatikan sistem, tumpukan layar kembali ke beranda). */
+    private fun ensureNote(id: String) {
+        if (vm.nav.stack.none { it is Scr.Note && it.id == id }) vm.nav.openNote(id, vm.cardMorph[id])
+    }
+
+    /** Serahkan gambar ke editor yang hidup; kalau editornya sudah tidak ada, tulis langsung ke data catatan lalu buka catatannya. */
+    private fun deliver(noteId: String, imgs: List<Img>, rep: Pair<String, Int>?) {
+        val ed = vm.ed?.takeIf { it.alive && it.noteId == noteId }
+        if (ed != null) {
+            if (rep != null) ed.replaceImgAt(rep.first, rep.second, imgs[0]) else ed.addImages(imgs)
+            return
+        }
+        val ok = if (rep != null) vm.replaceImgData(noteId, rep.first, rep.second, imgs[0])
+        else if (vm.note(noteId) != null) { vm.appendImages(noteId, imgs); true } else false
+        if (!ok) { vm.show("Catatan tidak ditemukan, gambar tidak dipasang"); return }
+        ensureNote(noteId)
+    }
+
+    // sisipkan gambar (bisa banyak): masuk di posisi kursor / setelah gambar terpilih
+    private val imgPicker = registerForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(20)) { uris ->
+        val t = takePick()
+        if (uris.isEmpty()) return@registerForActivityResult
+        val nid = t?.noteId?.takeIf { it.isNotEmpty() } ?: vm.nav.noteId ?: vm.ed?.noteId
+        lifecycleScope.launch {
+            val imgs = uris.mapNotNull { vm.importImage(it) }
+            when {
+                imgs.isEmpty() -> vm.show(importFailMsg("Gambar gagal dimuat"))
+                nid == null -> vm.show("Catatan tidak ditemukan, gambar tidak disisipkan")
+                else -> deliver(nid, imgs, null)
+            }
+        }
+    }
+    // ganti foto: satu gambar dari galeri mengisi bingkai gambar yang dicatat di PickTarget (ukuran bingkai tetap)
     private val replPicker = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri == null) {
+        val t = takePick()
+        if (uri == null || t == null || t.kind != "rep") {
             vm.ed?.replT = null
             return@registerForActivityResult
         }
         lifecycleScope.launch {
             val img = vm.importImage(uri)
-            if (img == null) vm.show("Gambar gagal dimuat") else vm.ed?.replaceImg(img)
+            if (img == null) vm.show(importFailMsg("Gambar gagal dimuat")) else deliver(t.noteId, listOf(img), t.bid to t.ix)
         }
     }
 
     // sampul catatan: satu gambar dari galeri; langsung dipasang lalu halaman pangkas dibuka
     private var coverFor: String? = null
     private val coverPicker = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        val id = coverFor
+        val t = takePick()
+        val id = t?.takeIf { it.kind == "cov" }?.noteId ?: coverFor
         coverFor = null
-        if (uri == null || id == null) return@registerForActivityResult
+        if (uri == null || id.isNullOrEmpty()) return@registerForActivityResult
         lifecycleScope.launch {
             val img = vm.importImage(uri)
-            if (img == null) vm.show("Gambar gagal dimuat") else {
-                vm.setCover(id, img.id)
-                val t = vm.nav.top
-                if (!(t is Scr.Cover && t.id == id)) vm.nav.push(Scr.Cover(id))
+            when {
+                img == null -> vm.show(importFailMsg("Gambar gagal dimuat"))
+                vm.note(id) == null -> vm.show("Catatan tidak ditemukan, sampul tidak dipasang")
+                else -> {
+                    vm.setCover(id, img.id)
+                    ensureNote(id)
+                    val tp = vm.nav.top
+                    if (!(tp is Scr.Cover && tp.id == id)) vm.nav.push(Scr.Cover(id))
+                }
             }
         }
     }
@@ -921,11 +1000,13 @@ class MainActivity : ComponentActivity(), Actions {
 
     override fun pickCover(id: String) {
         coverFor = id
-        coverPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+        setPick(PickTarget("cov", id))
+        openPicker { coverPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
     }
 
-    override fun replaceImage() {
-        replPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+    override fun replaceImage(noteId: String, bid: String, ix: Int) {
+        setPick(PickTarget("rep", noteId, bid, ix))
+        openPicker { replPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
     }
 
     override fun saveAudio(aud: Aud, name: String) {
@@ -934,7 +1015,8 @@ class MainActivity : ComponentActivity(), Actions {
     }
 
     override fun pickImages() {
-        imgPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+        setPick(PickTarget("ins", vm.nav.noteId ?: vm.ed?.noteId ?: ""))
+        openPicker { imgPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
     }
 
     override fun importMd() {
