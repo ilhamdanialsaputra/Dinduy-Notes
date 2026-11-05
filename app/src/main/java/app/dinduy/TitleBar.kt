@@ -68,7 +68,7 @@ fun TitleBar(ed: Ed, vm: AppVM) {
     val bold = n?.tbo ?: true
     val ital = n?.tit ?: false
     val cur = (n?.tcl ?: 0).coerceIn(0, TITLE_COLORS - 1)
-    Column(Modifier.fillMaxWidth().background(pal.c3)) {
+    Column(Modifier.fillMaxWidth().background(pal.bar())) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(pal.ol.copy(alpha = .35f)))
         Row(
             Modifier.fillMaxWidth().height(54.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
