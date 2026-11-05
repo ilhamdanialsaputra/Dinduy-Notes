@@ -96,6 +96,8 @@ fun CoverImage(vm: AppVM, n: Note, modifier: Modifier = Modifier) {
 
 /**
  * Banner sampul di atas editor, digambar sebagai lapisan di belakang bilah atas dan ikut tergulir bersama isi.
+ * Sampul ini TIDAK memudar saat morph: ia buram penuh sejak awal dan menimpa sampul kartu (bayangan kartu tidak menggambar sampul,
+ * hanya menyisakan ruangnya), jadi tidak ada dua lapisan setengah-transparan yang bertumpuk menjadi pucat sesaat (kedip).
  * Saat morph buka/tutup, tingginya berinterpolasi dari tinggi sampul di kartu ke tinggi banner: karena isi editor
  * ikut diskalakan ke dalam kartu, sampul ini persis menimpa sampul di kartu (bayangan) sehingga pudar-silangnya tak terlihat,
  * dan bannernya terasa "tumbuh" dari kartu.
@@ -118,7 +120,13 @@ fun EditorCover(vm: AppVM, d: Note, scroll: () -> Int) {
                 val p = m.measure(Constraints.fixed(w, h))
                 layout(w, h) { p.place(0, 0) }
             }
-            .graphicsLayer { translationY = -scroll().toFloat(); clip = true }
+            .graphicsLayer {
+                // ikut tergulir saat catatan terbuka penuh; saat menutup, sampul meluncur kembali ke atas sebelum sampai di kartu,
+                // jadi yang menimpa sampul kartu selalu bagian atas gambar (bukan sampul yang sudah tergulir keluar)
+                val k = cSmooth((vm.openP.value - .5f) / .5f)
+                translationY = -scroll().toFloat() * k
+                clip = true
+            }
             .background(pal.c3)
     ) {
         Canvas(Modifier.fillMaxSize()) { if (bmp != null) drawCover(bmp, d.cz, d.cx, d.cy) }
