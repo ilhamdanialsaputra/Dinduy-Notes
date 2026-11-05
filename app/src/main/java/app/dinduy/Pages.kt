@@ -362,6 +362,9 @@ fun NoteMenuPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
             MRow(POS_TOP, "pin", if (pinned) "Lepas sematan" else "Sematkan", "Catatan yang disematkan tampil di bagian atas") {
                 vm.mark(listOf(id), if (pinned) "Sematan dilepas" else "Catatan disematkan") { it.copy(p = !it.p) }
             }
+            MRow(POS_MID, "img", "Sampul", if (d?.cv.isNullOrEmpty()) "Tambahkan gambar di atas catatan" else "Ganti atau pangkas gambar sampul", chevron = true) {
+                if (d?.cv.isNullOrEmpty()) act.pickCover(id) else nav.push(Scr.Cover(id))
+            }
             MRow(POS_MID, "label", "Label", d?.lb?.joinToString(", ")?.ifEmpty { null } ?: "Atur label untuk catatan ini", chevron = true) {
                 nav.push(Scr.NoteLabels(id))
             }
