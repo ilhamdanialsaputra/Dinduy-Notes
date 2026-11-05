@@ -138,8 +138,9 @@ fun EditorCover(vm: AppVM, d: Note, scroll: () -> Int) {
                         colorStops = arrayOf(
                             0f to (if (pal.dark) pal.s.copy(alpha = .5f * e) else clear),
                             .28f to clear,
-                            .42f to clear,
-                            1f to pal.s.copy(alpha = (if (pal.dark) 1f else .55f) * e)
+                            (if (pal.dark) .42f else .55f) to clear,
+                            (if (pal.dark) .75f else .82f) to pal.s.copy(alpha = (if (pal.dark) .6f else .3f) * e),
+                            1f to pal.s.copy(alpha = e)
                         )
                     )
                 )
