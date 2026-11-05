@@ -41,7 +41,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -254,7 +253,7 @@ fun PageScaffold(title: String, sub: String?, onBack: () -> Unit, content: @Comp
     val sat = satDp()
     val sab = sabDp()
     val scroll = rememberScrollState()
-    Box(Modifier.fillMaxSize().background(pal.s)) {
+    Box(Modifier.fillMaxSize().background(pal.bg)) {
         Column(Modifier.fillMaxSize().verticalScroll(scroll)) {
             Spacer(Modifier.height(sat + 64.dp))
             Column(
@@ -272,15 +271,14 @@ fun PageScaffold(title: String, sub: String?, onBack: () -> Unit, content: @Comp
                     T(title, 40f, 400, pal.os, ls = -.01f, maxLines = 1)
                     if (sub != null) T(sub, 16f, 400, pal.osv, Modifier.padding(top = 6.dp), maxLines = 1)
                 }
-                // kartu di halaman ini tonal + border tipis (lihat SCard), tidak menyatu dengan latar
-                CompositionLocalProvider(LocalToneCards provides true) { content() }
+                content()
             }
         }
         Row(
             Modifier.fillMaxWidth().height(sat + 64.dp)
                 .drawBehind {
                     val k = (scroll.value / 80.dp.toPx()).coerceIn(0f, 1f)
-                    drawRect(androidx.compose.ui.graphics.lerp(pal.s, pal.c2, k))
+                    drawRect(androidx.compose.ui.graphics.lerp(pal.bg, pal.c2, k))
                 }
                 .padding(top = sat, start = 8.dp, end = 12.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -305,8 +303,8 @@ fun MRow(pos: Int, icon: String, title: String, sub: String? = null, danger: Boo
     val pal = LocalPal.current
     SCard(pos, onClick, PaddingValues(horizontal = 20.dp, vertical = 14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(16.dp)) {
-            Box(Modifier.size(44.dp).clip(CircleShape).background(if (danger) pal.ec else pal.tb2), Alignment.Center) {
-                Ic(icon, if (danger) pal.oec else pal.os, 22.dp)
+            Box(Modifier.size(44.dp).clip(CircleShape).background(if (danger) pal.ec else pal.pc), Alignment.Center) {
+                Ic(icon, if (danger) pal.oec else pal.opc, 22.dp)
             }
             Column(Modifier.weight(1f)) {
                 T(title, 16f, 500, pal.os)
@@ -340,11 +338,11 @@ private fun MdRow(pos: Int, onShare: () -> Unit, onSave: () -> Unit, onCopy: () 
                 T("Markdown (.md)", 16f, 500, pal.os)
                 T("Share, save or copy", 14f, 400, pal.osv, lh = 1.3f)
             }
-            IconBtn("up", pal.os, onShare, size = 44.dp, bg = pal.tb2)
+            IconBtn("up", pal.os, onShare, size = 44.dp, bg = pal.c4)
             Spacer(Modifier.width(6.dp))
-            IconBtn("dl", pal.os, onSave, size = 44.dp, bg = pal.tb2)
+            IconBtn("dl", pal.os, onSave, size = 44.dp, bg = pal.c4)
             Spacer(Modifier.width(6.dp))
-            IconBtn("dup", pal.os, onCopy, size = 44.dp, bg = pal.tb2)
+            IconBtn("dup", pal.os, onCopy, size = 44.dp, bg = pal.c4)
         }
     }
 }
@@ -431,7 +429,7 @@ fun NoteLabelsPage(vm: AppVM, nav: Nav, id: String) {
                     val on = d != null && n in d.lb
                     SCard(pos, { vm.toggleLabel(id, n) }, PaddingValues(horizontal = 20.dp, vertical = 14.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(16.dp)) {
-                            Box(Modifier.size(44.dp).clip(CircleShape).background(pal.tb2), Alignment.Center) { Ic("label", pal.os, 22.dp) }
+                            Box(Modifier.size(44.dp).clip(CircleShape).background(pal.pc), Alignment.Center) { Ic("label", pal.opc, 22.dp) }
                             T(n, 16f, 500, pal.os, Modifier.weight(1f), maxLines = 1)
                             MorphCheck(on)
                         }
