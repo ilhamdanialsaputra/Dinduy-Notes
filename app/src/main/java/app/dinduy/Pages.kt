@@ -207,7 +207,7 @@ fun AddNoteLayer(vm: AppVM, act: Actions) {
                     }
                 ) {
                     Box(Modifier.padding(start = 12.dp, top = sat + 8.dp).size(52.dp), Alignment.Center) { Ic("back", pal.os, 24.dp) }
-                    T("Judul", 34f, 1000, pal.osv, Modifier.padding(start = 24.dp, top = sat + 74.dp), ls = -.02f, alpha = .5f)
+                    T("Title", 34f, 1000, pal.osv, Modifier.padding(start = 24.dp, top = sat + 74.dp), ls = -.02f, alpha = .5f)
                 }
                 // tiap elemen naik + muncul bergiliran (stagger) mengikuti kartu yang sedang naik;
                 // semuanya pudar saat ditarik jauh atau diserahkan ke editor
@@ -224,15 +224,15 @@ fun AddNoteLayer(vm: AppVM, act: Actions) {
                     Box(stag(0).fillMaxWidth().padding(top = 14.dp, bottom = 18.dp), Alignment.Center) {
                         Box(Modifier.width(40.dp).height(5.dp).clip(RoundedCornerShape(3.dp)).background(pal.ol))
                     }
-                    T("Tambah catatan", 26f, 1000, pal.os, stag(1).padding(start = 12.dp, end = 12.dp, bottom = 14.dp), ls = -.01f)
-                    Box(stag(2)) { Opt(1, "txt", "Tulis catatan", "Ketuk, atau tarik kartu ini ke atas") { openNew() } }
+                    T("Add note", 26f, 1000, pal.os, stag(1).padding(start = 12.dp, end = 12.dp, bottom = 14.dp), ls = -.01f)
+                    Box(stag(2)) { Opt(1, "txt", "Write a note", "Tap, or pull this card up") { openNew() } }
                     Box(stag(3)) {
-                        Opt(2, "up", "Impor berkas", "Berkas .md atau .txt") {
+                        Opt(2, "up", "Import file", ".md or .txt files") {
                             if (!vm.addHand) { vm.addOn = false; act.importMd() }
                         }
                     }
                     Box(stag(4)) {
-                        Opt(3, "mic", "Voice note", "Catatan baru, langsung merekam suara") {
+                        Opt(3, "mic", "Voice note", "New note that starts recording") {
                             if (!vm.addHand) act.requestMic { if (vm.addOn && !vm.addHand) openNew(true) }
                         }
                     }
@@ -357,40 +357,40 @@ fun NoteMenuPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
     val d = vm.note(id)
     val pinned = d?.p == true
     val archived = d?.a == true
-    PageScaffold("Opsi catatan", d?.t?.ifEmpty { null } ?: "Tanpa judul", { nav.pop() }) {
-        SGroup("Catatan ini", 0) {
-            MRow(POS_TOP, "pin", if (pinned) "Lepas sematan" else "Sematkan", "Catatan yang disematkan tampil di bagian atas") {
-                vm.mark(listOf(id), if (pinned) "Sematan dilepas" else "Catatan disematkan") { it.copy(p = !it.p) }
+    PageScaffold("Note options", d?.t?.ifEmpty { null } ?: "Untitled", { nav.pop() }) {
+        SGroup("This note", 0) {
+            MRow(POS_TOP, "pin", if (pinned) "Unpin" else "Pin", "Pinned notes show at the top") {
+                vm.mark(listOf(id), if (pinned) "Note unpinned" else "Note pinned") { it.copy(p = !it.p) }
             }
-            MRow(POS_MID, "img", "Sampul", if (d?.cv.isNullOrEmpty()) "Tambahkan gambar di atas catatan" else "Ganti atau pangkas gambar sampul", chevron = true) {
+            MRow(POS_MID, "img", "Cover", if (d?.cv.isNullOrEmpty()) "Add an image at the top of the note" else "Change or crop the cover image", chevron = true) {
                 if (d?.cv.isNullOrEmpty()) act.pickCover(id) else nav.push(Scr.Cover(id))
             }
-            MRow(POS_MID, "label", "Label", d?.lb?.joinToString(", ")?.ifEmpty { null } ?: "Atur label untuk catatan ini", chevron = true) {
+            MRow(POS_MID, "label", "Labels", d?.lb?.joinToString(", ")?.ifEmpty { null } ?: "Set labels for this note", chevron = true) {
                 nav.push(Scr.NoteLabels(id))
             }
-            MRow(POS_BOT, "search", "Cari dalam catatan", "Temukan dan sorot kata di catatan ini") {
+            MRow(POS_BOT, "search", "Search in note", "Find and highlight words in this note") {
                 nav.pop(); vm.ed?.openFind()
             }
         }
-        SGroup("Bagikan dan ekspor", 60) {
-            MRow(POS_TOP, "txt", "Ekspor PDF", "Pratinjau per halaman, atur ukuran huruf, lalu simpan atau bagikan. Coretan ikut, rekaman suara tidak", chevron = true) {
+        SGroup("Share and export", 60) {
+            MRow(POS_TOP, "txt", "Export PDF", "Preview each page, set the text size, then save or share. Drawings are included, voice recordings are not", chevron = true) {
                 nav.push(Scr.PdfExport(id))
             }
             MdRow(
                 POS_BOT,
                 onShare = { d?.let { act.shareMd(noteFileName(it), noteToMd(it)) } },
                 onSave = { d?.let { act.saveMd(noteFileName(it), noteToMd(it)) } },
-                onCopy = { d?.let { act.copyText(noteToMd(it)); vm.show("Disalin ke papan klip") } }
+                onCopy = { d?.let { act.copyText(noteToMd(it)); vm.show("Copied to clipboard") } }
             )
         }
-        SGroup("Kelola", 120) {
-            MRow(POS_TOP, if (archived) "unarc" else "arc", if (archived) "Keluarkan dari arsip" else "Arsipkan", "Disimpan di Arsip, tidak muncul di beranda") {
-                if (archived) vm.mark(listOf(id), "Dikeluarkan dari arsip") { it.copy(a = false) }
-                else { nav.pop(); nav.pop(); vm.mark(listOf(id), "Catatan diarsipkan") { it.copy(a = true, p = false) } }
+        SGroup("Manage", 120) {
+            MRow(POS_TOP, if (archived) "unarc" else "arc", if (archived) "Unarchive" else "Archive", "Moved to Archive and hidden from home") {
+                if (archived) vm.mark(listOf(id), "Note unarchived") { it.copy(a = false) }
+                else { nav.pop(); nav.pop(); vm.mark(listOf(id), "Note archived") { it.copy(a = true, p = false) } }
             }
-            MRow(POS_MID, "lib", "Gandakan", "Buat salinan catatan ini") { vm.duplicate(id) }
-            MRow(POS_BOT, "del", "Hapus catatan", "Dipindah ke sampah selama 30 hari", danger = true) {
-                nav.pop(); nav.pop(); vm.mark(listOf(id), "Dipindah ke sampah") { it.copy(dt = System.currentTimeMillis()) }
+            MRow(POS_MID, "lib", "Duplicate", "Make a copy of this note") { vm.duplicate(id) }
+            MRow(POS_BOT, "del", "Delete note", "Kept in Trash for 30 days", danger = true) {
+                nav.pop(); nav.pop(); vm.mark(listOf(id), "Moved to Trash") { it.copy(dt = System.currentTimeMillis()) }
             }
         }
     }
@@ -404,8 +404,8 @@ fun NoteLabelsPage(vm: AppVM, nav: Nav, id: String) {
     var text by remember { mutableStateOf("") }
     val labels = vm.sortedLabels()
     val add = { if (text.isNotBlank() && vm.addLabel(text, id)) text = "" }
-    PageScaffold("Label", d?.t?.ifEmpty { null } ?: "Tanpa judul", { nav.pop() }) {
-        SGroup("Buat label baru", 0) {
+    PageScaffold("Labels", d?.t?.ifEmpty { null } ?: "Untitled", { nav.pop() }) {
+        SGroup("Create new label", 0) {
             SCard(POS_ONE, pad = PaddingValues(start = 20.dp, end = 8.dp, top = 6.dp, bottom = 6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Ic("label", pal.p, 24.dp)
@@ -417,16 +417,16 @@ fun NoteLabelsPage(vm: AppVM, nav: Nav, id: String) {
                         singleLine = true, cursorBrush = SolidColor(pal.p),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                         keyboardActions = KeyboardActions(onDone = { add() }),
-                        decorationBox = { inner -> Box { if (text.isEmpty()) T("Nama label", 17f, 500, pal.osv, maxLines = 1); inner() } }
+                        decorationBox = { inner -> Box { if (text.isEmpty()) T("Label name", 17f, 500, pal.osv, maxLines = 1); inner() } }
                     )
                     IconBtn("plus", if (text.isNotBlank()) pal.p else pal.osv.copy(alpha = .4f), { add() }, size = 48.dp, enabled = text.isNotBlank())
                 }
             }
         }
-        SGroup("Pilih label", 60) {
+        SGroup("Choose labels", 60) {
             Column(Modifier.animateContentSize(SizeSpring), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(3.dp)) {
                 if (labels.isEmpty()) {
-                    SCard(POS_ONE) { T("Belum ada label. Buat satu di atas, otomatis terpasang ke catatan ini.", 14f, 400, pal.osv, lh = 1.5f) }
+                    SCard(POS_ONE) { T("No labels yet. Create one above and it's added to this note.", 14f, 400, pal.osv, lh = 1.5f) }
                 } else labels.forEachIndexed { ix, n ->
                     val pos = if (labels.size == 1) POS_ONE else if (ix == 0) POS_TOP else if (ix == labels.lastIndex) POS_BOT else POS_MID
                     val on = d != null && n in d.lb
@@ -519,7 +519,7 @@ fun FindBar(ed: Ed, fa: Float) {
                         singleLine = true, cursorBrush = SolidColor(pal.p),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(onSearch = { ed.findStep(1) }),
-                        decorationBox = { inner -> Box { if (ed.findQ.isEmpty()) T("Cari dalam catatan", 17f, 500, pal.osv, maxLines = 1); inner() } }
+                        decorationBox = { inner -> Box { if (ed.findQ.isEmpty()) T("Search in note", 17f, 500, pal.osv, maxLines = 1); inner() } }
                     )
                     if (ed.findQ.isNotBlank()) T("$cur/$n", 13f, 700, if (n == 0) pal.osv else pal.p, Modifier.padding(horizontal = 6.dp), maxLines = 1)
                     IconBtn("aup", if (n > 0) pal.os else pal.osv.copy(alpha = .4f), { ed.findStep(-1) }, size = 40.dp, enabled = n > 0 && ed.findOn)
