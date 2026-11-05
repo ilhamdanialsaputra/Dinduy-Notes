@@ -116,8 +116,11 @@ object Imgs {
 
 @Composable
 fun rememberImg(vm: AppVM, id: String): ImageBitmap? {
-    val st = produceState<ImageBitmap?>(Imgs.peek(id), id) {
-        if (value == null) value = withContext(Dispatchers.IO) { Imgs.load(vm.imgDir, id) }
+    // state di-key ke id: saat foto diganti (id baru) nilai lama dibuang dan gambar baru dimuat.
+    // (produceState lama menyimpan nilai gambar sebelumnya, jadi `value == null` tak pernah true => foto tak berganti sampai aplikasi dimuat ulang)
+    val st = androidx.compose.runtime.remember(id) { mutableStateOf(Imgs.peek(id)) }
+    androidx.compose.runtime.LaunchedEffect(id) {
+        if (id.isNotEmpty() && st.value == null) st.value = withContext(Dispatchers.IO) { Imgs.load(vm.imgDir, id) }
     }
     return st.value
 }
