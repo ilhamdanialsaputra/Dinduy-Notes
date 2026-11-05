@@ -532,19 +532,19 @@ fun TF(
 class QS(val bg: Color, val fg: Color, val shape: Shape, val label: String?, val bar: Boolean = false, val border: Boolean = false)
 
 fun qs(k: String, p: Pal): QS = when (k) {
-    "note" -> QS(p.pc, p.opc, RoundedCornerShape(28.dp), "Catatan")
-    "tip" -> QS(p.sc, p.osc, RoundedCornerShape(40.dp, 12.dp, 40.dp, 12.dp), "Tips")
-    "imp" -> QS(p.p, p.op, RoundedCornerShape(12.dp, 40.dp, 12.dp, 40.dp), "Penting")
-    "warn" -> QS(p.wc, p.owc, RoundedCornerShape(24.dp), "Peringatan", bar = true)
-    "cau" -> QS(p.ec, p.oec, RoundedCornerShape(6.dp, 32.dp, 32.dp, 32.dp), "Awas")
-    "idea" -> QS(p.ac, p.oac, RoundedCornerShape(44.dp, 44.dp, 12.dp, 44.dp), "Ide")
-    "def" -> QS(Color.Transparent, p.os, RoundedCornerShape(32.dp), "Definisi", border = true)
+    "note" -> QS(p.pc, p.opc, RoundedCornerShape(28.dp), "Note")
+    "tip" -> QS(p.sc, p.osc, RoundedCornerShape(40.dp, 12.dp, 40.dp, 12.dp), "Tip")
+    "imp" -> QS(p.p, p.op, RoundedCornerShape(12.dp, 40.dp, 12.dp, 40.dp), "Important")
+    "warn" -> QS(p.wc, p.owc, RoundedCornerShape(24.dp), "Warning", bar = true)
+    "cau" -> QS(p.ec, p.oec, RoundedCornerShape(6.dp, 32.dp, 32.dp, 32.dp), "Caution")
+    "idea" -> QS(p.ac, p.oac, RoundedCornerShape(44.dp, 44.dp, 12.dp, 44.dp), "Idea")
+    "def" -> QS(Color.Transparent, p.os, RoundedCornerShape(32.dp), "Definition", border = true)
     else -> QS(p.tc, p.otc, RoundedCornerShape(28.dp, 28.dp, 28.dp, 8.dp), null)
 }
 
 val VARS = listOf(
-    "quote" to "Kutipan", "note" to "Catatan", "tip" to "Tips", "imp" to "Penting",
-    "warn" to "Peringatan", "cau" to "Awas", "idea" to "Ide", "def" to "Definisi"
+    "quote" to "Quote", "note" to "Note", "tip" to "Tip", "imp" to "Important",
+    "warn" to "Warning", "cau" to "Caution", "idea" to "Idea", "def" to "Definition"
 )
 
 @Composable
@@ -556,7 +556,7 @@ fun BlockView(ed: Ed, vm: AppVM, b: Blk, ordN: Int, dm: Dm, fold: Fold? = null, 
         "p", "li" -> {
             // paragraf dan poin memakai satu composable yang sama: mengubah poin <-> paragraf tidak membuat TextField baru (keyboard tetap)
             val only = b.ty == "p" && b.r.t.isEmpty() && ed.blocks.size == 1
-            ParaRow(ed, b, ordN, dm, pal, fold, mk, if (only) "Tulis catatan…" else null)
+            ParaRow(ed, b, ordN, dm, pal, fold, mk, if (only) "Write a note…" else null)
         }
         "h" -> {
             val st = when (b.lv) {
@@ -920,7 +920,7 @@ fun SideText(ed: Ed, b: Blk, dm: Dm, modifier: Modifier, minH: Dp, imgSel: Boole
     ) {
         TF(
             ed, b.id, baseStyle(pal, dm), Modifier.fillMaxWidth(),
-            hint = if (ed.reading) null else if (imgSel) "Ketuk di sini untuk menulis…" else "Tulis di samping…"
+            hint = if (ed.reading) null else if (imgSel) "Tap here to write…" else "Write beside it…"
         )
     }
 }
@@ -1421,10 +1421,10 @@ fun EdBar(ed: Ed, act: Actions, imeOpen: Boolean) {
                             .horizontalScroll(rememberScrollState()).padding(6.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        listOf("ar" to "+ Baris", "ac" to "+ Kolom", "dr" to "− Baris", "dc" to "− Kolom").forEach { (k, l) ->
+                        listOf("ar" to "+ Row", "ac" to "+ Column", "dr" to "− Row", "dc" to "− Column").forEach { (k, l) ->
                             Chip(l, pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.tOp(k) }
                         }
-                        Chip("Hapus tabel", pal.ec, pal.oec, RoundedCornerShape(23.dp)) { ed.tOp("dt") }
+                        Chip("Delete table", pal.ec, pal.oec, RoundedCornerShape(23.dp)) { ed.tOp("dt") }
                     }
                     3 -> Row(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(pal.c3)
@@ -1437,7 +1437,7 @@ fun EdBar(ed: Ed, act: Actions, imeOpen: Boolean) {
                                 ed.pickQuote = false; ed.setQuote(k)
                             }
                         }
-                        if (ty == "q") Chip("Teks biasa", pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.pickQuote = false; ed.setPlain() }
+                        if (ty == "q") Chip("Plain text", pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.pickQuote = false; ed.setPlain() }
                     }
                 }
             }
@@ -1531,7 +1531,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     val pal = LocalPal.current
     val ffNow = LocalFF.current
     val nfs = vm.noteFs(ed.noteId)
-    val dm = remember(nfs, vm.pr.lh, ffNow) { Dm(nfs.toFloat(), vm.pr.lh, ffNow) }   // instance stabil: blok tidak recompose tanpa sebab
+    val dm = remember(nfs, ffNow) { Dm(nfs.toFloat(), LH, ffNow) }   // instance stabil: blok tidak recompose tanpa sebab
     val scroll = rememberScrollState()
     InkSetup(ed)
     // Tombol back Android: tutup yang paling atas dulu. Mode ketik -> mode baca (tampilan penuh) -> baru keluar catatan.
@@ -1789,7 +1789,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                         }
                         Box(Modifier.padding(top = 48.dp + coverInset, bottom = 20.dp)) {
                             if (ed.title.isEmpty()) {
-                                T("Judul", 46f, if (tBold) 1000 else 400, pal.osv, alpha = .5f, ls = -.02f)
+                                T("Title", 46f, if (tBold) 1000 else 400, pal.osv, alpha = .5f, ls = -.02f)
                             }
                             androidx.compose.foundation.text.BasicTextField(
                                 value = ed.title,
@@ -2004,21 +2004,21 @@ fun SelBubble(ed: Ed, vm: AppVM, act: Actions, scrollY: Int) {
             SelBtn(live, 10.dp, 9.dp, f) { T(label, 14f, 800, pal.os, maxLines = 1) }
         }
         AnimatedVisibility(edit && has, enter = enter, exit = exit) {
-            Act("Potong") { act.copyText(ed.selText()); ed.selDelete() }
+            Act("Cut") { act.copyText(ed.selText()); ed.selDelete() }
         }
         AnimatedVisibility(has, enter = enter, exit = exit) {
-            Act("Salin") { act.copyText(ed.selText()); vm.show("Disalin"); ed.clearSel() }
+            Act("Copy") { act.copyText(ed.selText()); vm.show("Copied"); ed.clearSel() }
         }
         AnimatedVisibility(edit, enter = enter, exit = exit) {
-            Act("Tempel") {
+            Act("Paste") {
                 val s = clip.getText()?.text
-                if (!s.isNullOrEmpty()) ed.selPaste(s) else vm.show("Tidak ada yang bisa ditempel")
+                if (!s.isNullOrEmpty()) ed.selPaste(s) else vm.show("Nothing to paste")
             }
         }
         AnimatedVisibility(edit && has, enter = enter, exit = exit) {
             SelBtn(live, 9.dp, 7.dp, { ed.selDelete() }) { Ic("del", pal.os, 22.dp) }
         }
-        Act("Semua") { ed.selAll() }
+        Act("Select all") { ed.selAll() }
     }
 }
 
