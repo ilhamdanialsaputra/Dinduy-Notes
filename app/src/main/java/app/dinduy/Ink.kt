@@ -1618,9 +1618,9 @@ fun InkSetup(ed: Ed) {
                 val uri = ctx.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cvs) ?: error("uri")
                 ctx.contentResolver.openOutputStream(uri)?.use { out.compress(Bitmap.CompressFormat.PNG, 100, it) }
             }
-            "Disimpan ke Galeri (Pictures/Dinduy)"
+            "Saved to Gallery (Pictures/Dinduy)"
         } catch (e: Throwable) {
-            "Gagal mengekspor gambar (catatan terlalu panjang atau izin penyimpanan ditolak)"
+            "Couldn't export the image (note too long or storage permission denied)"
         }
         Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
         ik.exporting = false
@@ -1781,7 +1781,7 @@ private val PENCIL by lazy {
     PathParser().parsePathString("M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z").toPath()
 }
 
-/** Ikon alat coret: 0 pulpen (pensil), 1 stabilo (spidol miring + garis), 2 penghapus (blok miring), 3 lasso (tali melingkar), 4 menu "Coretan". */
+/** Ikon alat coret: 0 pulpen (pensil), 1 stabilo (spidol miring + garis), 2 penghapus (blok miring), 3 lasso (tali melingkar), 4 menu "Drawing". */
 @Composable
 fun InkToolIcon(tool: Int, tint: Color) {
     Canvas(Modifier.size(24.dp)) {
