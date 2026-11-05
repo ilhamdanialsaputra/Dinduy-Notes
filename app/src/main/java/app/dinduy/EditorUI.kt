@@ -1553,11 +1553,6 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     LaunchedEffect(ed.clearReq) {
         if (ed.clearReq > 0) { focusMgr.clearFocus(); kb?.hide() }
     }
-    // "ganti foto": pemilih galeri milik editor sendiri; hasilnya langsung mengisi bingkai gambar yang dipilih
-    val replLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) ed.replaceFromUri(uri) else ed.replT = null
-    }
-    SideEffect { ed.replPick = { replLauncher.launch("image/*") } }
     val od = remember(ed.blocks) { ords(ed.blocks) }
     val plans = floatPlans(ed, dm)
     SideEffect {
@@ -1565,6 +1560,10 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
         plans.values.forEach { p -> p.parts.forEach { (x, s) -> s.fold?.let { ed.folds[x.id] = it } } }
     }
     val titleFr = remember { FocusRequester() }
+    val titleNote = vm.note(ed.noteId)
+    val tBold = titleNote?.tbo ?: true
+    val tItal = titleNote?.tit ?: false
+    val tColor = titleColor(titleNote?.tcl ?: 0)
     LaunchedEffect(ed.titleReq) {
         if (ed.titleReq > 0) {
             delay(380)
@@ -1720,8 +1719,13 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     val sat = satDp()
     val coverInset = if (coverNote == null) 0.dp
     else (LocalConfiguration.current.screenWidthDp.dp / EDIT_RATIO - sat - 64.dp - 72.dp - 48.dp).coerceAtLeast(0.dp)
-    Box(Modifier.fillMaxSize().background(pal.s)) {
+    // Latar dan isi memudar sendiri-sendiri (noteFade), sedangkan sampul TIDAK ikut memudar: ia buram penuh sejak awal morph,
+    // persis menimpa sampul kartu. Dulu seluruh isi (termasuk sampul) memudar sambil bayangan kartu juga memudar, dan dua lapisan
+    // setengah-transparan yang identik itu bertumpuk menjadi ~75% sehingga sampul tampak pucat sesaat = "kedip".
+    Box(Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize().graphicsLayer { alpha = noteFade(vm) }.background(pal.s))
     if (coverNote != null) EditorCover(vm, coverNote) { scroll.value }
+    Box(Modifier.fillMaxSize().graphicsLayer { alpha = noteFade(vm) }) {
     Column(Modifier.fillMaxSize()) {
         TopBar()
         // area catatan berhenti tepat di atas keyboard / navbar; kapsul melayang di atasnya tanpa latar
@@ -1785,7 +1789,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                         }
                         Box(Modifier.padding(top = 48.dp + coverInset, bottom = 20.dp)) {
                             if (ed.title.isEmpty()) {
-                                T("Judul", 46f, 1000, pal.osv, alpha = .5f, ls = -.02f)
+                                T("Judul", 46f, if (tBold) 1000 else 400, pal.osv, alpha = .5f, ls = -.02f)
                             }
                             androidx.compose.foundation.text.BasicTextField(
                                 value = ed.title,
@@ -1793,7 +1797,8 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                                 readOnly = ed.reading,
                                 visualTransformation = titleVt,
                                 textStyle = TextStyle(
-                                    color = pal.p, fontFamily = dm.ff, fontSize = 46.sp, fontWeight = FontWeight(1000),
+                                    color = tColor, fontFamily = dm.ff, fontSize = 46.sp, fontWeight = FontWeight(if (tBold) 1000 else 400),
+                                    fontStyle = if (tItal) FontStyle.Italic else FontStyle.Normal,
                                     lineHeight = (46 * 1.1f).sp, letterSpacing = (-.02f).em
                                 ),
                                 cursorBrush = SolidColor(pal.p),
@@ -1878,6 +1883,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
             BottomBars(ed, vm, act, (!ed.reading || ed.selEdit) && !ed.titleFocus && !ed.findOn && !ed.ink.on, imeOpen) { kbBox[0] }
             InkBar(ed, vm)
         }
+    }
     }
     }
 }
@@ -2058,7 +2064,9 @@ fun SelHandles(ed: Ed) {
 @Composable
 fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boolean, holdH: () -> Int) {
     val recOn = ed.recActive
-    SideEffect { ed.barOn = showBar || recOn || ed.sheet != 0 }
+    // judul sedang diketik: kapsul judul (tebal / miring / warna) menggantikan kapsul isi catatan
+    val titleBarOn = ed.titleFocus && !ed.reading && !ed.findOn && !ed.ink.on && ed.sheet == 0
+    SideEffect { ed.barOn = showBar || recOn || ed.sheet != 0 || titleBarOn }
     // Tinggi bilah berubah tiap frame saat bilah / sheet beranimasi. Kalau langsung ditulis ke ed.barH, SETIAP blok teks
     // ikut recompose + restart efek tiap frame (penyebab sheet "+" dan "A" lemot). Sekarang baru diterapkan setelah animasi tenang.
     var rawBarH by remember { mutableStateOf(0f) }
@@ -2089,6 +2097,13 @@ fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boole
                 else fadeOut(tween(140)) + shrinkVertically(tween(260, easing = Emph), shrinkTowards = Alignment.Top)
             ) {
                 DocBar(ed, act)
+            }
+            AnimatedVisibility(
+                visible = titleBarOn,
+                enter = fadeIn(tween(160, delayMillis = 140)) + expandVertically(tween(280, easing = EmphDecel), expandFrom = Alignment.Top),
+                exit = fadeOut(tween(140)) + shrinkVertically(tween(260, easing = Emph), shrinkTowards = Alignment.Top)
+            ) {
+                TitleBar(ed, vm)
             }
         }
     }
