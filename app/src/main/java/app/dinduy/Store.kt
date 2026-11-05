@@ -386,7 +386,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         val n = note(id) ?: return
         if (n.cv.isEmpty()) return
         upd(id) { it.copy(cv = "", cx = .5f, cy = .5f, cz = 1f) }
-        snack = Snack("Sampul dihapus") { upd(id) { it.copy(cv = n.cv, cx = n.cx, cy = n.cy, cz = n.cz) } }
+        show("Sampul dihapus") { upd(id) { it.copy(cv = n.cv, cx = n.cx, cy = n.cy, cz = n.cz) } }
     }
 
     fun live() = docs.filter { !it.a && it.dt == 0L }
