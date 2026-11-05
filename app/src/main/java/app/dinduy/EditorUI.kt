@@ -1417,6 +1417,18 @@ fun EdBar(ed: Ed, act: Actions, imeOpen: Boolean) {
                                     Tbn({ Ic("aC", it) }, al == "c", true) { ed.imgAlign("c") }
                                     Tbn({ Ic("aR", it) }, al == "r", true) { ed.imgAlign("r") }
                                 }
+                                Chip("Scan text", pal.c4, pal.os, RoundedCornerShape(23.dp)) {
+                                    val im = b?.im?.getOrNull(s.second)
+                                    if (im != null) act.ocrImage(im.id) { t ->
+                                        if (ed.alive) {
+                                            val ps = t.split("\n").map { p -> p.trim() }.filter { p -> p.isNotEmpty() }
+                                            if (ps.isNotEmpty()) {
+                                                if (ed.blocks.any { bl -> bl.id == s.first }) ed.selImg = s
+                                                ed.insertObjs(ps.map { p -> Blk(ty = "p", r = Rt(p)) })
+                                            }
+                                        }
+                                    }
+                                }
                                 Tbn({ Ic(if (inRow) "rows" else "cols", it) }, false, true) { ed.toggleRow() }
                                 Tbn({ Ic("aup", it) }, false, true) { ed.imgMove(-1) }
                                 Tbn({ Ic("adn", it) }, false, true) { ed.imgMove(1) }
