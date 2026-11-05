@@ -126,7 +126,7 @@ private fun PdfPageItem(view: PdfView, index: Int, total: Int, wDp: Float, wPx: 
 
 private fun fmtPt(v: Float): String = if (v % 1f == 0f) v.toInt().toString() else v.toString()
 
-/** Halaman "Ekspor PDF" dari menu titik tiga: pratinjau PDF sungguhan, geser ukuran huruf, lalu simpan atau bagikan. */
+/** Halaman "Export PDF" dari menu titik tiga: pratinjau PDF sungguhan, geser ukuran huruf, lalu simpan atau bagikan. */
 @Composable
 fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
     val pal = LocalPal.current
@@ -200,7 +200,7 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconBtn("back", pal.os, { nav.pop() })
-                T("Ekspor PDF", 22f, 400, pal.os, Modifier.padding(start = 8.dp).weight(1f), maxLines = 1)
+                T("Export PDF", 22f, 400, pal.os, Modifier.padding(start = 8.dp).weight(1f), maxLines = 1)
                 if (busy) CircularProgressIndicator(Modifier.size(22.dp), color = pal.p, strokeWidth = 2.5.dp)
             }
 
@@ -218,7 +218,7 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
                     }
                 } else if (failed) {
                     Box(Modifier.fillMaxSize().padding(32.dp), Alignment.Center) {
-                        T("PDF gagal dibuat. Coba kecilkan ukuran huruf atau kurangi isi catatan.", 15f, 400, pal.osv, lh = 1.4f)
+                        T("Couldn't create the PDF. Try a smaller text size or a shorter note.", 15f, 400, pal.osv, lh = 1.4f)
                     }
                 } else {
                     Box(Modifier.fillMaxSize(), Alignment.Center) {
@@ -233,7 +233,7 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Ic("txt", pal.p, 22.dp)
-                    T("Ukuran huruf", 16f, 500, pal.os, Modifier.padding(start = 12.dp).weight(1f))
+                    T("Text size", 16f, 500, pal.os, Modifier.padding(start = 12.dp).weight(1f))
                     T(fmtPt(pt) + " pt", 16f, 600, pal.p)
                 }
                 Slider(
@@ -245,19 +245,19 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 12.dp)) {
                     val pages = info?.pages
                     T(
-                        (if (pages != null) "$pages halaman · A4. " else "") + "Coretan tetap, hanya teks yang berubah ukuran.",
+                        (if (pages != null) "${cnt(pages, "page")} · A4. " else "") + "Drawings stay the same. Only the text changes size.",
                         13f, 400, pal.osv, Modifier.weight(1f), lh = 1.3f
                     )
                     if (pt != def) {
                         T(
-                            "Setel ulang", 14f, 600, pal.p,
+                            "Reset", 14f, 600, pal.p,
                             Modifier.padding(start = 12.dp).clip(RoundedCornerShape(12.dp)).clickable { pt = def }.padding(8.dp)
                         )
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    PdfBtn("dl", "Simpan PDF", false, ready, Modifier.weight(1f)) { info?.let { act.savePdf(name, it.file) } }
-                    PdfBtn("up", "Bagikan PDF", true, ready, Modifier.weight(1f)) { info?.let { act.sharePdf(name, it.file) } }
+                    PdfBtn("dl", "Save PDF", false, ready, Modifier.weight(1f)) { info?.let { act.savePdf(name, it.file) } }
+                    PdfBtn("up", "Share PDF", true, ready, Modifier.weight(1f)) { info?.let { act.sharePdf(name, it.file) } }
                 }
             }
         }
