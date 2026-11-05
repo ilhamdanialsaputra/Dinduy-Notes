@@ -1487,16 +1487,13 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     // ---------- gambar: ganti foto (bingkai tetap) ----------
     /** Isi bingkai gambar terpilih dengan foto lain: ukuran bingkai, perataan, dan posisinya tidak berubah; pangkas diatur ulang. */
-    /** Pemilih galeri untuk "ganti foto" (dipasang NoteScreen); null bila belum siap. */
-    var replPick: (() -> Unit)? = null
+    /** false setelah komposisi editor ini dibuang (mis. Activity dibuat ulang); hasil galeri yang telat tiba tidak boleh dikirim ke editor mati. */
+    @Volatile var alive = true
 
-    /** Foto pilihan dari galeri dipakai mengganti isi bingkai yang dicatat di [replT]. */
-    fun replaceFromUri(uri: android.net.Uri) {
-        scope.launch {
-            val n = vm.importImage(uri)
-            if (n == null) { replT = null; vm.show("Couldn't load the photo"); return@launch }
-            replaceImg(n)
-        }
+    /** Isi bingkai gambar [bid] / [ix] dengan foto baru (target dicatat Activity sebelum galeri dibuka, jadi tak bergantung pada seleksi). */
+    fun replaceImgAt(bid: String, ix: Int, n: Img) {
+        replT = bid to ix
+        replaceImg(n)
     }
 
     fun replaceImg(n: Img) {
