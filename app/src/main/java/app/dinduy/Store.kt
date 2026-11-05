@@ -330,8 +330,24 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     fun dropIfEmpty(id: String, title: String, bl: List<Blk>) {
         if (title.isBlank() && plainOf(bl).isEmpty() && bl.none { it.isObj && it.ty != "hr" } && bl.none { it.ik.isNotEmpty() }) {
             // catatan kosong yang diberi pengingat tetap disimpan (seperti Google Keep)
-            if (docs.removeAll { it.id == id && it.rm == 0L && it.au.isEmpty() }) save()
+            if (docs.removeAll { it.id == id && it.rm == 0L && it.au.isEmpty() && it.cv.isEmpty() }) save()
         }
+    }
+
+    // ---------- sampul catatan ----------
+    fun setCover(id: String, img: String) = upd(id) { it.copy(cv = img, cx = .5f, cy = .5f, cz = 1f) }
+
+    fun setCoverCrop(id: String, cv: String, x: Float, y: Float, z: Float) {
+        val n = note(id) ?: return
+        if (n.cv != cv || (n.cx == x && n.cy == y && n.cz == z)) return
+        upd(id) { if (it.cv == cv) it.copy(cx = x, cy = y, cz = z) else it }
+    }
+
+    fun removeCover(id: String) {
+        val n = note(id) ?: return
+        if (n.cv.isEmpty()) return
+        upd(id) { it.copy(cv = "", cx = .5f, cy = .5f, cz = 1f) }
+        snack = Snack("Sampul dihapus") { upd(id) { it.copy(cv = n.cv, cx = n.cx, cy = n.cy, cz = n.cz) } }
     }
 
     fun live() = docs.filter { !it.a && it.dt == 0L }
@@ -823,6 +839,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     fun imgIds(): Set<String> {
         val s = LinkedHashSet<String>()
         docs.forEach { d -> d.bl.forEach { b -> b.im.forEach { s.add(it.id) } } }
+        docs.forEach { d -> if (d.cv.isNotEmpty()) s.add(d.cv) }
         return s
     }
 
