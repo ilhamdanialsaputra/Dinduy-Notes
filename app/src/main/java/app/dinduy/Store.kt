@@ -56,6 +56,9 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
+/** "1 note", "5 notes". */
+fun cnt(n: Int, one: String, many: String = one + "s"): String = "$n " + (if (n == 1) one else many)
+
 class Snack(val msg: String, val undo: (() -> Unit)?, val id: Long = System.nanoTime())
 
 class Morph(
@@ -119,13 +122,14 @@ fun rememberImg(vm: AppVM, id: String): ImageBitmap? {
     return st.value
 }
 
-const val WEL = "Catatan yang **rapi**, cepat, dan nyaman di jempol.\n\n## Mulai dari sini\n\n" +
-    "- Ketuk **Baru** untuk membuat catatan\n- Tahan kartu catatan untuk memilih, menghapus, atau menggandakan\n" +
-    "- Geser kapsul di atas keyboard untuk memformat teks\n\n### Daftar tugas\n\n- [x] Buka Dinduy\n" +
-    "- [ ] Tulis catatan pertamamu\n- [ ] Coba ketuk kotak centang\n\n1. Ketik teks\n2. Pilih gaya di kapsul\n" +
-    "3. Ketuk panah bawah untuk mode baca\n\n> Kutipan biasa yang rapi.\n\n> [!TIP]\n> Ketuk ikon kutipan untuk memilih gaya lain.\n\n" +
-    "> [!IDEA]\n> Satu catatan bisa memuat banyak jenis kotak.\n\n```js\nconst halo = (nama) => \"Halo \" + nama;\n```\n\n" +
-    "| Fitur | Status |\n|---|---|\n| Tabel | Siap |\n| Kode | Siap |\n\n---\n\nSelamat mencatat."
+const val WEL = "Notes that stay **neat**, quick, and easy on your thumb.\n\n## Start here\n\n" +
+    "- Tap **New** to create a note\n- Press and hold a note card to select, delete, or duplicate it\n" +
+    "- Press, hold, and drag a card to put it anywhere you like\n" +
+    "- Swipe the bar above the keyboard to format text\n\n### To-do list\n\n- [x] Open Dinduy\n" +
+    "- [ ] Write your first note\n- [ ] Tap a checkbox\n\n1. Type some text\n2. Pick a style in the bar\n" +
+    "3. Tap the down arrow for reading mode\n\n> A plain, tidy quote.\n\n> [!TIP]\n> Tap the quote icon to pick another style.\n\n" +
+    "> [!IDEA]\n> One note can hold many kinds of boxes.\n\n```js\nconst hello = (name) => \"Hello \" + name;\n```\n\n" +
+    "| Feature | Status |\n|---|---|\n| Table | Ready |\n| Code | Ready |\n\n---\n\nHappy writing."
 
 @androidx.compose.runtime.Stable
 class AppVM(app: Application) : AndroidViewModel(app) {
@@ -181,7 +185,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     val rec = Rec(ctx, viewModelScope)
     val player = Player(ctx, viewModelScope)
     val models = Models(ctx, viewModelScope,
-        { m -> show(m); Bg.done(ctx, "Unduhan terhenti", "Buka Dinduy lalu ketuk Lanjutkan.") },
+        { m -> show(m); Bg.done(ctx, "Download stopped", "Open Dinduy and tap Resume.") },
         { k -> onModelReady(k) },
         { bgSync() })
     var audVer by mutableStateOf(0)                // dinaikkan saat berkas suara berubah (rekam / pulihkan)
@@ -236,7 +240,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             val dark = (ctx.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
             pr = Prefs()   // mode otomatis + warna Material You mengikuti perangkat
             val t = now
-            docs.add(Note(id = "w", t = "Selamat datang di Dinduy", bl = md(WEL), x = "", u = t, c = t))
+            docs.add(Note(id = "w", t = "Welcome to Dinduy", bl = md(WEL), x = "", u = t, c = t))
             docs[0] = docs[0].copy(x = plainOf(docs[0].bl))
             save()
         } else {
@@ -307,7 +311,11 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     fun upd(id: String, f: (Note) -> Note) {
         val i = docs.indexOfFirst { it.id == id }
         if (i >= 0) {
-            docs[i] = f(docs[i]); save()
+            val old = docs[i]
+            val nn = f(old)
+            // catatan yang isinya baru diedit kembali ke atas (seperti Keep); posisi manualnya dilepas
+            docs[i] = if (nn.u != old.u && nn.o == old.o && nn.o != 0L) nn.copy(o = 0L) else nn
+            save()
         }
     }
 
@@ -386,7 +394,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         val n = note(id) ?: return
         if (n.cv.isEmpty()) return
         upd(id) { it.copy(cv = "", cx = .5f, cy = .5f, cz = 1f) }
-        show("Sampul dihapus") { upd(id) { it.copy(cv = n.cv, cx = n.cx, cy = n.cy, cz = n.cz) } }
+        show("Cover removed") { upd(id) { it.copy(cv = n.cv, cx = n.cx, cy = n.cy, cz = n.cz) } }
     }
 
     fun live() = docs.filter { !it.a && it.dt == 0L }
@@ -406,7 +414,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         val n = raw.trim().take(30)
         if (n.isEmpty()) return false
         val ex = labels.firstOrNull { it.equals(n, true) }
-        if (ex != null && forNote == null) { show("Label sudah ada"); return false }
+        if (ex != null && forNote == null) { show("Label already exists"); return false }
         val name = ex ?: n.also { labels.add(it) }
         if (forNote != null) upd(forNote) { if (name in it.lb) it else it.copy(lb = it.lb + name) }
         save()
@@ -417,7 +425,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         val n = raw.trim().take(30)
         if (n.isEmpty()) return false
         if (n == old) return true
-        if (labels.any { !it.equals(old, true) && it.equals(n, true) }) { show("Label sudah ada"); return false }
+        if (labels.any { !it.equals(old, true) && it.equals(n, true) }) { show("Label already exists"); return false }
         val ix = labels.indexOf(old)
         if (ix >= 0) labels[ix] = n
         for (i in docs.indices) {
@@ -436,7 +444,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             if (name in d.lb) docs[i] = d.copy(lb = d.lb - name)
         }
         if (filter == name) filter = null
-        save(); show("Label dihapus")
+        save(); show("Label deleted")
     }
 
     fun toggleLabel(id: String, name: String) {
@@ -445,10 +453,38 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     fun archived() = docs.filter { it.a && it.dt == 0L }.sortedByDescending { it.u }
     fun trashed() = docs.filter { it.dt != 0L }.sortedByDescending { it.dt }
-    fun sortKey(n: Note) = if (pr.sort == "c") (if (n.c != 0L) n.c else n.u) else n.u
+    /** Kunci urut: posisi manual (hasil seret) bila ada, kalau tidak waktu ubah / waktu dibuat sesuai pilihan. */
+    fun sortKey(n: Note) = if (n.o != 0L) n.o else if (pr.sort == "c") (if (n.c != 0L) n.c else n.u) else n.u
     fun sorted(l: List<Note>): List<Note> =
         if (remFilter) l.sortedBy { Rem.sortKey(it) }   // tampilan Pengingat: urut menurut waktu bunyi, yang terlewat di atas
-        else l.sortedWith(compareByDescending<Note> { it.p }.thenByDescending { sortKey(it) })
+        else l.sortedWith(compareByDescending<Note> { it.p }.thenByDescending { sortKey(it) }.thenBy { it.id })
+
+    /** Ganti urutan bawaan (Diubah / Dibuat). Urutan manual hasil seret ikut dihapus supaya pilihan baru langsung terlihat. */
+    fun setSort(s: String) {
+        if (pr.sort == s) return
+        for (i in docs.indices) if (docs[i].o != 0L) docs[i] = docs[i].copy(o = 0L)
+        setPr(pr.copy(sort = s))
+    }
+
+    /**
+     * Simpan urutan baru hasil seret. `ids` = urutan atas -> bawah untuk satu kelompok (disematkan atau tidak).
+     * Kunci urut yang sudah dimiliki kelompok itu dibagikan ulang menurut urutan baru, jadi catatan lain
+     * (yang tersembunyi oleh label / filter) tetap berada di tempatnya.
+     */
+    fun moveOrder(ids: List<String>) {
+        val live = ids.mapNotNull { note(it) }
+        if (live.size < 2) return
+        val keys = live.map { sortKey(it) }.sortedDescending().toMutableList()
+        for (i in 1 until keys.size) if (keys[i] >= keys[i - 1]) keys[i] = keys[i - 1] - 1L
+        val m = HashMap<String, Long>()
+        live.forEachIndexed { i, n -> m[n.id] = keys[i] }
+        var changed = false
+        for (i in docs.indices) {
+            val k = m[docs[i].id] ?: continue
+            if (docs[i].o != k) { docs[i] = docs[i].copy(o = k); changed = true }
+        }
+        if (changed) save()
+    }
 
     fun show(msg: String, undo: (() -> Unit)? = null) {
         snack = Snack(msg, undo)
@@ -464,28 +500,28 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     fun setReminder(id: String, at: Long, rr: String) {
         val prev = note(id) ?: return
         upd(id) { it.copy(rm = at, rr = rr, rd = 0L) }
-        show("Pengingat diatur: " + Rem.fmt(at)) { upd(id) { it.copy(rm = prev.rm, rr = prev.rr, rd = prev.rd) } }
+        show("Reminder set: " + Rem.fmt(at)) { upd(id) { it.copy(rm = prev.rm, rr = prev.rr, rd = prev.rd) } }
     }
 
     fun clearReminder(id: String) {
         val prev = note(id) ?: return
         upd(id) { it.copy(rm = 0L, rr = "", rd = 0L) }
-        show("Pengingat dihapus") { upd(id) { it.copy(rm = prev.rm, rr = prev.rr, rd = prev.rd) } }
+        show("Reminder removed") { upd(id) { it.copy(rm = prev.rm, rr = prev.rr, rd = prev.rd) } }
     }
 
     fun duplicate(id: String) {
         val d = note(id) ?: return
         val t = now
-        docs.add(0, d.copy(id = uid(), t = (d.t.ifEmpty { "Tanpa judul" }) + " (salinan)", u = t, c = t, p = false, a = false, rm = 0L, rr = "", rd = 0L))
-        save(); show("Catatan digandakan")
+        docs.add(0, d.copy(id = uid(), t = (d.t.ifEmpty { "Untitled" }) + " (copy)", u = t, c = t, p = false, a = false, rm = 0L, rr = "", rd = 0L))
+        save(); show("Note duplicated")
     }
 
     fun purge(id: String) {
-        docs.removeAll { it.id == id }; save(); gcAudio(); show("Dihapus permanen")
+        docs.removeAll { it.id == id }; save(); gcAudio(); show("Deleted forever")
     }
 
     fun purgeAll() {
-        docs.removeAll { it.dt != 0L }; save(); gcAudio(); show("Sampah dikosongkan")
+        docs.removeAll { it.dt != 0L }; save(); gcAudio(); show("Trash emptied")
     }
 
     // ---------- suara ----------
@@ -512,22 +548,22 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     private fun bgSnap(): Bg.Snap? {
         val dl = models.list.firstOrNull { it.status == 1 }
         val tr = trId
-        if (rec.active) return Bg.Snap("Merekam suara", fmtTime(rec.ms), -2, true, true)
+        if (rec.active) return Bg.Snap("Recording audio", fmtTime(rec.ms), -2, true, true)
         if (dl != null) {
             val p = if (dl.total > 0L) (dl.got * 100L / dl.total).toInt().coerceIn(0, 100) else -1
-            val txt = if (p >= 0) "$p% · " + (dl.got / 1048576L) + " dari " + (dl.total / 1048576L) + " MB" else "Menyiapkan unduhan…"
-            return Bg.Snap("Mengunduh model " + modelLabel(dl.info.key), txt, p, false, false)
+            val txt = if (p >= 0) "$p% · " + (dl.got / 1048576L) + " of " + (dl.total / 1048576L) + " MB" else "Preparing download…"
+            return Bg.Snap("Downloading model " + modelLabel(dl.info.key), txt, p, false, false)
         }
         if (tr != null) {
             val st = when (trStage) {
-                0 -> "Menyiapkan suara…"
-                1 -> "Memuat model…"
-                2 -> "Mengubah suara jadi teks…"
-                4 -> "Mengirim ke Groq…"
-                5 -> "Merapikan format…"
-                else -> "Membatalkan…"
+                0 -> "Preparing audio…"
+                1 -> "Loading model…"
+                2 -> "Turning speech into text…"
+                4 -> "Sending to Groq…"
+                5 -> "Formatting…"
+                else -> "Canceling…"
             }
-            return Bg.Snap("Transkripsi berjalan", if (trInfo.isNotEmpty()) st + " " + trInfo else st, -1, false, false)
+            return Bg.Snap("Transcription in progress", if (trInfo.isNotEmpty()) st + " " + trInfo else st, -1, false, false)
         }
         return null
     }
@@ -549,7 +585,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     fun startRec(noteId: String): Boolean {
         player.stop()
         val ok = rec.start(noteId)
-        if (!ok) show("Perekaman tidak bisa dimulai") else bgSync()
+        if (!ok) show("Can't start recording") else bgSync()
         return ok
     }
 
@@ -557,7 +593,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         val nid = rec.noteId ?: return
         val a = rec.finish()
         if (a == null) {
-            show("Rekaman terlalu singkat atau gagal")
+            show("Recording was too short or failed")
             return
         }
         upd(nid) { it.copy(au = it.au + a, u = now) }
@@ -574,7 +610,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         if (trId == audId) cancelTranscribe()
         player.stopIf(audId)
         upd(noteId) { it.copy(au = it.au.filter { x -> x.id != audId }) }
-        show("Suara dihapus") {
+        show("Audio deleted") {
             upd(noteId) { n -> if (n.au.any { it.id == audId }) n else n.copy(au = (n.au + a).sortedBy { it.at }) }
         }
     }
@@ -582,8 +618,8 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     private fun onModelReady(key: String) {
         val cur = models.list.firstOrNull { it.info.key == pr.wm }
         if (cur == null || cur.status != 2) setPr(pr.copy(wm = key))
-        show("Model transkripsi siap dipakai")
-        Bg.done(ctx, "Model transkripsi siap", "Sekarang bisa dipakai tanpa internet.")
+        show("Transcription model is ready")
+        Bg.done(ctx, "Transcription model ready", "You can now use it offline.")
     }
 
     fun cancelTranscribe() {
@@ -600,11 +636,11 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         val k = KeyVault.clean(raw)
         if (k == null) {
             gqState = 3
-            gqMsg = "Bentuk key tidak dikenali. Key Groq diawali gsk_ dan tanpa spasi. Coba salin ulang dari halaman Groq."
+            gqMsg = "Key format not recognized. Groq keys start with gsk_ and have no spaces. Try copying it again from Groq."
             return
         }
         gqState = 1
-        gqMsg = "Menghubungi Groq…"
+        gqMsg = "Contacting Groq…"
         viewModelScope.launch {
             val err = withContext(Dispatchers.IO) { Groq.test(k) }
             if (err != null) {
@@ -616,11 +652,11 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                     gqSet = true
                     gqHint = KeyVault.mask(k)
                     gqState = 2
-                    gqMsg = "Terhubung ke Groq. Key tersimpan terenkripsi di perangkat ini."
+                    gqMsg = "Connected to Groq. The key is stored encrypted on this device."
                     if (pr.eng != "groq") setPr(pr.copy(eng = "groq"))
                 } else {
                     gqState = 3
-                    gqMsg = "Key valid, tetapi gagal menyimpannya dengan aman di perangkat ini."
+                    gqMsg = "The key is valid, but it couldn't be stored safely on this device."
                 }
             }
         }
@@ -629,16 +665,16 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     fun testSavedKey() {
         if (gqState == 1) return
         gqState = 1
-        gqMsg = "Menghubungi Groq…"
+        gqMsg = "Contacting Groq…"
         viewModelScope.launch {
             val k = withContext(Dispatchers.IO) { vault.load() }
             if (k == null) {
                 gqSet = false; gqHint = ""
                 gqState = 3
-                gqMsg = "Key tidak ditemukan di perangkat ini. Masukkan lagi."
+                gqMsg = "Key not found on this device. Enter it again."
             } else {
                 val err = withContext(Dispatchers.IO) { Groq.test(k) }
-                if (err == null) { gqState = 2; gqMsg = "Key berfungsi. Groq siap dipakai." } else { gqState = 3; gqMsg = err }
+                if (err == null) { gqState = 2; gqMsg = "Key works. Groq is ready." } else { gqState = 3; gqMsg = err }
             }
         }
     }
@@ -646,7 +682,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     fun removeGroqKey() {
         vault.clear()
         gqSet = false; gqHint = ""; gqState = 0; gqMsg = ""
-        show("API key dihapus dari perangkat ini")
+        show("API key removed from this device")
     }
 
     /** "groq", "off", atau "" (belum ada mesin yang siap). Mengikuti pilihan pengguna, jatuh ke yang tersedia. */
@@ -666,7 +702,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         val segs = ArrayList<TSeg>()
         for ((i, p) in parts.withIndex()) {
             trStage = 4
-            trInfo = if (parts.size > 1) "Bagian ${i + 1} dari ${parts.size}" else ""
+            trInfo = if (parts.size > 1) "Part ${i + 1} of ${parts.size}" else ""
             val f = p.first
             val off = p.second
             val mime = if (f.extension == "m4a") "audio/mp4" else "audio/wav"
@@ -709,7 +745,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         }
         val src = AudioFiles.file(ctx, audId)
         if (!src.exists()) {
-            show("Berkas suara tidak ditemukan")
+            show("Audio file not found")
             return
         }
         val mf = if (eng == "off") models.readyFile(pr.wm) else null
@@ -728,7 +764,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                 val segs: List<TSeg>
                 if (eng == "groq") {
                     val k = withContext(Dispatchers.IO) { vault.load() }
-                        ?: throw GroqException("API key tidak ditemukan. Masukkan lagi di Model transkripsi.")
+                        ?: throw GroqException("API key not found. Enter it again in Voice transcription.")
                     key = k
                     segs = groqSegs(src, audId, k, temps)
                 } else {
@@ -736,7 +772,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                 }
                 val paras = Paras.build(segs)
                 if (paras.isEmpty()) {
-                    show("Tidak ada ucapan yang terdeteksi")
+                    show("No speech detected")
                 } else {
                     var chunks: List<Chunk>? = null
                     var fmtErr: String? = null
@@ -748,27 +784,27 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                         val fr = withContext(Dispatchers.IO) { Groq.format(kk, paras) { ensureActive() } }
                         chunks = fr?.chunks?.ifEmpty { null }; fmtErr = fr?.err; fmtOk = fr?.ok ?: 0
                     }
-                    applyTranscript(noteId, audId) { n -> Paras.blocks("Transkrip $n", paras, chunks) }
+                    applyTranscript(noteId, audId) { n -> Paras.blocks("Transcript $n", paras, chunks) }
                     val fe = fmtErr
                     show(
                         when {
-                            key == null || !pr.gf -> "Transkrip ditambahkan ke catatan"
-                            fe != null -> "Transkrip ditambahkan. Format otomatis dilewati: " + fe
-                            fmtOk == 0 -> "Transkrip ditambahkan tanpa format otomatis"
-                            else -> "Transkrip ditambahkan ke catatan"
+                            key == null || !pr.gf -> "Transcript added to the note"
+                            fe != null -> "Transcript added. Auto format skipped: " + fe
+                            fmtOk == 0 -> "Transcript added without auto format"
+                            else -> "Transcript added to the note"
                         }
                     )
-                    Bg.done(ctx, "Transkrip siap", "Teks suaramu sudah masuk ke catatan.")
+                    Bg.done(ctx, "Transcript ready", "Your transcript is now in the note.")
                 }
             } catch (e: CancellationException) {
-                show("Transkripsi dibatalkan")
+                show("Transcription canceled")
                 throw e
             } catch (e: Throwable) {
-                if (trStage == 3) show("Transkripsi dibatalkan")
+                if (trStage == 3) show("Transcription canceled")
                 else {
-                    val em = e.message ?: "kesalahan tidak dikenal"
-                    show("Transkripsi gagal: " + em)
-                    Bg.done(ctx, "Transkripsi gagal", em)
+                    val em = e.message ?: "unknown error"
+                    show("Transcription failed: " + em)
+                    Bg.done(ctx, "Transcription failed", em)
                 }
             } finally {
                 withContext(NonCancellable) { temps.forEach { try { it.delete() } catch (x: Exception) { } } }
@@ -813,7 +849,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         for (u in uris) {
             try {
                 val text = ctx.contentResolver.openInputStream(u)?.bufferedReader()?.readText() ?: continue
-                var name = "Catatan"
+                var name = "Note"
                 ctx.contentResolver.query(u, null, null, null, null)?.use { c ->
                     val i = c.getColumnIndex("_display_name")
                     if (c.moveToFirst() && i >= 0) name = c.getString(i)
@@ -856,7 +892,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             while (maxOf(o.outWidth, o.outHeight) / (s * 2) >= 1600) s *= 2
             val raw = ctx.contentResolver.openInputStream(uri)?.use {
                 BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = s })
-            } ?: throw IllegalStateException("gambar tidak terbaca")
+            } ?: throw IllegalStateException("image can't be read")
             // BitmapFactory tidak memutar gambar sesuai EXIF (foto kamera potret jadi miring), jadi diputar di sini
             val deg = try {
                 ctx.contentResolver.openInputStream(uri)?.use { st ->
@@ -888,8 +924,8 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             val id = uid()
             imgDir.mkdirs()
             val f = File(imgDir, "$id.jpg")
-            FileOutputStream(f).use { if (!out.compress(Bitmap.CompressFormat.JPEG, 85, it)) throw IllegalStateException("gagal menyimpan JPEG") }
-            if (f.length() == 0L) throw IllegalStateException("berkas gambar kosong")
+            FileOutputStream(f).use { if (!out.compress(Bitmap.CompressFormat.JPEG, 85, it)) throw IllegalStateException("couldn't save JPEG") }
+            if (f.length() == 0L) throw IllegalStateException("image file is empty")
             val a = bm.width.toFloat() / bm.height
             Img(id = id, a = a, o = a)
         } catch (e: Throwable) {
@@ -1115,7 +1151,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             syncLabels()
             save()
             if (replace) gcAudio()
-            show(p.notes.size.toString() + " catatan, " + p.nImg + " foto, dan " + p.aids.size + " suara dipulihkan")
+            show("Restored " + cnt(p.notes.size, "note") + ", " + cnt(p.nImg, "photo") + ", and " + cnt(p.aids.size, "audio file"))
         }
     }
 }
