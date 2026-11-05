@@ -324,10 +324,10 @@ fun DocBar(ed: Ed, act: Actions) {
                     Modifier.fillMaxWidth().padding(vertical = 6.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    listOf("ar" to "+ Baris", "ac" to "+ Kolom", "dr" to "− Baris", "dc" to "− Kolom").forEach { (k, l) ->
+                    listOf("ar" to "+ Row", "ac" to "+ Column", "dr" to "− Row", "dc" to "− Column").forEach { (k, l) ->
                         Chip(l, pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.tOp(k) }
                     }
-                    Chip("Hapus tabel", pal.ec, pal.oec, RoundedCornerShape(23.dp)) { ed.tOp("dt") }
+                    Chip("Delete table", pal.ec, pal.oec, RoundedCornerShape(23.dp)) { ed.tOp("dt") }
                 }
                 3 -> Row(
                     Modifier.fillMaxWidth().padding(vertical = 6.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
@@ -337,7 +337,7 @@ fun DocBar(ed: Ed, act: Actions) {
                         val q = qs(k, pal)
                         Chip(l, if (k == "def") pal.c4 else q.bg, q.fg, q.shape, 52.dp, 104.dp) { ed.pickQuote = false; ed.setQuote(k) }
                     }
-                    if (ty == "q") Chip("Teks biasa", pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.pickQuote = false; ed.setPlain() }
+                    if (ty == "q") Chip("Plain text", pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.pickQuote = false; ed.setPlain() }
                 }
                 else -> Row(Modifier.fillMaxWidth().height(54.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Tbn({ c -> T("A", 21f, 900, c) }, ed.sheet == 2, true) {
@@ -546,7 +546,7 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM, holdH: Int = 0) {
                 Column(Modifier.fillMaxWidth()) {
                     Row(Modifier.fillMaxWidth().padding(start = if (pg == 1) 6.dp else 22.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         if (pg == 1) IconBtn("chl", pal.os, { ed.sheetPage = 0 })
-                        T(if (pg == 2) "Format" else if (pg == 1) "Tabel" else "Sisipkan", 20f, 800, pal.os, Modifier.weight(1f).padding(vertical = 12.dp))
+                        T(if (pg == 2) "Format" else if (pg == 1) "Table" else "Insert", 20f, 800, pal.os, Modifier.weight(1f).padding(vertical = 12.dp))
                         IconBtn("x", pal.os, { ed.sheet = 0 })
                     }
                     Box(Modifier.fillMaxWidth().height(1.dp).background(pal.ol.copy(alpha = .35f)))
@@ -554,31 +554,31 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM, holdH: Int = 0) {
                     Column(Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState())) {
                         when (pg) {
                             0 -> {
-                                SRow(enabled = !blkOff, icon = { Ic("img", pal.os) }, label = { T("Gambar", 17f, 500, pal.os) }) {
+                                SRow(enabled = !blkOff, icon = { Ic("img", pal.os) }, label = { T("Image", 17f, 500, pal.os) }) {
                                     ed.sheet = 0; act.pickImages()
                                 }
-                                SRow(enabled = !blkOff, icon = { Ic("cam", pal.os) }, label = { T("Kamera", 17f, 500, pal.os) }) {
+                                SRow(enabled = !blkOff, icon = { Ic("cam", pal.os) }, label = { T("Camera", 17f, 500, pal.os) }) {
                                     ed.sheet = 0; act.takePhoto(false)
                                 }
-                                SRow(enabled = !blkOff, icon = { Ic("table", pal.os) }, label = { T("Tabel", 17f, 500, pal.os) }) {
+                                SRow(enabled = !blkOff, icon = { Ic("table", pal.os) }, label = { T("Table", 17f, 500, pal.os) }) {
                                     ed.sheetPage = 1                       // geser ke pengaturan baris dan kolom
                                 }
-                                SRow(icon = { InkToolIcon(4, pal.os) }, label = { T("Coretan", 17f, 500, pal.os) }) {
+                                SRow(icon = { InkToolIcon(4, pal.os) }, label = { T("Drawing", 17f, 500, pal.os) }) {
                                     ed.sheet = 0; ed.ink.toggle(ed)
                                 }
-                                SRow(enabled = !convOff, icon = { Ic("quote", pal.os) }, label = { T("Kutipan", 17f, 500, pal.os) }) {
+                                SRow(enabled = !convOff, icon = { Ic("quote", pal.os) }, label = { T("Quote", 17f, 500, pal.os) }) {
                                     ed.sheet = 0; if (ed.focus != null) ed.pickQuote = true
                                 }
-                                SRow(enabled = !convOff, icon = { Ic("pre", pal.os) }, label = { T("Kode", 17f, 500, pal.os) }) {
+                                SRow(enabled = !convOff, icon = { Ic("pre", pal.os) }, label = { T("Code", 17f, 500, pal.os) }) {
                                     ed.sheet = 0; ed.setCode()
                                 }
-                                SRow(enabled = !blkOff, icon = { Ic("hr", pal.os) }, label = { T("Garis horizontal", 17f, 500, pal.os) }) {
+                                SRow(enabled = !blkOff, icon = { Ic("hr", pal.os) }, label = { T("Divider", 17f, 500, pal.os) }) {
                                     ed.sheet = 0; ed.insHr()
                                 }
                             }
                             1 -> {
-                                Stepper("Baris", ed.tbR, 1, 20) { ed.tbR = it }
-                                Stepper("Kolom", ed.tbC, 1, 6) { ed.tbC = it }
+                                Stepper("Rows", ed.tbR, 1, 20) { ed.tbR = it }
+                                Stepper("Columns", ed.tbC, 1, 6) { ed.tbC = it }
                                 Box(Modifier.fillMaxWidth().padding(vertical = 6.dp), Alignment.Center) {
                                     Canvas(Modifier.size(width = 150.dp, height = 64.dp)) {   // pratinjau kisi
                                         val st = Stroke(1.5f * density)
@@ -588,7 +588,7 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM, holdH: Int = 0) {
                                     }
                                 }
                                 Box(Modifier.fillMaxWidth().padding(vertical = 10.dp), Alignment.Center) {
-                                    Chip("Sisipkan tabel", pal.p, pal.op, RoundedCornerShape(26.dp), 52.dp, 220.dp) {
+                                    Chip("Insert table", pal.p, pal.op, RoundedCornerShape(26.dp), 52.dp, 220.dp) {
                                         ed.sheet = 0; ed.insTable(ed.tbR, ed.tbC)
                                     }
                                 }
@@ -597,45 +597,45 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM, holdH: Int = 0) {
                                 // ---- ukuran teks: per catatan (Note.fs); 0 = ikut bawaan ----
                                 Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 6.dp)) {
                                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                        T("Ukuran teks", 17f, 500, pal.os)
+                                        T("Text size", 17f, 500, pal.os)
                                         T("${vm.noteFs(ed.noteId)} px", 16f, 600, pal.p)
                                     }
                                     BigSlider(vm.noteFs(ed.noteId).toFloat(), 14f, 30f) { v -> vm.upd(ed.noteId) { it.copy(fs = v.toInt()) } }
                                 }
                                 Box(Modifier.fillMaxWidth().height(1.dp).padding(horizontal = 22.dp).background(pal.ol.copy(alpha = .35f)))
-                                SRow(on = ty == "p", enabled = !convOff, icon = { T("T", 20f, 700, pal.os) }, label = { T("Teks biasa", 17f, 500, pal.os) }) {
+                                SRow(on = ty == "p", enabled = !convOff, icon = { T("T", 20f, 700, pal.os) }, label = { T("Plain text", 17f, 500, pal.os) }) {
                                     ed.setPlain()
                                 }
                                 listOf(1 to 26f, 2 to 23f, 3 to 20f, 4 to 18f).forEach { (lv, sz) ->
                                     SRow(on = ty == "h" && blk?.lv == lv, enabled = !convOff, icon = { T("H$lv", 15f, 900, pal.p) },
-                                        label = { T(if (lv == 4) "Sub-judul" else "Judul $lv", sz, 900, pal.os) }) {
+                                        label = { T(if (lv == 4) "Subheading" else "Heading $lv", sz, 900, pal.os) }) {
                                         ed.setHead(lv)
                                     }
                                 }
-                                SRow(on = K.S in fl, enabled = ty != "code", icon = { Ic("s", pal.os) }, label = { T("Coret", 17f, 500, pal.os) }) {
+                                SRow(on = K.S in fl, enabled = ty != "code", icon = { Ic("s", pal.os) }, label = { T("Strikethrough", 17f, 500, pal.os) }) {
                                     ed.toggleFmt(K.S)
                                 }
-                                SRow(on = K.C in fl, enabled = ty != "code", icon = { Ic("code", pal.os) }, label = { T("Kode sebaris", 17f, 500, pal.os) }) {
+                                SRow(on = K.C in fl, enabled = ty != "code", icon = { Ic("code", pal.os) }, label = { T("Inline code", 17f, 500, pal.os) }) {
                                     ed.toggleFmt(K.C)
                                 }
                                 // ---- inden paragraf: satu ketukan = satu inden, ketuk lagi = lepas ----
                                 val indLR = !blkOff && blk != null && (ty == "p" || ty == "h" || ty == "li" || ty == "q")
                                 val indSp = !blkOff && blk != null && (ty == "p" || ty == "h" || ty == "li")
                                 Box(Modifier.fillMaxWidth().height(1.dp).padding(horizontal = 22.dp).background(pal.ol.copy(alpha = .35f)))
-                                T("Inden", 15f, 800, pal.p, Modifier.padding(start = 22.dp, top = 12.dp, bottom = 2.dp))
+                                T("Indent", 15f, 800, pal.p, Modifier.padding(start = 22.dp, top = 12.dp, bottom = 2.dp))
                                 val il = blk?.il ?: 0
                                 val ir = blk?.ir ?: 0
                                 val fi = blk?.fi ?: 0
-                                SRow(on = il > 0, enabled = indLR, icon = { IndentIcon(0, pal.os) }, label = { T("Inden kiri", 17f, 500, pal.os) }) {
+                                SRow(on = il > 0, enabled = indLR, icon = { IndentIcon(0, pal.os) }, label = { T("Left indent", 17f, 500, pal.os) }) {
                                     ed.setIndent(0, if (il > 0) 0 else IND_UNIT)
                                 }
-                                SRow(on = ir > 0, enabled = indLR, icon = { IndentIcon(1, pal.os) }, label = { T("Inden kanan", 17f, 500, pal.os) }) {
+                                SRow(on = ir > 0, enabled = indLR, icon = { IndentIcon(1, pal.os) }, label = { T("Right indent", 17f, 500, pal.os) }) {
                                     ed.setIndent(1, if (ir > 0) 0 else IND_UNIT)
                                 }
-                                SRow(on = fi > 0, enabled = indSp, icon = { IndentIcon(2, pal.os) }, label = { T("Inden baris pertama", 17f, 500, pal.os) }) {
+                                SRow(on = fi > 0, enabled = indSp, icon = { IndentIcon(2, pal.os) }, label = { T("First-line indent", 17f, 500, pal.os) }) {
                                     ed.setIndent(2, if (fi > 0) 0 else IND_UNIT)
                                 }
-                                SRow(on = fi < 0, enabled = indSp, icon = { IndentIcon(3, pal.os) }, label = { T("Inden menggantung", 17f, 500, pal.os) }) {
+                                SRow(on = fi < 0, enabled = indSp, icon = { IndentIcon(3, pal.os) }, label = { T("Hanging indent", 17f, 500, pal.os) }) {
                                     ed.setIndent(3, if (fi < 0) 0 else IND_UNIT)
                                 }
                             }
