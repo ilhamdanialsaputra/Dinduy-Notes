@@ -1495,9 +1495,9 @@ fun SegPill(n: Int, sel: Int, onSel: (Int) -> Unit, h: Dp = 52.dp, item: @Compos
 fun MorphSwitch(on: Boolean) {
     val pal = LocalPal.current
     val k by animateFloatAsState(if (on) 1f else 0f, spring(.7f, 420f), label = "sw")
-    val track = androidx.compose.ui.graphics.lerp(pal.c4, pal.p, k)
-    val edge = androidx.compose.ui.graphics.lerp(pal.osv, pal.p, k)
-    val thumb = androidx.compose.ui.graphics.lerp(pal.osv, pal.op, k)
+    val track = androidx.compose.ui.graphics.lerp(pal.neutral(if (pal.dark) .16f else .10f), pal.p, k)
+    val edge = androidx.compose.ui.graphics.lerp(pal.neutral(.45f), pal.p, k)
+    val thumb = androidx.compose.ui.graphics.lerp(pal.neutral(.45f), pal.op, k)
     Box(Modifier.size(width = 52.dp, height = 32.dp).clip(CircleShape).background(track).border(2.dp, edge, CircleShape)) {
         val d = 16f + 8f * k
         val cx = 16f + 20f * k
