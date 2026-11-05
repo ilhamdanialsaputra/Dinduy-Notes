@@ -6,6 +6,8 @@ import kotlinx.serialization.json.Json
 /** Karakter tak terlihat di awal tiap kolom teks, supaya Backspace di awal blok terdeteksi. */
 const val Z = "\u200B"
 const val GAP = 0.02f
+/** Jarak baris teks: nilai normal tetap (tidak lagi bisa diatur di Pengaturan). */
+const val LH = 1.65f
 
 val J = Json {
     encodeDefaults = true
@@ -269,7 +271,8 @@ data class Note(
     val cz: Float = 1f,                  // sampul: zoom (1..4)
     val tbo: Boolean = true,             // judul: tebal (bawaan tebal, seperti tampilan sebelum ada pilihan ini)
     val tit: Boolean = false,            // judul: miring
-    val tcl: Int = 0                     // judul: warna (0 utama, 1 sekunder, 2 tersier, 3 pekat, 4 hitam; lihat titleColor)
+    val tcl: Int = 0,                    // judul: warna (0 utama, 1 sekunder, 2 tersier, 3 pekat, 4 hitam; lihat titleColor)
+    val o: Long = 0L                     // posisi manual hasil seret di beranda (kunci urut, besar = di atas); 0 = ikut waktu ubah / dibuat
 )
 
 @Serializable
@@ -277,10 +280,9 @@ data class Prefs(
     val mode: String = "auto",   // auto (ikuti perangkat) / light / dark (dark = AMOLED)
     val seed: String = "#6750A4",
     val fs: Int = 15,
-    val lh: Float = 1.65f,
     val sort: String = "u",
     val cd: String = "f",
-    val ff: String = "def",  // jenis huruf: def / flex / times
+    val ff: String = "def",  // jenis huruf: def / flex / times / reenie
     val cols: Int = 1,       // jumlah kolom kartu di beranda (1 / 2)
     val dyn: Boolean = true, // true = warna mengikuti perangkat (Material You, Android 12+); false = warna kustom (seed)
     val mono: Boolean = false, // true = Monochrome: seluruh warna aplikasi jadi abu-abu (terang dan gelap)
