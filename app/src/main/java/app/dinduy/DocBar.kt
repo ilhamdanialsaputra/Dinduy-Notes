@@ -251,7 +251,7 @@ fun DocBar(ed: Ed, act: Actions) {
         if (ed.sub != 0) subShown = ed.sub
     }
 
-    Column(Modifier.fillMaxWidth().background(pal.c3)) {
+    Column(Modifier.fillMaxWidth().background(pal.bar())) {
         // sub-bilah: perataan atau poin (mengembang di atas bilah utama)
         AnimatedVisibility(
             visible = ed.sub != 0 && kindNow == 0,
@@ -260,7 +260,7 @@ fun DocBar(ed: Ed, act: Actions) {
         ) {
             Box(Modifier.fillMaxWidth().padding(vertical = 6.dp), Alignment.Center) {
                 Row(
-                    Modifier.clip(RoundedCornerShape(26.dp)).background(pal.c4).padding(4.dp),
+                    Modifier.clip(RoundedCornerShape(26.dp)).background(pal.bar2()).padding(4.dp),
                     horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically
                 ) {
                     if (subShown == 1) {
@@ -306,6 +306,7 @@ fun DocBar(ed: Ed, act: Actions) {
                             Tbn({ Ic("cam", it) }, false, true) { ed.replT = ed.selImg ?: lastSel; act.takePhoto(true) }
                             // tambah gambar lain (disisipkan tepat sesudah gambar ini)
                             Tbn({ AddImgIcon(it) }, false, true) { ed.replT = null; act.pickImages() }
+                            Tbn({ Ic("del", it) }, false, true) { ed.imgDelete() }
                             Sep()
                             if (!inRow) {
                                 val al = b?.im?.getOrNull(s.second)?.al
@@ -316,7 +317,6 @@ fun DocBar(ed: Ed, act: Actions) {
                             Tbn({ Ic(if (inRow) "rows" else "cols", it) }, false, true) { ed.toggleRow() }
                             Tbn({ Ic("aup", it) }, false, true) { ed.imgMove(-1) }
                             Tbn({ Ic("adn", it) }, false, true) { ed.imgMove(1) }
-                            Tbn({ Ic("del", it) }, false, true) { ed.imgDelete() }
                         }
                     }
                 }
