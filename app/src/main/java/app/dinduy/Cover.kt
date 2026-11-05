@@ -47,7 +47,7 @@ val LocalVM = staticCompositionLocalOf<AppVM?> { null }
 const val EDIT_RATIO = 1.28f
 
 /** Rasio lebar/tinggi sampul di kartu beranda: 2 kolom lebih tinggi, 1 kolom berbentuk banner. */
-fun coverAspect(c2: Boolean): Float = if (c2) .95f else 1.85f
+fun coverAspect(c2: Boolean): Float = if (c2) .8f else 1.6f
 
 private fun cSmooth(x: Float): Float {
     val k = x.coerceIn(0f, 1f)
@@ -138,8 +138,12 @@ fun EditorCover(vm: AppVM, d: Note, scroll: () -> Int) {
                         colorStops = arrayOf(
                             0f to (if (pal.dark) pal.s.copy(alpha = .5f * e) else clear),
                             .28f to clear,
-                            (if (pal.dark) .42f else .55f) to clear,
-                            (if (pal.dark) .75f else .82f) to pal.s.copy(alpha = (if (pal.dark) .6f else .3f) * e),
+                            (if (pal.dark) .42f else .30f) to (if (pal.dark) clear else pal.s.copy(alpha = 0f)),
+                            // terang: kurva halus (ease) yang mulai lebih tinggi, jadi peralihan ke kertas tidak terasa bertahap kasar
+                            (if (pal.dark) .75f else .46f) to pal.s.copy(alpha = (if (pal.dark) .6f else .05f) * e),
+                            (if (pal.dark) .88f else .62f) to pal.s.copy(alpha = (if (pal.dark) .85f else .20f) * e),
+                            (if (pal.dark) .95f else .80f) to pal.s.copy(alpha = (if (pal.dark) .95f else .50f) * e),
+                            (if (pal.dark) 1f else .92f) to pal.s.copy(alpha = (if (pal.dark) 1f else .82f) * e),
                             1f to pal.s.copy(alpha = e)
                         )
                     )
