@@ -1137,7 +1137,9 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     var dens = 1f
     var viewH by mutableStateOf(0f)
     var barHLive by mutableStateOf(0f)            // tinggi kapsul/sheet langsung (tanpa debounce), dipakai gulir kursor
-    fun cursorClear(): Float = if (barHLive > 0f) barHLive + 12f * dens else 12f * dens
+    // memakai tinggi kapsul yang sudah tenang (barH, debounce), BUKAN barHLive: saat fokus pindah judul<->isi kapsul beranimasi tiap frame,
+    // dan tinggi per-frame itu memicu gulir kursor berulang (layar turun sendiri tanpa henti)
+    fun cursorClear(): Float = if (barH > 0f) barH + 12f * dens else 12f * dens
     var scroll: ScrollState? = null
 
     // ---- gulir otomatis ke kursor ----
@@ -1175,7 +1177,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val v = tf[key] ?: return 0f
         if (!v.selection.collapsed || viewH <= 0f) return 0f
         if (csBump < 0) return 0f   // hanya untuk berlangganan (dipakai coba-ulang)
-        val sig = CsSig(key, v.selection.start, v.text.length, viewH, barHLive)
+        val sig = CsSig(key, v.selection.start, v.text.length, viewH, barH)
         val old = csSig
         if (sig != old) {
             csSig = sig
