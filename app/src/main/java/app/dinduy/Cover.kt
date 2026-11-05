@@ -153,20 +153,20 @@ fun EditorCover(vm: AppVM, d: Note, scroll: () -> Int) {
 fun CoverPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
     val d = vm.note(id)
     val cv = d?.cv ?: ""
-    PageScaffold("Sampul", d?.t?.ifEmpty { null } ?: "Tanpa judul", { nav.pop() }) {
+    PageScaffold("Cover", d?.t?.ifEmpty { null } ?: "Untitled", { nav.pop() }) {
         if (d == null || cv.isEmpty()) {
-            SGroup("Gambar sampul", 0) {
-                MRow(POS_ONE, "img", "Pilih foto", "Tampil di kartu beranda dan di bagian atas catatan") { act.pickCover(id) }
+            SGroup("Cover image", 0) {
+                MRow(POS_ONE, "img", "Choose photo", "Shown on the home card and at the top of the note") { act.pickCover(id) }
             }
         } else key(cv) {
             CoverEditor(vm, d)
-            SGroup("Kelola", 60) {
-                MRow(POS_TOP, "swap", "Ganti foto", "Pilih gambar lain dari galeri") { act.pickCover(id) }
-                MRow(POS_MID, "pen", "Atur ulang posisi", "Kembali ke tengah gambar, tanpa zoom") {
+            SGroup("Manage", 60) {
+                MRow(POS_TOP, "swap", "Change photo", "Pick another image from your gallery") { act.pickCover(id) }
+                MRow(POS_MID, "pen", "Reset position", "Back to the center, no zoom") {
                     vm.setCoverCrop(id, cv, .5f, .5f, 1f)
                     nav.pop(); nav.push(Scr.Cover(id))
                 }
-                MRow(POS_BOT, "del", "Hapus sampul", "Gambar dilepas dari catatan ini", danger = true) {
+                MRow(POS_BOT, "del", "Remove cover", "The image is removed from this note", danger = true) {
                     vm.removeCover(id)
                     nav.pop()
                 }
@@ -195,9 +195,9 @@ private fun CoverEditor(vm: AppVM, d: Note) {
         onDispose { vm.setCoverCrop(d.id, d.cv, cur[0], cur[1], cur[2]) }
     }
 
-    SGroup("Atur posisi", 0) {
+    SGroup("Adjust position", 0) {
         SCard(POS_ONE) {
-            SegPill(2, frame, { frame = it }) { i, fg -> T(if (i == 0) "Beranda" else "Catatan", 15f, 500, fg) }
+            SegPill(2, frame, { frame = it }) { i, fg -> T(if (i == 0) "Home" else "Note", 15f, 500, fg) }
             Spacer(Modifier.height(14.dp))
             Box(Modifier.fillMaxWidth(), Alignment.Center) {
                 Box(
@@ -227,7 +227,7 @@ private fun CoverEditor(vm: AppVM, d: Note) {
                 }
             }
             T(
-                "Seret untuk menggeser, cubit untuk memperbesar. Posisi yang sama dipakai di beranda dan di dalam catatan.",
+                "Drag to move, pinch to zoom. The same position is used on the home screen and in the note.",
                 13f, 400, pal.osv, Modifier.padding(top = 12.dp), lh = 1.4f
             )
         }
