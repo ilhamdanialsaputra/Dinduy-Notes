@@ -743,7 +743,9 @@ private fun Modifier.curlTouch(
 // ---------------------------------------------------------------- satu halaman
 
 @Composable
-private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Modifier = Modifier) {
+// active = false: halaman ini tidak memasang gestur apa pun (seleksi / coret). Dipakai mode 3D: library PageCurl menumpuk halaman
+// sebelum / sesudahnya di atas halaman aktif, sehingga sentuhan jatuh ke halaman yang salah (seleksi muncul di halaman tak terlihat).
+private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Modifier = Modifier, active: Boolean = true) {
     val dens = LocalDensity.current.density
     val wPx = (widthDp.value * dens * mul).roundToInt()
     val bk = bucket(wPx)
@@ -785,7 +787,7 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
         modifier
             .onSizeChanged { sizePx = it }
             .background(if (ui.dark) Color.Black else Color.White)
-            .pointerInput(ui.inkOn, ui.tool, ui.ts, index) {
+            .then(if (!active) Modifier else Modifier.pointerInput(ui.inkOn, ui.tool, ui.ts, index) {
                 if (!ui.inkOn) return@pointerInput
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = true)
@@ -832,8 +834,8 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
                         ui.ink.add(PInk(index, ui.tool, ui.color, lv.wPx / W, pts))
                     }
                 }
-            }
-            .pointerInput(ui.inkOn, index) {
+            })
+            .then(if (!active) Modifier else Modifier.pointerInput(ui.inkOn, index) {
                 if (ui.inkOn) return@pointerInput
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
@@ -901,7 +903,7 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
                         }
                     } finally { ui.drawing = false }
                 }
-            }
+            })
     ) {
         Canvas(Modifier.fillMaxSize()) {
             val b = bmp
@@ -1332,7 +1334,7 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                         scaleX = cz; scaleY = cz; translationX = cpan.x; translationY = cpan.y
                     }
                 ) { p ->
-                    PdfPage(ui, p, w0, cMul, Modifier.fillMaxSize())
+                    PdfPage(ui, p, w0, cMul, Modifier.fillMaxSize(), active = p == cs.current)
                 }
             }
         } else {
