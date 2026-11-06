@@ -1258,7 +1258,8 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
             // internalnya macet sehingga ketukan berikutnya tak bereaksi, sedangkan geser jari tidak terpengaruh. State baru mulai
             // dari halaman tujuan, jadi tidak ada lompatan.
             var gen by remember { mutableIntStateOf(0) }
-            var baseP by remember { mutableIntStateOf(startPage) }
+            // mulai dari halaman yang sedang dibaca (bukan startPage): cabang ini dibuat ulang tiap ink dimatikan, jadi startPage membuat lompat ke awal
+            var baseP by remember { mutableIntStateOf(page.coerceIn(0, count - 1)) }
             var flip by remember { mutableStateOf<Job?>(null) }
             val cs = androidx.compose.runtime.key(gen) { rememberPageCurlState(baseP) }
             val csNow by androidx.compose.runtime.rememberUpdatedState(cs)
