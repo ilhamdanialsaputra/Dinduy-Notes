@@ -506,7 +506,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
     val curNote = (nav.noteId ?: vm.openId)?.let { vm.note(it) }
     val curCp = curNote?.takeIf { it.cv.isNotEmpty() && it.pdf.isEmpty() }?.cp.orEmpty()
     val noteTarget = remember(curCp, pal.dark, pal.mono, to) { if (curCp.isEmpty()) to else coverPal(pal.dark, curCp, pal.mono) }
-    val notePal = animPal(noteTarget)
+    val notePal = animPal(noteTarget, curNote?.id)
     val cs = remember(pal) {
         if (pal.dark) darkColorScheme(primary = pal.p, onPrimary = pal.op, surface = pal.s, onSurface = pal.os, background = pal.bg)
         else lightColorScheme(primary = pal.p, onPrimary = pal.op, surface = pal.s, onSurface = pal.os, background = pal.bg)
