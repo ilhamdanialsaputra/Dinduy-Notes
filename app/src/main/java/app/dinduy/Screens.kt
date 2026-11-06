@@ -928,7 +928,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         LazyVerticalStaggeredGrid(
             columns = StaggeredGridCells.Fixed(cols),
             state = state,
-            modifier = Modifier.fillMaxSize().nestedScroll(fabConn).graphicsLayer { alpha = 1f - sa }
+            modifier = Modifier.fillMaxSize().nestedScroll(fabConn).graphicsLayer { alpha = if (vm.searchOn) 0f else 1f }
                 .pointerInput(canDrag) {
                     if (!canDrag) return@pointerInput
                     awaitEachGesture {
@@ -1017,24 +1017,20 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         val divC = androidx.compose.ui.graphics.lerp(pal.bg, pal.os, .13f)
         Box(Modifier.fillMaxSize()) {
             // halaman hasil pencarian
-            if (sa > 0.001f || vm.searchOn) {
+            // tanpa animasi (langsung muncul / hilang): hanya bilahnya yang bergerak, supaya tidak kedip
+            if (vm.searchOn) {
                 Box(
                     Modifier.fillMaxSize()
                         .drawBehind {
-                            val k = sa
-                            drawRect(pal.bg.copy(alpha = (k * 1.6f).coerceAtMost(1f)))
-                            if (k > 0.001f) drawRect(divC.copy(alpha = divC.alpha * k), Offset(0f, divY), Size(size.width, divH))
+                            drawRect(pal.bg)
+                            drawRect(divC, Offset(0f, divY), Size(size.width, divH))
                         }
-                        .then(if (vm.searchOn) Modifier.pointerInput(Unit) { detectTapGestures { } } else Modifier)
+                        .pointerInput(Unit) { detectTapGestures { } }
                 ) {
                     // hasil pencarian: tampil di bawah bilah dengan tata letak yang sama seperti beranda (1 atau 2 kolom)
                     LazyVerticalStaggeredGrid(
                         columns = StaggeredGridCells.Fixed(cols),
-                        modifier = Modifier.fillMaxSize()
-                            .graphicsLayer {
-                                alpha = ((sa - .35f) / .65f).coerceIn(0f, 1f)
-                                translationY = (1f - sa) * 18.dp.toPx()
-                            },
+                        modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = sat + 80.dp, bottom = imeH + 16.dp),
                         verticalItemSpacing = 8.dp,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1054,11 +1050,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                             }
                         }
                     }
-                    Box(
-                        Modifier.fillMaxWidth().height(sat + 72.dp)
-                            .graphicsLayer { alpha = ((sa - .35f) / .65f).coerceIn(0f, 1f) }
-                            .background(pal.bg)
-                    )
+                    Box(Modifier.fillMaxWidth().height(sat + 72.dp).background(pal.bg))
                 }
             }
         // bilah: hanya tepi kiri/kanan yang bergerak
