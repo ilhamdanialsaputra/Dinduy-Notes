@@ -38,7 +38,10 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import kotlin.math.atan2
+import kotlin.math.cos
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 /** VM aplikasi untuk komponen yang jauh di dalam pohon (kartu catatan, bayangan morph). */
 val LocalVM = staticCompositionLocalOf<AppVM?> { null }
@@ -238,4 +241,46 @@ private fun CoverEditor(vm: AppVM, d: Note) {
             )
         }
     }
+}
+
+/**
+ * Warna dasar palet catatan dari foto sampul: foto diperkecil, tiap piksel yang cukup berwarna menyumbang suara ke
+ * salah satu dari 24 juring hue (bobot lebih besar untuk yang jenuh dan terang), juring terkuat (digabung dengan tetangganya)
+ * menang. Foto nyaris abu-abu menghasilkan palet abu-abu. Hasil: "#RRGGBB" (hanya hue dan saturasinya yang dipakai buildPal).
+ */
+fun coverSeed(src: android.graphics.Bitmap): String {
+    val w = 48
+    val h = (src.height * w / src.width.coerceAtLeast(1)).coerceIn(1, 96)
+    val bm = android.graphics.Bitmap.createScaledBitmap(src, w, h, true)
+    val px = IntArray(w * h)
+    bm.getPixels(px, 0, w, 0, 0, w, h)
+    val bins = 24
+    val sc = FloatArray(bins); val hx = FloatArray(bins); val hy = FloatArray(bins); val ss = FloatArray(bins)
+    val hsv = FloatArray(3)
+    var r = 0L; var g = 0L; var b = 0L
+    for (p in px) {
+        r += android.graphics.Color.red(p); g += android.graphics.Color.green(p); b += android.graphics.Color.blue(p)
+        android.graphics.Color.colorToHSV(p, hsv)
+        if (hsv[2] < .18f || hsv[1] < .14f) continue
+        val wt = hsv[1] * hsv[1] * (.4f + hsv[2])
+        val k = ((hsv[0] / 360f) * bins).toInt().coerceIn(0, bins - 1)
+        val rad = Math.toRadians(hsv[0].toDouble())
+        sc[k] += wt; hx[k] += (cos(rad) * wt).toFloat(); hy[k] += (sin(rad) * wt).toFloat(); ss[k] += hsv[1] * wt
+    }
+    fun at(k: Int) = (k + bins) % bins
+    var best = -1; var bestV = 0f
+    for (k in 0 until bins) {
+        val v = sc[k] + .5f * (sc[at(k - 1)] + sc[at(k + 1)])
+        if (v > bestV) { bestV = v; best = k }
+    }
+    if (best < 0 || bestV < px.size * .01f) {
+        val n = px.size.toLong().coerceAtLeast(1)
+        return String.format("#%02X%02X%02X", (r / n).toInt(), (g / n).toInt(), (b / n).toInt())
+    }
+    var x = 0f; var y = 0f; var s = 0f; var wsum = 0f
+    for (d in -1..1) { val k = at(best + d); x += hx[k]; y += hy[k]; s += ss[k]; wsum += sc[k] }
+    val hue = ((Math.toDegrees(atan2(y.toDouble(), x.toDouble())) + 360.0) % 360.0).toFloat()
+    val sat = (s / wsum.coerceAtLeast(1e-4f)).coerceIn(.2f, 1f)
+    val c = android.graphics.Color.HSVToColor(floatArrayOf(hue, sat, .8f))
+    return String.format("#%06X", c and 0xFFFFFF)
 }
