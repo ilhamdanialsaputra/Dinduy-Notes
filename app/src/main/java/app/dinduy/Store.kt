@@ -16,6 +16,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -348,7 +349,27 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     }
 
     // ---------- sampul catatan ----------
-    fun setCover(id: String, img: String) = upd(id) { it.copy(cv = img, cx = .5f, cy = .5f, cz = 1f) }
+    fun setCover(id: String, img: String) {
+        // cp lama dibiarkan sampai warna foto baru selesai dibaca, supaya palet berpindah mulus (tanpa kedip ke warna aplikasi)
+        upd(id) { it.copy(cv = img, cx = .5f, cy = .5f, cz = 1f) }
+        ensureCoverPal(id, force = true)
+    }
+
+    private val palBusy = HashSet<String>()
+
+    /** Baca warna dominan sampul lalu simpan di catatan (cp). Tanpa force: hanya bila cp masih kosong (catatan lama / hasil pulihkan cadangan). */
+    fun ensureCoverPal(id: String, force: Boolean = false) {
+        val n = note(id) ?: return
+        if (n.cv.isEmpty() || (!force && n.cp.isNotEmpty()) || !palBusy.add(id)) return
+        val img = n.cv
+        viewModelScope.launch {
+            val seed = withContext(Dispatchers.IO) {
+                try { Imgs.load(imgDir, img)?.asAndroidBitmap()?.let { coverSeed(it) } } catch (e: Throwable) { null }
+            }
+            palBusy.remove(id)
+            if (seed != null) upd(id) { if (it.cv == img && it.cp != seed) it.copy(cp = seed) else it }
+        }
+    }
 
     /** Muat sampul ke cache lebih dulu (dipanggil saat catatan mulai dibuka). */
     fun prefetchImg(id: String) {
@@ -397,8 +418,8 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     fun removeCover(id: String) {
         val n = note(id) ?: return
         if (n.cv.isEmpty()) return
-        upd(id) { it.copy(cv = "", cx = .5f, cy = .5f, cz = 1f) }
-        show("Cover removed") { upd(id) { it.copy(cv = n.cv, cx = n.cx, cy = n.cy, cz = n.cz) } }
+        upd(id) { it.copy(cv = "", cx = .5f, cy = .5f, cz = 1f, cp = "") }
+        show("Cover removed") { upd(id) { it.copy(cv = n.cv, cx = n.cx, cy = n.cy, cz = n.cz, cp = n.cp) } }
     }
 
     fun live() = docs.filter { !it.a && it.dt == 0L }
