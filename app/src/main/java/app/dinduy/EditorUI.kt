@@ -206,6 +206,8 @@ fun AnnotatedString.Builder.addSel(pal: Pal, rt: Rt, a0: Int, b0: Int, off: Int,
 fun styled(rt: Rt, text: String, off: Int, pal: Pal, fs: Float): AnnotatedString = buildAnnotatedString {
     append(text)
     val n = text.length
+    // awalan tak terlihat (Z): lebarnya dibuat nyaris nol, supaya kursor / teks rata tengah benar-benar di tengah (tidak geser setengah lebar Z)
+    if (off == 1 && n > 0 && text[0] == '\u200B') addStyle(SpanStyle(fontSize = 0.01.sp, letterSpacing = 0.sp), 0, 1)
     for (s in rt.sp) {
         val a = (s.s + off).coerceIn(0, n)
         val b = (s.e + off).coerceIn(0, n)
