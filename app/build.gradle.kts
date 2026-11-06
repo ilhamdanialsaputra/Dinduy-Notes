@@ -119,6 +119,8 @@ dependencies {
     implementation("org.jsoup:jsoup:1.18.1")
     // Pembaca teks PDF (pencarian kata di PDF): murni Java, offline, dari Maven Central
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    // Efek balik halaman 3D (melengkung) untuk mode Pages di PDF: Compose murni, Maven Central
+    implementation("io.github.oleksandrbalan:pagecurl:1.5.1")
     // OCR foto offline (model Latin ikut di dalam aplikasi, tanpa Play Services dan tanpa unduhan): dari Google Maven
     implementation("com.google.mlkit:text-recognition:16.0.1")
     // Transkripsi suara ke teks offline (whisper.cpp), Maven Central
