@@ -28,6 +28,22 @@ import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -197,7 +213,8 @@ suspend fun AppVM.importPdfs(uris: List<Uri>): List<Note> = withContext(Dispatch
             if (pages <= 0) { f.delete(); continue }
             val title = pdfName(ctx, u).replace(Regex("\\.pdf$", RegexOption.IGNORE_CASE), "").ifBlank { "PDF" }
             val t = System.currentTimeMillis()
-            val n = Note(id = id, t = title, x = "PDF · " + cnt(pages, "page"), u = t, c = t, lb = listOfNotNull(filter), pdf = id)
+            val cv = makePdfCover(this@importPdfs, f)
+            val n = Note(id = id, t = title, x = "PDF · " + cnt(pages, "page"), u = t, c = t, lb = listOfNotNull(filter), pdf = id, cv = cv, cx = .5f, cy = 0f, cz = 1f)
             withContext(Dispatchers.Main) { docs.add(0, n); save() }
             out.add(n)
         } catch (e: Throwable) {
@@ -205,6 +222,31 @@ suspend fun AppVM.importPdfs(uris: List<Uri>): List<Note> = withContext(Dispatch
         }
     }
     out
+}
+
+/** Render halaman pertama PDF jadi sampul (img/<id>.jpg) supaya kartu beranda dan morph buka/tutup memakai gambar PDF-nya. */
+fun makePdfCover(vm: AppVM, pdf: File): String {
+    try {
+        val pfd = ParcelFileDescriptor.open(pdf, ParcelFileDescriptor.MODE_READ_ONLY)
+        try {
+            val r = PdfRenderer(pfd)
+            try {
+                val pg = r.openPage(0)
+                try {
+                    val w = 900
+                    val h = (w * pg.height.toFloat() / pg.width.coerceAtLeast(1)).roundToInt().coerceIn(1, 2400)
+                    val bm = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                    bm.eraseColor(android.graphics.Color.WHITE)
+                    pg.render(bm, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    val id = uid()
+                    vm.imgDir.mkdirs()
+                    File(vm.imgDir, "$id.jpg").outputStream().use { bm.compress(Bitmap.CompressFormat.JPEG, 86, it) }
+                    bm.recycle()
+                    return id
+                } finally { pg.close() }
+            } finally { r.close() }
+        } finally { pfd.close() }
+    } catch (e: Throwable) { return "" }
 }
 
 // ---------------------------------------------------------------- render
@@ -372,7 +414,7 @@ class PdfText(private val ctx: Context, private val file: File) {
     }
 }
 
-class PHit(val page: Int, val rects: List<FloatArray>)
+class PHit(val page: Int, val rects: List<FloatArray>, val snip: String, val ms: Int, val me: Int)
 
 private fun hitsIn(page: Int, pt: PgText, q: String): List<PHit> {
     val out = ArrayList<PHit>()
@@ -388,7 +430,11 @@ private fun hitsIn(page: Int, pt: PgText, q: String): List<PHit> {
                 c[0] = min(c[0], r[0]); c[1] = min(c[1], r[1]); c[2] = max(c[2], r[2]); c[3] = max(c[3], r[3])
             } else { val n = r.copyOf(); cur = n; rs.add(n) }
         }
-        if (rs.isNotEmpty()) out.add(PHit(page, rs))
+        if (rs.isNotEmpty()) {
+            val a = max(0, i - 30)
+            val b = min(pt.t.length, e + 50)
+            out.add(PHit(page, rs, pt.t.substring(a, b), i - a, e - a))
+        }
         i = pt.t.indexOf(q, i + max(1, q.length), ignoreCase = true)
     }
     return out
@@ -508,6 +554,7 @@ class PdfUi(val doc: PdfDoc, val ink: PInkState, val fid: String) {
     var hits by mutableStateOf<List<PHit>>(emptyList())
     var cur by mutableIntStateOf(-1)
     var drawing by mutableStateOf(false)
+    var pulse: androidx.compose.runtime.State<Float> = mutableFloatStateOf(.6f)
 }
 
 private val INVERT = ColorFilter.colorMatrix(
@@ -633,11 +680,14 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
             }
             for ((vi, h) in marks) {
                 val cur = vi == ui.cur
+                val pad = 2f * density
                 for (r in h.rects) {
-                    drawRect(
-                        if (cur) Color(0xFFFF8A00).copy(alpha = .55f) else Color(0xFFFFD54F).copy(alpha = .5f),
-                        Offset(r[0] * size.width, r[1] * size.height), Size((r[2] - r[0]) * size.width, (r[3] - r[1]) * size.height)
-                    )
+                    val tl = Offset(r[0] * size.width - pad, r[1] * size.height - pad)
+                    val sz = Size((r[2] - r[0]) * size.width + pad * 2, max((r[3] - r[1]) * size.height, 10f * density) + pad * 2)
+                    if (cur) {
+                        drawRect(Color(0xFFFF8A00).copy(alpha = ui.pulse.value), tl, sz)
+                        drawRect(Color(0xFFE65100), tl, sz, style = Stroke(2.5f * density))
+                    } else drawRect(Color(0xFFFFD54F).copy(alpha = .6f), tl, sz)
                 }
             }
             if (pal != null) {
@@ -681,6 +731,10 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
     LaunchedEffect(file) {
         if (!file.exists()) { doc.failed = true; return@LaunchedEffect }
         launch { ink.load() }
+        if (vm.note(id)?.cv?.isEmpty() == true) {
+            val cvId = withContext(Dispatchers.IO) { makePdfCover(vm, file) }
+            if (cvId.isNotEmpty()) vm.upd(id) { if (it.cv.isEmpty()) it.copy(cv = cvId, cx = .5f, cy = 0f, cz = 1f) else it }
+        }
         doc.open()
         if (doc.ok) {
             launch { doc.loadRatios() }
@@ -788,17 +842,29 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
             if (h.isNotEmpty()) {
                 acc.addAll(h)
                 ui.hits = acc.toList()
-                if (first) { first = false; ui.cur = 0; goTo = acc[0] }
+                if (first) { first = false; ui.cur = 0; goTo = acc[0]; page = acc[0].page }
             }
         }
         searching = false
         if (acc.isEmpty()) vm.show("No results")
     }
+    var listOn by remember { mutableStateOf(false) }
+    val kb = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    fun jump(i: Int) {
+        if (i !in ui.hits.indices) return
+        ui.cur = i
+        goTo = ui.hits[i]
+        page = ui.hits[i].page
+    }
     fun step(d: Int) {
         val n = ui.hits.size
         if (n == 0) return
-        ui.cur = ((ui.cur + d) % n + n) % n
-        goTo = ui.hits[ui.cur]
+        jump(((ui.cur + d) % n + n) % n)
+    }
+    if (findOn) {
+        val inf = rememberInfiniteTransition(label = "hit")
+        val pl = inf.animateFloat(.3f, .75f, infiniteRepeatable(tween(650), RepeatMode.Reverse), label = "hitp")
+        SideEffect { ui.pulse = pl }
     }
 
     BackHandler(enabled = findOn || ui.inkOn) { if (findOn) findOn = false else { ui.inkOn = false; ui.drawing = false } }
@@ -809,12 +875,21 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
         val topPad = sat + 64.dp
         val botPad = sab + 96.dp
 
+        val vwPx = vwDp.value * dens
         if (mode == 0) {
             // ---------------- mode gulir (menerus) ----------------
             val list = rememberLazyListState(initialFirstVisibleItemIndex = startPage)
-            val hScroll = rememberScrollState()
             var zoom by remember { mutableFloatStateOf(1f) }
-            var pendingH by remember { mutableFloatStateOf(0f) }
+            var hx by remember { mutableFloatStateOf(0f) }   // geseran horizontal (px) saat diperbesar
+            fun clampX(x: Float, z: Float) = x.coerceIn(0f, max(0f, vwPx * (z - 1f)))
+            // zoom ke z1 dengan titik (cx, cy) tetap di bawah jari
+            fun applyZoom(z1: Float, cx: Float, cy: Float, panX: Float = 0f, panY: Float = 0f) {
+                val k = z1 / zoom
+                if (k != 1f) list.dispatchRawDelta((list.firstVisibleItemScrollOffset + cy) * (k - 1f))
+                hx = clampX((hx + cx) * k - cx - panX, z1)
+                zoom = z1
+                if (panY != 0f) list.dispatchRawDelta(-panY)
+            }
             val curPage by remember(list) {
                 derivedStateOf {
                     val li = list.layoutInfo
@@ -823,25 +898,19 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                 }
             }
             LaunchedEffect(curPage) { page = curPage }
-            LaunchedEffect(zoom) { withFrameNanos0(); hScroll.scrollTo(pendingH.roundToInt().coerceAtLeast(0)) }
             LaunchedEffect(goTo) {
                 val h = goTo ?: return@LaunchedEffect
                 goTo = null
                 val itemH = vwDp.value * zoom * ui.doc.ratioOf(h.page) * dens
                 val top = h.rects.minOf { it[1] } * itemH
-                list.animateScrollToItem(h.page, (top - list.layoutInfo.viewportSize.height * .3f).roundToInt())
+                list.scrollToItem(h.page, 0)
+                val off = top - list.layoutInfo.viewportSize.height * .3f
+                if (off > 0f) list.scrollBy(off)
             }
             Box(
-                Modifier.fillMaxSize()
+                Modifier.fillMaxSize().clipToBounds()
                     .pinch(
-                        onPinch = { z, pan, c ->
-                            val z0 = zoom
-                            val z1 = (z0 * z).coerceIn(1f, 5f)
-                            val k = z1 / z0
-                            zoom = z1
-                            pendingH = (hScroll.value + c.x) * k - c.x - pan.x
-                            list.dispatchRawDelta((list.firstVisibleItemScrollOffset + c.y) * (k - 1f) - pan.y)
-                        },
+                        onPinch = { z, pan, c -> applyZoom((zoom * z).coerceIn(1f, 5f), c.x, c.y, pan.x, pan.y) },
                         onEnd = { }
                     )
                     .pointerInput(ui.inkOn) {
@@ -849,25 +918,26 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                         detectTapGestures(
                             onTap = { bars = !bars },
                             onDoubleTap = { p ->
-                                val z1 = if (zoom > 1.2f) 1f else 2.5f
-                                val k = z1 / zoom
-                                pendingH = (hScroll.value + p.x) * k - p.x
-                                list.dispatchRawDelta((list.firstVisibleItemScrollOffset + p.y) * (k - 1f))
-                                zoom = z1
+                                val z0 = zoom
+                                val z1 = if (z0 > 1.2f) 1f else 2.5f
+                                scope.launch { animate(0f, 1f, animationSpec = spring(1f, 420f)) { v, _ -> applyZoom(z0 + (z1 - z0) * v, p.x, p.y) } }
                             }
                         )
                     }
+                    .pointerInput(zoom > 1.01f, ui.inkOn) {
+                        if (zoom <= 1.01f || ui.inkOn) return@pointerInput
+                        detectHorizontalDragGestures { c, d -> c.consume(); hx = clampX(hx - d, zoom) }
+                    }
             ) {
                 val contentW = vwDp * zoom
-                Box(Modifier.fillMaxSize().horizontalScroll(hScroll)) {
-                    LazyColumn(
-                        state = list, modifier = Modifier.fillMaxHeight().width(contentW),
-                        contentPadding = PaddingValues(top = topPad, bottom = botPad),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        items(count, key = { it }) { i ->
-                            PdfPage(ui, i, contentW, 1f, Modifier.width(contentW).height(contentW * ui.doc.ratioOf(i)))
-                        }
+                LazyColumn(
+                    state = list,
+                    modifier = Modifier.requiredWidth(contentW).fillMaxHeight().graphicsLayer { translationX = -hx },
+                    contentPadding = PaddingValues(top = topPad, bottom = botPad),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(count, key = { it }) { i ->
+                        PdfPage(ui, i, contentW, 1f, Modifier.width(contentW).height(contentW * ui.doc.ratioOf(i)))
                     }
                 }
             }
@@ -880,7 +950,7 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
             LaunchedEffect(goTo) {
                 val h = goTo ?: return@LaunchedEffect
                 goTo = null
-                pager.animateScrollToPage(h.page)
+                pager.scrollToPage(h.page)
             }
             fun fitW(p: Int): Dp {
                 val r = ui.doc.ratioOf(p)
@@ -891,25 +961,34 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                 val w = fitW(pager.currentPage).value * dens * z
                 val h = w * ui.doc.ratioOf(pager.currentPage)
                 val vx = vwDp.value * dens
-                val vy = (vhDp - topPad - sab).value * dens
+                val vy = (vhDp - topPad - sab - 12.dp).value * dens
                 val mx = ((w - vx) / 2f).coerceAtLeast(0f)
                 val my = ((h - vy) / 2f).coerceAtLeast(0f)
                 return Offset(o.x.coerceIn(-mx, mx), o.y.coerceIn(-my, my))
             }
+            // pusat halaman di layar (px): titik asal skala graphicsLayer
+            fun origin() = Offset(vwPx / 2f, topPad.value * dens + (vhDp - topPad - sab - 12.dp).value * dens / 2f)
+            fun zoomAt(z1: Float, c: Offset, delta: Offset = Offset.Zero) {
+                val k = z1 / pz
+                val d = c - origin()
+                pan = clampPan(d * (1f - k) + pan * k + delta, z1)
+                pz = z1
+            }
             Box(
                 Modifier.fillMaxSize()
                     .pinch(
-                        onPinch = { z, p, _ ->
-                            pz = (pz * z).coerceIn(1f, 4f)
-                            pan = clampPan(pan + p, pz)
-                        },
+                        onPinch = { z, p, c -> zoomAt((pz * z).coerceIn(1f, 4f), c, p) },
                         onEnd = { if (pz < 1.05f) { pz = 1f; pan = Offset.Zero } }
                     )
                     .pointerInput(ui.inkOn) {
                         if (ui.inkOn) return@pointerInput
                         detectTapGestures(
                             onTap = { bars = !bars },
-                            onDoubleTap = { if (pz > 1.2f) { pz = 1f; pan = Offset.Zero } else pz = 2.5f }
+                            onDoubleTap = { p ->
+                                val z0 = pz
+                                val z1 = if (z0 > 1.2f) 1f else 2.5f
+                                scope.launch { animate(0f, 1f, animationSpec = spring(1f, 420f)) { v, _ -> zoomAt(z0 + (z1 - z0) * v, p) } }
+                            }
                         )
                     }
                     .then(
@@ -974,10 +1053,43 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                                 decorationBox = { inner -> Box { if (query.isEmpty()) T("Find in PDF", 16f, 500, pal.osv); inner() } }
                             )
                             if (searching) LoadingBlob(Modifier.size(24.dp))
-                            else if (query.isNotBlank()) T(if (ui.hits.isEmpty()) "0" else "${ui.cur + 1}/${ui.hits.size}", 13f, 700, pal.osv)
                         }
                         IconBtn("aup", pal.os, { step(-1) }, size = 44.dp, enabled = ui.hits.isNotEmpty())
                         IconBtn("adn", pal.os, { step(1) }, size = 44.dp, enabled = ui.hits.isNotEmpty())
+                        IconBtn("rows", if (listOn) pal.op else pal.os, { listOn = !listOn }, size = 44.dp, enabled = ui.hits.isNotEmpty(), bg = if (listOn) pal.p else Color.Transparent)
+                    }
+                    if (query.isNotBlank()) {
+                        val h = ui.hits.getOrNull(ui.cur)
+                        Box(Modifier.fillMaxWidth().padding(start = 20.dp, end = 16.dp, bottom = 10.dp)) {
+                            T(
+                                if (h != null) "Result ${ui.cur + 1} of ${ui.hits.size}  ·  now on page ${h.page + 1}" + (if (searching) "  ·  searching…" else "")
+                                else if (searching) "Searching…" else "No results",
+                                13f, 700, pal.p
+                            )
+                        }
+                    }
+                    AnimatedVisibility(listOn && ui.hits.isNotEmpty()) {
+                        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 300.dp).padding(bottom = 8.dp)) {
+                            itemsIndexed(ui.hits) { i, h ->
+                                Row(
+                                    Modifier.fillMaxWidth().clickable { jump(i); listOn = false; kb?.hide() }
+                                        .background(if (i == ui.cur) pal.pc else Color.Transparent)
+                                        .padding(horizontal = 20.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)
+                                ) {
+                                    Box(Modifier.clip(CircleShape).background(pal.c4).padding(horizontal = 10.dp, vertical = 4.dp)) { T("p.${h.page + 1}", 13f, 800, pal.os) }
+                                    BasicText(
+                                        buildAnnotatedString {
+                                            append(h.snip.substring(0, h.ms))
+                                            withStyle(SpanStyle(fontWeight = FontWeight.ExtraBold, background = Color(0xFFFFD54F).copy(alpha = .55f), color = Color.Black)) { append(h.snip.substring(h.ms, h.me)) }
+                                            append(h.snip.substring(h.me))
+                                        },
+                                        style = TextStyle(color = pal.os, fontFamily = LocalFF.current, fontSize = 14.sp), maxLines = 2,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -989,7 +1101,7 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
             enter = fadeIn() , exit = fadeOut()
         ) {
             Box(Modifier.clip(CircleShape).background(pal.bar2().copy(alpha = .94f)).padding(horizontal = 16.dp, vertical = 8.dp)) {
-                T("${page + 1} / $count", 14f, 700, pal.os)
+                T("Page ${page + 1} of $count", 14f, 700, pal.os)
             }
         }
 
