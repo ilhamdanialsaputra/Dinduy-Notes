@@ -144,7 +144,6 @@ import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.text.TextPosition
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -153,7 +152,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
 import kotlinx.serialization.Serializable
 import java.io.File
@@ -680,7 +678,9 @@ private const val EDGE_TAP = .22f
 private fun Modifier.curlTouch(
     scope: CoroutineScope, enabled: Boolean = true, zoomed: () -> Boolean, locked: () -> Boolean = { false },
     onPan: (Offset) -> Unit, onEdge: (Int) -> Unit,
-    onTap: () -> Unit, onDouble: (Offset) -> Unit
+    onTap: () -> Unit, onDouble: (Offset) -> Unit,
+    // true = ketukan di zona tepi TIDAK dikonsumsi di sini: library PageCurl yang membalik halaman (tap bawaan library)
+    edgeToLib: Boolean = false
 ): Modifier = pointerInput(enabled) {
     if (!enabled) return@pointerInput
     var lastT = 0L
@@ -700,6 +700,13 @@ private fun Modifier.curlTouch(
             val c = ev.changes.firstOrNull { it.id == down.id } ?: break
             if (c.changedToUp()) {
                 val quick = c.uptimeMillis - down.uptimeMillis < viewConfiguration.longPressTimeoutMillis
+                val ex = c.position.x
+                val ew = size.width.toFloat()
+                if (edgeToLib && !moved && quick && !zoomed() && (ex < ew * EDGE_TAP || ex > ew * (1f - EDGE_TAP))) {
+                    // dibiarkan lewat ke library; saat mode cari (locked) ketukan tepi dimakan supaya tidak membalik
+                    if (locked()) c.consume()
+                    break
+                }
                 if (!moved && quick) {
                     c.consume()
                     val x = c.position.x
@@ -1243,7 +1250,6 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                 backPageColor = if (ui.dark) Color(0xFF1C1C1E) else Color.White,
                 dragInteraction = PageCurlConfig.GestureDragInteraction()
             )
-            var flip by remember { mutableStateOf<Job?>(null) }
             var cz by remember { mutableFloatStateOf(1f) }
             var cpan by remember { mutableStateOf(Offset.Zero) }
             val cMul by remember { derivedStateOf { ceil(cz).coerceAtLeast(1f) } }
@@ -1275,28 +1281,14 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                     )
                     .curlTouch(
                         scope, true, { cz > 1.02f }, { findOn }, { d -> cpan = cClamp(cpan + d, cz) },
-                        onEdge = { d ->
-                            val to = cs.current + d
-                            // satu balikan pada satu waktu; kalau animasi library tidak selesai / macet (ketukan ke-2 dst tak bereaksi),
-                            // dibatasi waktu lalu halaman dipindah langsung supaya ketukan tepi selalu bekerja
-                            if (to in 0 until count && flip?.isActive != true) {
-                                flip = scope.launch {
-                                    try {
-                                        withTimeoutOrNull(1200) { if (d > 0) cs.next() else cs.prev() }
-                                    } catch (e: CancellationException) {
-                                        throw e
-                                    } catch (e: Throwable) {
-                                    }
-                                    if (cs.current != to) cs.snapTo(to)
-                                }
-                            }
-                        },
+                        onEdge = { },
                         onTap ={ if (ui.sel != null) ui.sel = null else bars = !bars },
                         onDouble = { p ->
                             val z0 = cz
                             val z1 = if (z0 > 1.2f) 1f else 2.5f
                             scope.launch { animate(0f, 1f, animationSpec = spring(1f, 420f)) { v, _ -> cZoom(z0 + (z1 - z0) * v, p) } }
-                        }
+                        },
+                        edgeToLib = true
                     )
                     .padding(top = topPad, bottom = sab + 12.dp),
                 Alignment.Center
