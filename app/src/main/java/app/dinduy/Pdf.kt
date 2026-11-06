@@ -35,8 +35,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -276,8 +274,6 @@ object PdfCache {
     }
     fun get(k: String): Bitmap? = c.get(k)
     fun put(k: String, b: Bitmap) { c.put(k, b) }
-    /** Ada halaman yang sudah dirender dengan awalan kunci ini (fid:halaman@)? */
-    fun has(prefix: String): Boolean = c.snapshot().keys.any { it.startsWith(prefix) }
 }
 
 private fun bucket(px: Int): Int = (((px + 255) / 256) * 256).coerceIn(256, 2400)
@@ -990,26 +986,6 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
         }
     }
 
-    // sampul untuk animasi buka/tutup (gambar yang sama dengan kartu beranda)
-    val cvBmp = rememberImg(vm, note.cv)
-    val sat = satDp()
-    val sab = sabDp()
-    var settled by remember { mutableStateOf(false) }      // morph sudah pernah selesai membuka (sekali true, tetap true)
-    var firstReady by remember { mutableStateOf(false) }   // PDF terbuka dan halaman 1 sempat dirender
-    LaunchedEffect(Unit) { snapshotFlow { vm.openP.value >= .97f }.collect { if (it) settled = true } }
-    LaunchedEffect(doc.ok) {
-        if (!doc.ok) return@LaunchedEffect
-        val pre = note.pdf + ":" + note.pg.coerceIn(0, (doc.count - 1).coerceAtLeast(0)) + "@"
-        withTimeoutOrNull(1500) { while (!PdfCache.has(pre)) delay(16) }
-        delay(40)   // beri pembaca 2-3 frame untuk benar-benar menggambar bitmap itu
-        firstReady = true
-    }
-    // sampul dan halaman 1 pembaca sekarang piksel-per-piksel sama (termasuk mode gelap), jadi serah-terimanya cukup
-    // potongan sangat pendek hanya untuk menyamarkan beda ketajaman jpg 900px vs render penuh; bukan pudar-silang yang terlihat
-    val cvHold by androidx.compose.animation.core.animateFloatAsState(
-        if (settled && firstReady) 0f else 1f, tween(90), label = "cvhold"
-    )
-
     val dark = when (note.pdk) { 1 -> true; 2 -> false; else -> appPal.dark }
     val vpal = remember(dark, appPal, vm.pr.seed, vm.pr.dyn, vm.pr.mono) {
         if (dark == appPal.dark) appPal else {
@@ -1029,7 +1005,7 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
     val view = LocalView.current
     LaunchedEffect(Unit) {
         val w = (view.context as Activity).window
-        snapshotFlow { vm.openP.value > .45f }.collect { dk ->
+        snapshotFlow { vm.openP.value > .2f }.collect { dk ->
             WindowCompat.getInsetsController(w, view).isAppearanceLightStatusBars = if (dk) false else !appPal.dark
         }
     }
@@ -1047,19 +1023,13 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
         androidx.compose.material3.LocalContentColor provides cp.os
     ) {
         Box(
-            Modifier.fillMaxSize().drawBehind {
-                // latar hitam tumbuh pelan dari warna kartu (bukan muncul tiba-tiba), ikut progres morph buka/tutup
-                val x = ((vm.openP.value - .05f) / .6f).coerceIn(0f, 1f)
-                drawRect(Color.Black, alpha = x * x * (3f - 2f * x))
-            }
-        ) {
-          Box(
-            Modifier.fillMaxSize().graphicsLayer {
-                // isi pembaca (halaman lain, bilah atas) baru muncul setelah sampul hampir menjadi halaman 1
-                val x = ((vm.openP.value - .5f) / .4f).coerceIn(0f, 1f)
+            Modifier.fillMaxSize().background(Color.Black).graphicsLayer {
+                // buka/tutup dari beranda: isi PDF berkedip sangat cepat (pudar-silang dengan sampul kartu), bukan ikut membesar dari kartu.
+                // Rentang pudar dipersempit (dulu .20-.45, sekarang .14-.26 dari progres morph) supaya kedipnya singkat.
+                val x = ((vm.openP.value - .14f) / .12f).coerceIn(0f, 1f)
                 alpha = x * x * (3f - 2f * x)
             }
-          ) {
+        ) {
             when {
                 doc.failed -> Column(
                     Modifier.fillMaxSize().padding(32.dp), Arrangement.Center, Alignment.CenterHorizontally
@@ -1072,68 +1042,6 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
                 }
                 !doc.ok -> Box(Modifier.fillMaxSize(), Alignment.Center) { LoadingBlob(Modifier.size(56.dp)) }
                 else -> PdfReader(vm, id, act, ui, txt, note)
-            }
-          }
-            // sampul kartu "tumbuh" jadi halaman 1: kotak tujuan = tempat halaman 1 di pembaca, potongan gambar melebar dari
-            // potongan kartu ke halaman utuh. Ia tetap di atas pembaca sampai halaman 1 pembaca siap, lalu memudar (tanpa kedip).
-            Canvas(Modifier.fillMaxSize()) {
-                val b = cvBmp ?: return@Canvas
-                val t = vm.openP.value.coerceIn(0f, 1f)
-                val back = ((.92f - t) / .1f).coerceIn(0f, 1f)
-                val a = maxOf(back * back * (3f - 2f * back), cvHold)
-                if (a <= .004f) return@Canvas
-                val w = size.width
-                val h = size.height
-                val iw = b.width.toFloat()
-                val ih = b.height.toFloat()
-                // awal: persis sampul kartu (rasio kartu + potongan fokus yang sama dengan drawCover)
-                val c2 = vm.morph?.ghost?.c2 ?: (vm.pr.cols.coerceIn(1, 2) == 2)
-                val asp = coverAspect(c2)
-                val sh = w / asp
-                val z = note.cz.coerceIn(1f, 4f)
-                val o = iw / ih
-                val cw = if (o > asp) sh * o * z else w * z
-                val ch = if (o > asp) sh * z else w / o * z
-                val vw = (iw * w / cw).coerceIn(1f, iw)
-                val vh = (ih * sh / ch).coerceIn(1f, ih)
-                val sx0 = (iw - vw) * note.cx.coerceIn(0f, 1f)
-                val sy0 = (ih - vh) * note.cy.coerceIn(0f, 1f)
-                // akhir: posisi halaman 1 di pembaca (mode gulir: lebar penuh di bawah bilah atas; mode halaman: muat di tengah)
-                val topPx = (sat + 64.dp).toPx()
-                val r = ih / iw
-                val tw: Float
-                val tx: Float
-                val ty: Float
-                if (PdfBus.mode == 0) { tw = w; tx = 0f; ty = topPx }
-                else {
-                    val availH = h - topPx - (sab + 12.dp).toPx()
-                    tw = minOf(w, availH / r); tx = (w - tw) / 2f; ty = topPx + (availH - tw * r) / 2f
-                }
-                val th = tw * r
-                fun l(x0: Float, x1: Float) = x0 + (x1 - x0) * t
-                // mode gelap: halaman di pembaca dibalik warnanya (INVERT). Gambar yang SAMA dibalik bertahap mengikuti progres morph
-                // (matriks warna = campuran identitas dan INVERT), jadi di ujung animasi ia identik dengan halaman pembaca.
-                val d = if (dark) t * t * (3f - 2f * t) else 0f
-                val sc = 1f - 1.88f * d
-                val off = 224f * d
-                val cf = if (d <= .001f) null else ColorFilter.colorMatrix(
-                    ColorMatrix(
-                        floatArrayOf(
-                            sc, 0f, 0f, 0f, off,
-                            0f, sc, 0f, 0f, off,
-                            0f, 0f, sc, 0f, off,
-                            0f, 0f, 0f, 1f, 0f
-                        )
-                    )
-                )
-                drawImage(
-                    b,
-                    srcOffset = IntOffset(l(sx0, 0f).roundToInt(), l(sy0, 0f).roundToInt()),
-                    srcSize = IntSize(l(vw, iw).roundToInt().coerceAtLeast(1), l(vh, ih).roundToInt().coerceAtLeast(1)),
-                    dstOffset = IntOffset(l(0f, tx).roundToInt(), l(0f, ty).roundToInt()),
-                    dstSize = IntSize(l(w, tw).roundToInt().coerceAtLeast(1), l(sh, th).roundToInt().coerceAtLeast(1)),
-                    alpha = a, filterQuality = FilterQuality.Medium, colorFilter = cf
-                )
             }
         }
     }
