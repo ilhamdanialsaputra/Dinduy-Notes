@@ -269,6 +269,7 @@ data class Note(
     val cx: Float = .5f,                 // sampul: titik fokus horizontal (0..1)
     val cy: Float = .5f,                 // sampul: titik fokus vertikal (0..1)
     val cz: Float = 1f,                  // sampul: zoom (1..4)
+    val cp: String = "",                 // palet catatan: warna dasar (#RRGGBB) hasil membaca foto sampul; "" = ikut palet aplikasi
     val tbo: Boolean = true,             // judul: tebal (bawaan tebal, seperti tampilan sebelum ada pilihan ini)
     val tit: Boolean = false,            // judul: miring
     val tcl: Int = 0,                    // judul: warna (0 utama, 1 sekunder, 2 tersier, 3 pekat, 4 hitam; lihat titleColor)
