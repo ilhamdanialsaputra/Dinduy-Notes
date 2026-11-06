@@ -653,6 +653,7 @@ fun DrawerContent(vm: AppVM, close: () -> Unit, go: (Scr) -> Unit) {
             Spacer(Modifier.height(12.dp))
         }
         Divider()
+        DrawerItem("i", "Info") { close(); UpdState.infoOpen = true }
         DrawerItem("set", "Settings") { go(Scr.Settings) }
         Spacer(Modifier.height(12.dp))
     }

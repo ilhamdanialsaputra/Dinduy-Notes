@@ -298,6 +298,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             if (!tmp.renameTo(file)) {
                 file.writeText(tmp.readText()); tmp.delete()
             }
+            WidgetUtil.refresh(ctx)   // widget homescreen ikut diperbarui saat catatan berubah
         } catch (e: Exception) {
         }
     }

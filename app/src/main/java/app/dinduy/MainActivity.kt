@@ -666,6 +666,8 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     LabelDialogHost(vm)
                     ModelDialogHost(vm)
                     PermissionHost(vm)
+                    InfoHost()
+                    UpdateHost()
                 }
             }
         }
@@ -906,6 +908,29 @@ class MainActivity : ComponentActivity(), Actions {
 
     /** Ketuk notifikasi pengingat: buka catatannya (menutup halaman lain dulu bila perlu). */
     private fun openFromIntent(i: Intent?) {
+        // Widget homescreen: catatan baru / voice note baru
+        if (i != null && (i.action == WidgetUtil.ACTION_NEW || i.action == WidgetUtil.ACTION_VOICE)) {
+            val voice = i.action == WidgetUtil.ACTION_VOICE
+            i.action = Intent.ACTION_MAIN
+            lifecycleScope.launch {
+                vm.remDlg = null; vm.sheet = null; vm.addOn = false
+                if (vm.nav.stack.size > 1) {
+                    while (vm.nav.stack.size > 1) vm.nav.pop()
+                    delay(380)
+                }
+                vm.remFilter = false; vm.filter = null; vm.searchOn = false; vm.sel.clear()
+                if (!voice) {
+                    val n = vm.newNote()
+                    vm.nav.openNote(n.id, null, true)
+                } else {
+                    delay(350)   // beranda perlu tampil dulu (start dingin)
+                    requestMic {
+                        if (quickStart(vm)) lifecycleScope.launch { QuickFx.p.animateTo(1f, spring(.8f, 480f)) }
+                    }
+                }
+            }
+            return
+        }
         // PDF dari aplikasi lain: "Buka dengan Dinduy" (VIEW) atau Bagikan (SEND / SEND_MULTIPLE)
         if (i != null && (i.action == Intent.ACTION_VIEW || i.action == Intent.ACTION_SEND || i.action == Intent.ACTION_SEND_MULTIPLE)) {
             val us = ArrayList<Uri>()
