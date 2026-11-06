@@ -144,9 +144,11 @@ class Nav(private val vm: AppVM) {
                 val live = ex?.let { !it.a && it.dt == 0L } == true
                 vm.openId = t.id
                 if (ex == null) {
-                    // catatan kosong tidak jadi dibuat: menguncup kembali menjadi tombol Baru (+)
+                    // catatan kosong tidak jadi dibuat: menguncup kembali menjadi tombol Baru (+),
+                    // atau menjadi bilah voice note cepat kalau rekamannya dikembalikan ke bilah
                     vm.closing = false
-                    vm.morph = vm.fabMorph
+                    vm.morph = if (QuickFx.returning) (QuickFx.barMorph ?: vm.fabMorph) else vm.fabMorph
+                    QuickFx.returning = false
                 } else {
                     vm.morph = vm.cardMorph[t.id] ?: (if (live) vm.topSlot else null)
                     // kartu tujuan bisa di luar layar (daftar sedang digulir) atau berpindah urutan: morph mengikutinya
@@ -266,7 +268,7 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
                     }
                     if (drag) {
                         val vy = tracker.calculateVelocity().y
-                        if (lp < .82f || vy > 1000f) vm.nav.pop()
+                        if (lp < .82f || vy > 1000f) { quickCollapseNote(vm); vm.nav.pop() }
                         else gscope.launch { vm.openP.animateTo(1f, spring(.8f, 560f)) }
                     }
                 }
@@ -377,7 +379,7 @@ fun noteBlank(vm: AppVM): Boolean {
     if (vm.nav.top !is Scr.Note) return false
     val ed = vm.ed ?: return false
     if (ed.noteId != vm.nav.noteId) return false
-    if (ed.sheet != 0 || ed.reading || ed.findOn || ed.selImg != null || ed.pickQuote || vm.rec.active) return false
+    if (ed.sheet != 0 || ed.reading || ed.findOn || ed.selImg != null || ed.pickQuote || (vm.rec.active && !QuickFx.noteBound)) return false
     val n = vm.note(ed.noteId)
     return ed.title.isBlank() && plainOf(ed.blocks).isEmpty() &&
         ed.blocks.none { it.isObj && it.ty != "hr" } && ed.blocks.none { it.ik.isNotEmpty() } &&
@@ -543,10 +545,11 @@ fun AppRoot(vm: AppVM, act: Actions) {
             (top as? Scr.PdfExport)?.let { pageIds[2] = it.id }
             (top as? Scr.Cover)?.let { pageIds[3] = it.id }
 
-            BackHandler(enabled = nav.stack.size > 1 || drawer.isOpen || vm.addOn || vm.sel.isNotEmpty() || vm.searchOn || (isHome && (vm.filter != null || vm.remFilter)) || reading || imgSel || selE || finding) {
+            BackHandler(enabled = nav.stack.size > 1 || drawer.isOpen || vm.addOn || (QuickFx.shown && !QuickFx.noteBound && isHome) || vm.sel.isNotEmpty() || vm.searchOn || (isHome && (vm.filter != null || vm.remFilter)) || reading || imgSel || selE || finding) {
                 when {
                     drawer.isOpen -> scope.launch { drawer.close() }
                     vm.addOn -> vm.addOn = false
+                    QuickFx.shown && !QuickFx.noteBound && isHome -> quickFinish(vm)   // kembali = simpan rekaman cepat
                     isNote && finding -> vm.ed?.closeFind()
                     isHome && vm.sel.isNotEmpty() -> vm.sel.clear()
                     isHome && vm.searchOn -> vm.searchOn = false
@@ -561,7 +564,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
 
             ModalNavigationDrawer(
                 drawerState = drawer,
-                gesturesEnabled = isHome && vm.sel.isEmpty() && !vm.searchOn && !vm.addOn,
+                gesturesEnabled = isHome && vm.sel.isEmpty() && !vm.searchOn && !vm.addOn && !QuickFx.shown,
                 scrimColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = .5f),
                 drawerContent = {
                     val w = minOf(360.dp, (LocalConfiguration.current.screenWidthDp * .84f).dp)
@@ -651,16 +654,18 @@ fun AppRoot(vm: AppVM, act: Actions) {
 
                     SelBar(vm)
                     Fab(
-                        vm, small = fabSmall,
+                        vm, act, small = fabSmall,
                         hide = (!isHome && !FabFx.drag) || vm.sel.isNotEmpty() || vm.searchOn || vm.addOn || vm.remFilter,
                         lift = if (vm.snack != null) 92.dp else 0.dp
                     )
+                    QuickVoice(vm, lift = if (vm.snack != null) 92.dp else 0.dp)
                     SnackHost(vm, if (inNote) 84.dp else 20.dp + sabDp(), inNote)
                     AddNoteLayer(vm, act)
                     SheetHost(vm, nav, act)
                     ReminderHost(vm, act)
                     LabelDialogHost(vm)
                     ModelDialogHost(vm)
+                    PermissionHost(vm)
                 }
             }
         }
@@ -884,16 +889,7 @@ class MainActivity : ComponentActivity(), Actions {
         if (Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
         setContent { AppRoot(vm, this) }
         Rem.ensureChannel(this)
-        // minta izin notifikasi sekali saat pertama kali aplikasi dibuka (tanpa mengarahkan ke Pengaturan)
-        if (savedInstanceState == null && Build.VERSION.SDK_INT >= 33) {
-            val sp0 = getSharedPreferences("dinduy", 0)
-            if (!sp0.getBoolean("np", false) &&
-                ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
-            ) {
-                sp0.edit().putBoolean("np", true).apply()
-                notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
-        }
+        // izin (mikrofon, notifikasi, kamera) ditawarkan sekali lewat PermissionHost pada pemasangan baru
         openFromIntent(intent)
     }
 
