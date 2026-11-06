@@ -1097,7 +1097,7 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
                     .size(7.dp, 64.dp).clip(CircleShape).background(pal.p)
             )
         }
-        if (ed.mv == null && bmp != null) {
+        if (ed.mv == null && bmp != null && !ed.reading) {
             // tombol perluas: buka menu foto (morph dari bingkai ini ke layar penuh)
             Box(
                 Modifier.align(Alignment.TopStart).padding(8.dp).size(32.dp).clip(CircleShape)
