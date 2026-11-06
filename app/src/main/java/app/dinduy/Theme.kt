@@ -189,7 +189,7 @@ fun normMode(m: String): String = when (m) {
  * Gelap  : kertas (kartu & editor) HITAM PEKAT (AMOLED), latar beranda satu tingkat lebih terang.
  *
  * cover = true: palet khusus satu catatan yang bersampul. Warnanya diambil dari foto sampul, jadi kertas dibuat lebih
- * berwarna daripada palet aplikasi (tetap pastel), dan gelapnya tidak hitam pekat melainkan gelap bercorak seed.
+ * berwarna daripada palet aplikasi (tetap pastel), dan gelapnya tetap hitam pekat (AMOLED), corak seed ada di aksen dan wadah.
  */
 fun buildPal(mode: String, seed: String, cover: Boolean = false): Pal {
     val (h, s0) = hueSat(seed)
@@ -217,7 +217,7 @@ fun buildPal(mode: String, seed: String, cover: Boolean = false): Pal {
     } else {
         val ns = if (cover) minOf(sat * .5f, 40f) else minOf(sat * .35f, 26f)
         fun n(l: Float, k: Float = 1f) = hsl(h, ns * k, l)
-        val paper = if (cover) n(11f) else Color.Black
+        val paper = Color.Black                  // AMOLED juga untuk catatan bersampul; corak cover ada di aksen dan wadah tonal
         Pal(
             true, t(80f), t(20f), t(24f, .85f), t(90f), t(22f, .45f), t(90f, .35f), t(22f, .6f, 60f), t(90f, .5f, 60f),
             paper, n(90f, .4f), n(75f, .5f), n(30f),
