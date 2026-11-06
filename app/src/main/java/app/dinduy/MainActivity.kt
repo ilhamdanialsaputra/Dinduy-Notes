@@ -598,7 +598,6 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     NoteLayer(vm, on = inNote, morph = vm.morph, under = top is Scr.NoteMenu || top is Scr.NoteLabels || top is Scr.PdfExport || top is Scr.Cover || modelsOnNote) {
                         val id = nav.noteId
                         if (id != null && vm.note(id)?.pdf?.isNotEmpty() == true) {
-                            // catatan PDF: layar baca PDF, bukan editor
                             SideEffect { vm.ed = null }
                             PdfScreen(vm, id, act)
                         } else if (id != null) {
@@ -634,6 +633,9 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     ViewLayer(on = top is Scr.Models, under = false) {
                         ModelsScreen(vm, act, onBack = { nav.pop() })
                     }
+
+                    PhotoLayer(vm)
+                    androidx.compose.runtime.LaunchedEffect(vm.importTick) { if (vm.importTick > 0) act.importMd() }
 
                     SelBar(vm)
                     Fab(
@@ -789,18 +791,12 @@ class MainActivity : ComponentActivity(), Actions {
         }
     }
     private val mdPicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        if (uris.isNotEmpty()) lifecycleScope.launch { importPicked(uris) }
-    }
-
-    /** PDF masuk ke pembaca PDF, berkas lain (.md / .txt) jadi catatan teks. */
-    private suspend fun importPicked(uris: List<Uri>) {
-        val pdfs = uris.filter { isPdfUri(this, it) }
-        val rest = uris.filter { it !in pdfs }
-        val ns = ArrayList<Note>()
-        if (pdfs.isNotEmpty()) ns.addAll(vm.importPdfs(pdfs))
-        if (rest.isNotEmpty()) ns.addAll(vm.importMd(rest))
-        if (ns.size == 1) vm.nav.openNote(ns[0].id, null)
-        else vm.show(if (ns.isEmpty()) "No readable files" else "Imported ${cnt(ns.size, "note")}")
+        if (uris.isNotEmpty()) lifecycleScope.launch {
+            val pdfs = uris.filter { isPdfUri(this@MainActivity, it) }
+            val ns = vm.importPdfs(pdfs) + vm.importMd(uris - pdfs.toSet())
+            if (ns.size == 1) vm.nav.openNote(ns[0].id, null)
+            else vm.show(if (ns.isEmpty()) "No readable files" else "Imported ${cnt(ns.size, "note")}")
+        }
     }
     private val bkSaver = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         if (uri != null) lifecycleScope.launch {
@@ -887,52 +883,12 @@ class MainActivity : ComponentActivity(), Actions {
             }
         }
         openFromIntent(intent)
-        if (savedInstanceState == null) importFromIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         openFromIntent(intent)
-        importFromIntent(intent)
-    }
-
-    /** PDF dari "Buka dengan" / "Bagikan" aplikasi lain (WhatsApp, Files, browser, dll): disalin lalu dibuka di pembaca PDF. */
-    private fun importFromIntent(i: Intent?) {
-        if (i == null) return
-        val a = i.action
-        if (a != Intent.ACTION_VIEW && a != Intent.ACTION_SEND && a != Intent.ACTION_SEND_MULTIPLE) return
-        if (i.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
-        val all = LinkedHashSet<Uri>()
-        i.data?.let { all.add(it) }
-        i.clipData?.let { c -> for (k in 0 until c.itemCount) c.getItemAt(k).uri?.let { all.add(it) } }
-        try {
-            if (Build.VERSION.SDK_INT >= 33) {
-                i.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)?.let { all.add(it) }
-                i.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)?.let { all.addAll(it) }
-            } else {
-                @Suppress("DEPRECATION") i.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)?.let { all.add(it) }
-                @Suppress("DEPRECATION") i.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)?.let { all.addAll(it) }
-            }
-        } catch (e: Exception) { }
-        // sudah dibaca: jangan diproses lagi saat Activity dibuat ulang
-        i.action = null; i.data = null; i.clipData = null; i.removeExtra(Intent.EXTRA_STREAM)
-        val pdfs = all.filter { isPdfUri(this, it) }
-        if (pdfs.isEmpty()) return
-        lifecycleScope.launch {
-            val ns = vm.importPdfs(pdfs)
-            if (ns.isEmpty()) { vm.show("Couldn't open this PDF"); return@launch }
-            vm.remDlg = null
-            vm.sheet = null
-            vm.addOn = false
-            if (vm.nav.stack.size > 1) {
-                while (vm.nav.stack.size > 1) vm.nav.pop()
-                delay(380)
-            }
-            vm.remFilter = false
-            if (ns.size == 1) vm.nav.openNote(ns[0].id, null)
-            else vm.show("Imported ${cnt(ns.size, "PDF")}")
-        }
     }
 
     override fun onResume() {
@@ -942,6 +898,31 @@ class MainActivity : ComponentActivity(), Actions {
 
     /** Ketuk notifikasi pengingat: buka catatannya (menutup halaman lain dulu bila perlu). */
     private fun openFromIntent(i: Intent?) {
+        // PDF dari aplikasi lain: "Buka dengan Dinduy" (VIEW) atau Bagikan (SEND / SEND_MULTIPLE)
+        if (i != null && (i.action == Intent.ACTION_VIEW || i.action == Intent.ACTION_SEND || i.action == Intent.ACTION_SEND_MULTIPLE)) {
+            val us = ArrayList<Uri>()
+            @Suppress("DEPRECATION")
+            when (i.action) {
+                Intent.ACTION_VIEW -> i.data?.let { us.add(it) }
+                Intent.ACTION_SEND -> i.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)?.let { us.add(it) }
+                else -> i.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)?.let { us.addAll(it) }
+            }
+            if (us.isEmpty()) i.clipData?.let { cd -> for (k in 0 until cd.itemCount) cd.getItemAt(k).uri?.let { us.add(it) } }
+            i.action = Intent.ACTION_MAIN
+            i.data = null
+            i.removeExtra(Intent.EXTRA_STREAM)
+            if (us.isNotEmpty()) lifecycleScope.launch {
+                val ns = vm.importPdfs(us)
+                vm.remDlg = null; vm.sheet = null; vm.addOn = false
+                if (vm.nav.stack.size > 1) {
+                    while (vm.nav.stack.size > 1) vm.nav.pop()
+                    delay(380)
+                }
+                if (ns.size == 1) vm.nav.openNote(ns[0].id, null)
+                else vm.show(if (ns.isEmpty()) "Couldn't open this PDF" else "Imported ${cnt(ns.size, "PDF")}")
+            }
+            return
+        }
         val id = i?.getStringExtra(Rem.EXTRA_NOTE) ?: return
         i.removeExtra(Rem.EXTRA_NOTE)
         if (vm.note(id) == null) return
@@ -1073,18 +1054,6 @@ class MainActivity : ComponentActivity(), Actions {
 
     override fun importMd() {
         mdPicker.launch(arrayOf("application/pdf", "text/markdown", "text/plain", "text/*", "application/octet-stream"))
-    }
-
-    override fun ocrImage(imgId: String, onText: (String) -> Unit) {
-        vm.show("Reading text…")
-        lifecycleScope.launch {
-            val t = vm.ocrImage(imgId)
-            when {
-                t == null -> vm.show("Couldn't read this photo")
-                t.isBlank() -> vm.show("No text found in this photo")
-                else -> onText(t)
-            }
-        }
     }
 
     override fun saveBackup() { bkSaver.launch(vm.backupName()) }
