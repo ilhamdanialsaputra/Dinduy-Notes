@@ -941,6 +941,7 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
     val dens = LocalDensity.current.density
     val haptic = LocalHapticFeedback.current
     var box by remember { mutableStateOf(IntSize.Zero) }
+    var frame by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
     var snapOn by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(8.dp)
     val row = b.im.size > 1
@@ -1012,6 +1013,7 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
                 alpha = if (liftedRow) .94f else 1f
             }
             .onSizeChanged { box = it }
+            .photoBounds { frame = it }
             .onGloballyPositioned { c ->
                 val cc = ed.contentCoords
                 if (cc != null && cc.isAttached && c.isAttached) {
@@ -1094,6 +1096,15 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
                 Modifier.align(if (mt.after) Alignment.CenterEnd else Alignment.CenterStart).padding(horizontal = 6.dp)
                     .size(7.dp, 64.dp).clip(CircleShape).background(pal.p)
             )
+        }
+        if (ed.mv == null && bmp != null) {
+            // tombol perluas: buka menu foto (morph dari bingkai ini ke layar penuh)
+            Box(
+                Modifier.align(Alignment.TopStart).padding(8.dp).size(32.dp).clip(CircleShape)
+                    .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = .5f))
+                    .clickable { PhotoHost.req = PhotoReq(m.id, frame) },
+                Alignment.Center
+            ) { PIc("expand", androidx.compose.ui.graphics.Color.White, 16.dp) }
         }
         if (selected && !ed.reading && ed.mv == null) {
             Box(Modifier.matchParentSize().border(2.dp, pal.p, shape))
@@ -1416,18 +1427,6 @@ fun EdBar(ed: Ed, act: Actions, imeOpen: Boolean) {
                                     Tbn({ Ic("aL", it) }, al == "l", true) { ed.imgAlign("l") }
                                     Tbn({ Ic("aC", it) }, al == "c", true) { ed.imgAlign("c") }
                                     Tbn({ Ic("aR", it) }, al == "r", true) { ed.imgAlign("r") }
-                                }
-                                Chip("Scan text", pal.c4, pal.os, RoundedCornerShape(23.dp)) {
-                                    val im = b?.im?.getOrNull(s.second)
-                                    if (im != null) act.ocrImage(im.id) { t ->
-                                        if (ed.alive) {
-                                            val ps = t.split("\n").map { p -> p.trim() }.filter { p -> p.isNotEmpty() }
-                                            if (ps.isNotEmpty()) {
-                                                if (ed.blocks.any { bl -> bl.id == s.first }) ed.selImg = s
-                                                ed.insertObjs(ps.map { p -> Blk(ty = "p", r = Rt(p)) })
-                                            }
-                                        }
-                                    }
                                 }
                                 Tbn({ Ic(if (inRow) "rows" else "cols", it) }, false, true) { ed.toggleRow() }
                                 Tbn({ Ic("aup", it) }, false, true) { ed.imgMove(-1) }
