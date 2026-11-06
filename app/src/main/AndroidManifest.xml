@@ -10,6 +10,9 @@
     <!-- Voice note: rekam suara (diminta saat dipakai) dan unduh model transkripsi -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Update dari dalam aplikasi: membuka installer sistem untuk APK yang diunduh -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
     <!-- Kamera: foto langsung disisipkan ke catatan (izin diminta saat dipakai; kamera tidak wajib ada) -->
@@ -103,6 +106,36 @@
                 <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
             </intent-filter>
         </receiver>
+
+        <!-- Widget homescreen -->
+        <receiver
+            android:name=".QuickNoteWidget"
+            android:exported="false"
+            android:label="@string/widget_quick_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_quick_info" />
+        </receiver>
+
+        <receiver
+            android:name=".NotesWidget"
+            android:exported="false"
+            android:label="@string/widget_notes_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_notes_info" />
+        </receiver>
+
+        <service
+            android:name=".NotesWidgetService"
+            android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
 
         <provider
             android:name="androidx.core.content.FileProvider"
