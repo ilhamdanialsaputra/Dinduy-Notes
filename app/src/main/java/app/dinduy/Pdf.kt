@@ -144,6 +144,7 @@ import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.text.TextPosition
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -152,6 +153,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
 import kotlinx.serialization.Serializable
 import java.io.File
@@ -1245,7 +1247,13 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
             // ---------------- mode halaman 3D: efek balik halaman melengkung (library PageCurl) ----------------
             // awal HARUS konstan (startPage), bukan `page`: `page` berubah tiap balik halaman, dan state yang ikut berubah membuat
             // lambda pointerInput di bawah (dibuat sekali) memegang state lama yang sudah mati => ketukan hanya jalan sekali
-            val cs = rememberPageCurlState(startPage)
+            // state PageCurl dibuat ulang setelah tiap balikan lewat ketukan (gen++): next()/prev() bawaan library meninggalkan state
+            // internalnya macet sehingga ketukan berikutnya tak bereaksi, sedangkan geser jari tidak terpengaruh. State baru mulai
+            // dari halaman tujuan, jadi tidak ada lompatan.
+            var gen by remember { mutableIntStateOf(0) }
+            var baseP by remember { mutableIntStateOf(startPage) }
+            var flip by remember { mutableStateOf<Job?>(null) }
+            val cs = androidx.compose.runtime.key(gen) { rememberPageCurlState(baseP) }
             val csNow by androidx.compose.runtime.rememberUpdatedState(cs)
             val r0 = ui.doc.ratioOf(startPage)
             val w0 = minOf(vwDp, (vhDp - topPad - sab - 12.dp) / r0)
@@ -1287,7 +1295,18 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                         onEdge = { d ->
                             val st = csNow
                             val to = st.current + d
-                            if (to in 0 until count) scope.launch { if (d > 0) st.next() else st.prev() }
+                            if (to in 0 until count && flip?.isActive != true) {
+                                flip = scope.launch {
+                                    try {
+                                        withTimeoutOrNull(1200) { if (d > 0) st.next() else st.prev() }
+                                    } catch (e: CancellationException) {
+                                        throw e
+                                    } catch (e: Throwable) {
+                                    }
+                                    baseP = to
+                                    gen++
+                                }
+                            }
                         },
                         onTap ={ if (ui.sel != null) ui.sel = null else bars = !bars },
                         onDouble = { p ->
