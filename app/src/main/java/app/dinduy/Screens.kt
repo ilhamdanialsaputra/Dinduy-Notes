@@ -1171,6 +1171,11 @@ fun openNewFromFab(vm: AppVM) {
     vm.nav.openNote(n.id, vm.fabMorph, true)
 }
 
+/** Bilah voice note cepat sedang menggantikan tombol Baru (ditarik, merekam, atau sedang menguncup kembali). */
+private fun quickCoversFab(vm: AppVM): Boolean =
+    (QuickFx.drag || QuickFx.shown || QuickFx.noteBound || QuickFx.p.value > .001f) &&
+        (vm.nav.top is Scr.Home || QuickFx.noteBound)
+
 private const val FAB_HOLD_MS = 550L   // tahan sedikit lama untuk memunculkan sheet (suara dll.)
 
 /**
@@ -1189,6 +1194,9 @@ fun Fab(vm: AppVM, act: Actions, small: Boolean, hide: Boolean, lift: Dp) {
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
     val gone = hide || FabFx.drag
+    // bilah voice note cepat (QuickVoice) menggambar bentuk yang sama persis di atas tombol ini; selama ia aktif tombol asli
+    // harus benar-benar hilang (tanpa animasi, tanpa skala) supaya tidak ada dua tombol bertumpuk. Dibaca di lambda gambar
+    // agar tidak memicu rekomposisi tiap frame saat bilah ditarik.
     val sc by animateFloatAsState(if (gone) .4f else if (pr) .93f else 1f, spring(.55f, 500f), label = "sc")
     val al by animateFloatAsState(if (gone) 0f else 1f, tween(if (FabFx.drag) 80 else 250), label = "al")
     val r by animateDpAsState(if (pr) 22.dp else 32.dp, spring(.6f, 500f), label = "r")
@@ -1204,7 +1212,12 @@ fun Fab(vm: AppVM, act: Actions, small: Boolean, hide: Boolean, lift: Dp) {
                     val b = c.boundsInWindow()
                     if (!hide && b.width > 0f) vm.fabMorph = Morph(b.left, b.top, b.right, b.bottom, 32f * dens, pal.pc, card = true)
                 }
-                .graphicsLayer { scaleX = sc; scaleY = sc; alpha = al; transformOrigin = TransformOrigin(1f, 1f) }
+                .graphicsLayer {
+                    val q = quickCoversFab(vm)
+                    scaleX = if (q) 1f else sc; scaleY = if (q) 1f else sc
+                    alpha = if (q) 0f else al
+                    transformOrigin = TransformOrigin(1f, 1f)
+                }
                 .shadow(
                     if (pal.dark) 4.dp else 3.dp, shape, clip = false,
                     ambientColor = pal.p.copy(alpha = if (pal.dark) .35f else .22f),
