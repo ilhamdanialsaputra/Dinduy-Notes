@@ -92,6 +92,8 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -1498,7 +1500,7 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
         // Saat mode cari aktif, kapsul ini selalu tampil (di atas keyboard, atau di bawah layar kalau keyboard mati) dan baru
         // aktif setelah salah satu alatnya dipilih. Tombol X menutup mode coret saja; kapsulnya tetap ada selama mode cari.
         val inkShown = ui.inkOn || findOn
-        val imeDp = with(LocalDensity.current) { androidx.compose.foundation.layout.WindowInsets.ime.getBottom(this).toDp() }
+        val imeDp = with(LocalDensity.current) { WindowInsets.ime.getBottom(this).toDp() }
         val inkP by androidx.compose.animation.core.animateFloatAsState(
             if (inkShown) 1f else 0f,
             if (inkShown) spring(.68f, 300f) else spring(1f, 800f), label = "inkbar"
