@@ -718,6 +718,9 @@ class NoteDrag {
     fun reset() { id = null; dropping = false; order = emptyList() }
 }
 
+/** Pergeseran tumpukan kartu saat pencarian dibuka/ditutup: px = jarak (0 = beranda mentok di atas, tanpa animasi), p = progres 0..1. */
+private class StackShift(val px: Float, val p: Animatable<Float, androidx.compose.animation.core.AnimationVector1D>)
+
 @Composable
 fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmall: (Boolean) -> Unit) {
     val pal = LocalPal.current
@@ -821,6 +824,25 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         val imeH = with(dens) { WindowInsets.ime.getBottom(dens).toDp() }
         val hPx = with(dens) { maxHeight.toPx() }
         val wPx = with(dens) { maxWidth.toPx() }
+        // ---- gerak tumpukan kartu saat bilah cari dibuka / ditutup ----
+        // Beranda yang sudah tergulir: kartu meluncur (spring, tanpa fade) menuju posisi awal saat cari dibuka, dan kembali
+        // ke posisi gulir saat ditutup. Jaraknya dihitung dari posisi gulir saat itu. Kalau beranda mentok di atas: tanpa animasi.
+        val flip = remember { intArrayOf(0, 0) }
+        val onNow = if (vm.searchOn) 1 else 0
+        if (flip[1] != onNow) { flip[0]++; flip[1] = onNow }
+        val shift = remember(flip[0]) {
+            val px = if (flip[0] == 0) 0f else androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {
+                if (!state.canScrollBackward) 0f else {
+                    val vis = state.layoutInfo.visibleItemsInfo
+                    val avg = if (vis.isEmpty()) 0f else vis.map { it.size.height }.average().toFloat()
+                    val est = (state.firstVisibleItemIndex.toFloat() / cols) * (avg + 8f * dens.density) + state.firstVisibleItemScrollOffset
+                    est.coerceIn(0f, hPx * .5f)
+                }
+            }
+            val d = if (px < 2f) 0f else px
+            StackShift(d, Animatable(if (d > 0f) 0f else 1f))
+        }
+        LaunchedEffect(shift) { if (shift.px > 0f) shift.p.animateTo(1f, spring(.72f, 320f)) }
         // perkiraan slot kartu paling atas: titik awal morph menutup saat kartu tujuan belum tampil di layar
         run {
             val gap = 8f * dens.density
@@ -929,7 +951,10 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         LazyVerticalStaggeredGrid(
             columns = StaggeredGridCells.Fixed(cols),
             state = state,
-            modifier = Modifier.fillMaxSize().nestedScroll(fabConn).graphicsLayer { alpha = if (vm.searchOn) 0f else 1f }
+            modifier = Modifier.fillMaxSize().nestedScroll(fabConn).graphicsLayer {
+                    alpha = if (vm.searchOn) 0f else 1f
+                    translationY = if (!vm.searchOn && shift.px > 0f) shift.px * (1f - shift.p.value) else 0f
+                }
                 .pointerInput(canDrag) {
                     if (!canDrag) return@pointerInput
                     awaitEachGesture {
@@ -1031,8 +1056,10 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     // hasil pencarian: tampil di bawah bilah dengan tata letak yang sama seperti beranda (1 atau 2 kolom)
                     LazyVerticalStaggeredGrid(
                         columns = StaggeredGridCells.Fixed(cols),
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = sat + 80.dp, bottom = imeH + 16.dp),
+                        modifier = Modifier.fillMaxSize().graphicsLayer {
+                            translationY = if (vm.searchOn && shift.px > 0f) -shift.px * (1f - shift.p.value) else 0f
+                        },
+                        contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = sat + 78.dp, bottom = imeH + 16.dp),
                         verticalItemSpacing = 8.dp,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
