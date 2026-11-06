@@ -144,6 +144,7 @@ import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.text.TextPosition
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -152,6 +153,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
 import kotlinx.serialization.Serializable
 import java.io.File
@@ -1241,6 +1243,7 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                 backPageColor = if (ui.dark) Color(0xFF1C1C1E) else Color.White,
                 dragInteraction = PageCurlConfig.GestureDragInteraction()
             )
+            var flip by remember { mutableStateOf<Job?>(null) }
             var cz by remember { mutableFloatStateOf(1f) }
             var cpan by remember { mutableStateOf(Offset.Zero) }
             val cMul by remember { derivedStateOf { ceil(cz).coerceAtLeast(1f) } }
@@ -1273,9 +1276,19 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                     .curlTouch(
                         scope, true, { cz > 1.02f }, { findOn }, { d -> cpan = cClamp(cpan + d, cz) },
                         onEdge = { d ->
-                            scope.launch {
-                                if (d > 0 && cs.current < count - 1) cs.next()
-                                else if (d < 0 && cs.current > 0) cs.prev()
+                            val to = cs.current + d
+                            // satu balikan pada satu waktu; kalau animasi library tidak selesai / macet (ketukan ke-2 dst tak bereaksi),
+                            // dibatasi waktu lalu halaman dipindah langsung supaya ketukan tepi selalu bekerja
+                            if (to in 0 until count && flip?.isActive != true) {
+                                flip = scope.launch {
+                                    try {
+                                        withTimeoutOrNull(1200) { if (d > 0) cs.next() else cs.prev() }
+                                    } catch (e: CancellationException) {
+                                        throw e
+                                    } catch (e: Throwable) {
+                                    }
+                                    if (cs.current != to) cs.snapTo(to)
+                                }
                             }
                         },
                         onTap ={ if (ui.sel != null) ui.sel = null else bars = !bars },
