@@ -1178,9 +1178,11 @@ private const val FAB_HOLD_MS = 550L   // tahan sedikit lama untuk memunculkan s
  *  - ketuk            -> catatan baru langsung terbuka (melar dari tombol)
  *  - tahan ~0,5 detik -> sheet tambah (ada catatan suara)
  *  - tarik ke atas    -> catatan mekar mengikuti jari; lepas di atas ambang = terbuka, kalau tidak = menguncup lagi
+ *  - geser ke kiri    -> tombol melebar jadi bilah voice note cepat (lihat QuickVoice); lepas di atas ambang = merekam
  */
 @Composable
-fun Fab(vm: AppVM, small: Boolean, hide: Boolean, lift: Dp) {
+fun Fab(vm: AppVM, act: Actions, small: Boolean, hide: Boolean, lift: Dp) {
+    val ctx = LocalContext.current
     val pal = LocalPal.current
     val src = remember { MutableInteractionSource() }
     val pr by src.collectIsPressedAsState()
@@ -1224,7 +1226,7 @@ fun Fab(vm: AppVM, small: Boolean, hide: Boolean, lift: Dp) {
                         val slop = viewConfiguration.touchSlop
                         val sx = down.position.x
                         val sy = down.position.y
-                        var res = 0   // 0 batal, 1 ketuk, 2 tarik ke atas
+                        var res = 0   // 0 batal, 1 ketuk, 2 tarik ke atas, 3 geser ke kiri
                         val held = withTimeoutOrNull(FAB_HOLD_MS) {
                             var done = false
                             while (!done) {
@@ -1236,6 +1238,7 @@ fun Fab(vm: AppVM, small: Boolean, hide: Boolean, lift: Dp) {
                                     val dx = c.position.x - sx
                                     val dy = c.position.y - sy
                                     if (dy < -slop && abs(dy) > abs(dx)) { res = 2; done = true }
+                                    else if (dx < -slop && abs(dx) > abs(dy)) { res = 3; done = true }
                                     else if (abs(dx) > slop * 2f || dy > slop * 2f) { res = 0; done = true }
                                 }
                             }
@@ -1286,6 +1289,42 @@ fun Fab(vm: AppVM, small: Boolean, hide: Boolean, lift: Dp) {
                                         vm.nav.pop()
                                         FabFx.drag = false
                                     }
+                                }
+                            }
+                            3 -> {
+                                scope.launch { src.emit(PressInteraction.Cancel(press)) }
+                                if (vm.rec.active) {
+                                    vm.show("Already recording")
+                                    return@awaitEachGesture
+                                }
+                                if (!micOk(ctx)) {
+                                    // belum ada izin mikrofon: minta dulu, geser lagi setelah diizinkan
+                                    act.requestMic { }
+                                    return@awaitEachGesture
+                                }
+                                QuickFx.drag = true
+                                val dist = 220.dp.toPx()
+                                val tracker = VelocityTracker()
+                                tracker.addPosition(down.uptimeMillis, down.position)
+                                var p = 0f
+                                while (true) {
+                                    val ev = awaitPointerEvent()
+                                    val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                                    tracker.addPosition(c.uptimeMillis, c.position)
+                                    val up = c.changedToUpIgnoreConsumed()
+                                    c.consume()
+                                    if (up) break
+                                    p = ((sx - c.position.x - slop).coerceAtLeast(0f) / dist).coerceIn(0f, 1f)
+                                    val v = p
+                                    scope.launch { QuickFx.p.snapTo(v) }
+                                }
+                                val vx = tracker.calculateVelocity().x
+                                QuickFx.drag = false
+                                if ((p > .35f || vx < -1000f) && quickStart(vm)) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    scope.launch { QuickFx.p.animateTo(1f, spring(.8f, 480f)) }
+                                } else {
+                                    scope.launch { QuickFx.p.animateTo(0f, spring(1f, 600f)) }
                                 }
                             }
                             else -> scope.launch { src.emit(PressInteraction.Cancel(press)) }
