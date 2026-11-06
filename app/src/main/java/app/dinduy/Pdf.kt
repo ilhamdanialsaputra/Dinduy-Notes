@@ -670,11 +670,17 @@ private fun Modifier.pinch(onPinch: (Float, Offset, Offset) -> Unit, onEnd: () -
  * ketukan tunggal / ganda dipakai di sini (library tidak ikut membalik halaman),
  * saat diperbesar satu jari menggeser gambar dan library tidak pernah melihat geseran itu (jadi tidak bisa pindah halaman).
  * Geseran saat tidak diperbesar dibiarkan lewat ke library untuk melengkungkan halaman.
+ * Ketukan di zona tepi kiri / kanan (saat tidak diperbesar) langsung pindah halaman lewat onEdge(-1 / +1), tanpa menunggu ketukan ganda.
+ * Saat locked() (mode cari) geseran dikonsumsi di sini sehingga tidak ada yang bisa pindah halaman, dan ketukan tepi diabaikan.
  */
+private const val EDGE_TAP = .22f
+
 private fun Modifier.curlTouch(
-    scope: CoroutineScope, zoomed: () -> Boolean, onPan: (Offset) -> Unit,
+    scope: CoroutineScope, enabled: Boolean = true, zoomed: () -> Boolean, locked: () -> Boolean = { false },
+    onPan: (Offset) -> Unit, onEdge: (Int) -> Unit,
     onTap: () -> Unit, onDouble: (Offset) -> Unit
-): Modifier = pointerInput(Unit) {
+): Modifier = pointerInput(enabled) {
+    if (!enabled) return@pointerInput
     var lastT = 0L
     var lastP = Offset.Zero
     var pending: Job? = null
@@ -694,19 +700,28 @@ private fun Modifier.curlTouch(
                 val quick = c.uptimeMillis - down.uptimeMillis < viewConfiguration.longPressTimeoutMillis
                 if (!moved && quick) {
                     c.consume()
-                    val now = c.uptimeMillis
-                    if (pending?.isActive == true && now - lastT < 300L && (c.position - lastP).getDistance() < tol) {
+                    val x = c.position.x
+                    val w = size.width.toFloat()
+                    if (!zoomed() && (x < w * EDGE_TAP || x > w * (1f - EDGE_TAP))) {
+                        // zona tepi: pindah halaman seketika
                         pending?.cancel(); pending = null; lastT = 0L
-                        onDouble(c.position)
+                        if (!locked()) onEdge(if (x < w / 2f) -1 else 1)
                     } else {
-                        lastT = now; lastP = c.position
-                        pending = scope.launch { delay(300); onTap() }
+                        val now = c.uptimeMillis
+                        if (pending?.isActive == true && now - lastT < 300L && (c.position - lastP).getDistance() < tol) {
+                            pending?.cancel(); pending = null; lastT = 0L
+                            onDouble(c.position)
+                        } else {
+                            lastT = now; lastP = c.position
+                            pending = scope.launch { delay(300); onTap() }
+                        }
                     }
                 }
                 break
             }
             if (!moved && (c.position - down.position).getDistance() > slop) moved = true
             if (z0 && moved) { onPan(c.positionChange()); c.consume() }
+            else if (!z0 && locked()) c.consume()   // mode cari: geseran tidak sampai ke pager / PageCurl
         }
     }
 }
@@ -1256,8 +1271,14 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                         onEnd = { if (cz < 1.05f) { cz = 1f; cpan = Offset.Zero } }
                     )
                     .curlTouch(
-                        scope, { cz > 1.02f }, { d -> cpan = cClamp(cpan + d, cz) },
-                        onTap = { if (ui.sel != null) ui.sel = null else bars = !bars },
+                        scope, true, { cz > 1.02f }, { findOn }, { d -> cpan = cClamp(cpan + d, cz) },
+                        onEdge = { d ->
+                            scope.launch {
+                                if (d > 0 && cs.current < count - 1) cs.next()
+                                else if (d < 0 && cs.current > 0) cs.prev()
+                            }
+                        },
+                        onTap ={ if (ui.sel != null) ui.sel = null else bars = !bars },
                         onDouble = { p ->
                             val z0 = cz
                             val z1 = if (z0 > 1.2f) 1f else 2.5f
@@ -1315,26 +1336,23 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                         onPinch = { z, p, c -> zoomAt((pz * z).coerceIn(1f, 4f), c, p) },
                         onEnd = { if (pz < 1.05f) { pz = 1f; pan = Offset.Zero } }
                     )
-                    .pointerInput(ui.inkOn) {
-                        if (ui.inkOn) return@pointerInput
-                        detectTapGestures(
-                            onTap = { if (ui.sel != null) ui.sel = null else bars = !bars },
-                            onDoubleTap = { p ->
-                                val z0 = pz
-                                val z1 = if (z0 > 1.2f) 1f else 2.5f
-                                scope.launch { animate(0f, 1f, animationSpec = spring(1f, 420f)) { v, _ -> zoomAt(z0 + (z1 - z0) * v, p) } }
-                            }
-                        )
-                    }
-                    .then(
-                        if (pz > 1.05f && !ui.inkOn) Modifier.pointerInput(Unit) {
-                            detectDragGestures { c, d -> c.consume(); pan = clampPan(pan + d, pz) }
-                        } else Modifier
+                    .curlTouch(
+                        scope, !ui.inkOn, { pz > 1.05f }, { findOn }, { d -> pan = clampPan(pan + d, pz) },
+                        onEdge = { d ->
+                            val t = pager.currentPage + d
+                            if (t in 0 until count) scope.launch { pager.animateScrollToPage(t) }
+                        },
+                        onTap = { if (ui.sel != null) ui.sel = null else bars = !bars },
+                        onDouble = { p ->
+                            val z0 = pz
+                            val z1 = if (z0 > 1.2f) 1f else 2.5f
+                            scope.launch { animate(0f, 1f, animationSpec = spring(1f, 420f)) { v, _ -> zoomAt(z0 + (z1 - z0) * v, p) } }
+                        }
                     )
             ) {
                 HorizontalPager(
                     state = pager, modifier = Modifier.fillMaxSize(), pageSpacing = 12.dp,
-                    userScrollEnabled = pz <= 1.05f && !ui.drawing, beyondViewportPageCount = 1
+                    userScrollEnabled = pz <= 1.05f && !ui.drawing && !findOn, beyondViewportPageCount = 1
                 ) { p ->
                     val here = p == pager.currentPage
                     val w = fitW(p)
@@ -1543,7 +1561,7 @@ fun PdfMenuPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         Column(Modifier.weight(1f)) {
                             T("3D page", 16f, 500, pal.os)
-                            T("Pages curl like a real book. Swipe to turn, zoom in to pan", 14f, 400, pal.osv, lh = 1.3f)
+                            T("Pages curl like a real book. Swipe or tap the left / right edge to turn, zoom in to pan", 14f, 400, pal.osv, lh = 1.3f)
                         }
                         MorphSwitch(curlOn)
                     }
