@@ -109,6 +109,10 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -1030,7 +1034,9 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
         }
 
         // ---------------- bilah atas: hitam polos; tombol cari membuat bilah cari tumbuh dari ikonnya, yang lain menyingkir ----------------
-        val sp by androidx.compose.animation.core.animateFloatAsState(if (findOn) 1f else 0f, spring(.85f, 520f), label = "find")
+        val spRaw by androidx.compose.animation.core.animateFloatAsState(if (findOn) 1f else 0f, spring(.85f, 520f), label = "find")
+        // spring bisa overshoot (>1 atau <0): padding/lebar negatif membuat app force close, jadi dikunci 0..1
+        val sp = spRaw.coerceIn(0f, 1f)
         val white = Color.White
         val chip = Color(0xFF2A2A2D)
         AnimatedVisibility(
@@ -1096,20 +1102,35 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
             }
         }
 
-        // ---------------- alat coret: satu kapsul kecil ----------------
-        AnimatedVisibility(
-            ui.inkOn, Modifier.align(Alignment.BottomCenter).padding(bottom = sab + 16.dp),
-            enter = fadeIn(spring(stiffness = 600f)) + expandVertically(spring(.75f, 480f)),
-            exit = fadeOut(spring(stiffness = 700f)) + shrinkVertically(spring(1f, 600f))
-        ) {
+        // ---------------- alat coret: satu kapsul kecil (tumbuh dari tengah, isinya muncul satu per satu) ----------------
+        val inkP by androidx.compose.animation.core.animateFloatAsState(
+            if (ui.inkOn) 1f else 0f,
+            if (ui.inkOn) spring(.68f, 300f) else spring(1f, 800f), label = "inkbar"
+        )
+        if (inkP > .004f) {
             Row(
-                Modifier.clip(CircleShape).background(Color(0xFF2A2A2D)).padding(horizontal = 8.dp, vertical = 6.dp),
+                Modifier.align(Alignment.BottomCenter).padding(bottom = sab + 16.dp)
+                    .graphicsLayer {
+                        transformOrigin = TransformOrigin(.5f, 1f)
+                        val p = inkP
+                        translationY = (1f - p.coerceIn(0f, 1f)) * 36.dp.toPx()
+                        val sc = .7f + .3f * p.coerceAtLeast(0f)
+                        scaleX = sc; scaleY = sc
+                        alpha = (p * 2.5f).coerceIn(0f, 1f)
+                    }
+                    .clip(CircleShape)
+                    .layout { m, c ->
+                        val pl = m.measure(c)
+                        val w = (pl.width * (.2f + .8f * inkP).coerceAtLeast(.1f)).roundToInt()
+                        layout(w, pl.height) { pl.placeRelative((w - pl.width) / 2, 0) }
+                    }
+                    .background(Color(0xFF2A2A2D)).padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 for (t in 0..2) {
                     val on = ui.tool == t
                     Box(
-                        Modifier.size(44.dp).clip(CircleShape).background(if (on) Color.White.copy(alpha = .18f) else Color.Transparent)
+                        Modifier.pop({ inkP }, t).size(44.dp).clip(CircleShape).background(if (on) Color.White.copy(alpha = .18f) else Color.Transparent)
                             .clickable {
                                 saveTool()
                                 ui.tool = t
@@ -1121,15 +1142,22 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                 }
                 if (ui.tool < 2) {
                     // satu titik warna: ketuk untuk ganti warna berikutnya
-                    Box(Modifier.size(44.dp).clip(CircleShape).clickable { ui.color = (ui.color + 1) % 5; saveTool() }, Alignment.Center) {
+                    Box(Modifier.pop({ inkP }, 3).size(44.dp).clip(CircleShape).clickable { ui.color = (ui.color + 1) % 5; saveTool() }, Alignment.Center) {
                         Box(Modifier.size(24.dp).clip(CircleShape).background(inkColor(ui.inkPal ?: pal, ui.color, ui.tool == 1)).border(2.dp, Color.White, CircleShape))
                     }
                 }
-                IconBtn("undo", Color.White.copy(alpha = if (ui.ink.canUndo) 1f else .3f), { ui.ink.undo() }, size = 44.dp, enabled = ui.ink.canUndo)
-                IconBtn("ok", pal.op, { saveTool(); ui.inkOn = false }, size = 44.dp, bg = pal.p)
+                Box(Modifier.pop({ inkP }, 4)) { IconBtn("undo", Color.White.copy(alpha = if (ui.ink.canUndo) 1f else .3f), { ui.ink.undo() }, size = 44.dp, enabled = ui.ink.canUndo) }
+                Box(Modifier.pop({ inkP }, 5)) { IconBtn("ok", pal.op, { saveTool(); ui.inkOn = false }, size = 44.dp, bg = pal.p) }
             }
         }
     }
+}
+
+/** Isi kapsul muncul bergantian (membesar + pudar) setelah kapsulnya mulai terbuka; i = urutan. */
+private fun Modifier.pop(p: () -> Float, i: Int): Modifier = graphicsLayer {
+    val t = ((p() - .15f - i * .06f) / .5f).coerceIn(0f, 1f)
+    val k = .4f + .6f * t
+    alpha = t; scaleX = k; scaleY = k
 }
 
 private suspend fun withFrameNanos0() { androidx.compose.runtime.withFrameNanos { } }
@@ -1198,9 +1226,12 @@ fun PdfMenuPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
         }
     }
     if (renaming) {
-        var text by remember { mutableStateOf(d?.t ?: "") }
+        val init = d?.t ?: ""
+        var tf by remember { mutableStateOf(TextFieldValue(init, TextRange(init.length))) }
+        val rfr = remember { FocusRequester() }
+        LaunchedEffect(Unit) { delay(150); try { rfr.requestFocus() } catch (e: Exception) { } }
         val done = {
-            val t = text.trim()
+            val t = tf.text.trim()
             if (t.isNotEmpty()) vm.upd(id) { it.copy(t = t) }
             renaming = false
         }
@@ -1209,16 +1240,16 @@ fun PdfMenuPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
             containerColor = pal.c3,
             title = { T("Rename PDF", 22f, 900, pal.os) },
             text = {
-                Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(pal.c4).padding(horizontal = 20.dp, vertical = 16.dp)) {
-                    BasicTextField(
-                        value = text, onValueChange = { text = it.take(120) }, singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        textStyle = TextStyle(color = pal.os, fontFamily = LocalFF.current, fontSize = 18.sp, fontWeight = FontWeight(600)),
-                        cursorBrush = SolidColor(pal.p),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(onDone = { done() })
-                    )
-                }
+                // padding ada DI DALAM kolom teks (decorationBox), jadi seluruh pil bisa diketuk dan kursor bisa digeser sampai ujung
+                BasicTextField(
+                    value = tf, onValueChange = { if (it.text.length <= 120) tf = it }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(pal.c4).focusRequester(rfr),
+                    textStyle = TextStyle(color = pal.os, fontFamily = LocalFF.current, fontSize = 18.sp, fontWeight = FontWeight(600)),
+                    cursorBrush = SolidColor(pal.p),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { done() }),
+                    decorationBox = { inner -> Box(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp)) { inner() } }
+                )
             },
             confirmButton = { TextButton(onClick = { done() }) { T("Save", 16f, 900, pal.p) } },
             dismissButton = { TextButton(onClick = { renaming = false }) { T("Cancel", 16f, 700, pal.osv) } }
