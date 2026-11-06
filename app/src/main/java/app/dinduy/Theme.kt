@@ -3,7 +3,9 @@
 package app.dinduy
 
 import android.content.res.AssetManager
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
@@ -20,6 +22,9 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -178,14 +183,17 @@ fun normMode(m: String): String = when (m) {
 }
 
 /**
- * Palet dari satu warna dasar (seed). Seluruh permukaan (latar, kertas, kartu, sheet, chip) ikut diberi corak seed,
- * bukan hanya tombol, jadi warna kustom benar-benar terasa di seluruh aplikasi.
- * Terang : krem seperti semula (kertas lebih terang dari latar beranda), hue mengikuti seed.
+ * Palet dari satu warna dasar (seed). Pola mengikuti Google Keep (kalem, bukan pekat):
+ * Terang : kertas (kartu, editor, bilah cari) nyaris putih dengan corak sangat tipis (hsl ~ 60%, 98), latar beranda satu tingkat
+ *          lebih redup dan lebih abu (hsl ~ 20%, 94). Hue mengikuti seed (atau wallpaper), saturasinya sengaja dibuat rendah.
  * Gelap  : kertas (kartu & editor) HITAM PEKAT (AMOLED), latar beranda satu tingkat lebih terang.
+ *
+ * cover = true: palet khusus satu catatan yang bersampul. Warnanya diambil dari foto sampul, jadi kertas dibuat lebih
+ * berwarna daripada palet aplikasi (tetap pastel), dan gelapnya tidak hitam pekat melainkan gelap bercorak seed.
  */
-fun buildPal(mode: String, seed: String): Pal {
+fun buildPal(mode: String, seed: String, cover: Boolean = false): Pal {
     val (h, s0) = hueSat(seed)
-    val sat = maxOf(35f, minOf(s0, 88f))
+    val sat = if (cover) maxOf(14f, minOf(s0, 88f)) else maxOf(35f, minOf(s0, 88f))
     fun t(l: Float, k: Float = 1f, o: Float = 0f) = hsl(h + o, sat * k, l)
     val light = normMode(mode) == "light"
     val cl = if (light) 90f else 22f
@@ -194,27 +202,54 @@ fun buildPal(mode: String, seed: String): Pal {
     val ec = hsl(4f, 70f, cl); val oec = hsl(4f, 70f, ol)
     val ac = hsl(h + 150f, 45f, cl); val oac = hsl(h + 150f, 45f, ol)
     return if (light) {
-        // kombinasi sama dengan versi terang yang lama (krem hangat: kertas lebih terang dari latar),
-        // hanya corak/hue-nya sekarang mengikuti seed (atau wallpaper) alih-alih dikunci ke krem
-        val paper = hsl(h, 100f, 96f)          // dulu 0xFFFFF9EB
+        val paper = if (cover) hsl(h, minOf(sat * .65f, 55f), 94f) else hsl(h, 60f, 98f)     // Keep: FAF9FF
+        val bg = if (cover) hsl(h, minOf(sat * .45f, 40f), 89f) else hsl(h, 20f, 94f)        // Keep: EDEEF3
+        val c1 = if (cover) hsl(h, minOf(sat * .5f, 45f), 92f) else hsl(h, 25f, 96f)
+        val c3 = if (cover) hsl(h, minOf(sat * .5f, 45f), 90f) else hsl(h, 20f, 92f)
+        val c4 = if (cover) hsl(h, minOf(sat * .5f, 45f), 86f) else hsl(h, 20f, 89f)
         Pal(
             false, t(40f), Color.White, t(90f), t(12f), t(88f, .4f), t(14f, .4f), t(88f, .7f, 60f), t(14f, .7f, 60f),
             paper, t(10f, .12f), t(35f, .15f), t(78f, .15f),
-            t(96f, .25f), paper, t(92f, .25f), t(89f, .25f), wc, owc, ec, oec, ac, oac,
-            hsl(h, 52f, 92f),                  // dulu 0xFFF5EDE0
+            c1, paper, c3, c4, wc, owc, ec, oec, ac, oac,
+            bg,
             t(87f, .75f), t(80f, .8f)          // tb, tb2: wadah tonal berwarna (bukan abu netral)
         )
     } else {
-        val ns = minOf(sat * .35f, 26f)
+        val ns = if (cover) minOf(sat * .5f, 40f) else minOf(sat * .35f, 26f)
         fun n(l: Float, k: Float = 1f) = hsl(h, ns * k, l)
+        val paper = if (cover) n(11f) else Color.Black
         Pal(
             true, t(80f), t(20f), t(24f, .85f), t(90f), t(22f, .45f), t(90f, .35f), t(22f, .6f, 60f), t(90f, .5f, 60f),
-            Color.Black, n(90f, .4f), n(75f, .5f), n(30f),
-            n(7f), Color.Black, n(12f), n(17f), wc, owc, ec, oec, ac, oac,
-            n(9f),
+            paper, n(90f, .4f), n(75f, .5f), n(30f),
+            n(7f), paper, n(if (cover) 16f else 12f), n(if (cover) 21f else 17f), wc, owc, ec, oec, ac, oac,
+            n(if (cover) 8f else 9f),
             t(19f, .5f), t(26f, .55f)          // tb, tb2: wadah tonal berwarna, tetap berwarna walau perangkat < Android 12
         )
     }
+}
+
+/** Palet satu catatan bersampul, dari warna dominan foto (lihat coverSeed). Terang/gelap dan Monochrome ikut palet aplikasi. */
+fun coverPal(dark: Boolean, seed: String, mono: Boolean): Pal {
+    val p = buildPal(if (dark) "dark" else "light", seed, cover = true)
+    return if (mono) p.toMono() else p
+}
+
+/** Animasi pindah palet (dipakai palet catatan, yang bisa berganti saat sampul dipasang / diganti / dilepas). */
+@androidx.compose.runtime.Composable
+fun animPal(target: Pal): Pal {
+    val anim = androidx.compose.runtime.remember { Animatable(1f) }
+    var from by androidx.compose.runtime.remember { mutableStateOf(target) }
+    var to by androidx.compose.runtime.remember { mutableStateOf(target) }
+    LaunchedEffect(target) {
+        if (target !== to) {
+            from = lerpPal(from, to, anim.value)
+            to = target
+            anim.snapTo(0f)
+            anim.animateTo(1f, tween(450))
+        }
+    }
+    val av = anim.value
+    return if (av >= 1f) to else lerpPal(from, to, av)
 }
 
 /** Material You: palet dari warna sistem (wallpaper). Null jika perangkat < Android 12 atau warna sistem tak terbaca. */
@@ -234,13 +269,16 @@ fun dynamicPal(ctx: android.content.Context, mode: String): Pal? {
         val seed = a1(500)
         val base = buildPal(md, String.format("#%06X", seed.toArgb() and 0xFFFFFF))   // sumber warna peringatan/error/aksen
         if (md == "light") {
-            // permukaan memakai kombinasi terang yang sama dengan buildPal (hue dari wallpaper); aksen tetap dari warna sistem
+            // permukaan memakai pola Google Keep: kertas = netral sistem ~tone 98 (hampir putih), latar = netral ~tone 94 (satu tingkat
+            // lebih redup). Dulu memakai hsl(hue, 100%, 96%) yang pekat. Aksen tetap dari warna sistem.
+            val paper = lerp(n1(10), n1(50), .25f)
+            val bgc = lerp(n2(50), n2(100), .2f)
             Pal(
                 false, a1(600), a1(0), a1(100), a1(900), a2(100), a2(900), a3(100), a3(900),
-                base.s, n1(900), n2(700), n2(200),
-                base.c1, base.c2, base.c3, base.c4,
+                paper, n1(900), n2(700), n2(200),
+                lerp(paper, bgc, .5f), paper, lerp(n2(50), n2(100), .5f), n2(100),
                 base.wc, base.owc, base.ec, base.oec, base.ac, base.oac,
-                base.bg,
+                bgc,
                 lerp(a2(100), a1(100), .3f), a2(200)      // tb, tb2: tonal dari palet secondary/primary sistem (gaya Gboard)
             )
         } else {
