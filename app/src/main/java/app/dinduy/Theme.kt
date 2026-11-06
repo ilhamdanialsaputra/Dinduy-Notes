@@ -236,11 +236,12 @@ fun coverPal(dark: Boolean, seed: String, mono: Boolean): Pal {
 
 /** Animasi pindah palet (dipakai palet catatan, yang bisa berganti saat sampul dipasang / diganti / dilepas). */
 @androidx.compose.runtime.Composable
-fun animPal(target: Pal): Pal {
-    val anim = androidx.compose.runtime.remember { Animatable(1f) }
-    var from by androidx.compose.runtime.remember { mutableStateOf(target) }
-    var to by androidx.compose.runtime.remember { mutableStateOf(target) }
-    LaunchedEffect(target) {
+fun animPal(target: Pal, key: Any? = null): Pal {
+    // key berganti (mis. pindah ke catatan lain) = palet langsung pindah tanpa animasi, supaya warna catatan sebelumnya tidak sempat terlihat
+    val anim = androidx.compose.runtime.remember(key) { Animatable(1f) }
+    var from by androidx.compose.runtime.remember(key) { mutableStateOf(target) }
+    var to by androidx.compose.runtime.remember(key) { mutableStateOf(target) }
+    LaunchedEffect(target, key) {
         if (target !== to) {
             from = lerpPal(from, to, anim.value)
             to = target
