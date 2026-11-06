@@ -771,7 +771,13 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
         LocalPal provides vpal,
         androidx.compose.material3.LocalContentColor provides vpal.os
     ) {
-        Box(Modifier.fillMaxSize().background(if (dark) Color.Black else vpal.bg)) {
+        Box(
+            Modifier.fillMaxSize().background(if (dark) Color.Black else vpal.bg).graphicsLayer {
+                // buka/tutup dari beranda: isi PDF berkedip cepat (pudar-silang dengan sampul kartu), bukan ikut membesar dari kartu
+                val x = ((vm.openP.value - .2f) / .25f).coerceIn(0f, 1f)
+                alpha = x * x * (3f - 2f * x)
+            }
+        ) {
             when {
                 doc.failed -> Column(
                     Modifier.fillMaxSize().padding(32.dp), Arrangement.Center, Alignment.CenterHorizontally
@@ -933,7 +939,7 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                 val contentW = vwDp * zoom
                 LazyColumn(
                     state = list,
-                    modifier = Modifier.requiredWidth(contentW).fillMaxHeight().graphicsLayer { translationX = -hx },
+                    modifier = Modifier.requiredWidth(contentW).fillMaxHeight().graphicsLayer { translationX = vwPx * (zoom - 1f) / 2f - hx },
                     contentPadding = PaddingValues(top = topPad, bottom = botPad),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
