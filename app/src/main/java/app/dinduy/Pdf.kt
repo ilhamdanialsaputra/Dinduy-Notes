@@ -110,6 +110,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.layout
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
@@ -345,11 +348,12 @@ class PdfDoc(private val file: File) {
 // ---------------------------------------------------------------- teks PDF (untuk pencarian)
 
 /** Teks satu halaman + kotak tiap huruf (pecahan lebar/tinggi halaman: kiri, atas, kanan, bawah). Spasi / baris baru = null. */
-class PgText(val t: String, val r: List<FloatArray?>)
+class PgText(val t: String, val r: List<FloatArray?>, val lb: Set<Int> = emptySet())
 
 private class Grab : PDFTextStripper() {
     val sb = StringBuilder()
     val rs = ArrayList<FloatArray?>()
+    val lbs = HashSet<Int>()   // indeks pemisah baris (untuk salin)
     init { setSortByPosition(true) }
 
     override fun writeString(text: String, textPositions: MutableList<TextPosition>) {
@@ -368,14 +372,14 @@ private class Grab : PDFTextStripper() {
     }
 
     override fun writeWordSeparator() { sb.append(' '); rs.add(null) }
-    override fun writeLineSeparator() { sb.append(' '); rs.add(null) }
+    override fun writeLineSeparator() { lbs.add(sb.length); sb.append(' '); rs.add(null) }
 }
 
 @Stable
 class PdfText(private val ctx: Context, private val file: File) {
     private var doc: PDDocument? = null
     private var broken = false
-    private val cache = HashMap<Int, PgText>()
+    private val cache = java.util.concurrent.ConcurrentHashMap<Int, PgText>()
     private val lock = Mutex()
 
     private fun docNow(): PDDocument? {
@@ -387,6 +391,9 @@ class PdfText(private val ctx: Context, private val file: File) {
         } catch (e: Throwable) { broken = true; null }
     }
 
+    /** Teks halaman bila sudah pernah dimuat (aman dipanggil dari UI), kalau belum null. */
+    fun peek(i: Int): PgText? = cache[i]
+
     suspend fun page(i: Int): PgText? = withContext(Dispatchers.IO) {
         lock.withLock {
             cache[i]?.let { return@withLock it }
@@ -396,7 +403,7 @@ class PdfText(private val ctx: Context, private val file: File) {
                 g.startPage = i + 1
                 g.endPage = i + 1
                 g.getText(d)
-                val p = PgText(g.sb.toString(), g.rs)
+                val p = PgText(g.sb.toString(), g.rs, g.lbs)
                 cache[i] = p
                 p
             } catch (e: Throwable) { null }
@@ -444,6 +451,65 @@ private fun hitsIn(page: Int, pt: PgText, q: String): List<PHit> {
     }
     return out
 }
+
+// ---------------------------------------------------------------- seleksi teks (khusus PDF non-scan)
+
+data class PPos(val p: Int, val c: Int) : Comparable<PPos> {
+    override fun compareTo(other: PPos): Int = if (p != other.p) p.compareTo(other.p) else c.compareTo(other.c)
+}
+
+/** a = awal (termasuk), b = akhir (tidak termasuk); a < b. */
+class PSel(val a: PPos, val b: PPos)
+
+private fun rangeOn(s: PSel, p: Int, t: PgText): Pair<Int, Int>? {
+    if (p < s.a.p || p > s.b.p) return null
+    val a = if (p == s.a.p) s.a.c else 0
+    val b = if (p == s.b.p) min(s.b.c, t.t.length) else t.t.length
+    return if (b > a) a to b else null
+}
+
+/** Kotak sorotan per baris untuk huruf [i, e). */
+private fun rectsOf(pt: PgText, i: Int, e: Int): List<FloatArray> {
+    val rs = ArrayList<FloatArray>()
+    var cur: FloatArray? = null
+    for (k in i until e) {
+        val r = pt.r.getOrNull(k) ?: continue
+        val c = cur
+        if (c != null && abs(r[1] - c[1]) < (c[3] - c[1]) * .6f) {
+            c[0] = min(c[0], r[0]); c[1] = min(c[1], r[1]); c[2] = max(c[2], r[2]); c[3] = max(c[3], r[3])
+        } else { val n = r.copyOf(); cur = n; rs.add(n) }
+    }
+    return rs
+}
+
+/** Huruf terdekat dari titik (x, y) (pecahan lebar / tinggi halaman); ar = tinggi / lebar. -1 bila tak ada teks. */
+private fun nearestChar(pt: PgText, x: Float, y: Float, ar: Float): Int {
+    var best = -1; var bs = Float.MAX_VALUE
+    for (k in pt.r.indices) {
+        val r = pt.r[k] ?: continue
+        val dx = if (x < r[0]) r[0] - x else if (x > r[2]) x - r[2] else 0f
+        val dy = (if (y < r[1]) r[1] - y else if (y > r[3]) y - r[3] else 0f) * ar
+        val sc = dy * 4f + dx
+        if (sc < bs) { bs = sc; best = k }
+    }
+    return best
+}
+
+/** Posisi kursor (di antara dua huruf) terdekat dari titik. */
+private fun caretAt(pt: PgText, x: Float, y: Float, ar: Float): Int {
+    val k = nearestChar(pt, x, y, ar)
+    if (k < 0) return -1
+    val r = pt.r[k] ?: return -1
+    return if (x > (r[0] + r[2]) / 2f) k + 1 else k
+}
+
+private fun handleXY(pt: PgText, a: Int, b: Int, start: Boolean, w: Float, h: Float): Offset? {
+    if (start) { for (k in a until b) { val r = pt.r.getOrNull(k) ?: continue; return Offset(r[0] * w, r[3] * h) } }
+    else { for (k in b - 1 downTo a) { val r = pt.r.getOrNull(k) ?: continue; return Offset(r[2] * w, r[3] * h) } }
+    return null
+}
+
+private val SEL_COLOR = Color(0xFF4F8CFF)
 
 // ---------------------------------------------------------------- coretan di PDF
 
@@ -560,6 +626,9 @@ class PdfUi(val doc: PdfDoc, val ink: PInkState, val fid: String) {
     var cur by mutableIntStateOf(-1)
     var drawing by mutableStateOf(false)
     var pulse: androidx.compose.runtime.State<Float> = mutableFloatStateOf(.6f)
+    var txt: PdfText? = null
+    var sel by mutableStateOf<PSel?>(null)
+    var paged = false
 }
 
 private val INVERT = ColorFilter.colorMatrix(
@@ -609,6 +678,14 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
     }
     val strokes = ui.ink.byPage[index] ?: emptyList()
     val pal = ui.inkPal
+    val scp = rememberCoroutineScope()
+    val hap = LocalHapticFeedback.current
+    var pt by remember(index) { mutableStateOf<PgText?>(ui.txt?.peek(index)) }
+    LaunchedEffect(index, PdfBus.hasText) { if (PdfBus.hasText && pt == null) { delay(350); pt = ui.txt?.page(index) } }
+    val sel = ui.sel
+    val ptv = pt
+    val rg = remember(sel, ptv) { if (sel != null && ptv != null) rangeOn(sel, index, ptv) else null }
+    val selR = remember(rg, ptv) { if (rg != null && ptv != null) rectsOf(ptv, rg.first, rg.second) else emptyList() }
     val live = remember(index) { mutableStateOf<PLive?>(null) }
     var tick by remember(index) { mutableIntStateOf(0) }
     val marks = remember(ui.hits, index) { ui.hits.withIndex().filter { it.value.page == index } }
@@ -674,6 +751,75 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
                     }
                 }
             }
+            .pointerInput(ui.inkOn, index) {
+                if (ui.inkOn) return@pointerInput
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    if (!PdfBus.hasText) return@awaitEachGesture
+                    val W = size.width.toFloat().coerceAtLeast(1f)
+                    val H = size.height.toFloat().coerceAtLeast(1f)
+                    val here = pt
+                    val s0 = ui.sel
+                    var anchor: PPos? = null
+                    // 1) sentuh pegangan (handle) awal / akhir yang sudah ada -> geser untuk mengubah seleksi
+                    if (s0 != null && here != null) {
+                        val g = rangeOn(s0, index, here)
+                        if (g != null) {
+                            val hs = if (s0.a.p == index) handleXY(here, g.first, g.second, true, W, H) else null
+                            val he = if (s0.b.p == index) handleXY(here, g.first, g.second, false, W, H) else null
+                            val ds = hs?.let { (down.position - Offset(it.x, it.y + 9f * dens)).getDistance() } ?: Float.MAX_VALUE
+                            val de = he?.let { (down.position - Offset(it.x, it.y + 9f * dens)).getDistance() } ?: Float.MAX_VALUE
+                            if (min(ds, de) <= 28f * dens) { anchor = if (ds <= de) s0.b else s0.a; down.consume() }
+                        }
+                    }
+                    // 2) tekan lama di atas teks -> pilih satu kata; geser terus untuk memperluas
+                    if (anchor == null) {
+                        awaitLongPressOrCancellation(down.id) ?: return@awaitEachGesture
+                        if (here == null) { scp.launch { pt = ui.txt?.page(index) }; return@awaitEachGesture }
+                        val fx = (down.position.x / W).coerceIn(0f, 1f)
+                        val fy = (down.position.y / H).coerceIn(0f, 1f)
+                        val k = nearestChar(here, fx, fy, H / W)
+                        val r = if (k >= 0) here.r[k] else null
+                        if (r == null) return@awaitEachGesture
+                        val ddx = max(0f, max(r[0] - fx, fx - r[2]))
+                        val ddy = max(0f, max(r[1] - fy, fy - r[3])) * (H / W)
+                        if (ddx > .06f || ddy > .04f) return@awaitEachGesture
+                        var a = k; var b = k + 1
+                        if (here.t[k].isLetterOrDigit()) {
+                            while (a > 0 && here.t[a - 1].isLetterOrDigit()) a--
+                            while (b < here.t.length && here.t[b].isLetterOrDigit()) b++
+                        }
+                        hap.performHapticFeedback(HapticFeedbackType.LongPress)
+                        ui.sel = PSel(PPos(index, a), PPos(index, b))
+                        anchor = PPos(index, a)
+                    }
+                    val an = anchor ?: return@awaitEachGesture
+                    fun posAt(pos: Offset): PPos? {
+                        var p = index; var y = pos.y
+                        if (!ui.paged) {
+                            val gap = 6f * dens
+                            while (p < ui.doc.count - 1 && y > ui.doc.ratioOf(p) * W) { y -= ui.doc.ratioOf(p) * W + gap; p++ }
+                            while (y < 0f && p > 0) { p--; y += ui.doc.ratioOf(p) * W + gap }
+                        }
+                        val h = (ui.doc.ratioOf(p) * W).coerceAtLeast(1f)
+                        val t = ui.txt?.peek(p) ?: return null
+                        val c = caretAt(t, (pos.x / W).coerceIn(0f, 1f), (y / h).coerceIn(0f, 1f), h / W)
+                        return if (c < 0) null else PPos(p, c)
+                    }
+                    ui.drawing = true
+                    try {
+                        while (true) {
+                            val ev = awaitPointerEvent()
+                            if (ev.changes.size >= 2) break
+                            val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                            c.consume()
+                            if (c.changedToUp()) break
+                            val f = posAt(c.position) ?: continue
+                            if (f < an) ui.sel = PSel(f, an) else if (f > an) ui.sel = PSel(an, f)
+                        }
+                    } finally { ui.drawing = false }
+                }
+            }
     ) {
         Canvas(Modifier.fillMaxSize()) {
             val b = bmp
@@ -682,6 +828,10 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
                     b, dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()),
                     filterQuality = FilterQuality.Medium, colorFilter = if (ui.dark) INVERT else null
                 )
+            }
+            for (r in selR) {
+                val tl = Offset(r[0] * size.width, r[1] * size.height)
+                drawRect(SEL_COLOR.copy(alpha = .38f), tl, Size((r[2] - r[0]) * size.width, max((r[3] - r[1]) * size.height, 10f * density)))
             }
             for ((vi, h) in marks) {
                 val cur = vi == ui.cur
@@ -714,6 +864,15 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
                     ) else drawPath(path, col)
                 }
             }
+        }
+        if (sel != null && rg != null && ptv != null) Canvas(Modifier.fillMaxSize()) {
+            val rr = 9f * density
+            fun hdl(o: Offset) {
+                drawLine(SEL_COLOR, o, Offset(o.x, o.y + rr), strokeWidth = 2f * density)
+                drawCircle(SEL_COLOR, rr, Offset(o.x, o.y + rr))
+            }
+            if (sel.a.p == index) handleXY(ptv, rg.first, rg.second, true, size.width, size.height)?.let { hdl(it) }
+            if (sel.b.p == index) handleXY(ptv, rg.first, rg.second, false, size.width, size.height)?.let { hdl(it) }
         }
         if (bmp == null) Box(Modifier.align(Alignment.Center)) { LoadingBlob(Modifier.size(36.dp)) }
     }
@@ -762,7 +921,7 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
             if (vm.pr.mono) base.toMono() else base
         }
     }
-    val ui = remember(file) { PdfUi(doc, ink, note.pdf).also { it.dark = dark; it.inkPal = vpal; it.ts = vm.pr.ts } }
+    val ui = remember(file) { PdfUi(doc, ink, note.pdf).also { it.dark = dark; it.inkPal = vpal; it.ts = vm.pr.ts; it.txt = txt } }
     SideEffect { ui.dark = dark; ui.inkPal = vpal; ui.ts = vm.pr.ts }
     val view = LocalView.current
     SideEffect {
@@ -884,7 +1043,50 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
         SideEffect { ui.pulse = pl }
     }
 
-    BackHandler(enabled = findOn || ui.inkOn) { if (findOn) findOn = false else { ui.inkOn = false; ui.drawing = false } }
+    BackHandler(enabled = findOn || ui.inkOn || ui.sel != null) {
+        if (ui.sel != null) ui.sel = null else if (findOn) findOn = false else { ui.inkOn = false; ui.drawing = false }
+    }
+    SideEffect { ui.paged = mode != 0 }
+    LaunchedEffect(ui.inkOn, findOn) { if (ui.inkOn || findOn) ui.sel = null }
+    val ctx = LocalContext.current
+    fun copySel() {
+        val s = ui.sel ?: return
+        scope.launch {
+            val sb = StringBuilder()
+            for (p in s.a.p..s.b.p) {
+                val t = txt.page(p) ?: continue
+                val a = if (p == s.a.p) s.a.c else 0
+                val b = min(if (p == s.b.p) s.b.c else t.t.length, t.t.length)
+                if (b <= a) continue
+                val part = StringBuilder()
+                for (k in a until b) part.append(if (k in t.lb) '\n' else t.t[k])
+                val str = part.toString().replace(Regex(" *\n *"), "\n").trim()
+                if (str.isNotEmpty()) { if (sb.isNotEmpty()) sb.append("\n\n"); sb.append(str) }
+            }
+            if (sb.isEmpty()) return@launch
+            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("PDF", sb.toString()))
+            if (Build.VERSION.SDK_INT < 33) vm.show("Copied")
+            ui.sel = null
+        }
+    }
+    fun selectAll() {
+        scope.launch {
+            var a: PPos? = null
+            var b: PPos? = null
+            for (p in 0 until count) {
+                val t = txt.page(p) ?: continue
+                val k = t.r.indexOfFirst { it != null }
+                if (k >= 0) { a = PPos(p, k); break }
+            }
+            for (p in count - 1 downTo 0) {
+                val t = txt.page(p) ?: continue
+                val k = t.r.indexOfLast { it != null }
+                if (k >= 0) { b = PPos(p, k + 1); break }
+            }
+            if (a != null && b != null) ui.sel = PSel(a, b)
+        }
+    }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val vwDp = maxWidth
@@ -933,7 +1135,7 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                     .pointerInput(ui.inkOn) {
                         if (ui.inkOn) return@pointerInput
                         detectTapGestures(
-                            onTap = { bars = !bars },
+                            onTap = { if (ui.sel != null) ui.sel = null else bars = !bars },
                             onDoubleTap = { p ->
                                 val z0 = zoom
                                 val z1 = if (z0 > 1.2f) 1f else 2.5f
@@ -1000,7 +1202,7 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                     .pointerInput(ui.inkOn) {
                         if (ui.inkOn) return@pointerInput
                         detectTapGestures(
-                            onTap = { bars = !bars },
+                            onTap = { if (ui.sel != null) ui.sel = null else bars = !bars },
                             onDoubleTap = { p ->
                                 val z0 = pz
                                 val z1 = if (z0 > 1.2f) 1f else 2.5f
@@ -1094,11 +1296,32 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
 
         // ---------------- penunjuk halaman ----------------
         AnimatedVisibility(
-            bars && !ui.inkOn, Modifier.align(Alignment.BottomCenter).padding(bottom = sab + 16.dp),
+            bars && !ui.inkOn && ui.sel == null, Modifier.align(Alignment.BottomCenter).padding(bottom = sab + 16.dp),
             enter = fadeIn() , exit = fadeOut()
         ) {
             Box(Modifier.clip(CircleShape).background(Color(0xFF2A2A2D)).padding(horizontal = 16.dp, vertical = 8.dp)) {
                 T("Page ${page + 1} of $count", 14f, 700, Color.White)
+            }
+        }
+
+        // ---------------- bilah seleksi teks: Copy / Select all / Cancel ----------------
+        AnimatedVisibility(
+            ui.sel != null && !ui.inkOn, Modifier.align(Alignment.BottomCenter).padding(bottom = sab + 16.dp),
+            enter = fadeIn(spring(stiffness = 600f)) + androidx.compose.animation.scaleIn(spring(.7f, 420f), initialScale = .8f) +
+                androidx.compose.animation.slideInVertically(spring(.8f, 420f)) { it / 2 },
+            exit = fadeOut(spring(stiffness = 800f)) + androidx.compose.animation.scaleOut(spring(1f, 800f), targetScale = .85f)
+        ) {
+            Row(
+                Modifier.clip(CircleShape).background(Color(0xFF2A2A2D)).padding(horizontal = 6.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                for ((label, act1) in listOf<Pair<String, () -> Unit>>(
+                    "Copy" to { copySel() }, "Select all" to { selectAll() }, "Cancel" to { ui.sel = null }
+                )) {
+                    Box(Modifier.clip(CircleShape).clickable { act1() }.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                        T(label, 14f, 700, if (label == "Cancel") Color.White.copy(alpha = .65f) else Color.White)
+                    }
+                }
             }
         }
 
