@@ -276,6 +276,8 @@ object PdfCache {
     }
     fun get(k: String): Bitmap? = c.get(k)
     fun put(k: String, b: Bitmap) { c.put(k, b) }
+    /** Ada halaman yang sudah dirender dengan awalan kunci ini (fid:halaman@)? */
+    fun has(prefix: String): Boolean = c.snapshot().keys.any { it.startsWith(prefix) }
 }
 
 private fun bucket(px: Int): Int = (((px + 255) / 256) * 256).coerceIn(256, 2400)
@@ -995,9 +997,17 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
     var settled by remember { mutableStateOf(false) }      // morph sudah pernah selesai membuka (sekali true, tetap true)
     var firstReady by remember { mutableStateOf(false) }   // PDF terbuka dan halaman 1 sempat dirender
     LaunchedEffect(Unit) { snapshotFlow { vm.openP.value >= .97f }.collect { if (it) settled = true } }
-    LaunchedEffect(doc.ok) { if (doc.ok) { delay(160); firstReady = true } }
+    LaunchedEffect(doc.ok) {
+        if (!doc.ok) return@LaunchedEffect
+        val pre = note.pdf + ":" + note.pg.coerceIn(0, (doc.count - 1).coerceAtLeast(0)) + "@"
+        withTimeoutOrNull(1500) { while (!PdfCache.has(pre)) delay(16) }
+        delay(40)   // beri pembaca 2-3 frame untuk benar-benar menggambar bitmap itu
+        firstReady = true
+    }
+    // sampul dan halaman 1 pembaca sekarang piksel-per-piksel sama (termasuk mode gelap), jadi serah-terimanya cukup
+    // potongan sangat pendek hanya untuk menyamarkan beda ketajaman jpg 900px vs render penuh; bukan pudar-silang yang terlihat
     val cvHold by androidx.compose.animation.core.animateFloatAsState(
-        if (settled && firstReady) 0f else 1f, tween(170), label = "cvhold"
+        if (settled && firstReady) 0f else 1f, tween(90), label = "cvhold"
     )
 
     val dark = when (note.pdk) { 1 -> true; 2 -> false; else -> appPal.dark }
@@ -1017,9 +1027,11 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
     val ui = remember(file) { PdfUi(doc, ink, note.pdf).also { it.dark = dark; it.inkPal = vpal; it.ts = vm.pr.ts; it.txt = txt } }
     SideEffect { ui.dark = dark; ui.inkPal = vpal; ui.ts = vm.pr.ts }
     val view = LocalView.current
-    SideEffect {
+    LaunchedEffect(Unit) {
         val w = (view.context as Activity).window
-        WindowCompat.getInsetsController(w, view).isAppearanceLightStatusBars = false
+        snapshotFlow { vm.openP.value > .45f }.collect { dk ->
+            WindowCompat.getInsetsController(w, view).isAppearanceLightStatusBars = if (dk) false else !appPal.dark
+        }
     }
     DisposableEffect(appPal.dark) {
         onDispose {
@@ -1067,7 +1079,7 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
             Canvas(Modifier.fillMaxSize()) {
                 val b = cvBmp ?: return@Canvas
                 val t = vm.openP.value.coerceIn(0f, 1f)
-                val back = ((.9f - t) / .2f).coerceIn(0f, 1f)
+                val back = ((.92f - t) / .1f).coerceIn(0f, 1f)
                 val a = maxOf(back * back * (3f - 2f * back), cvHold)
                 if (a <= .004f) return@Canvas
                 val w = size.width
@@ -1099,13 +1111,28 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
                 }
                 val th = tw * r
                 fun l(x0: Float, x1: Float) = x0 + (x1 - x0) * t
+                // mode gelap: halaman di pembaca dibalik warnanya (INVERT). Gambar yang SAMA dibalik bertahap mengikuti progres morph
+                // (matriks warna = campuran identitas dan INVERT), jadi di ujung animasi ia identik dengan halaman pembaca.
+                val d = if (dark) t * t * (3f - 2f * t) else 0f
+                val sc = 1f - 1.88f * d
+                val off = 224f * d
+                val cf = if (d <= .001f) null else ColorFilter.colorMatrix(
+                    ColorMatrix(
+                        floatArrayOf(
+                            sc, 0f, 0f, 0f, off,
+                            0f, sc, 0f, 0f, off,
+                            0f, 0f, sc, 0f, off,
+                            0f, 0f, 0f, 1f, 0f
+                        )
+                    )
+                )
                 drawImage(
                     b,
                     srcOffset = IntOffset(l(sx0, 0f).roundToInt(), l(sy0, 0f).roundToInt()),
                     srcSize = IntSize(l(vw, iw).roundToInt().coerceAtLeast(1), l(vh, ih).roundToInt().coerceAtLeast(1)),
                     dstOffset = IntOffset(l(0f, tx).roundToInt(), l(0f, ty).roundToInt()),
                     dstSize = IntSize(l(w, tw).roundToInt().coerceAtLeast(1), l(sh, th).roundToInt().coerceAtLeast(1)),
-                    alpha = a, filterQuality = FilterQuality.Medium
+                    alpha = a, filterQuality = FilterQuality.Medium, colorFilter = cf
                 )
             }
         }
