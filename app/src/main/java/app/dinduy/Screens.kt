@@ -284,7 +284,11 @@ fun NoteCard(
     delTime: Long = 0L, onLong: (() -> Unit)? = null, track: ((Morph) -> Unit)? = null, tick: Int = 0, cols: Int = 1,
     paper: Boolean = false, onClick: (Morph) -> Unit
 ) {
-    val pal = LocalPal.current
+    // catatan bersampul: kartu memakai palet dari warna foto sampulnya (terpisah dari palet aplikasi)
+    val gp = LocalPal.current
+    val pal = if (d.cp.isEmpty() || d.cv.isEmpty()) gp else remember(d.cp, gp.dark, gp.mono) { coverPal(gp.dark, d.cp, gp.mono) }
+    val cvm = LocalVM.current
+    LaunchedEffect(d.id, d.cv, d.cp) { if (d.cv.isNotEmpty() && d.cp.isEmpty()) cvm?.ensureCoverPal(d.id) }
     val c2 = cols == 2
     // semua kartu satu warna (kertas) dengan garis tepi tipis; saat dipilih garisnya menebal sedikit dan berwarna utama
     val cardC = pal.s
@@ -325,7 +329,9 @@ fun NoteCard(
                 onLongClick = if (onLong != null) ({ haptic.performHapticFeedback(HapticFeedbackType.LongPress); onLong() }) else null
             )
     ) {
-        CardBody(d, "f", c2, fg, CARD_PAD_H, CARD_PAD_V, 0.dp, 0.dp, delTime)
+        CompositionLocalProvider(LocalPal provides pal) {
+            CardBody(d, "f", c2, fg, CARD_PAD_H, CARD_PAD_V, 0.dp, 0.dp, delTime)
+        }
     }
 }
 
@@ -998,72 +1004,77 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
             }
         }
 
-        // Bilah cari ala Google Keep: satu wadah yang MORPHING. Saat diam ia pil kertas di antara tombol menu dan tepi layar;
-        // saat dibuka, tepi-tepinya melebar ke seluruh layar, sudutnya meluruh jadi 0, warnanya beralih ke latar, dan jadilah
-        // satu halaman pencarian baru (panah kembali + kolom ketik + garis pemisah + hasil). Teks di bilah tidak berpindah tempat.
+        // Bilah cari ala Google Keep: saat diam ia pil kertas di antara tombol menu dan tepi layar. Saat dibuka, bilah HANYA melebar
+        // ke kiri dan kanan (atas dan bawahnya tetap), sudutnya meluruh jadi 0 dan warnanya beralih ke latar, sehingga menyatu jadi
+        // bilah atas selebar layar. Halaman hasil (latar + kartu + garis pemisah) muncul memudar DI BAWAH bilah, bukan ikut melebar.
         val padStartIdle = with(dens) { 72.dp.toPx() }
         val padEndIdle = with(dens) { 72.dp.toPx() }
-        val topIdle = with(dens) { (sat + 8.dp).toPx() }
-        val botIdle = with(dens) { (sat + 64.dp).toPx() }
+        val topBar = with(dens) { (sat + 8.dp).toPx() }
+        val botBar = with(dens) { (sat + 64.dp).toPx() }
         val radIdle = with(dens) { 28.dp.toPx() }
         val divY = with(dens) { (sat + 72.dp).toPx() }
         val divH = with(dens) { 1.dp.toPx() }
         val divC = androidx.compose.ui.graphics.lerp(pal.bg, pal.os, .13f)
+        Box(Modifier.fillMaxSize()) {
+            // halaman hasil pencarian
+            if (sa > 0.001f || vm.searchOn) {
+                Box(
+                    Modifier.fillMaxSize()
+                        .drawBehind {
+                            val k = sa
+                            drawRect(pal.bg.copy(alpha = (k * 1.6f).coerceAtMost(1f)))
+                            if (k > 0.001f) drawRect(divC.copy(alpha = divC.alpha * k), Offset(0f, divY), Size(size.width, divH))
+                        }
+                        .then(if (vm.searchOn) Modifier.pointerInput(Unit) { detectTapGestures { } } else Modifier)
+                ) {
+                    // hasil pencarian: tampil di bawah bilah dengan tata letak yang sama seperti beranda (1 atau 2 kolom)
+                    LazyVerticalStaggeredGrid(
+                        columns = StaggeredGridCells.Fixed(cols),
+                        modifier = Modifier.fillMaxSize()
+                            .graphicsLayer {
+                                alpha = ((sa - .35f) / .65f).coerceIn(0f, 1f)
+                                translationY = (1f - sa) * 18.dp.toPx()
+                            },
+                        contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = sat + 80.dp, bottom = imeH + 16.dp),
+                        verticalItemSpacing = 8.dp,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (res.isEmpty() && vm.searchOn) item(key = "empty-search", span = full) {
+                            T(if (q.isNotEmpty()) "No results" else "No notes yet", 17f, 600, pal.osv,
+                                Modifier.fillMaxWidth().padding(vertical = 48.dp), align = androidx.compose.ui.text.style.TextAlign.Center)
+                        }
+                        gridItems(res, key = { "s" + it.id }) { d ->
+                            val ri = res.indexOfFirst { it.id == d.id }.coerceAtLeast(0)
+                            NoteCard(
+                                d, pos[d.id] ?: ri, "f", false,
+                                flowItemG().makeRoom(vm, d.id, ri, { res.indexOfFirst { it.id == vm.openId } }, hPx, dens.density),
+                                cols = cols
+                            ) { m ->
+                                focusMgr.clearFocus(); vm.cardMorph[d.id] = m; nav.openNote(d.id, m)
+                            }
+                        }
+                    }
+                    Box(
+                        Modifier.fillMaxWidth().height(sat + 72.dp)
+                            .graphicsLayer { alpha = ((sa - .35f) / .65f).coerceIn(0f, 1f) }
+                            .background(pal.bg)
+                    )
+                }
+            }
+        // bilah: hanya tepi kiri/kanan yang bergerak
         Box(
             Modifier.fillMaxSize()
-                .drawWithContent {
+                .drawBehind {
                     val k = sa
                     val l = androidx.compose.ui.util.lerp(padStartIdle, 0f, k)
                     val r = androidx.compose.ui.util.lerp(size.width - padEndIdle, size.width, k)
-                    val t = androidx.compose.ui.util.lerp(topIdle, 0f, k)
-                    val b = androidx.compose.ui.util.lerp(botIdle, size.height, k)
                     val rad = androidx.compose.ui.util.lerp(radIdle, 0f, k)
-                    val path = Path().apply { addRoundRect(RoundRect(Rect(l, t, r, b), CornerRadius(rad))) }
-                    clipPath(path) {
-                        drawRect(androidx.compose.ui.graphics.lerp(pal.s, pal.bg, (k * 1.6f).coerceAtMost(1f)))
-                        this@drawWithContent.drawContent()
-                        if (k > 0.001f) drawRect(divC.copy(alpha = divC.alpha * k), Offset(l, divY), Size(r - l, divH))
-                    }
+                    drawRoundRect(
+                        androidx.compose.ui.graphics.lerp(pal.s, pal.bg, (k * 1.6f).coerceAtMost(1f)),
+                        topLeft = Offset(l, topBar), size = Size(r - l, botBar - topBar), cornerRadius = CornerRadius(rad)
+                    )
                 }
-                .then(if (vm.searchOn) Modifier.pointerInput(Unit) { detectTapGestures { } } else Modifier)
         ) {
-            // hasil pencarian: tampil di bawah bilah dengan tata letak yang sama seperti beranda (1 atau 2 kolom)
-            if (sa > 0.001f || vm.searchOn) {
-                LazyVerticalStaggeredGrid(
-                    columns = StaggeredGridCells.Fixed(cols),
-                    modifier = Modifier.fillMaxSize()
-                        .graphicsLayer {
-                            alpha = ((sa - .35f) / .65f).coerceIn(0f, 1f)
-                            translationY = (1f - sa) * 18.dp.toPx()
-                        },
-                    contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = sat + 80.dp, bottom = imeH + 16.dp),
-                    verticalItemSpacing = 8.dp,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    if (res.isEmpty() && vm.searchOn) item(key = "empty-search", span = full) {
-                        T(if (q.isNotEmpty()) "No results" else "No notes yet", 17f, 600, pal.osv,
-                            Modifier.fillMaxWidth().padding(vertical = 48.dp), align = androidx.compose.ui.text.style.TextAlign.Center)
-                    }
-                    gridItems(res, key = { "s" + it.id }) { d ->
-                        val ri = res.indexOfFirst { it.id == d.id }.coerceAtLeast(0)
-                        NoteCard(
-                            d, pos[d.id] ?: ri, "f", false,
-                            flowItemG().makeRoom(vm, d.id, ri, { res.indexOfFirst { it.id == vm.openId } }, hPx, dens.density),
-                            cols = cols
-                        ) { m ->
-                            focusMgr.clearFocus(); vm.cardMorph[d.id] = m; nav.openNote(d.id, m)
-                        }
-                    }
-                }
-            }
-
-            if (sa > 0.001f || vm.searchOn) {
-                Box(
-                    Modifier.fillMaxWidth().height(sat + 72.dp)
-                        .graphicsLayer { alpha = ((sa - .35f) / .65f).coerceIn(0f, 1f) }
-                        .background(pal.bg)
-                )
-            }
             // baris bilah: posisinya mengikuti tepi kiri/kanan wadah yang melebar
             Row(
                 Modifier.padding(
@@ -1098,6 +1109,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     exit = fadeOut(tween(100)) + scaleOut(tween(120), .6f)
                 ) { IconBtn("x", pal.osv, { vm.query = "" }, size = 44.dp) }
             }
+        }
         }
     }
 }
