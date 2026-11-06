@@ -130,6 +130,11 @@ class Rec(private val ctx: Context, private val scope: CoroutineScope) {
         return Aud(id = nid, du = dur, at = System.currentTimeMillis())
     }
 
+    /** Pindahkan rekaman yang sedang berjalan ke catatan lain tanpa menghentikannya (voice note cepat <-> catatan). */
+    fun rebind(note: String) {
+        if (mr != null) noteId = note
+    }
+
     fun cancel() {
         val r = mr ?: return
         job?.cancel()
