@@ -110,6 +110,11 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.layout
+import eu.wewox.pagecurl.ExperimentalPageCurlApi
+import eu.wewox.pagecurl.config.PageCurlConfig
+import eu.wewox.pagecurl.config.rememberPageCurlConfig
+import eu.wewox.pagecurl.page.PageCurl
+import eu.wewox.pagecurl.page.rememberPageCurlState
 import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -123,6 +128,7 @@ import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -171,6 +177,7 @@ object PdfBus {
     var find by mutableIntStateOf(0)       // dinaikkan menu: buka bilah cari
     var hasText by mutableStateOf(false)   // PDF punya lapisan teks (bukan hasil scan)
     var mode by mutableIntStateOf(-1)      // 0 gulir, 1 halaman; -1 belum dimuat
+    var curl by mutableIntStateOf(-1)      // 1 = efek balik halaman 3D (hanya mode halaman); -1 belum dimuat
 }
 
 /** Hapus berkas PDF / coretan yang tidak dipakai catatan mana pun lagi. */
@@ -658,6 +665,52 @@ private fun Modifier.pinch(onPinch: (Float, Offset, Offset) -> Unit, onEnd: () -
     }
 }
 
+/**
+ * Sentuhan untuk mode 3D, dipasang di induk (pass Initial) supaya mendahului library:
+ * ketukan tunggal / ganda dipakai di sini (library tidak ikut membalik halaman),
+ * saat diperbesar satu jari menggeser gambar dan library tidak pernah melihat geseran itu (jadi tidak bisa pindah halaman).
+ * Geseran saat tidak diperbesar dibiarkan lewat ke library untuk melengkungkan halaman.
+ */
+private fun Modifier.curlTouch(
+    scope: CoroutineScope, zoomed: () -> Boolean, onPan: (Offset) -> Unit,
+    onTap: () -> Unit, onDouble: (Offset) -> Unit
+): Modifier = pointerInput(Unit) {
+    var lastT = 0L
+    var lastP = Offset.Zero
+    var pending: Job? = null
+    val tol = 56.dp.toPx()
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        val slop = viewConfiguration.touchSlop
+        val z0 = zoomed()
+        var moved = false
+        var multi = false
+        while (true) {
+            val ev = awaitPointerEvent(PointerEventPass.Initial)
+            if (ev.changes.count { it.pressed } >= 2) multi = true
+            if (multi) { if (ev.changes.none { it.pressed }) break else continue }   // cubitan ditangani pinch()
+            val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+            if (c.changedToUp()) {
+                val quick = c.uptimeMillis - down.uptimeMillis < viewConfiguration.longPressTimeoutMillis
+                if (!moved && quick) {
+                    c.consume()
+                    val now = c.uptimeMillis
+                    if (pending?.isActive == true && now - lastT < 300L && (c.position - lastP).getDistance() < tol) {
+                        pending?.cancel(); pending = null; lastT = 0L
+                        onDouble(c.position)
+                    } else {
+                        lastT = now; lastP = c.position
+                        pending = scope.launch { delay(300); onTap() }
+                    }
+                }
+                break
+            }
+            if (!moved && (c.position - down.position).getDistance() > slop) moved = true
+            if (z0 && moved) { onPan(c.positionChange()); c.consume() }
+        }
+    }
+}
+
 // ---------------------------------------------------------------- satu halaman
 
 @Composable
@@ -935,6 +988,7 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
         }
     }
     if (PdfBus.mode < 0) PdfBus.mode = ctx.getSharedPreferences("dinduy", 0).getInt("pdfmode", 0)
+    if (PdfBus.curl < 0) PdfBus.curl = ctx.getSharedPreferences("dinduy", 0).getInt("pdfcurl", 0)
 
     androidx.compose.runtime.CompositionLocalProvider(
         LocalPal provides cp,
@@ -964,6 +1018,7 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
     }
 }
 
+@OptIn(ExperimentalPageCurlApi::class)
 @Composable
 private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfText, note: Note) {
     val pal = LocalPal.current
@@ -981,6 +1036,8 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
     val startPage = remember { note.pg.coerceIn(0, count - 1) }
     var page by remember { mutableIntStateOf(startPage) }
     val hasText = PdfBus.hasText
+    // mode 3D (efek balik halaman melengkung); mati saat pensil coret aktif
+    val curlMode = mode != 0 && PdfBus.curl == 1 && !ui.inkOn
 
     // pengaturan alat coret terakhir
     LaunchedEffect(Unit) {
@@ -1160,9 +1217,68 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                     }
                 }
             }
+        } else if (curlMode) {
+            // ---------------- mode halaman 3D: efek balik halaman melengkung (library PageCurl) ----------------
+            val cs = rememberPageCurlState(page)
+            val r0 = ui.doc.ratioOf(startPage)
+            val w0 = minOf(vwDp, (vhDp - topPad - sab - 12.dp) / r0)
+            val cfg = rememberPageCurlConfig(
+                backPageColor = if (ui.dark) Color(0xFF1C1C1E) else Color.White,
+                dragInteraction = PageCurlConfig.GestureDragInteraction()
+            )
+            var cz by remember { mutableFloatStateOf(1f) }
+            var cpan by remember { mutableStateOf(Offset.Zero) }
+            val cMul by remember { derivedStateOf { ceil(cz).coerceAtLeast(1f) } }
+            val availPx = (vhDp - topPad - sab - 12.dp).value * dens
+            fun cClamp(o: Offset, z: Float): Offset {
+                val w = w0.value * dens * z
+                val h = w0.value * dens * r0 * z
+                val mx = ((w - vwPx) / 2f).coerceAtLeast(0f)
+                val my = ((h - availPx) / 2f).coerceAtLeast(0f)
+                return Offset(o.x.coerceIn(-mx, mx), o.y.coerceIn(-my, my))
+            }
+            fun cZoom(z1: Float, c: Offset, delta: Offset = Offset.Zero) {
+                val k = z1 / cz
+                val origin = Offset(vwPx / 2f, topPad.value * dens + availPx / 2f)
+                cpan = cClamp((c - origin) * (1f - k) + cpan * k + delta, z1)
+                cz = z1
+            }
+            LaunchedEffect(cs) { snapshotFlow { cs.current }.collect { page = it; cz = 1f; cpan = Offset.Zero } }
+            LaunchedEffect(goTo) {
+                val h = goTo ?: return@LaunchedEffect
+                goTo = null
+                cs.snapTo(h.page)
+            }
+            Box(
+                Modifier.fillMaxSize()
+                    .pinch(
+                        onPinch = { z, p, c -> cZoom((cz * z).coerceIn(1f, 4f), c, p) },
+                        onEnd = { if (cz < 1.05f) { cz = 1f; cpan = Offset.Zero } }
+                    )
+                    .curlTouch(
+                        scope, { cz > 1.02f }, { d -> cpan = cClamp(cpan + d, cz) },
+                        onTap = { if (ui.sel != null) ui.sel = null else bars = !bars },
+                        onDouble = { p ->
+                            val z0 = cz
+                            val z1 = if (z0 > 1.2f) 1f else 2.5f
+                            scope.launch { animate(0f, 1f, animationSpec = spring(1f, 420f)) { v, _ -> cZoom(z0 + (z1 - z0) * v, p) } }
+                        }
+                    )
+                    .padding(top = topPad, bottom = sab + 12.dp),
+                Alignment.Center
+            ) {
+                PageCurl(
+                    count = count, state = cs, config = cfg,
+                    modifier = Modifier.width(w0).height(w0 * r0).graphicsLayer {
+                        scaleX = cz; scaleY = cz; translationX = cpan.x; translationY = cpan.y
+                    }
+                ) { p ->
+                    PdfPage(ui, p, w0, cMul, Modifier.fillMaxSize())
+                }
+            }
         } else {
             // ---------------- mode halaman (geser per halaman) ----------------
-            val pager = rememberPagerState(initialPage = startPage, pageCount = { count })
+            val pager = rememberPagerState(initialPage = page.coerceIn(0, count - 1), pageCount = { count })
             var pz by remember { mutableFloatStateOf(1f) }
             var pan by remember { mutableStateOf(Offset.Zero) }
             LaunchedEffect(pager) { snapshotFlow { pager.currentPage }.collect { page = it; pz = 1f; pan = Offset.Zero } }
@@ -1410,6 +1526,26 @@ fun PdfMenuPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (i == 0) Ic("rows", fg, 20.dp) else PIc("page", fg, 20.dp)
                         T(if (i == 0) "Scroll" else "Pages", 15f, 700, fg)
+                    }
+                }
+            }
+            AnimatedVisibility(
+                visible = mode == 1,
+                enter = expandVertically(spring(.9f, 420f)) + fadeIn(tween(220)),
+                exit = shrinkVertically(spring(1f, 500f)) + fadeOut(tween(140))
+            ) {
+                val curlOn = (if (PdfBus.curl < 0) ctx.getSharedPreferences("dinduy", 0).getInt("pdfcurl", 0) else PdfBus.curl) == 1
+                SCard(POS_MID, onClick = {
+                    val v = if (curlOn) 0 else 1
+                    PdfBus.curl = v
+                    ctx.getSharedPreferences("dinduy", 0).edit().putInt("pdfcurl", v).apply()
+                }) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Column(Modifier.weight(1f)) {
+                            T("3D page", 16f, 500, pal.os)
+                            T("Pages curl like a real book. Swipe to turn, zoom in to pan", 14f, 400, pal.osv, lh = 1.3f)
+                        }
+                        MorphSwitch(curlOn)
                     }
                 }
             }
