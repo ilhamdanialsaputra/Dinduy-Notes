@@ -92,6 +92,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
@@ -1112,6 +1113,7 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
     }
     var listOn by remember { mutableStateOf(false) }
     val kb = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val focusMgr = androidx.compose.ui.platform.LocalFocusManager.current
     fun jump(i: Int) {
         if (i !in ui.hits.indices) return
         ui.cur = i
@@ -1130,7 +1132,7 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
     }
 
     BackHandler(enabled = findOn || ui.inkOn || ui.sel != null) {
-        if (ui.sel != null) ui.sel = null else if (findOn) findOn = false else { ui.inkOn = false; ui.drawing = false }
+        if (ui.sel != null) ui.sel = null else if (ui.inkOn) { ui.inkOn = false; ui.drawing = false } else if (findOn) findOn = false
     }
     SideEffect { ui.paged = mode != 0 }
     LaunchedEffect(ui.inkOn, findOn) { if (ui.inkOn || findOn) ui.sel = null }
@@ -1463,7 +1465,7 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
 
         // ---------------- penunjuk halaman ----------------
         AnimatedVisibility(
-            bars && !ui.inkOn && ui.sel == null, Modifier.align(Alignment.BottomCenter).padding(bottom = sab + 16.dp),
+            bars && !ui.inkOn && !findOn && ui.sel == null, Modifier.align(Alignment.BottomCenter).padding(bottom = sab + 16.dp),
             enter = fadeIn() , exit = fadeOut()
         ) {
             Box(Modifier.clip(CircleShape).background(Color(0xFF2A2A2D)).padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -1493,13 +1495,17 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
         }
 
         // ---------------- alat coret: satu kapsul kecil (tumbuh dari tengah, isinya muncul satu per satu) ----------------
+        // Saat mode cari aktif, kapsul ini selalu tampil (di atas keyboard, atau di bawah layar kalau keyboard mati) dan baru
+        // aktif setelah salah satu alatnya dipilih. Tombol X menutup mode coret saja; kapsulnya tetap ada selama mode cari.
+        val inkShown = ui.inkOn || findOn
+        val imeDp = with(LocalDensity.current) { androidx.compose.foundation.layout.WindowInsets.ime.getBottom(this).toDp() }
         val inkP by androidx.compose.animation.core.animateFloatAsState(
-            if (ui.inkOn) 1f else 0f,
-            if (ui.inkOn) spring(.68f, 300f) else spring(1f, 800f), label = "inkbar"
+            if (inkShown) 1f else 0f,
+            if (inkShown) spring(.68f, 300f) else spring(1f, 800f), label = "inkbar"
         )
         if (inkP > .004f) {
             Row(
-                Modifier.align(Alignment.BottomCenter).padding(bottom = sab + 16.dp)
+                Modifier.align(Alignment.BottomCenter).padding(bottom = maxOf(sab, imeDp) + 16.dp)
                     .graphicsLayer {
                         transformOrigin = TransformOrigin(.5f, 1f)
                         val p = inkP
@@ -1518,7 +1524,7 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 for (t in 0..2) {
-                    val on = ui.tool == t
+                    val on = ui.inkOn && ui.tool == t
                     Box(
                         Modifier.pop({ inkP }, t).size(44.dp).clip(CircleShape).background(if (on) Color.White.copy(alpha = .18f) else Color.Transparent)
                             .clickable {
@@ -1526,18 +1532,33 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                                 ui.tool = t
                                 ui.color = vm.pr.ic.getOrElse(t) { 0 }
                                 ui.wDp = vm.pr.iw.getOrElse(t) { if (t == 0) 3f else if (t == 1) 16f else 18f }
+                                if (!ui.inkOn) ui.inkOn = true
+                                // mode cari: sembunyikan keyboard supaya area coret lega
+                                if (findOn) { focusMgr.clearFocus(); kb?.hide() }
                             },
                         Alignment.Center
                     ) { InkToolIcon(t, Color.White) }
                 }
                 if (ui.tool < 2) {
                     // satu titik warna: ketuk untuk ganti warna berikutnya
-                    Box(Modifier.pop({ inkP }, 3).size(44.dp).clip(CircleShape).clickable { ui.color = (ui.color + 1) % 5; saveTool() }, Alignment.Center) {
-                        Box(Modifier.size(24.dp).clip(CircleShape).background(inkColor(ui.inkPal ?: pal, ui.color, ui.tool == 1)).border(2.dp, Color.White, CircleShape))
+                    Box(Modifier.pop({ inkP }, 3).size(44.dp).clip(CircleShape).clickable(enabled = ui.inkOn) { ui.color = (ui.color + 1) % 5; saveTool() }, Alignment.Center) {
+                        Box(Modifier.alpha(if (ui.inkOn) 1f else .35f).size(24.dp).clip(CircleShape).background(inkColor(ui.inkPal ?: pal, ui.color, ui.tool == 1)).border(2.dp, Color.White, CircleShape))
                     }
                 }
                 Box(Modifier.pop({ inkP }, 4)) { IconBtn("undo", Color.White.copy(alpha = if (ui.ink.canUndo) 1f else .3f), { ui.ink.undo() }, size = 44.dp, enabled = ui.ink.canUndo) }
-                Box(Modifier.pop({ inkP }, 5)) { IconBtn("ok", pal.op, { saveTool(); ui.inkOn = false }, size = 44.dp, bg = pal.p) }
+                if (findOn) {
+                    // mode cari: X hanya mematikan mode coret, kapsul tetap di tempatnya
+                    Box(Modifier.pop({ inkP }, 5)) {
+                        IconBtn(
+                            "x", Color.White.copy(alpha = if (ui.inkOn) 1f else .3f),
+                            { saveTool(); ui.inkOn = false; ui.drawing = false },
+                            size = 44.dp, enabled = ui.inkOn,
+                            bg = if (ui.inkOn) Color.White.copy(alpha = .14f) else Color.Transparent
+                        )
+                    }
+                } else {
+                    Box(Modifier.pop({ inkP }, 5)) { IconBtn("ok", pal.op, { saveTool(); ui.inkOn = false }, size = 44.dp, bg = pal.p) }
+                }
             }
         }
     }
