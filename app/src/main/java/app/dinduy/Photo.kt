@@ -230,23 +230,65 @@ private fun PhotoScreen(vm: AppVM, id: String, onClose: () -> Unit) {
                 }
                 return best
             }
+            fun nearest(pt: Offset): Int {
+                var best = -1
+                var bd = Float.MAX_VALUE
+                words.forEachIndexed { i, w ->
+                    val cx = pt.x.coerceIn(ox + w.l * s0, ox + w.r * s0)
+                    val cy = pt.y.coerceIn(oy + w.tp * s0, oy + w.b * s0)
+                    val d = (pt.x - cx) * (pt.x - cx) + (pt.y - cy) * (pt.y - cy)
+                    if (d < bd) { bd = d; best = i }
+                }
+                return best
+            }
+            // posisi pegangan: awal = kiri-bawah kata pertama, akhir = kanan-bawah kata terakhir
+            fun handle(end: Boolean): Offset {
+                val w = words[if (end) sb else sa]
+                return Offset(ox + (if (end) w.r else w.l) * s0, oy + w.b * s0 + 12f * dens)
+            }
+            fun nearHandle(pt: Offset): Int {
+                if (sa < 0 || sa >= words.size || sb >= words.size) return -1
+                val lim = 40f * dens
+                val d0 = (pt - handle(false)).getDistance()
+                val d1 = (pt - handle(true)).getDistance()
+                return if (d0 <= lim && d0 <= d1) 0 else if (d1 <= lim) 1 else -1
+            }
             Canvas(
                 Modifier.fillMaxSize()
                     .androidx_onSize { box = it }
-                    .pointerInput(scan) {
+                    .pointerInput(scan, box, words.size) {
                         if (scan) {
-                            detectTapGestures(onTap = { pt -> val i = hit(pt, 10f * dens); if (i >= 0) { sa = i; sb = i } else { sa = -1; sb = -1 } })
+                            detectTapGestures(onTap = { pt ->
+                                if (nearHandle(pt) < 0) {
+                                    val i = hit(pt, 10f * dens)
+                                    if (i >= 0) { sa = i; sb = i } else { sa = -1; sb = -1 }
+                                }
+                            })
                         } else detectTapGestures(onDoubleTap = { if (zoom > 1.2f) { zoom = 1f; pan = Offset.Zero } else zoom = 2.5f })
                     }
-                    .pointerInput(scan) {
+                    .pointerInput(scan, box, words.size) {
                         if (scan) {
                             var anchor = -1
+                            var which = -1
                             detectDragGestures(
-                                onDragStart = { pt -> anchor = hit(pt, 14f * dens); if (anchor >= 0) { sa = anchor; sb = anchor } },
+                                onDragStart = { pt ->
+                                    which = nearHandle(pt)
+                                    anchor = if (which >= 0) -1 else hit(pt, 14f * dens)
+                                    if (anchor >= 0) { sa = anchor; sb = anchor }
+                                },
                                 onDrag = { c, _ ->
                                     c.consume()
-                                    val i = hit(c.position, 14f * dens)
-                                    if (anchor >= 0 && i >= 0) sb = i
+                                    if (which >= 0) {
+                                        // jari ada di bawah teks: ukur dari titik sedikit di atas jari
+                                        val i = nearest(Offset(c.position.x, c.position.y - 22f * dens))
+                                        if (i >= 0) {
+                                            if (which == 0) { if (i <= sb) sa = i else { sa = sb; sb = i; which = 1 } }
+                                            else { if (i >= sa) sb = i else { sb = sa; sa = i; which = 0 } }
+                                        }
+                                    } else if (anchor >= 0) {
+                                        val i = hit(c.position, 14f * dens)
+                                        if (i >= 0) { sa = min(anchor, i); sb = max(anchor, i) }
+                                    }
                                 }
                             )
                         } else detectTransformGestures { _, pn, z, _ ->
@@ -266,6 +308,19 @@ private fun PhotoScreen(vm: AppVM, id: String, onClose: () -> Unit) {
                         val sz = Size((w.r - w.l) * s0, (w.b - w.tp) * s0)
                         if (sa >= 0 && i in lo..hi) drawRect(pal.p.copy(alpha = .45f), tl, sz)
                         else drawRect(white.copy(alpha = .55f), tl, sz, style = Stroke(1.2f * dens))
+                    }
+                    if (sa >= 0 && sa < words.size && sb < words.size) {
+                        // pegangan seleksi: batang di tepi kata + bulatan di bawahnya, bisa diseret
+                        for (end in listOf(false, true)) {
+                            val w = words[if (end) sb else sa]
+                            val x = ox + (if (end) w.r else w.l) * s0
+                            val top = oy + w.tp * s0
+                            val bot = oy + w.b * s0
+                            val c = Offset(x, bot + 12f * dens)
+                            drawLine(pal.p, Offset(x, top), Offset(x, bot), strokeWidth = 2.5f * dens)
+                            drawCircle(Color.White, 12f * dens, c)
+                            drawCircle(pal.p, 9.5f * dens, c)
+                        }
                     }
                 }
             }
