@@ -616,6 +616,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     fun stopRec() {
         val nid = rec.noteId ?: return
+        if (nid == QuickFx.QID) { quickFinish(this); return }   // rekaman cepat belum punya catatan: dibuat saat selesai
         val a = rec.finish()
         if (a == null) {
             show("Recording was too short or failed")
