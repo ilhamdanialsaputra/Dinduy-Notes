@@ -656,9 +656,9 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     Fab(
                         vm, act, small = fabSmall,
                         hide = (!isHome && !FabFx.drag) || vm.sel.isNotEmpty() || vm.searchOn || vm.addOn || vm.remFilter,
-                        lift = if (vm.snack != null) 92.dp else 0.dp
+                        lift = 0.dp   // snackbar/notifikasi tidak menaikkan tombol; snackbar digambar di atasnya
                     )
-                    QuickVoice(vm, lift = if (vm.snack != null) 92.dp else 0.dp)
+                    QuickVoice(vm, lift = 0.dp)
                     SnackHost(vm, if (inNote) 84.dp else 20.dp + sabDp(), inNote)
                     AddNoteLayer(vm, act)
                     SheetHost(vm, nav, act)
