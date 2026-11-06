@@ -3,13 +3,19 @@ name: Build Dinduy APK
 on:
   push:
     branches: [main, master]
+    tags: ['v*']
   workflow_dispatch:
+
+permissions:
+  contents: write   # perlu untuk membuat GitHub Release
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # riwayat commit + tag untuk catatan rilis
 
       - uses: actions/setup-java@v4
         with:
@@ -20,13 +26,28 @@ jobs:
         with:
           gradle-version: "8.11.1"
 
-      - name: Keystore (opsional)
+      # Tag v* harus sama dengan versionName, kalau tidak aplikasi terus menawarkan update yang sama
+      - name: Cek tag = versionName
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          NAME=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -n1)
+          TAG="${GITHUB_REF_NAME#v}"
+          echo "versionName=$NAME tag=$TAG"
+          if [ "$NAME" != "$TAG" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME tidak sama dengan versionName \"$NAME\" di app/build.gradle.kts. Naikkan versionName dulu, commit, lalu buat tag lagi."
+            exit 1
+          fi
+
+      - name: Keystore
         env:
           KS_B64: ${{ secrets.KEYSTORE_B64 }}
         run: |
           if [ -n "$KS_B64" ]; then
             echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/dinduy.jks"
             echo "KS_FILE=$RUNNER_TEMP/dinduy.jks" >> "$GITHUB_ENV"
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "::error::Secret KEYSTORE_B64 belum diisi. Rilis harus ditandatangani keystore tetap."
+            exit 1
           fi
 
       - name: Build release APK
@@ -43,7 +64,31 @@ jobs:
         run: |
           grep '^e: ' build.log | sed 's#file:///home/runner/work/[^/]*/[^/]*/##' || true
 
-      - uses: actions/upload-artifact@v4
+      - name: Ganti nama APK
+        run: |
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -n1)
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then NAME="Dinduy-${GITHUB_REF_NAME}.apk"; else NAME="Dinduy-${GITHUB_SHA::7}.apk"; fi
+          cp "$APK" "$NAME"
+          echo "APK_NAME=$NAME" >> "$GITHUB_ENV"
+
+      - name: Upload APK (build biasa)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@v4
         with:
           name: Dinduy-apk
-          path: app/build/outputs/apk/release/*.apk
+          path: ${{ env.APK_NAME }}
+
+      # GitHub Release lewat gh CLI bawaan runner (tanpa action pihak ketiga)
+      - name: Buat GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PREV=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          if [ -n "$PREV" ]; then RANGE="$PREV..$GITHUB_REF_NAME"; else RANGE="$GITHUB_REF_NAME"; fi
+          git log "$RANGE" --no-merges --pretty=format:'- %s' | head -n 15 > notes.md
+          [ -s notes.md ] || echo "- Bug fixes and improvements" > notes.md
+          gh release create "$GITHUB_REF_NAME" "$APK_NAME" \
+            --title "Dinduy $GITHUB_REF_NAME" \
+            --notes-file notes.md \
+            --verify-tag
