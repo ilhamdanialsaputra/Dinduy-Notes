@@ -752,12 +752,18 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
             if (vm.pr.mono) base.toMono() else base
         }
     }
+    val cp = remember(appPal, vm.pr.seed, vm.pr.dyn, vm.pr.mono) {
+        if (appPal.dark) appPal else {
+            val base = (if (vm.pr.dyn && Build.VERSION.SDK_INT >= 31) dynamicPal(ctx, "dark") else null) ?: buildPal("dark", vm.pr.seed)
+            if (vm.pr.mono) base.toMono() else base
+        }
+    }
     val ui = remember(file) { PdfUi(doc, ink, note.pdf).also { it.dark = dark; it.inkPal = vpal; it.ts = vm.pr.ts } }
     SideEffect { ui.dark = dark; ui.inkPal = vpal; ui.ts = vm.pr.ts }
     val view = LocalView.current
     SideEffect {
         val w = (view.context as Activity).window
-        WindowCompat.getInsetsController(w, view).isAppearanceLightStatusBars = !vpal.dark
+        WindowCompat.getInsetsController(w, view).isAppearanceLightStatusBars = false
     }
     DisposableEffect(appPal.dark) {
         onDispose {
@@ -768,11 +774,11 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
     if (PdfBus.mode < 0) PdfBus.mode = ctx.getSharedPreferences("dinduy", 0).getInt("pdfmode", 0)
 
     androidx.compose.runtime.CompositionLocalProvider(
-        LocalPal provides vpal,
-        androidx.compose.material3.LocalContentColor provides vpal.os
+        LocalPal provides cp,
+        androidx.compose.material3.LocalContentColor provides cp.os
     ) {
         Box(
-            Modifier.fillMaxSize().background(if (dark) Color.Black else vpal.bg).graphicsLayer {
+            Modifier.fillMaxSize().background(Color.Black).graphicsLayer {
                 // buka/tutup dari beranda: isi PDF berkedip cepat (pudar-silang dengan sampul kartu), bukan ikut membesar dari kartu
                 val x = ((vm.openP.value - .2f) / .25f).coerceIn(0f, 1f)
                 alpha = x * x * (3f - 2f * x)
@@ -782,11 +788,11 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
                 doc.failed -> Column(
                     Modifier.fillMaxSize().padding(32.dp), Arrangement.Center, Alignment.CenterHorizontally
                 ) {
-                    T("This PDF can't be opened", 20f, 800, vpal.os)
+                    T("This PDF can't be opened", 20f, 800, cp.os)
                     Spacer(Modifier.height(8.dp))
-                    T("The file is missing, damaged, or protected with a password.", 15f, 400, vpal.osv)
+                    T("The file is missing, damaged, or protected with a password.", 15f, 400, cp.osv)
                     Spacer(Modifier.height(20.dp))
-                    IconBtn("back", vpal.op, { vm.nav.pop() }, bg = vpal.p)
+                    IconBtn("back", cp.op, { vm.nav.pop() }, bg = cp.p)
                 }
                 !doc.ok -> Box(Modifier.fillMaxSize(), Alignment.Center) { LoadingBlob(Modifier.size(56.dp)) }
                 else -> PdfReader(vm, id, act, ui, txt, note)
@@ -1023,79 +1029,57 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
             }
         }
 
-        // ---------------- bilah atas ----------------
+        // ---------------- bilah atas: hitam polos; tombol cari membuat bilah cari tumbuh dari ikonnya, yang lain menyingkir ----------------
+        val sp by androidx.compose.animation.core.animateFloatAsState(if (findOn) 1f else 0f, spring(.85f, 520f), label = "find")
+        val white = Color.White
+        val chip = Color(0xFF2A2A2D)
         AnimatedVisibility(
             bars || findOn, Modifier.align(Alignment.TopCenter),
-            enter = fadeIn(spring(stiffness = 600f)) + expandVertically(spring(.8f, 500f)),
-            exit = fadeOut(spring(stiffness = 700f)) + shrinkVertically(spring(1f, 600f))
+            enter = fadeIn(spring(stiffness = 600f)), exit = fadeOut(spring(stiffness = 700f))
         ) {
-            Column(Modifier.fillMaxWidth().background(pal.s.copy(alpha = .96f)).padding(top = sat)) {
-                Row(Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconBtn("back", pal.os, { if (findOn) findOn = false else vm.nav.pop() }, size = 46.dp)
-                    T(note.t.ifBlank { "PDF" }, 18f, 600, pal.os, Modifier.weight(1f).padding(horizontal = 6.dp), maxLines = 1)
+            Box(Modifier.fillMaxWidth().background(Color.Black).padding(top = sat).height(60.dp).padding(horizontal = 6.dp)) {
+                Row(
+                    Modifier.fillMaxSize().graphicsLayer { alpha = (1f - sp * 2f).coerceIn(0f, 1f) },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconBtn("back", white, { vm.nav.pop() }, size = 46.dp)
+                    T(note.t.ifBlank { "PDF" }, 18f, 600, white, Modifier.weight(1f).padding(horizontal = 6.dp), maxLines = 1)
                     IconBtn(
-                        "search", if (hasText) pal.os else pal.os.copy(alpha = .32f),
-                        { if (hasText) findOn = !findOn else vm.show("This PDF is a scan, so there's no text to search") },
-                        size = 44.dp, bg = if (findOn) pal.pc else Color.Transparent
+                        "search", if (hasText) white else white.copy(alpha = .32f),
+                        { if (hasText) findOn = true else vm.show("This PDF is a scan, so there's no text to search") },
+                        size = 44.dp
                     )
-                    IconBtn("pen", if (ui.inkOn) pal.op else pal.os, { ui.inkOn = !ui.inkOn }, size = 44.dp, bg = if (ui.inkOn) pal.p else Color.Transparent)
-                    IconBtn("more", pal.os, { vm.nav.push(Scr.NoteMenu(id)) }, size = 44.dp)
+                    Box(
+                        Modifier.size(44.dp).clip(CircleShape).background(if (ui.inkOn) white.copy(alpha = .18f) else Color.Transparent)
+                            .clickable { ui.inkOn = !ui.inkOn },
+                        Alignment.Center
+                    ) { InkToolIcon(0, white) }
+                    IconBtn("more", white, { vm.nav.push(Scr.NoteMenu(id)) }, size = 44.dp)
                 }
-                AnimatedVisibility(findOn) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(start = 12.dp, end = 8.dp, bottom = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                if (sp > .01f) {
+                    val full = vwDp - 12.dp
+                    Box(
+                        Modifier.align(Alignment.CenterEnd).padding(end = 88.dp * (1f - sp))
+                            .width(44.dp + (full - 44.dp) * sp).height(46.dp).clip(CircleShape).background(chip)
                     ) {
                         Row(
-                            Modifier.weight(1f).height(46.dp).clip(CircleShape).background(pal.c3).padding(horizontal = 16.dp),
+                            Modifier.fillMaxSize().graphicsLayer { alpha = ((sp - .45f) / .4f).coerceIn(0f, 1f) },
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            IconBtn("back", white, { findOn = false }, size = 44.dp)
                             BasicTextField(
                                 value = query, onValueChange = { query = it }, singleLine = true,
                                 modifier = Modifier.weight(1f).focusRequester(fr),
-                                textStyle = TextStyle(color = pal.os, fontFamily = LocalFF.current, fontSize = 16.sp, fontWeight = FontWeight(500)),
-                                cursorBrush = SolidColor(pal.p),
+                                textStyle = TextStyle(color = white, fontFamily = LocalFF.current, fontSize = 16.sp, fontWeight = FontWeight(500)),
+                                cursorBrush = SolidColor(white),
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                                 keyboardActions = KeyboardActions(onSearch = { step(1) }),
-                                decorationBox = { inner -> Box { if (query.isEmpty()) T("Find in PDF", 16f, 500, pal.osv); inner() } }
+                                decorationBox = { inner -> Box { if (query.isEmpty()) T("Search", 16f, 500, white.copy(alpha = .5f)); inner() } }
                             )
-                            if (searching) LoadingBlob(Modifier.size(24.dp))
-                        }
-                        IconBtn("aup", pal.os, { step(-1) }, size = 44.dp, enabled = ui.hits.isNotEmpty())
-                        IconBtn("adn", pal.os, { step(1) }, size = 44.dp, enabled = ui.hits.isNotEmpty())
-                        IconBtn("rows", if (listOn) pal.op else pal.os, { listOn = !listOn }, size = 44.dp, enabled = ui.hits.isNotEmpty(), bg = if (listOn) pal.p else Color.Transparent)
-                    }
-                    if (query.isNotBlank()) {
-                        val h = ui.hits.getOrNull(ui.cur)
-                        Box(Modifier.fillMaxWidth().padding(start = 20.dp, end = 16.dp, bottom = 10.dp)) {
-                            T(
-                                if (h != null) "Result ${ui.cur + 1} of ${ui.hits.size}  ·  now on page ${h.page + 1}" + (if (searching) "  ·  searching…" else "")
-                                else if (searching) "Searching…" else "No results",
-                                13f, 700, pal.p
-                            )
-                        }
-                    }
-                    AnimatedVisibility(listOn && ui.hits.isNotEmpty()) {
-                        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 300.dp).padding(bottom = 8.dp)) {
-                            itemsIndexed(ui.hits) { i, h ->
-                                Row(
-                                    Modifier.fillMaxWidth().clickable { jump(i); listOn = false; kb?.hide() }
-                                        .background(if (i == ui.cur) pal.pc else Color.Transparent)
-                                        .padding(horizontal = 20.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)
-                                ) {
-                                    Box(Modifier.clip(CircleShape).background(pal.c4).padding(horizontal = 10.dp, vertical = 4.dp)) { T("p.${h.page + 1}", 13f, 800, pal.os) }
-                                    BasicText(
-                                        buildAnnotatedString {
-                                            append(h.snip.substring(0, h.ms))
-                                            withStyle(SpanStyle(fontWeight = FontWeight.ExtraBold, background = Color(0xFFFFD54F).copy(alpha = .55f), color = Color.Black)) { append(h.snip.substring(h.ms, h.me)) }
-                                            append(h.snip.substring(h.me))
-                                        },
-                                        style = TextStyle(color = pal.os, fontFamily = LocalFF.current, fontSize = 14.sp), maxLines = 2,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                            }
+                            if (searching && ui.hits.isEmpty()) LoadingBlob(Modifier.size(22.dp))
+                            else if (query.isNotBlank()) T(if (ui.hits.isEmpty()) "0" else "${ui.cur + 1}/${ui.hits.size}", 13f, 700, white.copy(alpha = .7f))
+                            IconBtn("aup", white, { step(-1) }, size = 40.dp, enabled = ui.hits.isNotEmpty())
+                            IconBtn("adn", white, { step(1) }, size = 40.dp, enabled = ui.hits.isNotEmpty())
                         }
                     }
                 }
@@ -1107,64 +1091,42 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
             bars && !ui.inkOn, Modifier.align(Alignment.BottomCenter).padding(bottom = sab + 16.dp),
             enter = fadeIn() , exit = fadeOut()
         ) {
-            Box(Modifier.clip(CircleShape).background(pal.bar2().copy(alpha = .94f)).padding(horizontal = 16.dp, vertical = 8.dp)) {
-                T("Page ${page + 1} of $count", 14f, 700, pal.os)
+            Box(Modifier.clip(CircleShape).background(Color(0xFF2A2A2D)).padding(horizontal = 16.dp, vertical = 8.dp)) {
+                T("Page ${page + 1} of $count", 14f, 700, Color.White)
             }
         }
 
-        // ---------------- toolbar coret ----------------
+        // ---------------- alat coret: satu kapsul kecil ----------------
         AnimatedVisibility(
-            ui.inkOn, Modifier.align(Alignment.BottomCenter).padding(bottom = sab + 14.dp),
+            ui.inkOn, Modifier.align(Alignment.BottomCenter).padding(bottom = sab + 16.dp),
             enter = fadeIn(spring(stiffness = 600f)) + expandVertically(spring(.75f, 480f)),
             exit = fadeOut(spring(stiffness = 700f)) + shrinkVertically(spring(1f, 600f))
         ) {
-            Column(
-                Modifier.clip(RoundedCornerShape(30.dp)).background(pal.bar2()).padding(horizontal = 10.dp, vertical = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)
+            Row(
+                Modifier.clip(CircleShape).background(Color(0xFF2A2A2D)).padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    for (t in 0..2) {
-                        val on = ui.tool == t
-                        Box(
-                            Modifier.size(46.dp).clip(CircleShape).background(if (on) pal.p else Color.Transparent)
-                                .clickable {
-                                    saveTool()
-                                    ui.tool = t
-                                    ui.color = vm.pr.ic.getOrElse(t) { 0 }
-                                    ui.wDp = vm.pr.iw.getOrElse(t) { if (t == 0) 3f else if (t == 1) 16f else 18f }
-                                },
-                            Alignment.Center
-                        ) { InkToolIcon(t, if (on) pal.op else pal.os) }
-                    }
-                    Spacer(Modifier.width(6.dp))
-                    IconBtn("undo", if (ui.ink.canUndo) pal.os else pal.os.copy(alpha = .3f), { ui.ink.undo() }, size = 44.dp, enabled = ui.ink.canUndo)
-                    IconBtn("redo", if (ui.ink.canRedo) pal.os else pal.os.copy(alpha = .3f), { ui.ink.redo() }, size = 44.dp, enabled = ui.ink.canRedo)
-                    IconBtn("ok", pal.op, { saveTool(); ui.inkOn = false }, size = 44.dp, bg = pal.p)
+                for (t in 0..2) {
+                    val on = ui.tool == t
+                    Box(
+                        Modifier.size(44.dp).clip(CircleShape).background(if (on) Color.White.copy(alpha = .18f) else Color.Transparent)
+                            .clickable {
+                                saveTool()
+                                ui.tool = t
+                                ui.color = vm.pr.ic.getOrElse(t) { 0 }
+                                ui.wDp = vm.pr.iw.getOrElse(t) { if (t == 0) 3f else if (t == 1) 16f else 18f }
+                            },
+                        Alignment.Center
+                    ) { InkToolIcon(t, Color.White) }
                 }
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (ui.tool < 2) {
-                        for (i in 0..4) {
-                            val col = inkColor(pal, i, ui.tool == 1)
-                            Box(
-                                Modifier.size(34.dp).clip(CircleShape).clickable { ui.color = i; saveTool() }
-                                    .then(if (ui.color == i) Modifier.border(2.5.dp, pal.p, CircleShape) else Modifier),
-                                Alignment.Center
-                            ) { Box(Modifier.size(22.dp).clip(CircleShape).background(col).border(1.dp, pal.ol, CircleShape)) }
-                        }
-                        Spacer(Modifier.width(8.dp))
-                    }
-                    val sizes = when (ui.tool) { 0 -> listOf(2f, 3f, 5f, 8f); 1 -> listOf(10f, 16f, 24f); else -> listOf(12f, 18f, 30f) }
-                    for (s in sizes) {
-                        val on = abs(ui.wDp - s) < .5f
-                        Box(
-                            Modifier.size(34.dp).clip(CircleShape).background(if (on) pal.pc else Color.Transparent).clickable { ui.wDp = s; saveTool() },
-                            Alignment.Center
-                        ) {
-                            val d = (4f + s * .55f).coerceAtMost(22f)
-                            Box(Modifier.size(d.dp).clip(CircleShape).background(if (on) pal.opc else pal.os))
-                        }
+                if (ui.tool < 2) {
+                    // satu titik warna: ketuk untuk ganti warna berikutnya
+                    Box(Modifier.size(44.dp).clip(CircleShape).clickable { ui.color = (ui.color + 1) % 5; saveTool() }, Alignment.Center) {
+                        Box(Modifier.size(24.dp).clip(CircleShape).background(inkColor(ui.inkPal ?: pal, ui.color, ui.tool == 1)).border(2.dp, Color.White, CircleShape))
                     }
                 }
+                IconBtn("undo", Color.White.copy(alpha = if (ui.ink.canUndo) 1f else .3f), { ui.ink.undo() }, size = 44.dp, enabled = ui.ink.canUndo)
+                IconBtn("ok", pal.op, { saveTool(); ui.inkOn = false }, size = 44.dp, bg = pal.p)
             }
         }
     }
