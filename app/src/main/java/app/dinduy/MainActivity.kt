@@ -501,6 +501,12 @@ fun AppRoot(vm: AppVM, act: Actions) {
         c.isAppearanceLightStatusBars = !pal.dark
         c.isAppearanceLightNavigationBars = !pal.dark
     }
+    // palet catatan yang sedang dibuka: bila bersampul, warnanya dari foto sampul (terpisah dari palet aplikasi); selain itu ikut palet aplikasi.
+    // Fallback memakai `to` (target yang stabil), bukan `pal` yang berubah tiap frame saat tema beralih.
+    val curNote = (nav.noteId ?: vm.openId)?.let { vm.note(it) }
+    val curCp = curNote?.takeIf { it.cv.isNotEmpty() && it.pdf.isEmpty() }?.cp.orEmpty()
+    val noteTarget = remember(curCp, pal.dark, pal.mono, to) { if (curCp.isEmpty()) to else coverPal(pal.dark, curCp, pal.mono) }
+    val notePal = animPal(noteTarget)
     val cs = remember(pal) {
         if (pal.dark) darkColorScheme(primary = pal.p, onPrimary = pal.op, surface = pal.s, onSurface = pal.os, background = pal.bg)
         else lightColorScheme(primary = pal.p, onPrimary = pal.op, surface = pal.s, onSurface = pal.os, background = pal.bg)
@@ -595,6 +601,11 @@ fun AppRoot(vm: AppVM, act: Actions) {
                         SettingsScreen(vm, act, onBack = { nav.pop() })
                     }
                     AddScrim(vm)
+                    CompositionLocalProvider(
+                        LocalPal provides notePal,
+                        LocalContentColor provides notePal.os,
+                        LocalTextSelectionColors provides TextSelectionColors(handleColor = notePal.p, backgroundColor = notePal.pc)
+                    ) {
                     NoteLayer(vm, on = inNote, morph = vm.morph, under = top is Scr.NoteMenu || top is Scr.NoteLabels || top is Scr.PdfExport || top is Scr.Cover || modelsOnNote) {
                         val id = nav.noteId
                         if (id != null && vm.note(id)?.pdf?.isNotEmpty() == true) {
@@ -614,6 +625,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
                             SideEffect { vm.ed = ed }
                             NoteScreen(vm, ed, act)
                         }
+                    }
                     }
 
                     // halaman titik tiga & label: satu halaman penuh bergaya Pengaturan, di atas editor
