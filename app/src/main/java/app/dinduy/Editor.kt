@@ -931,7 +931,6 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
                 return
             }
         }
-        if (nb.ty == "tbl" && nb.ta != "") nb = fitFloat(nb)   // tabel mengambang tetap muat setelah kolom bertambah
         setBlock(i, nb)
         tf.removePrefix("$bid:")
         seed(nb)
@@ -959,7 +958,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val i = idx(bid)
         if (i < 0 || blocks[i].cw.isEmpty()) return
         commit()
-        setBlock(i, blocks[i].copy(cw = emptyList(), ta = ""))   // lebar otomatis = selebar layar, jadi tak lagi mengambang
+        setBlock(i, blocks[i].copy(cw = emptyList()))
         dirty(); commit()
     }
 
@@ -999,40 +998,9 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     /** Dulu memindahkan teks samping ke bawah gambar. Sekarang teks mengalir otomatis di sekitar gambar, jadi tak ada yang perlu dipindah. */
     fun releaseSide(bid: String, force: Boolean = false) {}
 
-    /** Tabel rata kiri/kanan cukup sempit sehingga teks bisa mengalir di sampingnya. */
+    /** Tabel cukup sempit (mis. 2 kolom) sehingga teks otomatis mengalir di sampingnya, tanpa pengaturan apa pun. */
     fun tblSideOk(b: Blk): Boolean =
-        b.ty == "tbl" && (b.ta == "l" || b.ta == "r") && tblWidths(b, widthDp).sum() + 3f <= widthDp * maxSideW() + .001f
-
-    /** Kecilkan lebar kolom (sebanding) supaya tabel mengambang muat; bila kolomnya terlalu banyak, kembali ke lebar penuh. */
-    fun fitFloat(b: Blk): Blk {
-        val n = b.tb.firstOrNull()?.size ?: return b
-        val maxW = widthDp * maxSideW() - 3f
-        val ws = tblWidths(b, widthDp)
-        if (ws.sum() <= maxW && b.cw.isNotEmpty()) return b
-        if (n * COL_MIN > maxW) return b.copy(ta = "")
-        val over = ws.map { (it - COL_MIN).coerceAtLeast(0f) }
-        val so = over.sum()
-        val k = if (so <= 0f) 0f else ((maxW - n * COL_MIN) / so).coerceIn(0f, 1f)
-        return b.copy(cw = ws.mapIndexed { c, _ -> ((COL_MIN + over[c] * k) * 10f).toInt() / 10f })
-    }
-
-    /** Perataan tabel: "l" / "r" = mengambang (teks mengalir di sampingnya), "c" = selebar penuh. */
-    fun tblAlign(al: String) {
-        val key = focus ?: return
-        if (!isCellKey(key)) return
-        val i = idx(keyBlock(key))
-        if (i < 0) return
-        val b = blocks[i]
-        if (b.ty != "tbl") return
-        commit()
-        var nb = b.copy(ta = if (al == "c") "" else al)
-        if (nb.ta != "") {
-            nb = fitFloat(nb)
-            if (nb.ta == "") { vm.show("Too many columns to wrap text around this table"); return }
-        }
-        setBlock(i, nb)
-        dirty(); commit()
-    }
+        b.ty == "tbl" && tblWidths(b, widthDp).sum() + 3f <= widthDp * maxSideW() + .001f
 
     fun imgAlign(al: String) {
         val s = selImg ?: return
@@ -1443,7 +1411,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
                 val m = mv
                 val sc = scroll
                 if (m != null && sc != null && mvDir != 0 && viewH > 0f) {
-                    val cy = m.top + m.h / 2f + mvY - sc.value
+                    val cy = m.top + minOf(m.h / 2f, viewH * .3f) + mvY - sc.value
                     val z = viewH * .2f
                     val v = when {
                         mvDir < 0 && cy < z -> -(z - cy) / z
@@ -1497,12 +1465,13 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (i < 0) return
         mergeCheck()
         if (m.row) { rowOut(m); return }
-        val cy = m.top + m.h / 2f + mvY
+        // blok yang sangat tinggi (tabel panjang): acuan = dekat bagian atasnya, bukan pusatnya yang jauh di luar layar
+        val cy = m.top + minOf(m.h / 2f, viewH * .3f) + mvY
         var gap = blocks.size
         for ((j, b) in blocks.withIndex()) {
             if (j == i) continue
             val q = bpos[b.id] ?: continue
-            if (q[0] + q[1] / 2f >= cy) { gap = j; break }
+            if (q[0] + minOf(q[1] / 2f, viewH * .3f) >= cy) { gap = j; break }
         }
         val nd = if (mergeT != null || gap == i || gap == i + 1) -1 else gap
         if (nd != dropAt) { dropAt = nd; if (nd >= 0) buzz?.invoke() }
