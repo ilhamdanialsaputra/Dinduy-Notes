@@ -81,6 +81,9 @@ fun noteToMd(n: Note): String = (if (n.t.isNotEmpty()) "# " + n.t + "\n\n" else 
 
 fun noteFileName(n: Note): String = (n.t.replace(Regex("[^\\w\\- ]+"), "").trim().ifEmpty { "catatan" }) + ".md"
 
+/** Nama berkas bagikan Dinduy: judul catatan + .dinduy. */
+fun noteShareName(n: Note): String = noteFileName(n).removeSuffix(".md") + ".dinduy"
+
 private fun smooth(x: Float): Float {
     val k = x.coerceIn(0f, 1f)
     return k * k * (3f - 2f * k)
@@ -349,18 +352,16 @@ private fun ShareNodesBtn(tint: Color, bg: Color, onClick: () -> Unit) {
     }
 }
 
-/** Satu baris untuk tiga aksi Markdown: bagikan, simpan, salin. */
+/** Satu baris untuk dua aksi Markdown: simpan, salin. (Bagikan Markdown diganti berkas Dinduy.) */
 @Composable
-private fun MdRow(pos: Int, onShare: () -> Unit, onSave: () -> Unit, onCopy: () -> Unit) {
+private fun MdRow(pos: Int, onSave: () -> Unit, onCopy: () -> Unit) {
     val pal = LocalPal.current
     SCard(pos, null, PaddingValues(start = 20.dp, end = 8.dp, top = 10.dp, bottom = 10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 T("Markdown (.md)", 16f, 500, pal.os)
-                T("Share, save or copy", 14f, 400, pal.osv, lh = 1.3f)
+                T("Save or copy as text", 14f, 400, pal.osv, lh = 1.3f)
             }
-            ShareNodesBtn(pal.os, pal.c4, onShare)
-            Spacer(Modifier.width(6.dp))
             IconBtn("dl", pal.os, onSave, size = 44.dp, bg = pal.c4)
             Spacer(Modifier.width(6.dp))
             IconBtn("dup", pal.os, onCopy, size = 44.dp, bg = pal.c4)
@@ -368,10 +369,25 @@ private fun MdRow(pos: Int, onShare: () -> Unit, onSave: () -> Unit, onCopy: () 
     }
 }
 
+/** Bagikan satu catatan sebagai berkas Dinduy: hanya bisa dibuka di Dinduy, gambar, coretan, suara, dan PDF ikut. */
+@Composable
+private fun DinduyRow(pos: Int, onShare: () -> Unit) {
+    val pal = LocalPal.current
+    SCard(pos, null, PaddingValues(start = 20.dp, end = 8.dp, top = 10.dp, bottom = 10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                T("Dinduy file (.dinduy)", 16f, 500, pal.os)
+                T("Opens only in Dinduy. Images, drawings, audio, and PDFs come along", 14f, 400, pal.osv, lh = 1.3f)
+            }
+            ShareNodesBtn(pal.os, pal.c4, onShare)
+        }
+    }
+}
+
 /**
  * Halaman titik tiga di editor, diringkas dan diurutkan dari yang paling sering dipakai.
  * Pengingat tidak ada di sini karena sudah ada tombol lonceng di bilah atas editor.
- * Bagikan / simpan / salin Markdown digabung jadi satu baris.
+ * Bagikan berkas Dinduy satu baris; simpan / salin Markdown satu baris.
  */
 @Composable
 fun NoteMenuPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
@@ -397,9 +413,9 @@ fun NoteMenuPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
             MRow(POS_TOP, "txt", "Export PDF", "Preview each page, set the text size, then save or share. Drawings are included, voice recordings are not", chevron = true) {
                 nav.push(Scr.PdfExport(id))
             }
+            DinduyRow(POS_MID) { vm.onShareNote?.invoke(id) }
             MdRow(
                 POS_BOT,
-                onShare = { d?.let { act.shareMd(noteFileName(it), noteToMd(it)) } },
                 onSave = { d?.let { act.saveMd(noteFileName(it), noteToMd(it)) } },
                 onCopy = { d?.let { act.copyText(noteToMd(it)); vm.show("Copied to clipboard") } }
             )
