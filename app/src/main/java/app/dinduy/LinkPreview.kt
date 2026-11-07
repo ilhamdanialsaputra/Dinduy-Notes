@@ -265,6 +265,12 @@ object LinkPreviews {
         return decode(bytes)
     }
 
+    /** Berkas cache gambar (cacheDir/lp) yang sudah ada untuk alamat gambar ini, termasuk cadangan resolusi YouTube. Dipakai cadangan / bagikan supaya kartu tautan tetap bergambar saat offline. */
+    fun cachedFiles(ctx: Context, url: String): List<File> {
+        val dir = File(ctx.cacheDir, "lp")
+        return candidates(url).map { File(dir, keyOf(it) + ".bin") }.filter { it.exists() && it.length() > 0L }
+    }
+
     /** Gambar yang sudah ada di memori (tanpa menunggu apa pun); null kalau belum. */
     fun peek(url: String): ImageBitmap? = bitmaps.get(url)
 
