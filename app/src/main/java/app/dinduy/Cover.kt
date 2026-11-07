@@ -134,6 +134,12 @@ private const val COVER_TILT = 20f
 /** Blur maksimum (dp) saat sampul tergulir habis. Hanya Android 12+; di bawahnya dilewati. */
 private const val COVER_BLUR = 22f
 
+/** Zoom tambahan di tengah morph buka/tutup (0.08 = gambar membesar 8% di puncak lalu mengendap). 0 di awal dan akhir, jadi tetap pas menimpa sampul kartu. */
+private const val COVER_MORPH_ZOOM = .08f
+
+/** Blur (dp) di puncak morph buka/tutup, efek "fokus ditarik". Isi 0 untuk mematikan. */
+private const val COVER_MORPH_BLUR = 5f
+
 /** Kemajuan gulir sampul 0..1 (1 = sampul sudah tergulir keluar seluruhnya). Hanya aktif setelah catatan terbuka penuh, jadi morph buka/tutup tidak terganggu. */
 private fun coverQ(open: Float, scrollPx: Int, h: Float): Float =
     (scrollPx / h.coerceAtLeast(1f)).coerceIn(0f, 1f) * cSmooth((open - .5f) / .5f)
@@ -180,14 +186,18 @@ fun EditorCover(vm: AppVM, d: Note, scroll: () -> Int) {
                 val open = vm.openP.value
                 val q = coverQ(open, sp, size.height)
                 translationY = sp * COVER_PARALLAX * cSmooth((open - .5f) / .5f)
-                val z = 1f + COVER_ZOOM * cSmooth(q)
+                // puncak di tengah morph, nol saat tertutup dan terbuka penuh
+                val m = sin(open.coerceIn(0f, 1f) * 3.1416f).coerceAtLeast(0f)
+                val z = (1f + COVER_ZOOM * cSmooth(q)) * (1f + COVER_MORPH_ZOOM * m)
                 scaleX = z; scaleY = z
-                transformOrigin = TransformOrigin(.5f, 1f)
+                // pusat zoom: tengah gambar saat morph, pindah mulus ke tepi bawah saat digulir
+                transformOrigin = TransformOrigin(.5f, 1f - .5f * m)
                 cameraDistance = 14f * density
                 rotationX = COVER_TILT * cSmooth(q)
                 if (android.os.Build.VERSION.SDK_INT >= 31) {
                     // dibulatkan per .5 supaya efek blur tidak dibuat ulang tiap piksel gulir
-                    val r = (cSmooth((q - .12f) / .88f) * COVER_BLUR * density * 2f).roundToInt() / 2f
+                    val rb = maxOf(cSmooth((q - .12f) / .88f) * COVER_BLUR, m * m * COVER_MORPH_BLUR)
+                    val r = (rb * density * 2f).roundToInt() / 2f
                     renderEffect = if (r > .5f) BlurEffect(r, r, TileMode.Clamp) else null
                 }
             }
