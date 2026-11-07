@@ -329,16 +329,28 @@ fun DocBar(ed: Ed, act: Actions) {
                     if (ob == null) Spacer(Modifier.height(54.dp)) else {
                         val al = ob.alOf()
                         Row(
-                            Modifier.fillMaxWidth().height(54.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp),
-                            horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically
+                            Modifier.fillMaxWidth().height(54.dp).padding(horizontal = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Tbn({ Ic("ok", it) }, true, true) { ed.selObj = null }
-                            Sep()
-                            Tbn({ AlignArrow(0, it) }, al == "l", true) { ed.objAlign(ob.id, "l") }
-                            Tbn({ AlignArrow(1, it) }, al == "c", true) { ed.objAlign(ob.id, "c") }
-                            Tbn({ AlignArrow(2, it) }, al == "r", true) { ed.objAlign(ob.id, "r") }
-                            Sep()
-                            Tbn({ Ic("del", it) }, false, true) { ed.objDelete(ob.id) }
+                            // kiri: selesai (netral, supaya hanya rata yang aktif yang berwarna)
+                            Box(Modifier.clip(RoundedCornerShape(23.dp)).background(pal.c4)) {
+                                Tbn({ Ic("ok", it) }, false, true) { ed.selObj = null }
+                            }
+                            // tengah: kontrol segmented rata kiri / tengah / kanan
+                            Box(Modifier.weight(1f), Alignment.Center) {
+                                Row(
+                                    Modifier.clip(RoundedCornerShape(26.dp)).background(pal.c4).padding(3.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Tbn({ AlignArrow(0, it) }, al == "l", true) { ed.objAlign(ob.id, "l") }
+                                    Tbn({ AlignArrow(1, it) }, al == "c", true) { ed.objAlign(ob.id, "c") }
+                                    Tbn({ AlignArrow(2, it) }, al == "r", true) { ed.objAlign(ob.id, "r") }
+                                }
+                            }
+                            // kanan: hapus (merah, terpisah dari rata supaya tidak kepencet)
+                            Box(Modifier.clip(RoundedCornerShape(23.dp)).background(pal.ec)) {
+                                Tbn({ Ic("del", pal.oec) }, false, true) { ed.objDelete(ob.id) }
+                            }
                         }
                     }
                 }
