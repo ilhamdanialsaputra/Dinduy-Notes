@@ -116,6 +116,7 @@ sealed class Scr {
     object Home : Scr()
     class Note(val id: String) : Scr()
     object Settings : Scr()
+    object Info : Scr()                        // halaman Info (versi, pembaruan, proyek), bergaya Pengaturan
     object Archive : Scr()
     object Trash : Scr()
     class NoteMenu(val id: String) : Scr()     // halaman titik tiga di editor
@@ -583,7 +584,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
                 Box(Modifier.fillMaxSize().background(pal.bg)) {
                     ViewLayer(
                         on = true, base = true, keep = true,
-                        under = nav.stack.any { it is Scr.Settings || it is Scr.Archive || it is Scr.Trash }
+                        under = nav.stack.any { it is Scr.Settings || it is Scr.Info || it is Scr.Archive || it is Scr.Trash }
                     ) {
                         HomeScreen(vm, nav, act, openDrawer = { scope.launch { drawer.open() } }, onSmall = { fabSmall = it })
                     }
@@ -602,6 +603,9 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     }
                     ViewLayer(on = top is Scr.Settings || modelsOnSettings, under = modelsOnSettings) {
                         SettingsScreen(vm, act, onBack = { nav.pop() })
+                    }
+                    ViewLayer(on = top is Scr.Info, under = false) {
+                        InfoScreen(onBack = { nav.pop() })
                     }
                     AddScrim(vm)
                     CompositionLocalProvider(
@@ -666,7 +670,6 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     LabelDialogHost(vm)
                     ModelDialogHost(vm)
                     PermissionHost(vm)
-                    InfoHost()
                     UpdateHost()
                 }
             }
