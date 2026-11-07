@@ -761,6 +761,12 @@ fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier = Modifier) {
                 .onGloballyPositioned { viewW = it.size.width; dw[8] = it.positionInRoot().x + it.size.width }
                 .horizontalScroll(hs)
         ) {
+            Box(
+                Modifier.pointerInput(ed.reading) {
+                    // mode baca: ketuk di mana pun di tabel (termasuk bantalan sel) = pilih tabel
+                    if (ed.reading) detectTapGestures(onTap = { if (!ed.ink.on) ed.tapObj(bS.id) })
+                }
+            ) {
             Column {
                 b.tb.forEachIndexed { r, row ->
                     val head = r == 0
@@ -777,7 +783,12 @@ fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier = Modifier) {
                                 else -> androidx.compose.ui.text.style.TextAlign.Start
                             }
                             // dibungkus Box: tiap sel selalu tepat satu anak Layout (TF bisa kosong sesaat), supaya pegangan tak salah urut
-                            Box(Modifier.fillMaxWidth()) {
+                            Box(
+                                Modifier.fillMaxWidth().pointerInput(active, k) {
+                                    // tabel terpilih: ketuk di mana pun di sel (bukan cuma di huruf) = edit sel itu
+                                    if (active && !ed.reading && !ed.ink.on) detectTapGestures(onTap = { ed.focusAt(k, ed.rtOf(k).t.length) })
+                                }
+                            ) {
                                 TF(
                                     ed, k,
                                     TextStyle(
@@ -805,6 +816,11 @@ fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier = Modifier) {
                         }
                     }
                 }
+            }
+            // belum terpilih: seluruh tabel (termasuk bantalan sel) satu area ketuk besar untuk memilih; ketuk kedua baru masuk sel
+            if (!ed.reading && !ed.ink.on && !active && !lifted) {
+                Box(Modifier.matchParentSize().pointerInput(b.id) { detectTapGestures(onTap = { ed.selectObj(bS.id) }) })
+            }
             }
         }
     }
@@ -1686,7 +1702,9 @@ private fun BoxCell(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
                                 onMove = { _, d -> ed.mvDrag(d.x, d.y) },
                                 onEnd = { ok -> ed.mvEnd(ok) },
                                 lead = 150L
-                            ) else Modifier
+                            ) else if (ed.reading) Modifier.pointerInput(true) {
+                            detectTapGestures(onTap = { if (!ed.ink.on) ed.tapObj(bS.id) })   // mode baca: seluruh blok bisa diketuk
+                        } else Modifier
                     )
                 )
                 // belum terpilih: lapisan ketuk menahan sentuhan supaya tidak langsung masuk ke teks (gulir tetap lewat)
@@ -1799,6 +1817,26 @@ private fun BoxBody(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
     }
 }
 
+/** Ikon panah rata objek: 0 = panah ke kiri + garis tepi kiri, 1 = dua panah menuju garis tengah, 2 = panah ke kanan + garis tepi kanan. */
+@Composable
+fun AlignArrow(kind: Int, c: Color) {
+    Canvas(Modifier.size(24.dp)) {
+        val sw = 2.2.dp.toPx()
+        val w = size.width; val h = size.height; val m = h / 2f; val hd = 4.dp.toPx()
+        fun line(x0: Float, y0: Float, x1: Float, y1: Float) = drawLine(c, Offset(x0, y0), Offset(x1, y1), sw, androidx.compose.ui.graphics.StrokeCap.Round)
+        fun arrow(x0: Float, x1: Float) {   // dari x0 menuju x1
+            line(x0, m, x1, m)
+            val d = if (x1 > x0) -1f else 1f
+            line(x1, m, x1 + d * hd, m - hd); line(x1, m, x1 + d * hd, m + hd)
+        }
+        when (kind) {
+            0 -> { line(3.dp.toPx(), 3.dp.toPx(), 3.dp.toPx(), h - 3.dp.toPx()); arrow(w - 3.dp.toPx(), 7.dp.toPx()) }
+            2 -> { line(w - 3.dp.toPx(), 3.dp.toPx(), w - 3.dp.toPx(), h - 3.dp.toPx()); arrow(3.dp.toPx(), w - 7.dp.toPx()) }
+            else -> { line(w / 2f, 3.dp.toPx(), w / 2f, h - 3.dp.toPx()); arrow(2.dp.toPx(), w / 2f - 3.dp.toPx()); arrow(w - 2.dp.toPx(), w / 2f + 3.dp.toPx()) }
+        }
+    }
+}
+
 // ---------- toolbar ----------
 @Composable
 fun Tbn(content: @Composable (Color) -> Unit, on: Boolean, enabled: Boolean, onClick: () -> Unit) {
@@ -1848,12 +1886,15 @@ fun EdBar(ed: Ed, act: Actions, imeOpen: Boolean) {
         Modifier.widthIn(max = 560.dp).fillMaxWidth().padding(horizontal = 10.dp)
     ) {
         // kapsul tambahan (gambar / tabel / kutipan): muncul dan hilang dengan animasi mulus
-        val kindNow = if (ed.miniBar) 0 else if (ed.selImg != null) 1 else if (cell) 2 else if (ed.pickQuote) 3 else 0
+        val objNow = ed.selObj ?: blk?.takeIf { it.ty == "q" || it.ty == "code" }?.id
+        var objLast by remember { mutableStateOf<String?>(null) }
+        val kindNow = if (ed.miniBar) 0 else if (ed.selImg != null) 1 else if (cell) 2 else if (ed.pickQuote) 3 else if (objNow != null) 4 else 0
         var kindShown by remember { mutableStateOf(0) }
         var lastSel by remember { mutableStateOf<Pair<String, Int>?>(null) }
         SideEffect {
             if (kindNow != 0) kindShown = kindNow
             ed.selImg?.let { lastSel = it }
+            objNow?.let { objLast = it }
         }
         val kind = if (kindNow != 0) kindNow else kindShown
         AnimatedVisibility(
@@ -1900,6 +1941,25 @@ fun EdBar(ed: Ed, act: Actions, imeOpen: Boolean) {
                         }
                         if (blk != null && blk.cw.isNotEmpty()) Chip("Reset widths", pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.tblResetCols(blk.id) }
                         Chip("Delete table", pal.ec, pal.oec, RoundedCornerShape(23.dp)) { ed.tOp("dt") }
+                    }
+                    4 -> {
+                        val oid = objNow ?: objLast
+                        val ob = ed.blocks.firstOrNull { it.id == oid }
+                        if (ob != null) {
+                            val al = ob.alOf()
+                            Row(
+                                Modifier.fillMaxWidth().shadow(if (pal.dark) 6.dp else 1.dp, RoundedCornerShape(28.dp)).clip(RoundedCornerShape(28.dp))
+                                    .background(pal.c3).horizontalScroll(rememberScrollState()).padding(6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                if (ed.selObj != null) { Tbn({ Ic("ok", it) }, true, true) { ed.selObj = null }; Sep() }
+                                Tbn({ AlignArrow(0, it) }, al == "l", true) { ed.objAlign(ob.id, "l") }
+                                Tbn({ AlignArrow(1, it) }, al == "c", true) { ed.objAlign(ob.id, "c") }
+                                Tbn({ AlignArrow(2, it) }, al == "r", true) { ed.objAlign(ob.id, "r") }
+                                Sep()
+                                Tbn({ Ic("del", it) }, false, true) { ed.objDelete(ob.id) }
+                            }
+                        }
                     }
                     3 -> Row(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(pal.c3)
