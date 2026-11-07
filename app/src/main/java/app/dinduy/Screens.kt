@@ -663,34 +663,162 @@ fun DrawerContent(vm: AppVM, close: () -> Unit, go: (Scr) -> Unit) {
 fun LabelDialogHost(vm: AppVM) {
     val d = vm.lblDlg ?: return
     val pal = LocalPal.current
+    val renaming = d.old != null
     var text by remember(d) { mutableStateOf(d.old ?: "") }
+    var focused by remember(d) { mutableStateOf(false) }
+    var err by remember(d) { mutableStateOf(false) }
+    var closing by remember(d) { mutableStateOf(false) }
     val fr = remember(d) { FocusRequester() }
-    val done = {
-        val old = d.old
-        val ok = if (old != null) vm.renameLabel(old, text) else vm.addLabel(text, d.forNote)
-        if (ok) vm.lblDlg = null
-    }
-    LaunchedEffect(d) { delay(120); try { fr.requestFocus() } catch (e: Exception) { } }
-    AlertDialog(
-        onDismissRequest = { vm.lblDlg = null },
-        containerColor = pal.c3,
-        title = { T(if (d.old != null) "Rename label" else "New label", 22f, 900, pal.os) },
-        text = {
-            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(pal.c4).padding(horizontal = 20.dp, vertical = 16.dp)) {
-                BasicTextField(
-                    value = text, onValueChange = { text = it.take(30) },
-                    modifier = Modifier.fillMaxWidth().focusRequester(fr),
-                    textStyle = TextStyle(color = pal.os, fontFamily = LocalFF.current, fontSize = 18.sp, fontWeight = FontWeight(600)),
-                    singleLine = true, cursorBrush = SolidColor(pal.p),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { done() }),
-                    decorationBox = { inner -> Box { if (text.isEmpty()) T("Label name", 18f, 600, pal.osv); inner() } }
-                )
+    val scope = rememberCoroutineScope()
+    val prog = remember(d) { Animatable(0f) }      // 0 -> 1: kartu masuk (pegas, sedikit membal)
+    val iconP = remember(d) { Animatable(0f) }     // lencana ikon masuk menyusul sesaat kemudian
+
+    // keluar: kartu mengecil + memudar dulu, baru dialog benar-benar dilepas
+    val close: () -> Unit = {
+        if (!closing) {
+            closing = true
+            scope.launch {
+                prog.animateTo(0f, androidx.compose.animation.core.tween(190, easing = androidx.compose.animation.core.FastOutLinearInEasing))
+                vm.lblDlg = null
             }
-        },
-        confirmButton = { TextButton(onClick = { done() }) { T(if (d.old != null) "Save" else "Create", 16f, 900, pal.p) } },
-        dismissButton = { TextButton(onClick = { vm.lblDlg = null }) { T("Cancel", 16f, 700, pal.osv) } }
-    )
+        }
+    }
+    val done: () -> Unit = {
+        if (!closing && text.isNotBlank()) {
+            val old = d.old
+            val ok = if (old != null) vm.renameLabel(old, text) else vm.addLabel(text, d.forNote)
+            if (ok) close() else err = true
+        }
+    }
+    LaunchedEffect(d) {
+        launch { prog.animateTo(1f, spring(.74f, 320f)) }
+        launch { delay(110); iconP.animateTo(1f, spring(.42f, 340f)) }
+        delay(260)
+        try { fr.requestFocus() } catch (e: Exception) { }
+    }
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = close,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        // scrim digambar sendiri (ikut animasi), jadi redup bawaan jendela dimatikan
+        val win = (androidx.compose.ui.platform.LocalView.current.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
+        androidx.compose.runtime.SideEffect { win?.setDimAmount(0f); win?.setWindowAnimations(-1) }
+
+        Box(
+            Modifier.fillMaxSize()
+                .labelScrim(prog)
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { close() }
+                .padding(horizontal = 24.dp),
+            Alignment.Center
+        ) {
+            val cardShape = RoundedCornerShape(36.dp)
+            Column(
+                Modifier.widthIn(max = 380.dp).fillMaxWidth()
+                    .graphicsLayer {
+                        val p = prog.value
+                        val sc = .84f + .16f * p
+                        scaleX = sc; scaleY = sc
+                        alpha = (p * 2.2f).coerceIn(0f, 1f)
+                        translationY = (1f - p) * 36.dp.toPx()
+                    }
+                    .clip(cardShape).background(pal.c3)
+                    .pointerInput(Unit) { detectTapGestures { } }       // ketuk di kartu tidak menutup
+                    .padding(start = 24.dp, end = 24.dp, top = 30.dp, bottom = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // lencana ikon: kotak membulat besar, berputar sedikit sambil membal masuk
+                Box(
+                    Modifier.size(68.dp)
+                        .graphicsLayer {
+                            val k = iconP.value
+                            scaleX = k; scaleY = k; rotationZ = (1f - k) * -28f
+                        }
+                        .clip(RoundedCornerShape(24.dp)).background(pal.pc),
+                    Alignment.Center
+                ) { Ic("label", pal.opc, 32.dp) }
+                Spacer(Modifier.height(18.dp))
+                Box(Modifier.fillMaxWidth(), Alignment.Center) { T(if (renaming) "Rename label" else "New label", 26f, 900, pal.os) }
+                Spacer(Modifier.height(4.dp))
+                Box(Modifier.fillMaxWidth(), Alignment.Center) {
+                    T(if (renaming) "Notes keep this label" else if (d.forNote != null) "It will be added to this note" else "Use labels to group notes", 14f, 500, pal.osv, maxLines = 1)
+                }
+                Spacer(Modifier.height(22.dp))
+
+                // kolom isian: kapsul tonal, bingkai primer menyala saat fokus
+                val frame by animateColorAsState(
+                    if (err) pal.oec else if (focused) pal.p else Color.Transparent,
+                    androidx.compose.animation.core.tween(180), label = "lfr"
+                )
+                val tint by animateColorAsState(if (focused) pal.p else pal.osv, androidx.compose.animation.core.tween(180), label = "lti")
+                val clearK by animateFloatAsState(if (text.isNotEmpty()) 1f else 0f, spring(.6f, 520f), label = "lcl")
+                val fieldShape = RoundedCornerShape(28.dp)
+                Row(
+                    Modifier.fillMaxWidth().height(60.dp).clip(fieldShape).background(pal.c4)
+                        .border(2.dp, frame, fieldShape).padding(start = 18.dp, end = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Ic("label", tint, 22.dp)
+                    Spacer(Modifier.width(12.dp))
+                    Box(Modifier.weight(1f)) {
+                        BasicTextField(
+                            value = text, onValueChange = { text = it.take(30); err = false },
+                            modifier = Modifier.fillMaxWidth().focusRequester(fr).onFocusChanged { focused = it.isFocused },
+                            textStyle = TextStyle(color = pal.os, fontFamily = LocalFF.current, fontSize = 18.sp, fontWeight = FontWeight(600)),
+                            singleLine = true, cursorBrush = SolidColor(pal.p),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { done() }),
+                            decorationBox = { inner -> Box { if (text.isEmpty()) T("Label name", 18f, 600, pal.osv, maxLines = 1); inner() } }
+                        )
+                    }
+                    Box(
+                        Modifier.size(40.dp).graphicsLayer { scaleX = clearK; scaleY = clearK; alpha = clearK }
+                            .clip(CircleShape)
+                            .clickable(enabled = text.isNotEmpty()) { text = ""; err = false; try { fr.requestFocus() } catch (e: Exception) { } },
+                        Alignment.Center
+                    ) {
+                        androidx.compose.foundation.Canvas(Modifier.size(12.dp)) {
+                            val sw = 2.2.dp.toPx()
+                            drawLine(pal.osv, Offset(0f, 0f), Offset(size.width, size.height), sw, androidx.compose.ui.graphics.StrokeCap.Round)
+                            drawLine(pal.osv, Offset(size.width, 0f), Offset(0f, size.height), sw, androidx.compose.ui.graphics.StrokeCap.Round)
+                        }
+                    }
+                }
+                Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f)) {
+                        if (err) T("This label already exists", 13f, 600, pal.oec, maxLines = 1)
+                    }
+                    T("${text.length}/30", 13f, 600, if (text.length >= 26) pal.p else pal.osv)
+                }
+                Spacer(Modifier.height(18.dp))
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    LabelDlgBtn("Cancel", pal.c4, pal.os, true, Modifier.weight(1f)) { close() }
+                    LabelDlgBtn(if (renaming) "Save" else "Create", pal.p, pal.op, text.isNotBlank(), Modifier.weight(1f)) { done() }
+                }
+            }
+        }
+    }
+}
+
+/** Scrim yang ikut progres animasi kartu (dibaca di fase gambar, jadi tidak memicu recompose tiap frame). */
+private fun Modifier.labelScrim(p: Animatable<Float, androidx.compose.animation.core.AnimationVector1D>): Modifier =
+    this.drawBehind { drawRect(Color.Black.copy(alpha = .52f * p.value.coerceIn(0f, 1f))) }
+
+/** Tombol dialog ala M3 Expressive: kapsul tinggi, sudut menyusut dan badan mengecil saat ditekan. */
+@Composable
+private fun LabelDlgBtn(text: String, bg: Color, fg: Color, enabled: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val src = remember { MutableInteractionSource() }
+    val pr by src.collectIsPressedAsState()
+    val r by animateDpAsState(if (pr) 16.dp else 26.dp, spring(.6f, 520f), label = "lbr")
+    val sc by animateFloatAsState(if (pr) .95f else 1f, spring(.5f, 600f), label = "lbs")
+    val al by animateFloatAsState(if (enabled) 1f else .38f, androidx.compose.animation.core.tween(160), label = "lba")
+    Box(
+        modifier.height(52.dp).graphicsLayer { scaleX = sc; scaleY = sc; alpha = al }
+            .clip(RoundedCornerShape(r)).background(bg)
+            .clickable(interactionSource = src, indication = null, enabled = enabled, onClick = onClick),
+        Alignment.Center
+    ) { T(text, 16f, 800, fg, maxLines = 1) }
 }
 
 // ---------- beranda ----------
