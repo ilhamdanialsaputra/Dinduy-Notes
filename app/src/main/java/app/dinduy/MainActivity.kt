@@ -933,6 +933,14 @@ class MainActivity : ComponentActivity(), Actions {
         vm.permTick++   // status izin notifikasi bisa berubah setelah pengguna kembali dari Pengaturan
     }
 
+    /** Tunggu sampai jendela benar-benar tampil (maks ~3 dtk). Layanan mikrofon hanya boleh dinyalakan dari aplikasi yang terlihat. */
+    private suspend fun awaitResumed() {
+        var w = 0
+        while (!lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED) && w < 60) {
+            delay(50); w++
+        }
+    }
+
     /** Ketuk notifikasi pengingat: buka catatannya (menutup halaman lain dulu bila perlu). */
     private fun openFromIntent(i: Intent?) {
         // Widget homescreen: catatan baru / voice note baru
@@ -951,8 +959,17 @@ class MainActivity : ComponentActivity(), Actions {
                     vm.nav.openNote(n.id, null, true)
                 } else {
                     delay(350)   // beranda perlu tampil dulu (start dingin)
+                    awaitResumed()
                     requestMic {
-                        if (quickStart(vm)) lifecycleScope.launch { QuickFx.p.animateTo(1f, spring(.8f, 480f)) }
+                        // callback izin bisa datang sebelum layar RESUMED: tunggu lagi sebelum mulai merekam
+                        lifecycleScope.launch {
+                            awaitResumed()
+                            try {
+                                if (quickStart(vm)) QuickFx.p.animateTo(1f, spring(.8f, 480f))
+                            } catch (e: Exception) {
+                                vm.show("Can't start recording")
+                            }
+                        }
                     }
                 }
             }
