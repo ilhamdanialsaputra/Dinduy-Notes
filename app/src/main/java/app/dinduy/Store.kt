@@ -86,11 +86,30 @@ sealed class Sheet {
 
 class Pending(
     val notes: List<Note>, val pr: Prefs?, val nImg: Int, val at: Long, val dir: File, val ids: List<String>,
-    val lbl: List<String> = emptyList(), val aids: List<String> = emptyList()
+    val lbl: List<String> = emptyList(), val aids: List<String> = emptyList(),
+    val pids: List<String> = emptyList(),          // id berkas PDF dalam cadangan
+    val lps: List<String> = emptyList(),           // nama thumbnail kartu tautan dalam cadangan
+    val cfg: Map<String, Int> = emptyMap(),        // pengaturan kecil di luar Prefs (mode baca PDF, efek balik halaman)
+    val one: Boolean = false                       // true = berkas bagikan satu catatan (bukan cadangan penuh)
 )
 
 /** Dialog nama label. old == null: label baru; forNote != null: langsung dipasang ke catatan itu. */
 class LblDlg(val old: String?, val forNote: String?)
+
+/** Berkas .dinduy (catatan yang dibagikan atau cadangan): dikenali dari tipe MIME atau akhiran nama. */
+fun isDinduyUri(ctx: android.content.Context, u: Uri): Boolean {
+    val t = try { ctx.contentResolver.getType(u) } catch (e: Exception) { null }
+    if (t == "application/x-dinduy") return true
+    var name = ""
+    try {
+        ctx.contentResolver.query(u, null, null, null, null)?.use { c ->
+            val i = c.getColumnIndex("_display_name")
+            if (i >= 0 && c.moveToFirst()) name = c.getString(i) ?: ""
+        }
+    } catch (e: Exception) { }
+    if (name.isEmpty()) name = u.lastPathSegment?.substringAfterLast('/') ?: ""
+    return name.endsWith(".dinduy", true)
+}
 
 object Imgs {
     // sampul harus sudah ada di cache saat catatan dibuka (kalau tidak, ia muncul belakangan = kedip), jadi cache dibuat lega
@@ -163,6 +182,8 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     var remFilter by mutableStateOf(false)        // true = beranda hanya menampilkan catatan berpengingat
     var permTick by mutableStateOf(0)             // dinaikkan saat status izin notifikasi mungkin berubah
     var importTick by mutableStateOf(0)           // dinaikkan dari menu samping: AppRoot membuka pemilih berkas impor
+    var onShareNote: ((String) -> Unit)? = null   // diisi MainActivity: bagikan satu catatan sebagai berkas .dinduy
+    var sharedId: String? = null                  // id catatan hasil impor berkas .dinduy terakhir
     private val scheduled = HashMap<String, Long>()   // id catatan -> waktu alarm yang sudah dipasang
 
     // penutupan catatan: kartu tujuan bisa sedang bergerak (daftar digulir otomatis), jadi morph mengikutinya
@@ -968,7 +989,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         return s
     }
 
-    // ---------- cadangan: ZIP (data.json + img/ + audio/); format lama DINDUY01 tetap terbaca ----------
+    // ---------- cadangan: ZIP (data.json + img/ + audio/ + pdf/ + lp/); format lama DINDUY01 tetap terbaca ----------
     fun backupName(): String {
         val c = java.util.Calendar.getInstance()
         fun p(n: Int) = n.toString().padStart(2, '0')
@@ -977,26 +998,56 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             p(c.get(java.util.Calendar.MINUTE)) + ".dinduy"
     }
 
-    /** Format baru: ZIP berisi data.json, folder img (foto), dan folder audio (suara). Format lama (DINDUY01) tetap bisa dibaca saat memulihkan. */
-    fun writeBackup(os: OutputStream) {
-        val imgs = imgIds().filter { id -> File(imgDir, "$id.jpg").let { it.exists() && it.length() > 0L } }
-        val auds = audIds().filter { id -> AudioFiles.file(ctx, id).let { it.exists() && it.length() > 0L } }
+    private fun okFile(f: File) = f.exists() && f.length() > 0L
+
+    /** Thumbnail kartu tautan yang sudah ada di cache perangkat untuk catatan-catatan ini (cacheDir/lp). */
+    private fun linkThumbs(notes: List<Note>): List<File> {
+        val out = LinkedHashMap<String, File>()
+        for (n in notes) for (b in n.bl) if (b.ty == "lnk" && b.pi.isNotEmpty())
+            for (f in LinkPreviews.cachedFiles(ctx, b.pi)) out[f.name] = f
+        return out.values.toList()
+    }
+
+    /**
+     * Tulis ZIP: data.json, img/ (foto + sampul), audio/ (suara), pdf/ (berkas PDF + coretannya), lp/ (thumbnail tautan).
+     * full = true: cadangan penuh (ikut Prefs, daftar label, pengaturan baca PDF). full = false: bagikan satu catatan (kind = "note").
+     * API key Groq tidak pernah ikut: ia tersimpan terenkripsi terpisah di KeyVault.
+     */
+    private fun writeZip(os: OutputStream, kind: String, notes: List<Note>, full: Boolean) {
+        val imgs = LinkedHashSet<String>().also { st ->
+            notes.forEach { d ->
+                d.bl.forEach { b -> b.im.forEach { st.add(it.id) } }
+                if (d.cv.isNotEmpty()) st.add(d.cv)
+            }
+        }.filter { id -> okFile(File(imgDir, "$id.jpg")) }
+        val auds = notes.flatMap { d -> d.au.map { it.id } }.distinct().filter { id -> okFile(AudioFiles.file(ctx, id)) }
+        val pdfs = notes.mapNotNull { it.pdf.takeIf { p -> p.isNotEmpty() } }.distinct().filter { id -> okFile(PdfFiles.file(ctx, id)) }
+        val lps = linkThumbs(notes)
         val head = buildJsonObject {
             put("app", "dinduy")
-            put("v", 3)
+            put("v", 4)
             put("at", now)
-            put("pr", J.encodeToJsonElement(pr))
-            put("docs", J.encodeToJsonElement(docs.toList()))
-            put("lbl", J.encodeToJsonElement(labels.toList()))
+            if (kind.isNotEmpty()) put("kind", kind)
+            if (full) {
+                put("pr", J.encodeToJsonElement(pr))
+                put("lbl", J.encodeToJsonElement(labels.toList()))
+                put("sp", buildJsonObject {
+                    put("pdfmode", sp.getInt("pdfmode", 0))
+                    put("pdfcurl", sp.getInt("pdfcurl", 0))
+                })
+            }
+            put("docs", J.encodeToJsonElement(notes))
             put("img", JsonArray(imgs.map { JsonPrimitive(it) }))
             put("aud", JsonArray(auds.map { JsonPrimitive(it) }))
+            put("pdf", JsonArray(pdfs.map { JsonPrimitive(it) }))
+            put("lp", JsonArray(lps.map { JsonPrimitive(it.name.removeSuffix(".bin")) }))
         }
         val zos = ZipOutputStream(BufferedOutputStream(os, 65536))
         zos.setLevel(Deflater.DEFAULT_COMPRESSION)
         zos.putNextEntry(ZipEntry("data.json"))
         zos.write(head.toString().toByteArray(Charsets.UTF_8))
         zos.closeEntry()
-        zos.setLevel(Deflater.NO_COMPRESSION)   // foto & suara sudah terkompresi
+        zos.setLevel(Deflater.NO_COMPRESSION)   // foto, suara, PDF sudah terkompresi
         for (id in imgs) {
             zos.putNextEntry(ZipEntry("img/$id.jpg"))
             File(imgDir, "$id.jpg").inputStream().use { it.copyTo(zos) }
@@ -1007,8 +1058,34 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             AudioFiles.file(ctx, id).inputStream().use { it.copyTo(zos) }
             zos.closeEntry()
         }
+        for (id in pdfs) {
+            zos.putNextEntry(ZipEntry("pdf/$id.pdf"))
+            PdfFiles.file(ctx, id).inputStream().use { it.copyTo(zos) }
+            zos.closeEntry()
+            val ink = PdfFiles.ink(ctx, id)
+            if (okFile(ink)) {
+                zos.putNextEntry(ZipEntry("pdf/$id.ink.json"))
+                ink.inputStream().use { it.copyTo(zos) }
+                zos.closeEntry()
+            }
+        }
+        for (f in lps) {
+            zos.putNextEntry(ZipEntry("lp/" + f.name))
+            f.inputStream().use { it.copyTo(zos) }
+            zos.closeEntry()
+        }
         zos.finish()
         zos.flush()
+    }
+
+    /** Cadangan penuh: semua catatan (termasuk arsip & sampah), foto, sampul, coretan, suara, PDF + coretan PDF, thumbnail tautan, pengaturan. */
+    fun writeBackup(os: OutputStream) = writeZip(os, "", docs.toList(), true)
+
+    /** Satu catatan jadi berkas .dinduy (ZIP yang sama dengan cadangan, tapi hanya berisi catatan ini dan aset yang dipakainya). */
+    fun writeNoteFile(n: Note, os: OutputStream) {
+        // label, sematan, arsip, sampah, pengingat, dan posisi seret itu milik pemilik; tidak ikut terkirim
+        val clean = n.copy(lb = emptyList(), p = false, a = false, dt = 0L, rm = 0L, rr = "", rd = 0L, o = 0L)
+        writeZip(os, "note", listOf(clean), false)
     }
 
     fun markBackedUp() {
@@ -1109,13 +1186,23 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         return Pending(notes, prefsOf(m), ids.size, m.num("at").let { if (it == 0L) now else it }, dir, ids, lbl)
     }
 
-    /** Cadangan baru: ZIP (data.json, img/, audio/). Nama berkas dibentuk sendiri dari id yang divalidasi. */
+    private val lpRe = Regex("[0-9a-f]{1,8}_\\d{1,6}")
+
+    /** Cadangan baru / berkas bagikan: ZIP (data.json, img/, audio/, pdf/, lp/). Nama berkas dibentuk sendiri dari id yang divalidasi. */
     private fun stageZip(raw: InputStream, dir: File): Pending? {
         val zin = ZipInputStream(raw)
         var json: String? = null
         val imgs = ArrayList<String>()
         val auds = ArrayList<String>()
+        val pdfs = ArrayList<String>()
+        val lps = ArrayList<String>()
         val buf = ByteArray(65536)
+        fun dump(f: File) {
+            FileOutputStream(f).use { fo ->
+                var r = zin.read(buf)
+                while (r >= 0) { fo.write(buf, 0, r); r = zin.read(buf) }
+            }
+        }
         while (true) {
             val e = zin.nextEntry ?: break
             if (e.isDirectory) continue
@@ -1125,19 +1212,27 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             } else if (name.startsWith("img/") && name.endsWith(".jpg")) {
                 val id = name.substring(4, name.length - 4)
                 if (!idRe.matches(id)) continue
-                FileOutputStream(File(dir, "$id.jpg")).use { fo ->
-                    var r = zin.read(buf)
-                    while (r >= 0) { fo.write(buf, 0, r); r = zin.read(buf) }
-                }
+                dump(File(dir, "$id.jpg"))
                 imgs.add(id)
             } else if (name.startsWith("audio/") && name.endsWith(".m4a")) {
                 val id = name.substring(6, name.length - 4)
                 if (!idRe.matches(id)) continue
-                FileOutputStream(File(dir, "$id.m4a")).use { fo ->
-                    var r = zin.read(buf)
-                    while (r >= 0) { fo.write(buf, 0, r); r = zin.read(buf) }
-                }
+                dump(File(dir, "$id.m4a"))
                 auds.add(id)
+            } else if (name.startsWith("pdf/") && name.endsWith(".ink.json")) {
+                val id = name.substring(4, name.length - 9)
+                if (!idRe.matches(id)) continue
+                dump(File(dir, "$id.ink.json"))
+            } else if (name.startsWith("pdf/") && name.endsWith(".pdf")) {
+                val id = name.substring(4, name.length - 4)
+                if (!idRe.matches(id)) continue
+                dump(File(dir, "$id.pdf"))
+                pdfs.add(id)
+            } else if (name.startsWith("lp/") && name.endsWith(".bin")) {
+                val nm = name.substring(3, name.length - 4)
+                if (!lpRe.matches(nm)) continue
+                dump(File(dir, "lp_$nm.bin"))
+                lps.add(nm)
             }
         }
         val j = json ?: return null
@@ -1146,12 +1241,99 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         val arr = m["docs"] as? JsonArray ?: return null
         val notes = arr.mapNotNull { (it as? JsonObject)?.let { o -> docFrom(o) } }
         val lbl = (m["lbl"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content } ?: emptyList()
-        return Pending(notes, prefsOf(m), imgs.size, m.num("at").let { if (it == 0L) now else it }, dir, imgs, lbl, auds)
+        val so = m["sp"] as? JsonObject
+        val cfg = if (so == null) emptyMap<String, Int>() else listOf("pdfmode", "pdfcurl").filter { so[it] != null }.associateWith { so.num(it).toInt() }
+        val one = (m["kind"] as? JsonPrimitive)?.content == "note" && notes.size == 1
+        return Pending(notes, prefsOf(m), imgs.size, m.num("at").let { if (it == 0L) now else it }, dir, imgs, lbl, auds, pdfs, lps, cfg, one)
+    }
+
+    /** Salin PDF (dan coretannya) dari folder staging. Untuk catatan yang tidak diambil dari cadangan, berkas yang sudah ada tidak ditimpa. */
+    private fun copyPdfs(p: Pending, take: Set<String>) {
+        if (p.pids.isEmpty()) return
+        PdfFiles.dir(ctx)
+        for (id in p.pids) {
+            val src = File(p.dir, "$id.pdf")
+            if (!src.exists()) continue
+            val dst = PdfFiles.file(ctx, id)
+            if (!dst.exists() || id in take) src.copyTo(dst, overwrite = true)
+            val ink = File(p.dir, "$id.ink.json")
+            val dink = PdfFiles.ink(ctx, id)
+            if (ink.exists() && (!dink.exists() || id in take)) ink.copyTo(dink, overwrite = true)
+        }
+    }
+
+    /** Pulihkan thumbnail kartu tautan ke cache supaya kartu tetap bergambar tanpa internet. */
+    private fun copyThumbs(p: Pending) {
+        if (p.lps.isEmpty()) return
+        val d = File(ctx.cacheDir, "lp").also { it.mkdirs() }
+        for (nm in p.lps) {
+            val src = File(p.dir, "lp_$nm.bin")
+            val dst = File(d, "$nm.bin")
+            if (src.exists() && !dst.exists()) src.copyTo(dst)
+        }
+    }
+
+    /**
+     * Buka berkas .dinduy. Hasil: 0 = bukan berkas Dinduy yang sah; 1 = cadangan penuh (lembar pemulihan dibuka);
+     * 2 = catatan yang dibagikan: langsung ditambahkan sebagai catatan baru (id-nya di [sharedId]).
+     */
+    suspend fun openDinduyFile(uri: Uri): Int {
+        if (!stageBackup(uri)) return 0
+        val p = pending ?: return 0
+        if (!p.one) { sheet = Sheet.Bk; return 1 }
+        pending = null
+        val n = addShared(p) ?: return 0
+        sharedId = n.id
+        return 2
+    }
+
+    private suspend fun addShared(p: Pending): Note? {
+        val src = p.notes.firstOrNull() ?: return null
+        val t = now
+        val hasPdf = src.pdf.isNotEmpty() && src.pdf in p.pids
+        val npdf = if (hasPdf) uid() else ""   // id baru supaya PDF / coretan milik catatan lain di perangkat ini tidak tertimpa
+        withContext(Dispatchers.IO) {
+            imgDir.mkdirs()
+            for (id in p.ids) {
+                val d = File(imgDir, "$id.jpg")
+                if (!d.exists()) File(p.dir, "$id.jpg").copyTo(d)
+            }
+            if (p.aids.isNotEmpty()) {
+                AudioFiles.dir(ctx).mkdirs()
+                for (id in p.aids) {
+                    val d = AudioFiles.file(ctx, id)
+                    if (!d.exists()) File(p.dir, "$id.m4a").copyTo(d)
+                }
+            }
+            if (hasPdf) {
+                File(p.dir, src.pdf + ".pdf").copyTo(PdfFiles.file(ctx, npdf), overwrite = true)
+                val ink = File(p.dir, src.pdf + ".ink.json")
+                if (ink.exists()) ink.copyTo(PdfFiles.ink(ctx, npdf), overwrite = true)
+            }
+            copyThumbs(p)
+        }
+        val n = src.copy(
+            id = uid(), u = t, c = t, a = false, p = false, dt = 0L, lb = listOfNotNull(filter),
+            rm = 0L, rr = "", rd = 0L, o = 0L, pdf = npdf
+        )
+        docs.add(0, n)
+        save()
+        withContext(Dispatchers.IO) { try { p.dir.deleteRecursively() } catch (e: Exception) { } }
+        show("Note added: " + n.t.ifEmpty { "Untitled" })
+        return n
     }
 
     fun applyBackup(replace: Boolean) {
         val p = pending ?: return
         pending = null
+        // catatan yang benar-benar diambil dari cadangan: PDF + coretannya hanya ditimpa untuk catatan ini
+        val take = HashSet<String>()
+        if (replace) p.notes.forEach { take.add(it.id) }
+        else for (d in p.notes) {
+            val i = docs.indexOfFirst { it.id == d.id }
+            if (i < 0 || d.u > docs[i].u) take.add(d.id)
+        }
+        val takePdf = p.notes.filter { it.id in take }.map { it.pdf }.filter { it.isNotEmpty() }.toSet()
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 imgDir.mkdirs()
@@ -1160,6 +1342,8 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                     AudioFiles.dir(ctx).mkdirs()
                     p.aids.forEach { File(p.dir, "$it.m4a").copyTo(AudioFiles.file(ctx, it), overwrite = true) }
                 }
+                copyPdfs(p, takePdf)
+                copyThumbs(p)
             }
             player.stop()
             audVer++
@@ -1168,6 +1352,8 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                 labels.clear(); labels.addAll(p.lbl)
                 filter = null
                 p.pr?.let { pr = it.copy(fs = it.fs.coerceIn(14, 30)) }
+                p.cfg["pdfmode"]?.let { v -> sp.edit().putInt("pdfmode", v).apply(); PdfBus.mode = v }
+                p.cfg["pdfcurl"]?.let { v -> sp.edit().putInt("pdfcurl", v).apply(); PdfBus.curl = v }
             } else {
                 for (d in p.notes) {
                     val i = docs.indexOfFirst { it.id == d.id }
@@ -1177,8 +1363,10 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             }
             syncLabels()
             save()
-            if (replace) gcAudio()
-            show("Restored " + cnt(p.notes.size, "note") + ", " + cnt(p.nImg, "photo") + ", and " + cnt(p.aids.size, "audio file"))
+            if (replace) { gcAudio(); gcPdf() }
+            val parts = arrayListOf(cnt(p.notes.size, "note"), cnt(p.nImg, "photo"), cnt(p.aids.size, "audio file"))
+            if (p.pids.isNotEmpty()) parts.add(cnt(p.pids.size, "PDF"))
+            show("Restored " + parts.dropLast(1).joinToString(", ") + ", and " + parts.last())
         }
     }
 }
