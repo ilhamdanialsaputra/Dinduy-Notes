@@ -709,10 +709,19 @@ fun ParaRow(ed: Ed, b: Blk, ordN: Int, dm: Dm, pal: Pal, fold: Fold?, mk: Float,
     }
 }
 
-/** Lebar tiap kolom tabel (dp): lebar yang disetel pengguna, atau lebar bawaan (lebar layar dibagi rata, minimal 110dp). */
+/** Lebar bawaan satu kolom (dp): tabel 1-2 kolom dibuat ringkas supaya teks mengalir di sampingnya; lebih dari itu dibagi rata (minimal 110dp). */
+fun tblDef(n: Int, viewDp: Float): Float {
+    if (n <= 2) {
+        val maxSide = (1f - (SIDE_MIN + SIDE_GAP) / viewDp.coerceAtLeast(200f)).coerceIn(.3f, .9f) * viewDp - 4f
+        return minOf(150f, maxSide / n).coerceAtLeast(80f)
+    }
+    return maxOf(110f, viewDp / n)
+}
+
+/** Lebar tiap kolom tabel (dp): lebar yang disetel pengguna, atau lebar bawaan. */
 fun tblWidths(b: Blk, viewDp: Float): List<Float> {
     val n = b.tb.firstOrNull()?.size ?: 1
-    val def = maxOf(110f, viewDp / n)
+    val def = tblDef(n, viewDp)
     return List(n) { c -> b.cw.getOrNull(c)?.takeIf { it >= 40f } ?: def }
 }
 
@@ -725,7 +734,7 @@ fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier = Modifier) {
     val dens = LocalDensity.current.density
     val haptic = LocalHapticFeedback.current
     val ws = tblWidths(b, ed.widthDp)
-    val def = maxOf(110f, ed.widthDp / cols)
+    val def = tblDef(cols, ed.widthDp)
     // sel yang sedang diedit di tabel ini (null = tidak ada). derivedStateOf: hanya tabel yang fokusnya berubah yang recompose.
     val fkS = remember(b.id) {
         androidx.compose.runtime.derivedStateOf {
@@ -751,9 +760,7 @@ fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier = Modifier) {
     // Lebar kolom dihitung MUTLAK dari posisi jari di layar (bukan dari selisih per-frame): pegangan ikut bergeser saat kolom
     // melebar, jadi pendekatan selisih membuat lebar loncat-loncat. Dengan titik awal tetap, tepi kolom selalu mengikuti jari.
     fun applyW(c: Int) {
-        val others = wsS.sum() - wsS.getOrElse(c) { def }
-        val floated = bS.ta == "l" || bS.ta == "r"
-        val cap = if (floated) minOf(COL_MAX, ed.widthDp * ed.maxSideW() - 3f - others) else COL_MAX   // tabel yang dililit teks tak boleh melebihi batasnya
+        val cap = COL_MAX
         val raw = dw[6] + ((dw[3] - dw[4]) + dw[7]) / dens
         dw[2] = raw.coerceIn(COL_MIN, maxOf(COL_MIN, cap))
         // menempel ke lebar bawaan saat sudah dekat (getar kecil), seperti gambar menempel ke rasio aslinya
@@ -1440,7 +1447,7 @@ private fun planFloat(ed: Ed, i: Int, dm: Dm, pal: Pal, tm: TextMeasurer, dn: De
     val imgH: Float
     if (b.ty == "tbl") {
         // tabel mengambang: lebar = jumlah lebar kolom, tinggi = hasil ukur isi sel
-        left = b.ta == "l"
+        left = true
         imgW = tblWidths(b, ed.widthDp).sum() + 3f
         imgH = tblHeightDp(ed, b, dm, pal, tm, dn)
     } else {
@@ -1524,11 +1531,10 @@ fun floatPlans(ed: Ed, dm: Dm): Map<String, FloatPlan> {
         // semua gambar tunggal rata kiri/kanan selalu lewat FloatGroup, walau tak ada teks di sampingnya,
         // supaya komponen gambar tidak berganti (dan gestur ubah ukuran tidak putus) saat teks samping habis
         if (b.ty == "tbl") {
-            // tabel rata kiri/kanan yang cukup sempit: teks sesudahnya mengalir di sampingnya, seperti gambar
-            if ((b.ta == "l" || b.ta == "r") && ed.tblSideOk(b)) {
-                if (out == null) out = HashMap()
-                out[b.id] = planFloat(ed, i, dm, pal, tm, dn)
-            }
+            // semua tabel lewat TblFloatGroup (komposisi tidak berganti saat lebar kolom diseret melewati batas);
+            // teks hanya mengalir di sampingnya bila tabel cukup sempit
+            if (out == null) out = HashMap()
+            out[b.id] = if (ed.tblSideOk(b)) planFloat(ed, i, dm, pal, tm, dn) else FloatPlan(emptyList())
             continue
         }
         if (b.ty != "img" || b.im.size != 1 || b.im[0].al == "c") continue
@@ -1579,6 +1585,7 @@ fun FloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<String, Int>,
 @Composable
 private fun TblFloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<String, Int>, dm: Dm) {
     val pal = LocalPal.current
+    val narrow = ed.tblSideOk(b)
     val tw = (tblWidths(b, ed.widthDp).sum() + 3f).dp
     val lifted = ed.mv?.let { it.bid == b.id } == true
     Box(Modifier.fillMaxWidth()) {
@@ -1598,12 +1605,12 @@ private fun TblFloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<St
             }
         }
         Box(
-            Modifier.align(if (b.ta == "r") Alignment.TopEnd else Alignment.TopStart)
+            Modifier.align(Alignment.TopStart)
                 .zIndex(if (lifted) 3f else 1f)
                 .graphicsLayer {
                     if (lifted) { translationX = ed.mvX; translationY = ed.mvY; scaleX = 1.03f; scaleY = 1.03f; alpha = .94f }
                 }
-        ) { TableView(ed, b, dm, pal, Modifier.width(tw)) }
+        ) { TableView(ed, b, dm, pal, if (narrow) Modifier.width(tw) else Modifier.fillMaxWidth()) }
     }
 }
 
