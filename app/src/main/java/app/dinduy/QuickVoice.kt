@@ -116,9 +116,9 @@ fun micOk(ctx: Context): Boolean =
     ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
 /** Mulai merekam. Belum ada catatan: id sementara dipakai sampai selesai. */
-fun quickStart(vm: AppVM): Boolean {
+fun quickStart(vm: AppVM, quiet: Boolean = false): Boolean {
     if (vm.rec.active) return false
-    val ok = vm.startRec(QuickFx.QID)
+    val ok = vm.startRec(QuickFx.QID, quiet)
     if (ok) { QuickFx.shown = true; QuickFx.lastMs = 0L }
     return ok
 }
