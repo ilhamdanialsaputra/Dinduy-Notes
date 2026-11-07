@@ -216,7 +216,8 @@ data class Blk(
     val ir: Int = 0,                  // inden kanan (dp)
     val fi: Int = 0,                  // > 0 inden baris pertama, < 0 inden menggantung (dp, nilai mutlak = jaraknya)
     val st: Int = 0,                  // butir bernomor: > 0 = mulai dari angka ini (mis. ketik "4." -> nomor 4); 0 = lanjut dari butir sebelumnya
-    val pi: String = ""               // kartu tautan (ty = "lnk"): alamat gambar og:image; alamat tautan di l, judul di r.t
+    val pi: String = "",              // kartu tautan (ty = "lnk"): alamat gambar og:image; alamat tautan di l, judul di r.t
+    val cw: List<Float> = emptyList() // tabel: lebar tiap kolom (dp); kosong / 0 = lebar bawaan (otomatis)
 ) {
     val isText: Boolean get() = ty == "p" || ty == "h" || ty == "li" || ty == "q" || ty == "code"
     val isObj: Boolean get() = ty == "tbl" || ty == "img" || ty == "hr" || ty == "lnk"
@@ -316,20 +317,32 @@ fun plainOf(bl: List<Blk>): String = bl.joinToString("\n") {
     }
 }.replace("\u200B", "").trim()
 
+/** Nomor urut butir bernomor ("o") dan butir huruf ("a"). Daftar yang jenisnya berbeda di kedalaman yang sama dihitung terpisah. */
 fun ords(bl: List<Blk>): Map<String, Int> {
     val m = HashMap<String, Int>()
     val c = IntArray(6)
+    val k = arrayOfNulls<String>(6)   // jenis butir berurutan terakhir di tiap kedalaman
     for (b in bl) {
         if (b.ty == "li") {
             val d = b.d.coerceIn(0, 4)
-            for (k in d + 1 until 6) c[k] = 0
-            if (b.lt == "o") {
+            for (j in d + 1 until 6) { c[j] = 0; k[j] = null }
+            if (b.lt == "o" || b.lt == "a") {
+                if (k[d] != b.lt) c[d] = 0
                 if (b.st > 0) c[d] = b.st else c[d]++
+                k[d] = b.lt
                 m[b.id] = c[d]
-            } else c[d] = 0
-        } else java.util.Arrays.fill(c, 0)
+            } else { c[d] = 0; k[d] = null }
+        } else { java.util.Arrays.fill(c, 0); java.util.Arrays.fill(k, null) }
     }
     return m
+}
+
+/** 1 -> A, 2 -> B, ... 26 -> Z, 27 -> AA (penomoran huruf ala spreadsheet). */
+fun letterOf(n: Int): String {
+    var x = n.coerceAtLeast(1)
+    val sb = StringBuilder()
+    while (x > 0) { x--; sb.append('A' + x % 26); x /= 26 }
+    return sb.reverse().toString()
 }
 
 fun wordCount(x: String): Int {
