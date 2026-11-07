@@ -100,7 +100,7 @@ class Fold(val cuts: IntArray, val pn: IntArray, val pl: FloatArray, val cutR: F
 data class Pt(val key: String, val off: Int)
 
 /** Gambar yang sedang diangkat (tekan-tahan lalu geser). */
-class Mv(val bid: String, val imgId: String, val row: Boolean, val top: Float, val h: Float)
+class Mv(val bid: String, val imgId: String, val row: Boolean, val top: Float, val h: Float, val g: Float = -1f)
 
 class Req(val key: String, val pos: Int, val n: Int, val sel: TextRange? = null)
 
@@ -728,7 +728,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     fun setPlain() = convertFocused { b -> b.copy(ty = "p") }
 
     /** Perataan paragraf: "" kiri, c tengah, r kanan, j rata kiri-kanan. Tidak berlaku untuk blok kode. */
-    fun setAlign(a: String) = convertFocused { b -> if (b.isText && b.ty != "code") b.copy(ta = a) else b }
+    fun setAlign(a: String) = convertFocused { b -> if (b.isText && b.ty != "code" && b.ty != "q") b.copy(ta = a) else b }
 
     /**
      * Inden paragraf (dp, nilai mutlak). kind: 0 kiri, 1 kanan, 2 baris pertama, 3 menggantung.
@@ -1000,7 +1000,20 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     /** Tabel cukup sempit (mis. 2 kolom) sehingga teks otomatis mengalir di sampingnya, tanpa pengaturan apa pun. */
     fun tblSideOk(b: Blk): Boolean =
-        b.ty == "tbl" && tblWidths(b, widthDp).sum() + 3f <= widthDp * maxSideW() + .001f
+        b.ty == "tbl" && b.alOf() != "c" && tblWidths(b, widthDp).sum() + 3f <= widthDp * maxSideW() + .001f
+
+    // ---------- kutipan / kode / garis pemisah: sama seperti foto (seret, ubah lebar, teks mengelilingi) ----------
+    /** Tinggi terukur (dp) objek yang teksnya mengalir di sampingnya; diisi tampilan supaya aliran teks memakai tinggi sebenarnya. */
+    val objH = androidx.compose.runtime.mutableStateMapOf<String, Float>()
+    fun setObjH(id: String, h: Float) {
+        val o = objH[id]
+        if (o == null || kotlin.math.abs(o - h) > .5f) objH[id] = h
+    }
+    fun boxSideOk(b: Blk): Boolean = b.isBox && b.alOf() != "c" && b.bw.coerceIn(.2f, 1f) <= maxSideW() + .001f
+    fun boxLive(bid: String, w: Float) {
+        blocks = blocks.map { if (it.id == bid) it.copy(bw = w.coerceIn(.2f, 1f)) else it }
+        dirty()
+    }
 
     fun imgAlign(al: String) {
         val s = selImg ?: return
@@ -1389,7 +1402,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     private fun isEmptyP(x: Blk) = x.ty == "p" && x.r.t.isEmpty()
 
-    fun mvBegin(bid: String, imgId: String) {
+    fun mvBegin(bid: String, imgId: String, grab: Float = -1f) {
         val i = idx(bid)
         if (i < 0) return
         val b = blocks[i]
@@ -1401,9 +1414,9 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             val m0 = b.im[0]
             widthDp * m0.w.coerceIn(.2f, 1f) / m0.a.coerceIn(.2f, 5f) * dens
         } else p[1]
-        mv = Mv(bid, imgId, b.im.size > 1, p[0], hh)
+        mv = Mv(bid, imgId, b.im.size > 1, p[0], hh, grab)
         mvX = 0f; mvY = 0f; dropAt = -1; mvDir = 0; mergeT = null
-        mvAl = b.im.firstOrNull()?.al ?: "c"
+        mvAl = b.im.firstOrNull()?.al ?: b.alOf()
         buzz?.invoke()
         autoJob?.cancel()
         autoJob = scope.launch {
@@ -1411,7 +1424,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
                 val m = mv
                 val sc = scroll
                 if (m != null && sc != null && mvDir != 0 && viewH > 0f) {
-                    val cy = m.top + minOf(m.h / 2f, viewH * .3f) + mvY - sc.value
+                    val cy = mvRef(m) - sc.value
                     val z = viewH * .2f
                     val v = when {
                         mvDir < 0 && cy < z -> -(z - cy) / z
@@ -1427,6 +1440,13 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             }
         }
     }
+
+    /**
+     * Titik acuan seretan di ruang konten. Bila jari memegang blok di titik g (tab tabel), acuannya jari itu sendiri; kalau tidak, titik tengah blok
+     * (dibatasi supaya blok yang sangat tinggi tidak punya acuan jauh di luar layar). Dulu tabel panjang memakai titik 30% layar di bawah jari,
+     * sehingga seret ke atas tak pernah menyentuh zona gulir atas.
+     */
+    private fun mvRef(m: Mv): Float = m.top + (if (m.g >= 0f) m.g else minOf(m.h / 2f, viewH * .3f)) + mvY
 
     fun mvDrag(dx: Float, dy: Float) {
         val m = mv ?: return
@@ -1466,7 +1486,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         mergeCheck()
         if (m.row) { rowOut(m); return }
         // blok yang sangat tinggi (tabel panjang): acuan = dekat bagian atasnya, bukan pusatnya yang jauh di luar layar
-        val cy = m.top + minOf(m.h / 2f, viewH * .3f) + mvY
+        val cy = mvRef(m)
         var gap = blocks.size
         for ((j, b) in blocks.withIndex()) {
             if (j == i) continue
@@ -1476,6 +1496,14 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val nd = if (mergeT != null || gap == i || gap == i + 1) -1 else gap
         if (nd != dropAt) { dropAt = nd; if (nd >= 0) buzz?.invoke() }
         val b = blocks[i]
+        if (b.isBox || b.ty == "tbl") {
+            val w = widthDp * dens
+            val wp = if (b.ty == "tbl") (tblWidths(b, widthDp).sum() + 3f) * dens else w * b.bw.coerceIn(.2f, 1f)
+            val base = when (b.alOf()) { "l" -> wp / 2f; "r" -> w - wp / 2f; else -> w / 2f }
+            val cx = base + mvX
+            val al = if (cx < w / 3f) "l" else if (cx > w * 2f / 3f) "r" else "c"
+            if (al != mvAl) { mvAl = al; buzz?.invoke() }
+        }
         if (b.im.size == 1) {
             val w = widthDp * dens
             val mi = b.im[0]
@@ -1504,6 +1532,11 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             val mi = b.im[0]
             val w = if (al != "c" && mi.w > maxSideW()) minOf(SIDE_W, maxSideW()) else mi.w
             b = b.copy(im = listOf(mi.copy(al = al, w = w)))
+        }
+        if (!m.row && (b.isBox || b.ty == "tbl") && al != b.alOf()) {
+            // dilepas di sepertiga kiri / kanan: menempel ke sisi itu dan teks mengelilinginya; di tengah: sebaris penuh seperti foto
+            val tooWide = b.isBox && al != "c" && b.bw > maxSideW()
+            b = b.copy(ba = al, bw = if (tooWide) minOf(SIDE_W, maxSideW()) else b.bw)
         }
         val l = blocks.toMutableList()
         if (!m.row && to >= 0 && to != i && to != i + 1) {
