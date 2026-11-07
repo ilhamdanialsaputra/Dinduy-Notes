@@ -629,10 +629,10 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun startRec(noteId: String): Boolean {
+    fun startRec(noteId: String, quiet: Boolean = false): Boolean {
         player.stop()
         val ok = rec.start(noteId)
-        if (!ok) show("Can't start recording") else bgSync()
+        if (!ok) { if (!quiet) show("Can't start recording" + (rec.lastError?.let { " ($it)" } ?: "")) } else bgSync()
         return ok
     }
 
