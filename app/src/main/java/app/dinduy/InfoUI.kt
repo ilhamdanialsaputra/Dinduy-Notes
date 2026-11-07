@@ -36,6 +36,8 @@ import androidx.compose.ui.unit.dp
 private const val ABOUT = "A fast, private notes app with rich text, images, PDF reading, handwriting, " +
     "reminders and voice notes with on-device transcription. Your notes are stored on your phone."
 
+private const val DONATE_URL = "https://ko-fi.com/ilhamdanials#checkoutModal"
+
 private fun openUrl(ctx: android.content.Context, url: String) {
     try { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (e: Exception) { }
 }
@@ -103,7 +105,10 @@ fun InfoScreen(onBack: () -> Unit) {
                     InfoRow(POS_MID, "notes", "What's new", "Release notes for every version") { openUrl(ctx, Upd.REPO_URL + "/releases") }
                     InfoRow(POS_BOT, "pen", "Report an issue", "Found a bug or have an idea?") { openUrl(ctx, Upd.REPO_URL + "/issues") }
                 }
-                SGroup("Privacy", 120) {
+                SGroup("Support", 120) {
+                    InfoRow(POS_ONE, "heart", "Donate", "Support Dinduy's development on Ko-fi") { openUrl(ctx, DONATE_URL) }
+                }
+                SGroup("Privacy", 180) {
                     InfoRow(POS_ONE, "phone", "Stored on your phone", "Your notes stay on this device unless you share or back them up", onClick = null)
                 }
             }
