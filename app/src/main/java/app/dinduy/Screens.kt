@@ -185,7 +185,6 @@ interface Actions {
     fun shareBackup()
     fun restoreBackup()
     fun saveMd(name: String, text: String)
-    fun shareMd(name: String, text: String)
     fun savePdf(name: String, file: java.io.File)    // simpan PDF hasil ekspor lewat pemilih berkas sistem
     fun sharePdf(name: String, file: java.io.File)   // bagikan PDF hasil ekspor lewat lembar bagikan
     fun copyText(t: String)
