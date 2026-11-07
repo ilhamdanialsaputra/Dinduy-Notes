@@ -73,6 +73,8 @@ object PdfExport {
         val zones = ArrayList<FloatArray>()    // rentang yang tidak boleh dipotong (gambar, judul)
         val strokes = ArrayList<PStroke>()
         val texts = HashMap<String, TL>()      // id blok -> tata letak teksnya
+        val imgs = HashMap<String, FloatArray>() // id gambar -> [x, y, lebar, tinggi] di ruang aliran (pt), untuk coretan di atas gambar
+        var objW = 0f                          // lebar (pt) objek terakhir yang ditata (kutipan / kode / garis / tabel), dipakai aliran teks di sampingnya
         var y = 0f
     }
 
@@ -100,6 +102,20 @@ object PdfExport {
         val (l, r) = fitInd(b.il, b.ir, cx.cw / u)
         val f = if (sp) b.fi else 0
         return Ind(l * u, r * u, f.coerceIn(0, IND_MAX_FI) * u, (-f).coerceIn(0, IND_MAX_FI) * u)
+    }
+
+    /**
+     * Lebar relatif objek (foto, kutipan, kode, garis) di halaman. Teks PDF memakai ukuran huruf pilihan pengguna (bodyPt), sedangkan lebar
+     * relatif dihitung dari lebar halaman: kalau huruf PDF lebih kecil daripada huruf editor yang "setia", objek jadi kegedean dibanding teksnya.
+     * Di sini lebarnya diskalakan dengan rasio huruf yang sama (k), jadi perbandingan objek : teks sama dengan di editor. Objek yang hampir
+     * selebar halaman tetap selebar halaman.
+     */
+    private fun effFrac(cx: Cx, frac: Float): Float {
+        val f = frac.coerceIn(.2f, 1f)
+        val k = (cx.u / cx.r).coerceIn(.35f, 1.6f)
+        val t = ((f - .7f) / .3f).coerceIn(0f, 1f)
+        val s = t * t * (3f - 2f * t)
+        return (f * (k + (1f - k) * s)).coerceIn(.12f, 1f)
     }
 
     private class QSt(val bg: Color, val fg: Color, val r: FloatArray, val label: String?, val bar: Boolean = false, val border: Boolean = false)
@@ -546,8 +562,11 @@ object PdfExport {
         val padX = 22f * u
         val padY = 18f * u
         val size = fs * 1.05f
-        val iv = indOf(cx, b, false)
-        val boxW = (cx.cw - iv.l - iv.r).coerceAtLeast(60f)
+        val full = b.bw >= .999f
+        val iv = if (full) indOf(cx, b, false) else NO_IND
+        val boxW = ((if (full) cx.cw else cx.cw * effFrac(cx, b.bw)) - iv.l - iv.r).coerceAtLeast(60f)
+        val bx = if (full) iv.l else when (b.alOf()) { "l" -> 0f; "r" -> cx.cw - boxW; else -> (cx.cw - boxW) / 2f }
+        f.objW = boxW
         val lay = mk(cx, b.r, (boxW - 2f * padX).coerceAtLeast(30f), size, q.fg.toArgb(), size * cx.lh, ta = b.ta)
         val lsz = fs * .7f * 1.05f
         val lp = TextPaint(Paint.ANTI_ALIAS_FLAG)
@@ -562,11 +581,11 @@ object PdfExport {
         val boxH = padY * 2f + labelH + lay.height
         val y0 = f.y
         f.cuts.add(y0)
-        f.texts[b.id] = TL(lay, iv.l + padX, y0 + padY + labelH)
+        f.texts[b.id] = TL(lay, bx + padX, y0 + padY + labelH)
         for (i in 1 until lay.lineCount) f.cuts.add(y0 + padY + labelH + lay.getLineTop(i))
         val rs = radii(q.r, u, boxW, boxH)
         val w = boxW
-        f.pieces.add(Piece(y0, boxH, iv.l, { c ->
+        f.pieces.add(Piece(y0, boxH, bx, { c ->
             val path = boxPath(w, boxH, rs)
             val p = Paint(Paint.ANTI_ALIAS_FLAG)
             if (q.bg.alpha > 0f) {
@@ -606,7 +625,10 @@ object PdfExport {
         val u = cx.u
         val pad = 20f * u
         val tsz = fs * .82f
-        val lay = mk(cx, Rt(b.r.t), cx.cw - 2f * pad, tsz, pal.os.toArgb(), tsz * 1.55f, mono = true)
+        val boxW = if (b.bw >= .999f) cx.cw else cx.cw * effFrac(cx, b.bw)
+        val bx = if (b.bw >= .999f) 0f else when (b.alOf()) { "l" -> 0f; "r" -> cx.cw - boxW; else -> (cx.cw - boxW) / 2f }
+        f.objW = boxW
+        val lay = mk(cx, Rt(b.r.t), (boxW - 2f * pad).coerceAtLeast(30f), tsz, pal.os.toArgb(), tsz * 1.55f, mono = true)
         val label = if (b.l.isNotEmpty()) b.l.uppercase() else null
         val cp = TextPaint(Paint.ANTI_ALIAS_FLAG)
         cp.textSize = 12f * u
@@ -621,11 +643,11 @@ object PdfExport {
         val boxH = pad * 2f + chipH + lay.height
         val y0 = f.y
         f.cuts.add(y0)
-        f.texts[b.id] = TL(lay, pad, y0 + pad + chipH)
+        f.texts[b.id] = TL(lay, bx + pad, y0 + pad + chipH)
         for (i in 1 until lay.lineCount) f.cuts.add(y0 + pad + chipH + lay.getLineTop(i))
-        val rs = radii(floatArrayOf(28f, 28f, 28f, 28f), u, cx.cw, boxH)
-        val w = cx.cw
-        f.pieces.add(Piece(y0, boxH, 0f, { c ->
+        val rs = radii(floatArrayOf(28f, 28f, 28f, 28f), u, boxW, boxH)
+        val w = boxW
+        f.pieces.add(Piece(y0, boxH, bx, { c ->
             val p = Paint(Paint.ANTI_ALIAS_FLAG)
             p.color = pal.c3.toArgb()
             c.drawPath(boxPath(w, boxH, rs), p)
@@ -685,9 +707,11 @@ object PdfExport {
         val total = acc
         for (ri in 2 until rows.size) f.cuts.add(y0 + tops[ri])
         val cw = colWs.sum()
+        val bx = when (b.alOf()) { "r" -> cx.cw - cw; "c" -> (cx.cw - cw) / 2f; else -> 0f }
+        f.objW = cw
         val rr = (4f * cx.u).coerceIn(1f, 4f)   // sudut hampir kotak, sama seperti tabel di editor
         val bw = (1.5f * cx.u).coerceIn(.8f, 1.5f)
-        f.pieces.add(Piece(y0, total, 0f, { c ->
+        f.pieces.add(Piece(y0, total, bx, { c ->
             val path = Path()
             path.addRoundRect(RectF(0f, 0f, cw, total), rr, rr, Path.Direction.CW)
             c.save()
@@ -722,14 +746,16 @@ object PdfExport {
     }
 
     // ------------------------------------------------------------------ garis pemisah
-    private fun emitHr(f: Flow, cx: Cx) {
+    private fun emitHr(f: Flow, cx: Cx, b: Blk) {
         val padV = cx.fs * .9f
         val bh = (8f * cx.u).coerceIn(2f, 8f)
         val y0 = f.y
         f.cuts.add(y0)
-        val cw = cx.cw
+        val cw = if (b.bw >= .999f) cx.cw else cx.cw * effFrac(cx, b.bw)
+        val bx = if (b.bw >= .999f) 0f else when (b.alOf()) { "l" -> 0f; "r" -> cx.cw - cw; else -> (cx.cw - cw) / 2f }
+        f.objW = cw
         val col = cx.pal.ol.toArgb()
-        f.pieces.add(Piece(y0, padV * 2f + bh, 0f, { c ->
+        f.pieces.add(Piece(y0, padV * 2f + bh, bx, { c ->
             val p = Paint(Paint.ANTI_ALIAS_FLAG)
             p.color = col
             c.drawRoundRect(RectF(0f, padV, cw, padV + bh), bh / 2f, bh / 2f, p)
@@ -816,7 +842,7 @@ object PdfExport {
         val maxH = cx.h * .9f
         if (n == 1) {
             val m = b.im[0]
-            var w = cx.cw * m.w.coerceIn(.2f, 1f)
+            var w = cx.cw * effFrac(cx, m.w)
             val ratio = m.a.coerceIn(.2f, 5f)
             var h = w / ratio
             if (h > maxH) {
@@ -829,7 +855,8 @@ object PdfExport {
             val x = when (m.al) { "l" -> 0f; "r" -> cx.cw - w; else -> (cx.cw - w) / 2f }
             val ww = w
             val hh = h
-            f.pieces.add(Piece(y0, h, x, null) { c -> drawCell(c, cx, cell, 0f, ww, hh) })
+            f.imgs[m.id] = floatArrayOf(x, y0, ww, hh)
+            f.pieces.add(Piece(y0, h, x, { c -> drawCell(c, cx, cell, 0f, ww, hh) }, null))
             if (!float) {
                 f.zones.add(floatArrayOf(y0, y0 + h))
                 f.y = y0 + h + bottom
@@ -876,16 +903,68 @@ object PdfExport {
         val x0 = (cx.cw - totalW) / 2f
         val cells = b.im.mapIndexed { ix, m -> cellBitmap(cx, m, widths[ix], h) }
         val hh = h
-        f.pieces.add(Piece(y0, h, x0, null) { c ->
+        run {
+            var xx = x0
+            for (ix in widths.indices) {
+                f.imgs[b.im[ix].id] = floatArrayOf(xx, y0, widths[ix], hh)
+                xx += widths[ix] + gap
+            }
+        }
+        f.pieces.add(Piece(y0, h, x0, { c ->
             var xx = 0f
             for (ix in widths.indices) {
                 drawCell(c, cx, cells[ix], xx, widths[ix], hh)
                 xx += widths[ix] + gap
             }
-        })
+        }, null))
         f.zones.add(floatArrayOf(y0, y0 + h))
         f.y = y0 + h + bottom
         return 1
+    }
+
+    // ------------------------------------------------------------------ objek mengambang (kutipan, kode, garis, tabel)
+    /**
+     * Kutipan / kode / garis / tabel yang menempel ke kiri / kanan (diseret di editor) dan cukup sempit: teks sesudahnya mengalir di sampingnya
+     * sampai tingginya habis, persis seperti foto. Mengembalikan jumlah blok yang terpakai.
+     */
+    private fun emitObj(f: Flow, cx: Cx, bl: List<Blk>, i: Int, last: Int, maxSide: Float): Int {
+        val b = bl[i]
+        val fs = cx.fs
+        val y0 = f.y
+        f.objW = 0f
+        when (b.ty) {
+            "q" -> emitQuote(f, cx, b)
+            "code" -> emitCode(f, cx, b)
+            "tbl" -> emitTable(f, cx, b)
+            else -> emitHr(f, cx, b)
+        }
+        val total = f.y - y0
+        val dpW = (cx.cw / cx.r).coerceAtLeast(120f)
+        val frac = if (b.ty == "tbl") (tblWidths(b, dpW).sum() + 3f) / dpW else b.bw.coerceIn(.2f, 1f)
+        val al = b.alOf()
+        if (al == "c" || frac > maxSide + .001f || total <= 0f || f.objW <= 0f || (b.ty == "tbl" && b.tb.isEmpty())) return 1
+        val left = al != "r"
+        val indent = f.objW + SIDE_GAP * cx.u
+        val groupBottom = y0 + total
+        f.zones.add(floatArrayOf(y0, groupBottom))
+        var rem = total
+        var j = i + 1
+        f.y = y0
+        while (j <= last && rem > 0f) {
+            val x2 = bl[j]
+            if (x2.ty != "p" && x2.ty != "h" && x2.ty != "li") break
+            val top = if (x2.ty == "h") fs * .4f else 0f
+            if (top >= rem) break
+            val sy = f.y
+            val em = emitText(f, cx, x2, FloatCtx(rem, indent, left))
+            inkOf(f, cx, x2, sy)
+            val fits = top + em.textH <= rem
+            j++
+            if (!fits) { rem = 0f; break }
+            rem -= em.total
+        }
+        f.y = max(f.y, groupBottom)
+        return j - i
     }
 
     // ------------------------------------------------------------------ coretan
@@ -935,13 +1014,32 @@ object PdfExport {
             val n = s.p.size / 3
             if (n == 0) continue
             if (tl != null && s.anc && tl.lay.lay.text.isNotEmpty()) { anchoredInk(f, cx, s, tl); continue }
+            val ir = if (s.img) f.imgs[s.ai] else null
+            if (ir != null) {
+                // coretan di atas gambar: tiap titik relatif kotak gambar, tebal mengikuti lebar gambar (sama seperti editor)
+                val g = FloatArray(n * 3)
+                for (q in 0 until n) {
+                    g[q * 3] = ir[0] + s.an[q * 2] * ir[2]
+                    g[q * 3 + 1] = ir[1] + s.an[q * 2 + 1] * ir[3]
+                    g[q * 3 + 2] = s.p[q * 3 + 2]
+                }
+                val gw = s.w * ir[2] / s.ah
+                val gp = inkPath(g, n, s.t, gw, s.sh).asAndroidPath()
+                val gr = RectF()
+                gp.computeBounds(gr, true)
+                val gpad = if (s.t == 1) gw / 2f else 0f
+                f.strokes.add(PStroke(gp, s.t, inkColor(cx.pal, s.c, s.t == 1).toArgb(), gw, gr.top - gpad, gr.bottom + gpad))
+                continue
+            }
+            // coretan di blok teks yang tak bisa menempel ke huruf (mis. paragraf kosong): jarak dan tebal mengikuti ukuran huruf, seperti editor
+            val sc = if (s.fz && tl != null) tl.lay.em / s.ah else cx.r
             val a = FloatArray(n * 3)
             for (q in 0 until n) {
                 a[q * 3] = s.p[q * 3] * cx.cw
-                a[q * 3 + 1] = top + s.p[q * 3 + 1] * cx.r
+                a[q * 3 + 1] = top + s.p[q * 3 + 1] * sc
                 a[q * 3 + 2] = s.p[q * 3 + 2]
             }
-            val wPx = s.w * cx.r
+            val wPx = s.w * sc
             val ap = inkPath(a, n, s.t, wPx, s.sh).asAndroidPath()
             val rf = RectF()
             ap.computeBounds(rf, true)
@@ -979,10 +1077,7 @@ object PdfExport {
             var used = 1
             when (b.ty) {
                 "p", "h", "li" -> emitText(f, cx, b, null)
-                "q" -> emitQuote(f, cx, b)
-                "code" -> emitCode(f, cx, b)
-                "tbl" -> emitTable(f, cx, b)
-                "hr" -> emitHr(f, cx)
+                "q", "code", "tbl", "hr" -> used = emitObj(f, cx, bl, i, last, maxSide)
                 "img" -> used = emitImg(f, cx, bl, i, last, maxSide)
             }
             inkOf(f, cx, b, y0)
@@ -1033,11 +1128,14 @@ object PdfExport {
 
     private fun drawStrokes(c: Canvas, f: Flow, ranges: List<FloatArray>, page: Int, tool: Int) {
         val y0 = ranges[page][0]
+        val y1 = ranges[page][1]
         c.save()
         c.translate(ML, MT - y0)
+        // dipotong di batas halaman: stabilo yang kebetulan jatuh di sambungan dua halaman tetap menempel ke baris teksnya di kedua halaman
+        c.clipRect(-ML, y0, PW.toFloat(), y1)
         for (s in f.strokes) {
             if ((if (s.tool == 1) 1 else 0) != tool) continue
-            if (pageOf(ranges, (s.top + s.bottom) / 2f) != page) continue
+            if (s.bottom <= y0 || s.top >= y1) continue
             val p = Paint(Paint.ANTI_ALIAS_FLAG)
             p.color = s.color
             if (s.tool == 1) {
