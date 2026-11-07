@@ -136,7 +136,6 @@ object Upd {
                     res.r.apkUrl == null -> UpdState.message = "Version ${res.r.tag.removePrefix("v")} is out, but its APK isn't available yet."
                     else -> {
                         UpdState.dlError = null; UpdState.ready = null; UpdState.progress = -1f
-                        UpdState.infoOpen = false
                         UpdState.release = res.r
                     }
                 }
