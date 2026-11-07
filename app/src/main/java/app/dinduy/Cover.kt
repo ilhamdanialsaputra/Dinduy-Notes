@@ -103,6 +103,22 @@ fun CoverImage(vm: AppVM, n: Note, modifier: Modifier = Modifier) {
     }
 }
 
+private const val LIGHT_N = 28
+
+/**
+ * Kurva pudar sampul di mode terang (alpha kertas dari atas ke bawah banner).
+ * Dibuat landai: kerudung tipis di tepi atas (ikon status tetap terbaca) yang meluruh sendiri, lalu foto larut perlahan ke kertas
+ * lewat smoothstep yang dimulai di ~20% tinggi dan mendarat tepat di tepi bawah (tanpa tepi tegas).
+ * Perkiraan: ~4% di 30% tinggi, ~32% di 50%, ~75% di 74% (awal judul, teks gelap tetap kontras), penuh di 100%.
+ * Kemiringan maksimumnya sekitar setengah dari kurva lama, jadi peralihannya tidak terasa tajam.
+ */
+private val LIGHT_FADE = FloatArray(LIGHT_N) { i ->
+    val p = i / (LIGHT_N - 1).toFloat()
+    val top = .13f * (1f - cSmooth(p / .30f))
+    val body = cSmooth((p - .20f) / .80f)
+    1f - (1f - top) * (1f - body)
+}
+
 /**
  * Banner sampul di atas editor, digambar sebagai lapisan di belakang bilah atas dan ikut tergulir bersama isi.
  * Sampul ini TIDAK memudar saat morph: ia buram penuh sejak awal dan menimpa sampul kartu (bayangan kartu tidak menggambar sampul,
@@ -149,14 +165,9 @@ fun EditorCover(vm: AppVM, d: Note, scroll: () -> Int) {
                             .28f to clear,
                             .42f to clear,
                             1f to pal.s.copy(alpha = e)
-                        ) else arrayOf(0f to pal.s.copy(alpha = .20f * e)) + Array(14) { i ->
-                            // terang: kerudung tipis di tepi atas (ikon status tetap terbaca di atas foto gelap), lalu foto larut ke kertas
-                            // lewat kurva smootherstep yang sangat landai di awal dan mendarat halus di kertas (tanpa tepi tegas):
-                            // ~5% di 30% tinggi, ~33% di 45%, ~70% di 60% (area judul: teks gelap tetap kontras), penuh di bagian paling bawah
-                            val u = i / 13f
-                            val t = (u * 1.18f).coerceAtMost(1f)
-                            val a = t * t * t * (t * (t * 6f - 15f) + 10f)
-                            (.16f + .84f * u) to pal.s.copy(alpha = a * e)
+                        ) else Array(LIGHT_N) { i ->
+                            // terang: lihat LIGHT_FADE (kurva landai, banyak titik henti supaya tidak ada pita / siku)
+                            (i / (LIGHT_N - 1).toFloat()) to pal.s.copy(alpha = LIGHT_FADE[i] * e)
                         }
                     )
                 )
