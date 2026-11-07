@@ -36,6 +36,17 @@
 
 <div align="center">
 
+<img width="1920" height="1080" alt="Dinduy Notes_20261108_031652_0000" src="https://github.com/user-attachments/assets/e1ee6615-7090-4fc4-a9ed-5049e5d71342" />
+
+<img width="1920" height="1080" alt="Dinduy Notes_20261108_031653_0001" src="https://github.com/user-attachments/assets/6cbce289-bf6d-4d17-9106-3ccfa0cee326" />
+
+<img width="1920" height="1080" alt="Dinduy Notes_20261108_031653_0003" src="https://github.com/user-attachments/assets/5ec87b3b-2ce1-4746-a96f-9158d6a7a6f4" />
+
+<img width="1920" height="1080" alt="Dinduy Notes_20261108_031653_0004" src="https://github.com/user-attachments/assets/6c90a923-1ff8-4643-9247-1a38b239b9b1" />
+
+<img width="1920" height="1080" alt="Dinduy Notes_20261108_031653_0005" src="https://github.com/user-attachments/assets/8a542d43-2811-4359-ac40-6fbd156d5dfe" />
+
+
 ## Overview
 
 </div>
