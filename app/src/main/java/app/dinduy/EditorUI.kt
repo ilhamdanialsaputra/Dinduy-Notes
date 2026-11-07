@@ -64,6 +64,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -206,8 +207,10 @@ fun AnnotatedString.Builder.addSel(pal: Pal, rt: Rt, a0: Int, b0: Int, off: Int,
 fun styled(rt: Rt, text: String, off: Int, pal: Pal, fs: Float): AnnotatedString = buildAnnotatedString {
     append(text)
     val n = text.length
-    // awalan tak terlihat (Z): lebarnya dibuat nyaris nol, supaya kursor / teks rata tengah benar-benar di tengah (tidak geser setengah lebar Z)
-    if (off == 1 && n > 0 && text[0] == '\u200B') addStyle(SpanStyle(fontSize = 0.01.sp, letterSpacing = 0.sp), 0, 1)
+    // awalan tak terlihat (Z): lebarnya dibuat nyaris nol, supaya kursor / teks rata tengah benar-benar di tengah (tidak geser setengah lebar Z).
+    // Paragraf KOSONG (hanya Z, n == 1) tidak boleh dikecilkan: baris itu tak punya huruf lain, jadi tinggi baris dan kursornya ikut
+    // menyusut ke 0,01sp dan kursor tak terlihat. Z tak berlebar (zero-width) sehingga tak menggeser kursor.
+    if (off == 1 && n > 1 && text[0] == '\u200B') addStyle(SpanStyle(fontSize = 0.01.sp, letterSpacing = 0.sp), 0, 1)
     for (s in rt.sp) {
         val a = (s.s + off).coerceIn(0, n)
         val b = (s.e + off).coerceIn(0, n)
@@ -628,7 +631,7 @@ fun ParaRow(ed: Ed, b: Blk, ordN: Int, dm: Dm, pal: Pal, fold: Fold?, mk: Float,
     val fs = dm.fs
     val li = b.ty == "li"
     val lineH = fs * dm.lh
-    val mw = when (b.lt) { "o" -> 2.2f; "c" -> 1.9f; else -> 1.7f } * fs
+    val mw = when (b.lt) { "o", "a" -> 2.2f; "c" -> 1.9f; else -> 1.7f } * fs
     val done = li && b.lt == "c" && b.x
     val (il, ir) = fitInd(b.il, b.ir, ed.widthDp)
     val st = baseStyle(pal, dm).let {
@@ -670,12 +673,13 @@ fun ParaRow(ed: Ed, b: Blk, ordN: Int, dm: Dm, pal: Pal, fold: Fold?, mk: Float,
                 )
             ) {
                 when (b.lt) {
-                    "o" -> {
+                    "o", "a" -> {
                         val sz = 1.55f * fs
+                        val label = if (b.lt == "a") letterOf(ordN) else ordN.toString()
                         Box(
                             Modifier.offset(0.dp, (cy - sz / 2f).dp).size(sz.dp).clip(CircleShape).background(pal.p),
                             Alignment.Center
-                        ) { T(ordN.toString(), fs * .85f, 900, pal.op) }
+                        ) { T(label, fs * (if (label.length > 1) .62f else .85f), 900, pal.op) }
                     }
                     "c" -> {
                         val sz = 1.15f * fs
@@ -701,10 +705,23 @@ fun ParaRow(ed: Ed, b: Blk, ordN: Int, dm: Dm, pal: Pal, fold: Fold?, mk: Float,
     }
 }
 
+/** Lebar tiap kolom tabel (dp): lebar yang disetel pengguna, atau lebar bawaan (lebar layar dibagi rata, minimal 110dp). */
+fun tblWidths(b: Blk, viewDp: Float): List<Float> {
+    val n = b.tb.firstOrNull()?.size ?: 1
+    val def = maxOf(110f, viewDp / n)
+    return List(n) { c -> b.cw.getOrNull(c)?.takeIf { it >= 40f } ?: def }
+}
+
+private const val COL_MIN = 56f
+private const val COL_MAX = 640f
+
 @Composable
 fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal) {
     val cols = b.tb.firstOrNull()?.size ?: 1
-    val colW = maxOf(110f, ed.widthDp / cols).dp
+    val dens = LocalDensity.current.density
+    val haptic = LocalHapticFeedback.current
+    val ws = tblWidths(b, ed.widthDp)
+    val def = maxOf(110f, ed.widthDp / cols)
     // sel yang sedang diedit di tabel ini (null = tidak ada). derivedStateOf: hanya tabel yang fokusnya berubah yang recompose.
     val fkS = remember(b.id) {
         androidx.compose.runtime.derivedStateOf {
@@ -714,34 +731,97 @@ fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal) {
     }
     val fk = fkS.value
     val fRC = if (fk != null) cellRC(fk) else null
-    HBox(
-        Modifier.fillMaxWidth().padding(bottom = (dm.fs * 1.1f).dp).clip(RoundedCornerShape(4.dp)).background(pal.c2)
-            .border(1.5.dp, pal.osv.copy(alpha = .75f), RoundedCornerShape(4.dp))   // garis luar jelas di tema terang maupun gelap
-            .horizontalScroll(rememberScrollState())
-    ) {
-        Column {
-            b.tb.forEachIndexed { r, row ->
-                val head = r == 0
-                val fc = if (fRC != null && fRC.first == r) fRC.second else -1
-                // satu baris = satu Layout sendiri (satu kali ukur, tanpa IntrinsicSize): tinggi baris = sel tertinggi
-                TRow(colW, head, r > 0, fc, pal) {
-                    row.forEachIndexed { c, _ ->
-                        val k = "${b.id}:$r:$c"
-                        val focused = fc == c
-                        val fg = if (focused) pal.opc else if (head) pal.osc else pal.os
-                        val al = when (b.ca.getOrNull(c)) {
-                            "center" -> androidx.compose.ui.text.style.TextAlign.Center
-                            "right" -> androidx.compose.ui.text.style.TextAlign.End
-                            else -> androidx.compose.ui.text.style.TextAlign.Start
+    val hs = rememberScrollState()
+    var viewW by remember { mutableStateOf(0) }
+    var dragC by remember { mutableStateOf(-1) }
+    var snapOn by remember { mutableStateOf(false) }
+    // [0] lebar yang sedang ditampilkan (dp), [1] arah geser terakhir (px), [2] lebar mentah tanpa tempel (dp)
+    val dw = remember { floatArrayOf(0f, 0f, 0f) }
+    val bS by rememberUpdatedState(b)
+    val wsS by rememberUpdatedState(ws)
+    val lifted = ed.mv?.let { it.bid == b.id } == true
+    val active = fk != null && !ed.reading && ed.mv == null
+    val showH = (active || dragC >= 0) && !lifted
+
+    // pegangan ditahan di tepi kanan layar: tabel ikut tergulir dan kolom terus melebar (jempol tak perlu bolak-balik)
+    LaunchedEffect(dragC) {
+        if (dragC < 0) return@LaunchedEffect
+        val c = dragC
+        while (true) {
+            delay(16)
+            if (dw[1] < 0f || viewW <= 0) continue
+            var edge = 0f
+            for (k in 0..c.coerceAtMost(wsS.size - 1)) edge += wsS[k]
+            val zone = 44f * dens
+            val over = edge * dens - hs.value - (viewW - zone)
+            if (over > 0f) {
+                val v = (over / zone).coerceIn(0f, 1f) * 12f * dens
+                dw[2] = (dw[2] + v / dens).coerceAtMost(COL_MAX)
+                dw[0] = if (kotlin.math.abs(dw[2] - def) < 8f) def else dw[2]
+                ed.tblCol(bS.id, c, dw[0])
+                hs.scrollBy(v)
+            }
+        }
+    }
+
+    Column(Modifier.fillMaxWidth().padding(bottom = (dm.fs * 1.1f).dp)) {
+        // tab pegangan di pojok kiri atas: tekan sebentar lalu geser = angkat dan pindahkan seluruh tabel (seperti foto)
+        if (!ed.reading) TableTab(ed, b, active, lifted, pal)
+        HBox(
+            Modifier.clip(RoundedCornerShape(4.dp)).background(pal.c2)
+                .border(1.5.dp, if (active) pal.p.copy(alpha = .75f) else pal.osv.copy(alpha = .75f), RoundedCornerShape(4.dp))   // garis luar jelas di tema terang maupun gelap
+                .onSizeChanged { viewW = it.width }
+                .horizontalScroll(hs)
+        ) {
+            Column {
+                b.tb.forEachIndexed { r, row ->
+                    val head = r == 0
+                    val fc = if (fRC != null && fRC.first == r) fRC.second else -1
+                    // satu baris = satu Layout sendiri (satu kali ukur, tanpa IntrinsicSize): tinggi baris = sel tertinggi
+                    TRow(ws.map { it.dp }, head, r > 0, fc, if (head) dragC else -1, pal) {
+                        row.forEachIndexed { c, _ ->
+                            val k = "${b.id}:$r:$c"
+                            val focused = fc == c
+                            val fg = if (focused) pal.opc else if (head) pal.osc else pal.os
+                            val al = when (b.ca.getOrNull(c)) {
+                                "center" -> androidx.compose.ui.text.style.TextAlign.Center
+                                "right" -> androidx.compose.ui.text.style.TextAlign.End
+                                else -> androidx.compose.ui.text.style.TextAlign.Start
+                            }
+                            // dibungkus Box: tiap sel selalu tepat satu anak Layout (TF bisa kosong sesaat), supaya pegangan tak salah urut
+                            Box(Modifier.fillMaxWidth()) {
+                                TF(
+                                    ed, k,
+                                    TextStyle(
+                                        color = fg, fontFamily = dm.ff, fontSize = (dm.fs * .9f).sp, lineHeight = (dm.fs * .9f * 1.45f).sp,
+                                        fontWeight = FontWeight(if (head) 850 else 400), textAlign = al
+                                    ),
+                                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)
+                                )
+                            }
                         }
-                        TF(
-                            ed, k,
-                            TextStyle(
-                                color = fg, fontFamily = dm.ff, fontSize = (dm.fs * .9f).sp, lineHeight = (dm.fs * .9f * 1.45f).sp,
-                                fontWeight = FontWeight(if (head) 850 else 400), textAlign = al
-                            ),
-                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)
-                        )
+                        if (head) for (c in 0 until cols) key(c) {
+                            ColHandle(
+                                pal, c == cols - 1, showH, dragC == c,
+                                onStart = {
+                                    ed.commit()
+                                    dragC = c; snapOn = false
+                                    dw[0] = wsS.getOrElse(c) { def }; dw[1] = 0f; dw[2] = dw[0]
+                                },
+                                onDrag = { dx ->
+                                    dw[1] = dx
+                                    dw[2] = (dw[2] + dx / dens).coerceIn(COL_MIN, COL_MAX)
+                                    // menempel ke lebar bawaan saat sudah dekat (getar kecil), seperti gambar menempel ke rasio aslinya
+                                    val near = kotlin.math.abs(dw[2] - def) < 8f
+                                    if (near && !snapOn) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    snapOn = near
+                                    dw[0] = if (near) def else dw[2]
+                                    ed.tblCol(bS.id, c, dw[0])
+                                },
+                                onEnd = { dragC = -1; snapOn = false; ed.commit() },
+                                onReset = { ed.commit(); ed.tblCol(bS.id, c, 0f); ed.commit() }
+                            )
+                        }
                     }
                 }
             }
@@ -749,27 +829,106 @@ fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal) {
     }
 }
 
-/** Satu baris tabel. Latar sel (kepala / sel aktif) dan garis pemisah digambar di sini; sel hanya berisi teks. */
+/** Tab pegangan tabel (pojok kiri atas, seperti tab map): area sentuh lebar, tekan sebentar lalu geser untuk memindahkan tabel. */
 @Composable
-private fun TRow(colW: Dp, head: Boolean, topLine: Boolean, fc: Int, pal: Pal, content: @Composable () -> Unit) {
+private fun TableTab(ed: Ed, b: Blk, active: Boolean, lifted: Boolean, pal: Pal) {
+    val sc by animateFloatAsState(if (lifted) 1.12f else 1f, spring(.6f, 500f), label = "tab")
+    val dots = if (active || lifted) pal.op else pal.osv
+    Box(
+        Modifier.size(64.dp, 28.dp).graphicsLayer { scaleX = sc; scaleY = sc; transformOrigin = TransformOrigin(0f, 1f) }
+            .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
+            .background(if (active || lifted) pal.p else pal.c4)
+            .holdDrag(
+                true,
+                onStart = { if (ed.ink.on) false else { ed.mvBegin(b.id, ""); true } },
+                onMove = { _, d -> ed.mvDrag(d.x, d.y) },
+                onEnd = { ok -> ed.mvEnd(ok) },
+                lead = 300L   // tekan ~0,1 detik saja: cukup untuk membedakan dari gulir halaman
+            ),
+        Alignment.Center
+    ) {
+        Canvas(Modifier.size(24.dp, 12.dp)) {
+            val r = 1.8.dp.toPx()
+            for (i in 0 until 4) for (j in 0 until 2) {
+                drawCircle(dots, r, Offset(size.width * (i + .5f) / 4f, size.height * (j + .5f) / 2f))
+            }
+        }
+    }
+}
+
+/**
+ * Pegangan lebar kolom di tepi kanan sel kepala: batang kecil yang terlihat, area sentuh 44dp.
+ * Seret ke kiri / kanan untuk mengubah lebar, ketuk dua kali untuk mengembalikan ke lebar otomatis.
+ */
+@Composable
+private fun ColHandle(
+    pal: Pal, last: Boolean, show: Boolean, dragging: Boolean,
+    onStart: () -> Unit, onDrag: (Float) -> Unit, onEnd: () -> Unit, onReset: () -> Unit
+) {
+    val st by rememberUpdatedState(onStart)
+    val dr by rememberUpdatedState(onDrag)
+    val en by rememberUpdatedState(onEnd)
+    val rs by rememberUpdatedState(onReset)
+    val sc by animateFloatAsState(if (dragging) 1.45f else 1f, spring(.6f, 600f), label = "chs")
+    val al by animateFloatAsState(if (show) 1f else 0f, tween(160), label = "cha")
+    Box(
+        Modifier
+            .pointerInput(show) { if (show) detectTapGestures(onDoubleTap = { rs() }) }
+            .pointerInput(show) {
+                if (show) detectDragGestures(
+                    onDragStart = { st() }, onDragEnd = { en() }, onDragCancel = { en() }
+                ) { ch, d -> ch.consume(); dr(d.x) }
+            },
+        if (last) Alignment.CenterEnd else Alignment.Center
+    ) {
+        Box(
+            Modifier.padding(end = if (last) 6.dp else 0.dp)
+                .graphicsLayer { scaleX = sc; scaleY = sc; alpha = al }
+                .size(5.dp, 28.dp).clip(CircleShape).background(pal.s).padding(1.dp).clip(CircleShape).background(pal.p)
+        )
+    }
+}
+
+/**
+ * Satu baris tabel. Latar sel (kepala / sel aktif / kolom yang sedang dilebarkan) dan garis pemisah digambar di sini.
+ * Anak pertama sampai ke-n = sel; sisanya (kalau ada) = pegangan lebar kolom, ditaruh di tepi kanan tiap kolom.
+ */
+@Composable
+private fun TRow(ws: List<Dp>, head: Boolean, topLine: Boolean, fc: Int, dc: Int, pal: Pal, content: @Composable () -> Unit) {
     androidx.compose.ui.layout.Layout(
         content = content,
         modifier = Modifier.drawBehind {
-            val w = colW.toPx()
-            val n = if (w > 0f) (size.width / w + .5f).toInt() else 0
-            for (c in 0 until n) {
-                val x = c * w
+            var x = 0f
+            ws.forEachIndexed { c, wd ->
+                val w = wd.toPx()
                 if (c == fc) drawRect(pal.pc, Offset(x, 0f), Size(w, size.height))
                 else if (head) drawRect(pal.sc, Offset(x, 0f), Size(w, size.height))
+                if (c == dc) drawRect(pal.p.copy(alpha = .16f), Offset(x, 0f), Size(w, size.height))
+                x += w
             }
             if (topLine) drawLine(pal.ol, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx())   // garis pemisah baris
-            for (c in 1 until n) drawLine(pal.ol, Offset(c * w, 0f), Offset(c * w, size.height), 1.dp.toPx())   // garis pemisah kolom
+            var cx = 0f
+            for (c in 0 until ws.size - 1) {
+                cx += ws[c].toPx()
+                drawLine(pal.ol, Offset(cx, 0f), Offset(cx, size.height), 1.dp.toPx())   // garis pemisah kolom
+            }
         }
     ) { ms, _ ->
-        val w = colW.roundToPx()
-        val ps = ms.map { it.measure(Constraints(minWidth = w, maxWidth = w)) }
-        val h = ps.maxOfOrNull { it.height } ?: 0
-        layout(w * ps.size, h) { ps.forEachIndexed { i, p -> p.placeRelative(i * w, 0) } }
+        val n = ws.size
+        val px = ws.map { it.roundToPx() }
+        val cells = (0 until n).map { i -> ms[i].measure(Constraints(minWidth = px[i], maxWidth = px[i])) }
+        val h = cells.maxOfOrNull { it.height } ?: 0
+        val hw = 44.dp.roundToPx()
+        val hands = (n until ms.size).map { i -> ms[i].measure(Constraints.fixed(hw, h)) }
+        layout(px.sum(), h) {
+            var x = 0
+            cells.forEachIndexed { i, p -> p.placeRelative(x, 0); x += px[i] }
+            var e = 0
+            hands.forEachIndexed { i, p ->
+                e += px[i]
+                p.placeRelative(if (i == n - 1) e - hw else e - hw / 2, 0)
+            }
+        }
     }
 }
 
@@ -1209,7 +1368,7 @@ private fun blockBM(b: Blk, pal: Pal, dm: Dm): BM? {
             BM(st, fs * .4f, fs * .5f, 0f)
         }
         "li" -> {
-            val mw = when (b.lt) { "o" -> 2.2f; "c" -> 1.9f; else -> 1.7f } * fs
+            val mw = when (b.lt) { "o", "a" -> 2.2f; "c" -> 1.9f; else -> 1.7f } * fs
             BM(baseStyle(pal, dm), 0f, fs * .5f, b.d * 1.4f * fs + mw)
         }
         else -> null
@@ -1240,7 +1399,7 @@ private fun planFloat(ed: Ed, i: Int, dm: Dm, pal: Pal, tm: TextMeasurer, dn: De
         if (top >= rem) break
         val fsz = bm.style.fontSize.value
         val isLi = x.ty == "li"
-        val mwLi = if (isLi) (when (x.lt) { "o" -> 2.2f; "c" -> 1.9f; else -> 1.7f } * fs) else 0f
+        val mwLi = if (isLi) (when (x.lt) { "o", "a" -> 2.2f; "c" -> 1.9f; else -> 1.7f } * fs) else 0f
         // inden kiri / kanan paragraf ikut dihitung: kolom teks mulai di base0 (dp dari tepi kiri) dan berakhir di W - irf
         val (ilf, irf) = fitInd(x.il, x.ir, ed.widthDp)
         val base0 = (if (isLi) x.d * 1.4f * fs else 0f) + ilf
@@ -1445,6 +1604,7 @@ fun EdBar(ed: Ed, act: Actions, imeOpen: Boolean) {
                         listOf("ar" to "+ Row", "ac" to "+ Column", "dr" to "− Row", "dc" to "− Column").forEach { (k, l) ->
                             Chip(l, pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.tOp(k) }
                         }
+                        if (blk != null && blk.cw.isNotEmpty()) Chip("Reset widths", pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.tblResetCols(blk.id) }
                         Chip("Delete table", pal.ec, pal.oec, RoundedCornerShape(23.dp)) { ed.tOp("dt") }
                     }
                     3 -> Row(
@@ -1505,6 +1665,7 @@ fun EdBar(ed: Ed, act: Actions, imeOpen: Boolean) {
                 Sep()
                 I("ul", "ul", isLi && blk?.lt == "b", convOff) { ed.setList("b") }
                 I("ol", "ol", isLi && blk?.lt == "o", convOff) { ed.setList("o") }
+                Tbn({ LetterListIcon(it) }, isLi && blk?.lt == "a", !convOff) { ed.pickQuote = false; ed.setList("a") }
                 I("chk", "chk", isLi && blk?.lt == "c", convOff) { ed.setList("c") }
                 I("out", "out", off = !isLi) { ed.indent(-1) }
                 I("ind", "ind", off = !isLi) { ed.indent(1) }
@@ -1536,6 +1697,19 @@ fun EdBar(ed: Ed, act: Actions, imeOpen: Boolean) {
                 }
             }
         }
+        }
+    }
+}
+
+/** Ikon daftar huruf: dua baris kecil "A —" dan "B —", sejajar dengan ikon daftar lain di toolbar. */
+@Composable
+fun LetterListIcon(c: Color) {
+    Column(Modifier.size(24.dp), verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically)) {
+        for (l in listOf("A", "B")) {
+            Row(Modifier.fillMaxWidth().height(11.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.width(9.dp), Alignment.Center) { T(l, 10f, 1000, c, lh = 1f) }
+                Box(Modifier.padding(start = 2.dp).weight(1f).height(2.5.dp).clip(RoundedCornerShape(1.dp)).background(c))
+            }
         }
     }
 }
@@ -1765,7 +1939,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                         .inkInput(ed, vm, scroll)
                         .holdDrag(
                             true,
-                            onStart = { pos -> !ed.ink.on && !ed.ink.busy && ed.selLong(pos, pos.y - scroll.value) },
+                            onStart = { pos -> !ed.ink.on && !ed.ink.busy && ed.mv == null && ed.selLong(pos, pos.y - scroll.value) },
                             onMove = { pos, _ -> ed.selMove(pos, pos.y - scroll.value) },
                             onEnd = { ed.selEnd() },
                             lead = 70L
