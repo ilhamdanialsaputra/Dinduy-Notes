@@ -10,7 +10,13 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
@@ -1504,8 +1510,9 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
             bars && !ui.inkOn && !findOn && ui.sel == null, Modifier.align(Alignment.BottomCenter).padding(bottom = sab + 16.dp),
             enter = fadeIn() , exit = fadeOut()
         ) {
-            Box(Modifier.clip(CircleShape).background(Color(0xFF2A2A2D)).padding(horizontal = 16.dp, vertical = 8.dp)) {
-                T("Page ${page + 1} of $count", 14f, 700, Color.White)
+            PageCapsule(page, count) { i ->
+                page = i
+                goTo = PHit(i, listOf(floatArrayOf(0f, 0f, 0f, 0f)), "", 0, 0)   // pindah halaman tanpa menggulir ke dalam halaman
             }
         }
 
@@ -1595,6 +1602,109 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                 } else {
                     Box(Modifier.pop({ inkP }, 5)) { IconBtn("ok", pal.op, { saveTool(); ui.inkOn = false }, size = 44.dp, bg = pal.p) }
                 }
+            }
+        }
+    }
+}
+
+
+/**
+ * Kapsul penunjuk halaman. Ketuk = kapsul melebar jadi penggeser (gaya Material 3 Expressive: trek tebal berujung bulat, celah di sekitar
+ * gagang tegak yang memipih saat ditekan, titik akhir). Tekan lalu geser di mana saja pada trek untuk pindah halaman; menciut sendiri
+ * kalau dibiarkan. Getar halus tiap berganti halaman.
+ */
+@Composable
+private fun PageCapsule(page: Int, count: Int, onSeek: (Int) -> Unit) {
+    val pal = LocalPal.current
+    val haptic = LocalHapticFeedback.current
+    val seek by androidx.compose.runtime.rememberUpdatedState(onSeek)
+    var open by remember { mutableStateOf(false) }
+    var drag by remember { mutableStateOf(false) }
+    var live by remember { mutableIntStateOf(page) }
+    var touch by remember { mutableIntStateOf(0) }
+    LaunchedEffect(open, drag, touch) { if (open && !drag) { delay(3200); open = false } }
+    val shown = (if (drag) live else page).coerceIn(0, (count - 1).coerceAtLeast(0))
+    val frac = if (count <= 1) 0f else shown / (count - 1f)
+    val animF by animateFloatAsState(frac, spring(1f, 1500f), label = "pcf")
+    val handleW by animateDpAsState(if (drag) 3.dp else 6.dp, spring(.6f, 520f), label = "pch")
+    val trackH by animateDpAsState(if (drag) 20.dp else 16.dp, spring(.6f, 520f), label = "pct")
+    AnimatedContent(
+        targetState = open,
+        modifier = Modifier.clip(CircleShape).background(Color(0xFF2A2A2D)),
+        transitionSpec = {
+            (fadeIn(tween(200)) + scaleIn(spring(.75f, 420f), initialScale = .88f)) togetherWith fadeOut(tween(110))
+        },
+        label = "pcap"
+    ) { isOpen ->
+        if (!isOpen) {
+            Box(
+                Modifier.clickable { live = page; touch++; open = true }.padding(horizontal = 16.dp, vertical = 8.dp)
+            ) { T("Page ${page + 1} of $count", 14f, 700, Color.White) }
+        } else {
+            Row(
+                Modifier.height(48.dp).padding(horizontal = 18.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                T((shown + 1).toString(), 15f, 800, Color.White, Modifier.widthIn(min = 24.dp))
+                Canvas(
+                    Modifier.width(200.dp).height(48.dp).pointerInput(count) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            val pad = 6.dp.toPx()
+                            fun at(x: Float): Int {
+                                val f = ((x - pad) / (size.width - 2f * pad).coerceAtLeast(1f)).coerceIn(0f, 1f)
+                                return (f * (count - 1).coerceAtLeast(0) + .5f).toInt()
+                            }
+                            drag = true; touch++
+                            live = at(down.position.x)
+                            seek(live)
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            down.consume()
+                            while (true) {
+                                val ev = awaitPointerEvent()
+                                val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!c.pressed) break
+                                val p = at(c.position.x)
+                                if (p != live) {
+                                    live = p
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    seek(p)
+                                }
+                                c.consume()
+                            }
+                            drag = false; touch++
+                        }
+                    }
+                ) {
+                    val pad = 6.dp.toPx()
+                    val th = trackH.toPx()
+                    val gap = 6.dp.toPx()
+                    val hw = handleW.toPx()
+                    val cy = size.height / 2f
+                    val x = pad + (size.width - 2f * pad) * animF
+                    val big = androidx.compose.ui.geometry.CornerRadius(th / 2f)
+                    val small = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
+                    fun seg(l: Float, r: Float, col: Color, leftBig: Boolean) {
+                        if (r - l < 1f) return
+                        val p = androidx.compose.ui.graphics.Path()
+                        p.addRoundRect(
+                            androidx.compose.ui.geometry.RoundRect(
+                                l, cy - th / 2f, r, cy + th / 2f,
+                                if (leftBig) big else small, if (leftBig) small else big,
+                                if (leftBig) small else big, if (leftBig) big else small
+                            )
+                        )
+                        drawPath(p, col)
+                    }
+                    seg(pad, x - hw / 2f - gap, pal.p, true)
+                    seg(x + hw / 2f + gap, size.width - pad, Color.White.copy(alpha = .2f), false)
+                    if (size.width - pad - (x + hw / 2f + gap) > 16.dp.toPx()) drawCircle(pal.p, 2.dp.toPx(), Offset(size.width - pad - 7.dp.toPx(), cy))
+                    drawRoundRect(
+                        pal.p, Offset(x - hw / 2f, cy - 18.dp.toPx()), androidx.compose.ui.geometry.Size(hw, 36.dp.toPx()),
+                        androidx.compose.ui.geometry.CornerRadius(hw / 2f)
+                    )
+                }
+                T(count.toString(), 15f, 700, Color.White.copy(alpha = .55f))
             }
         }
     }
