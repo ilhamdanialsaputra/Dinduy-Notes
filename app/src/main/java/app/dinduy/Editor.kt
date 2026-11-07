@@ -19,6 +19,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** Jarak antara gambar dan teks di sisinya (dp), dan lebar minimum kolom teks samping (dp). */
+/** Ambang komposisi berjendela (biaya blok: 1 per blok, tabel 1 + sel/2). Histeresis: nyala di WIN_ON, mati di bawah WIN_OFF. */
+const val WIN_ON = 140
+const val WIN_OFF = 100
 const val SIDE_GAP = 14f
 const val SIDE_MIN = 110f
 const val SIDE_W = 0.5f
@@ -1166,6 +1169,148 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     // dan tinggi per-frame itu memicu gulir kursor berulang (layar turun sendiri tanpa henti)
     fun cursorClear(): Float = if (barH > 0f) barH + 12f * dens else 12f * dens
     var scroll: ScrollState? = null
+
+    // ---- komposisi berjendela (catatan sangat panjang) ----
+    // Catatan yang sangat besar (ratusan blok / banyak sel tabel) tidak lagi menyusun SEMUA blok sekaligus:
+    // hanya blok di sekitar layar (plus yang "wajib hidup": fokus, seleksi, hasil cari, gambar diangkat) yang disusun,
+    // sisanya diganti Spacer setinggi terakhir terukur (atau perkiraan bila belum pernah diukur).
+    // Catatan biasa tidak terpengaruh (ambang di bawah).
+    var liveLo = 0f
+    var liveHi = 4500f
+    private var winFlag = false
+    val windowed: Boolean by androidx.compose.runtime.derivedStateOf {
+        var c = 0
+        for (b in blocks) c += if (b.ty == "tbl") 1 + b.tb.sumOf { it.size } / 2 else 1
+        winFlag = if (winFlag) c >= WIN_OFF else c >= WIN_ON
+        winFlag
+    }
+
+    /** Blok (atau kelompok gambar-apung) beserta rencananya, urutan sama dengan yang digambar di NoteScreen. */
+    fun slotsOf(plans: Map<String, FloatPlan>): List<Pair<Blk, FloatPlan?>> {
+        val bl = blocks
+        val out = ArrayList<Pair<Blk, FloatPlan?>>(bl.size)
+        var i = 0
+        while (i < bl.size) {
+            val b = bl[i]
+            val p = plans[b.id]
+            out.add(b to p)
+            i += 1 + (p?.parts?.size ?: 0)
+        }
+        return out
+    }
+
+    /** Perkiraan tinggi (px) satu blok yang belum pernah diukur. Kasar saja: selisihnya dikoreksi otomatis saat blok benar-benar tampil. */
+    fun estimateH(b: Blk, fs: Float, lh: Float): Float {
+        val w = (widthDp - b.il - b.ir - (if (b.ty == "li") 24f * (b.d + 1) else 0f)).coerceAtLeast(120f)
+        val cw = (fs * 0.52f).coerceAtLeast(4f)
+        fun lines(t: String, width: Float): Int {
+            val cpl = (width / cw).toInt().coerceAtLeast(4)
+            var n = 0
+            var s = 0
+            while (true) {
+                val e = t.indexOf('\n', s)
+                val len = (if (e < 0) t.length else e) - s
+                n += maxOf(1, (len + cpl - 1) / cpl)
+                if (e < 0) break
+                s = e + 1
+            }
+            return n
+        }
+        val dp = when (b.ty) {
+            "h" -> lines(b.r.t, w) * fs * 1.5f * 1.25f + 20f
+            "tbl" -> {
+                val nc = maxOf(1, b.tb.firstOrNull()?.size ?: 1)
+                val colW = (w / nc).coerceAtLeast(90f)
+                var sum = 8f
+                for (row in b.tb) {
+                    var mx = 1
+                    for (cell in row) mx = maxOf(mx, lines(cell.t, colW - 16f))
+                    sum += mx * fs * lh + 20f
+                }
+                sum
+            }
+            "img" -> {
+                val m = b.im.firstOrNull()
+                if (m == null) 120f else w * m.w.coerceIn(.2f, 1f) / m.a.coerceIn(.2f, 5f) + 16f
+            }
+            "hr" -> 28f
+            "lnk" -> 110f
+            "code", "q" -> lines(b.r.t, w - 24f) * fs * lh + 28f
+            else -> lines(b.r.t, w) * fs * lh + 8f
+        }
+        return dp * dens
+    }
+
+    fun estimateSlot(b: Blk, plan: FloatPlan?, fs: Float, lh: Float): Float {
+        val e0 = estimateH(b, fs, lh)
+        if (plan == null) return e0
+        var s = 0f
+        for ((x, _) in plan.parts) s += estimateH(x, fs, lh)
+        return maxOf(e0, s)
+    }
+
+    /** Himpunan id slot yang harus tersusun. Membaca state (dipakai di dalam snapshotFlow), jadi berlangganan semua yang relevan. */
+    fun computeLive(scrollV: Int, plans: Map<String, FloatPlan>, fs: Float, lh: Float): Set<String> {
+        val vh = if (viewH > 0f) viewH else 1600f
+        val top = scrollV.toFloat()
+        val bot = top + vh
+        val m = .75f * vh
+        val k = .35f * vh
+        if (top - liveLo < k || liveHi - bot < k || liveHi - liveLo < vh + 1.2f * m) {
+            liveLo = top - m
+            liveHi = bot + m
+        }
+        ink.lay   // berlangganan perubahan posisi blok
+        val forced = HashSet<String>()
+        focus?.let { forced.add(keyBlock(it)) }
+        req?.let { forced.add(keyBlock(it.key)) }
+        selImg?.let { forced.add(it.first) }
+        mv?.let { forced.add(it.bid) }
+        mergeT?.let { forced.add(it.bid) }
+        if (selOn) {
+            pa?.let { forced.add(keyBlock(it.key)) }
+            pf?.let { forced.add(keyBlock(it.key)) }
+        }
+        if (findOn) curHit()?.let { if (it.key != "@t") forced.add(keyBlock(it.key)) }
+        val out = HashSet<String>()
+        var y = 0f
+        for ((b, p) in slotsOf(plans)) {
+            val pos = bpos[b.id]
+            val t = pos?.get(0) ?: y
+            val h = pos?.get(1) ?: estimateSlot(b, p, fs, lh)
+            y = t + h
+            var hit = t <= liveHi && y >= liveLo
+            if (!hit && forced.isNotEmpty()) {
+                hit = b.id in forced || (p != null && p.parts.any { it.first.id in forced })
+            }
+            if (hit) out.add(b.id)
+        }
+        return out
+    }
+
+    /** Catat posisi slot. Bila slot yang seluruhnya di atas layar berubah tinggi, gulir digeser sebesar selisihnya agar isi di layar tidak melompat. */
+    fun setSlotPos(id: String, y: Float, h: Float) {
+        val o = bpos[id]
+        if (windowed && o != null && o[1] != h) {
+            val sc = scroll
+            if (sc != null && y + o[1] <= sc.value.toFloat()) sc.dispatchRawDelta(h - o[1])
+        }
+        setPos(id, y, h)
+    }
+
+    /** Slot keluar dari komposisi: buang layout/posisi basi supaya seleksi, hit-test, dan coretan tidak memakainya. */
+    fun leaveSlot(blks: List<Blk>, leader: String) {
+        if (!windowed) return
+        val ids = HashSet<String>()
+        for (x in blks) ids.add(x.id)
+        lays.keys.filter { keyBlock(it) in ids }.forEach { lays.remove(it); lsh.remove(it); layLen.remove(it) }
+        kpos.keys.filter { keyBlock(it) in ids }.forEach { kpos.remove(it) }
+        for (x in blks) {
+            for (m in x.im) ipos.remove(m.id)
+            if (x.id != leader) bpos.remove(x.id)
+        }
+        ink.lay++
+    }
 
     // ---- gulir otomatis ke kursor ----
     // Prinsip: HANYA satu sistem yang menggulir (fungsi ini). Gulir bawaan BasicTextField dimatikan di NoteScreen (cursorSpec).
