@@ -243,11 +243,13 @@ fun DocBar(ed: Ed, act: Actions) {
     val isLi = ty == "li" && !cell
     val kb = LocalSoftwareKeyboardController.current
     val haptic = LocalHapticFeedback.current
-    val kindNow = if (ed.selImg != null) 1 else if (cell) 2 else if (ed.pickQuote) 3 else 0
+    val kindNow = if (ed.selImg != null) 1 else if (ed.selObj != null) 4 else if (cell) 2 else if (ed.pickQuote) 3 else 0
+    var objLast by remember { mutableStateOf<String?>(null) }
     var lastSel by remember { mutableStateOf<Pair<String, Int>?>(null) }
     var subShown by remember { mutableStateOf(1) }
     SideEffect {
         ed.selImg?.let { lastSel = it }
+        ed.selObj?.let { objLast = it }
         if (ed.sub != 0) subShown = ed.sub
     }
 
@@ -318,6 +320,25 @@ fun DocBar(ed: Ed, act: Actions) {
                             Tbn({ Ic(if (inRow) "rows" else "cols", it) }, false, true) { ed.toggleRow() }
                             Tbn({ Ic("aup", it) }, false, true) { ed.imgMove(-1) }
                             Tbn({ Ic("adn", it) }, false, true) { ed.imgMove(1) }
+                        }
+                    }
+                }
+                4 -> {
+                    // objek sisipan (tabel / kode / kutipan / garis) terpilih tanpa keyboard: hapus + rata lewat tombol
+                    val ob = ed.blocks.firstOrNull { it.id == (ed.selObj ?: objLast) }
+                    if (ob == null) Spacer(Modifier.height(54.dp)) else {
+                        val al = ob.alOf()
+                        Row(
+                            Modifier.fillMaxWidth().height(54.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Tbn({ Ic("ok", it) }, true, true) { ed.selObj = null }
+                            Sep()
+                            Tbn({ AlignArrow(0, it) }, al == "l", true) { ed.objAlign(ob.id, "l") }
+                            Tbn({ AlignArrow(1, it) }, al == "c", true) { ed.objAlign(ob.id, "c") }
+                            Tbn({ AlignArrow(2, it) }, al == "r", true) { ed.objAlign(ob.id, "r") }
+                            Sep()
+                            Tbn({ Ic("del", it) }, false, true) { ed.objDelete(ob.id) }
                         }
                     }
                 }
