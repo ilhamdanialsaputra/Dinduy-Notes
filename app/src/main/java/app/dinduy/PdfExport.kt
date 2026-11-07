@@ -656,10 +656,16 @@ object PdfExport {
         val cols = rows[0].size.coerceAtLeast(1)
         val tfs = min(cx.fs * .9f, 14f)
         val lineH = tfs * 1.45f
-        val colW = cx.cw / cols
+        // lebar kolom mengikuti editor (dp -> pt); kalau melebihi lebar halaman, dikecilkan sebanding supaya muat
+        val raw = tblWidths(b, cx.cw / cx.r).map { it * cx.r }
+        val rawSum = raw.sum().coerceAtLeast(1f)
+        val fit = if (rawSum > cx.cw) cx.cw / rawSum else 1f
+        val colWs = List(cols) { (raw.getOrNull(it) ?: (cx.cw / cols)) * fit }
+        val xs = ArrayList<Float>()
+        var xa = 0f
+        for (w in colWs) { xs.add(xa); xa += w }
         val padX = tfs * .9f
         val padY = tfs * .7f
-        val inner = (colW - 2f * padX).coerceAtLeast(10f)
         val lays = ArrayList<List<JL>>()
         val hts = ArrayList<Float>()
         rows.forEachIndexed { ri, row ->
@@ -667,6 +673,7 @@ object PdfExport {
             val ls = (0 until cols).map { ci ->
                 val rt = row.getOrNull(ci) ?: Rt()
                 val ta = when (b.ca.getOrNull(ci)) { "center" -> "c"; "right" -> "r"; else -> "" }
+                val inner = (colWs[ci] - 2f * padX).coerceAtLeast(10f)
                 mk(cx, rt, inner, tfs, (if (head) pal.osc else pal.os).toArgb(), lineH, bold = head, ta = ta)
             }
             lays.add(ls)
@@ -677,8 +684,9 @@ object PdfExport {
         for (h in hts) { tops.add(acc); acc += h }
         val total = acc
         for (ri in 2 until rows.size) f.cuts.add(y0 + tops[ri])
-        val cw = cx.cw
-        val rr = min(24f * cx.u, 18f)
+        val cw = colWs.sum()
+        val rr = (4f * cx.u).coerceIn(1f, 4f)   // sudut hampir kotak, sama seperti tabel di editor
+        val bw = (1.5f * cx.u).coerceIn(.8f, 1.5f)
         f.pieces.add(Piece(y0, total, 0f, { c ->
             val path = Path()
             path.addRoundRect(RectF(0f, 0f, cw, total), rr, rr, Path.Direction.CW)
@@ -692,13 +700,19 @@ object PdfExport {
             p.color = pal.ol.toArgb()
             p.strokeWidth = .8f
             for (ri in 1 until rows.size) c.drawLine(0f, tops[ri], cw, tops[ri], p)
-            for (ci in 1 until cols) c.drawLine(ci * colW, 0f, ci * colW, total, p)
+            for (ci in 1 until cols) c.drawLine(xs[ci], 0f, xs[ci], total, p)
             c.restore()
+            // garis luar tegas, seperti di editor
+            p.style = Paint.Style.STROKE
+            p.strokeWidth = bw
+            p.color = pal.osv.toArgb()
+            p.alpha = 190
+            c.drawRoundRect(RectF(bw / 2f, bw / 2f, cw - bw / 2f, total - bw / 2f), rr, rr, p)
         }, { c ->
             for (ri in lays.indices) {
                 for (ci in lays[ri].indices) {
                     c.save()
-                    c.translate(ci * colW + padX, tops[ri] + padY)
+                    c.translate(xs[ci] + padX, tops[ri] + padY)
                     lays[ri][ci].draw(c)
                     c.restore()
                 }
