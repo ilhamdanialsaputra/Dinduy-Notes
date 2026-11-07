@@ -641,6 +641,7 @@ class PdfUi(val doc: PdfDoc, val ink: PInkState, val fid: String) {
     var txt: PdfText? = null
     var sel by mutableStateOf<PSel?>(null)
     var paged = false
+    var multi by mutableStateOf(false)   // dua jari (atau lebih) sedang menyentuh layar: gulir / zoom, bukan coretan
 }
 
 private val INVERT = ColorFilter.colorMatrix(
@@ -654,18 +655,29 @@ private val INVERT = ColorFilter.colorMatrix(
     )
 )
 
-private fun Modifier.pinch(onPinch: (Float, Offset, Offset) -> Unit, onEnd: () -> Unit): Modifier = pointerInput(Unit) {
+/**
+ * Cubit / geser dua jari, dibaca di pass Initial pada induk supaya melihat SEMUA jari (halaman anak hanya melihat jari yang jatuh di dalamnya:
+ * dua jari di dua halaman berbeda tidak saling tahu). [onMulti] memberi tahu halaman bahwa ini gestur dua jari, jadi coretan dibatalkan.
+ * Jari pena (stylus) diabaikan: telapak yang menempel saat menulis dengan pena tidak boleh membatalkan goresan.
+ */
+private fun Modifier.pinch(onPinch: (Float, Offset, Offset) -> Unit, onEnd: () -> Unit, onMulti: (Boolean) -> Unit = {}): Modifier = pointerInput(Unit) {
     awaitEachGesture {
         awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
         var multi = false
-        do {
-            val ev = awaitPointerEvent(PointerEventPass.Initial)
-            if (ev.changes.count { it.pressed } >= 2) {
-                multi = true
-                onPinch(ev.calculateZoom(), ev.calculatePan(), ev.calculateCentroid(useCurrent = true))
-                ev.changes.forEach { if (it.positionChanged()) it.consume() }
-            }
-        } while (ev.changes.any { it.pressed })
+        try {
+            do {
+                val ev = awaitPointerEvent(PointerEventPass.Initial)
+                val pen = ev.changes.any { it.pressed && it.type == PointerType.Stylus }
+                if (!pen && ev.changes.count { it.pressed } >= 2) {
+                    if (!multi) onMulti(true)
+                    multi = true
+                    onPinch(ev.calculateZoom(), ev.calculatePan(), ev.calculateCentroid(useCurrent = true))
+                    ev.changes.forEach { if (it.positionChanged()) it.consume() }
+                }
+            } while (ev.changes.any { it.pressed })
+        } finally {
+            if (multi) onMulti(false)
+        }
         if (multi) onEnd()
     }
 }
@@ -685,7 +697,9 @@ private fun Modifier.curlTouch(
     onPan: (Offset) -> Unit, onEdge: (Int) -> Unit,
     onTap: () -> Unit, onDouble: (Offset) -> Unit,
     // true = ketukan di zona tepi TIDAK dikonsumsi di sini: library PageCurl yang membalik halaman (tap bawaan library)
-    edgeToLib: Boolean = false
+    edgeToLib: Boolean = false,
+    // true = anak sedang memakai sentuhan ini (menyeret pegangan seleksi teks): jangan menggeser gambar yang diperbesar
+    busy: () -> Boolean = { false }
 ): Modifier = pointerInput(enabled) {
     if (!enabled) return@pointerInput
     var lastT = 0L
@@ -734,7 +748,7 @@ private fun Modifier.curlTouch(
                 break
             }
             if (!moved && (c.position - down.position).getDistance() > slop) moved = true
-            if (z0 && moved) { onPan(c.positionChange()); c.consume() }
+            if (z0 && moved && !busy()) { onPan(c.positionChange()); c.consume() }
             else if (!z0 && locked()) c.consume()   // mode cari: geseran tidak sampai ke pager / PageCurl
         }
     }
@@ -799,10 +813,17 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
                         else -> if (InkEnv.stylus) stylus else true
                     }
                     if (!allow) return@awaitEachGesture
+                    // dua jari sedang menyentuh layar (mis. menggulir dengan dua jari): bukan coretan
+                    if (!stylus && ui.multi) return@awaitEachGesture
                     val W = size.width.toFloat().coerceAtLeast(1f)
                     val wPxTool = ui.wDp * dens
                     val lv = PLive(ui.tool, ui.color, wPxTool)
                     val erased = HashSet<PInk>()
+                    // Jari baru ditampilkan / disimpan setelah menyentuh sebentar tanpa jari kedua: dua jari yang mendarat berurutan
+                    // (jari pertama beberapa milidetik lebih dulu) tidak sempat meninggalkan coretan. Pena langsung tampil.
+                    val grace = if (stylus) 0L else 90L
+                    val t0 = down.uptimeMillis
+                    var shown = stylus
                     ui.drawing = true
                     fun kOf(p: Float) = if (stylus && p > .01f) (.35f + .95f * p).coerceIn(.3f, 1.3f) else 1f
                     fun point(pos: Offset, pr: Float) {
@@ -810,18 +831,23 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
                             val r = wPxTool / 2f / W
                             (ui.ink.byPage[index] ?: emptyList()).forEach { s -> if (s !in erased && hitStroke(s, pos.x / W, pos.y / W, r)) erased.add(s) }
                         } else lv.add(pos.x, pos.y, kOf(pr))
-                        live.value = lv; tick++
                     }
+                    fun publish() { if (shown) { live.value = lv; tick++ } }
                     down.consume()
                     point(down.position, down.pressure)
+                    publish()
                     var cancelled = false
                     while (true) {
                         val ev = awaitPointerEvent()
-                        if (ev.changes.size >= 2 || ev.changes.any { it.isConsumed && it.id != down.id }) { cancelled = true; break }
                         val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                        // jari kedua (di halaman mana pun, dilihat induk lewat ui.multi), atau gestur lain mengambil sentuhan ini
+                        if (!stylus && (ui.multi || ev.changes.count { it.pressed } >= 2 || c.isConsumed)) { cancelled = true; break }
+                        if (stylus && c.isConsumed) { cancelled = true; break }
                         if (c.changedToUp()) break
+                        if (!shown && c.uptimeMillis - t0 >= grace) shown = true
                         for (h in c.historical) point(h.position, c.pressure)
                         point(c.position, c.pressure)
+                        publish()
                         c.consume()
                     }
                     ui.drawing = false
@@ -853,7 +879,7 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
                             val he = if (s0.b.p == index) handleXY(here, g.first, g.second, false, W, H) else null
                             val ds = hs?.let { (down.position - Offset(it.x, it.y + 9f * dens)).getDistance() } ?: Float.MAX_VALUE
                             val de = he?.let { (down.position - Offset(it.x, it.y + 9f * dens)).getDistance() } ?: Float.MAX_VALUE
-                            if (min(ds, de) <= 28f * dens) { anchor = if (ds <= de) s0.b else s0.a; down.consume() }
+                            if (min(ds, de) <= 36f * dens) { anchor = if (ds <= de) s0.b else s0.a; down.consume() }
                         }
                     }
                     // 2) tekan lama di atas teks -> pilih satu kata; geser terus untuk memperluas
@@ -1222,7 +1248,8 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                 Modifier.fillMaxSize().clipToBounds()
                     .pinch(
                         onPinch = { z, pan, c -> applyZoom((zoom * z).coerceIn(1f, 5f), c.x, c.y, pan.x, pan.y) },
-                        onEnd = { }
+                        onEnd = { },
+                        onMulti = { ui.multi = it }
                     )
                     .pointerInput(ui.inkOn) {
                         if (ui.inkOn) return@pointerInput
@@ -1235,14 +1262,15 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                             }
                         )
                     }
-                    .pointerInput(zoom > 1.01f, ui.inkOn) {
-                        if (zoom <= 1.01f || ui.inkOn) return@pointerInput
+                    .pointerInput(zoom > 1.01f, ui.inkOn, ui.drawing) {
+                        if (zoom <= 1.01f || ui.inkOn || ui.drawing) return@pointerInput
                         detectHorizontalDragGestures { c, d -> c.consume(); hx = clampX(hx - d, zoom) }
                     }
             ) {
                 val contentW = vwDp * zoom
                 LazyColumn(
                     state = list,
+                    userScrollEnabled = !ui.drawing,   // menyeret pegangan seleksi / menggoreskan pena: daftar tidak boleh ikut bergulir
                     modifier = Modifier.requiredWidth(contentW).fillMaxHeight().graphicsLayer { translationX = vwPx * (zoom - 1f) / 2f - hx },
                     contentPadding = PaddingValues(top = topPad, bottom = botPad),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -1323,7 +1351,8 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                             val z0 = cz
                             val z1 = if (z0 > 1.2f) 1f else 2.5f
                             scope.launch { animate(0f, 1f, animationSpec = spring(1f, 420f)) { v, _ -> cZoom(z0 + (z1 - z0) * v, p) } }
-                        }
+                        },
+                        busy = { ui.drawing }
                     )
                     .padding(top = topPad, bottom = sab + 12.dp),
                 Alignment.Center
@@ -1374,7 +1403,8 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                 Modifier.fillMaxSize()
                     .pinch(
                         onPinch = { z, p, c -> zoomAt((pz * z).coerceIn(1f, 4f), c, p) },
-                        onEnd = { if (pz < 1.05f) { pz = 1f; pan = Offset.Zero } }
+                        onEnd = { if (pz < 1.05f) { pz = 1f; pan = Offset.Zero } },
+                        onMulti = { ui.multi = it }
                     )
                     .curlTouch(
                         scope, !ui.inkOn, { pz > 1.05f }, { findOn }, { d -> pan = clampPan(pan + d, pz) },
@@ -1387,7 +1417,8 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                             val z0 = pz
                             val z1 = if (z0 > 1.2f) 1f else 2.5f
                             scope.launch { animate(0f, 1f, animationSpec = spring(1f, 420f)) { v, _ -> zoomAt(z0 + (z1 - z0) * v, p) } }
-                        }
+                        },
+                        busy = { ui.drawing }
                     )
             ) {
                 HorizontalPager(
