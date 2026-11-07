@@ -190,10 +190,6 @@ fun CoverPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
             CoverEditor(vm, d)
             SGroup("Manage", 60) {
                 MRow(POS_TOP, "swap", "Change photo", "Pick another image from your gallery") { act.pickCover(id) }
-                MRow(POS_MID, "pen", "Reset position", "Back to the center, no zoom") {
-                    vm.setCoverCrop(id, cv, .5f, .5f, 1f)
-                    nav.pop(); nav.push(Scr.Cover(id))
-                }
                 MRow(POS_BOT, "del", "Remove cover", "The image is removed from this note", danger = true) {
                     vm.removeCover(id)
                     nav.pop()
