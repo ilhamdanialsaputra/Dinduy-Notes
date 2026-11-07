@@ -325,12 +325,6 @@ fun DocBar(ed: Ed, act: Actions) {
                     Modifier.fillMaxWidth().padding(vertical = 6.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    // perataan tabel: kiri / kanan = mengambang (teks mengalir di sampingnya), tengah = selebar penuh
-                    val tal = if (blk != null && ed.tblSideOk(blk)) blk.ta else ""
-                    Tbn({ Ic("aL", it) }, tal == "l", true) { ed.tblAlign("l") }
-                    Tbn({ Ic("aC", it) }, tal == "", true) { ed.tblAlign("c") }
-                    Tbn({ Ic("aR", it) }, tal == "r", true) { ed.tblAlign("r") }
-                    Sep()
                     listOf("ar" to "+ Row", "ac" to "+ Column", "dr" to "− Row", "dc" to "− Column").forEach { (k, l) ->
                         Chip(l, pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.tOp(k) }
                     }
