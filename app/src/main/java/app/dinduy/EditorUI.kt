@@ -45,6 +45,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.IntOffset
@@ -1720,6 +1721,42 @@ fun Sep() {
     Box(Modifier.padding(horizontal = 4.dp).width(2.dp).height(24.dp).clip(RoundedCornerShape(1.dp)).background(pal.ol))
 }
 
+// ---------- slot blok (komposisi berjendela) ----------
+private val NO_OD: Map<String, Int> = emptyMap()
+
+/**
+ * Satu slot di kolom isi catatan. Kotak luar SELALU ada (melaporkan posisi/tinggi); isi dalamnya hidup hanya bila [live],
+ * selain itu diganti Spacer setinggi terakhir terukur (atau perkiraan). Pada catatan biasa [live] selalu true, jadi sama dengan sebelumnya.
+ */
+@Composable
+private fun BlockSlot(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan?, ordN: Int, od: Map<String, Int>, dm: Dm, live: Boolean) {
+    val lifted = ed.mv?.let { it.bid == b.id && !it.row } == true
+    val dragging = ed.mv?.bid == b.id
+    val den = LocalDensity.current
+    Box(
+        Modifier
+            .zIndex(if (dragging) 3f else 0f)
+            .onGloballyPositioned { c -> ed.setSlotPos(b.id, c.positionInParent().y, c.size.height.toFloat()) }
+            .graphicsLayer {
+                if (lifted && plan == null) {
+                    translationX = ed.mvX; translationY = ed.mvY
+                    scaleX = 1.03f; scaleY = 1.03f; alpha = .94f
+                }
+            }
+    ) {
+        if (live) {
+            val blks = plan?.parts?.map { it.first }?.let { listOf(b) + it } ?: listOf(b)
+            val cur by rememberUpdatedState(blks)
+            DisposableEffect(b.id) { onDispose { ed.leaveSlot(cur, b.id) } }
+            if (plan != null) FloatGroup(ed, vm, b, plan, od, dm)
+            else BlockView(ed, vm, b, ordN, dm)
+        } else {
+            val h = ed.bpos[b.id]?.get(1) ?: ed.estimateSlot(b, plan, dm.fs, dm.lh)
+            Spacer(Modifier.fillMaxWidth().height(with(den) { h.toDp() }))
+        }
+    }
+}
+
 // ---------- layar catatan ----------
 @Composable
 fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
@@ -1753,6 +1790,18 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     SideEffect {
         ed.folds.clear()
         plans.values.forEach { p -> p.parts.forEach { (x, s) -> s.fold?.let { ed.folds[x.id] = it } } }
+    }
+    // komposisi berjendela: himpunan slot yang hidup (hanya dipakai bila catatan sangat panjang)
+    val winOn = ed.windowed
+    val plansNow by rememberUpdatedState(plans)
+    var liveSet by remember {
+        mutableStateOf<Set<String>>(
+            if (ed.windowed) androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { ed.computeLive(0, plans, dm.fs, dm.lh) } else emptySet()
+        )
+    }
+    LaunchedEffect(winOn, dm) {
+        if (!winOn) { liveSet = emptySet(); return@LaunchedEffect }
+        androidx.compose.runtime.snapshotFlow { ed.computeLive(scroll.value, plansNow, dm.fs, dm.lh) }.collect { liveSet = it }
     }
     val titleFr = remember { FocusRequester() }
     val titleNote = vm.note(ed.noteId)
@@ -1862,7 +1911,9 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     LaunchedEffect(hitNow) {
         val h = hitNow ?: return@LaunchedEffect
         if (h.key == "@t") { scroll.animateScrollTo(0, tween(380, easing = Emph)); return@LaunchedEffect }
-        repeat(8) {
+        // catatan berjendela: blok sasaran mungkin baru tersusun (lama) dan perkiraan tinggi bisa meleset, jadi tunggu lebih lama dan periksa ulang posisinya
+        var fixes = 0
+        repeat(if (ed.windowed) 30 else 8) {
             val lay = ed.lays[h.key]
             val pos = ed.kpos[h.key]
             if (lay != null && pos != null && lay.layoutInput.text.isNotEmpty()) {
@@ -1874,6 +1925,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                 val botV = scroll.value + ed.viewH - 160f * ed.dens
                 if (y < topV || yb > botV) {
                     scroll.animateScrollTo((y - ed.viewH * .3f).toInt().coerceIn(0, scroll.maxValue), tween(380, easing = Emph))
+                    if (ed.windowed && fixes++ < 3) { delay(150); return@repeat }
                 }
                 return@LaunchedEffect
             }
@@ -2009,30 +2061,16 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                                     )
                             )
                         }
-                        var bi0 = 0
-                        while (bi0 < ed.blocks.size) {
-                            val bi = bi0
-                            val b = ed.blocks[bi]
-                            val plan = plans[b.id]
-                            key(b.id) {
-                                val lifted = ed.mv?.let { it.bid == b.id && !it.row } == true
-                                val dragging = ed.mv?.bid == b.id
-                                Box(
-                                    Modifier
-                                        .zIndex(if (dragging) 3f else 0f)
-                                        .onGloballyPositioned { c -> ed.setPos(b.id, c.positionInParent().y, c.size.height.toFloat()) }
-                                        .graphicsLayer {
-                                            if (lifted && plan == null) {
-                                                translationX = ed.mvX; translationY = ed.mvY
-                                                scaleX = 1.03f; scaleY = 1.03f; alpha = .94f
-                                            }
-                                        }
-                                ) {
-                                    if (plan != null) FloatGroup(ed, vm, b, plan, od, dm)
-                                    else BlockView(ed, vm, b, od[b.id] ?: 1, dm)
-                                }
+                        for ((sb, splan) in ed.slotsOf(plans)) {
+                            key(sb.id) {
+                                BlockSlot(
+                                    ed, vm, sb, splan,
+                                    if (splan == null) (od[sb.id] ?: 1) else 1,
+                                    if (splan == null) NO_OD else od,
+                                    dm,
+                                    !winOn || sb.id in liveSet
+                                )
                             }
-                            bi0 += 1 + plan.let { it?.parts?.size ?: 0 }
                         }
                         Box(
                             Modifier.fillMaxWidth().height(if (hasAu) 28.dp else 220.dp).pointerInput(ed.reading, ed.selOn) {
