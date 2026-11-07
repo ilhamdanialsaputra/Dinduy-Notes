@@ -965,6 +965,35 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     }
 
     // ---------- gambar ----------
+    /** Ketuk objek: dari mode baca masuk mode edit dulu (tanpa keyboard), lalu objek terpilih. */
+    fun tapObj(bid: String) {
+        if (reading) exitReading()
+        selectObj(bid)
+    }
+
+    /** Rata kiri / tengah / kanan objek sisipan lewat tombol (alternatif seret). Lebar yang terlalu besar dikecilkan supaya teks bisa mengalir di sampingnya. */
+    fun objAlign(bid: String, al: String) {
+        val i = idx(bid)
+        if (i < 0) return
+        commit()
+        val b = blocks[i]
+        val tooWide = b.isBox && al != "c" && b.bw > maxSideW()
+        setBlock(i, b.copy(ba = al, bw = if (tooWide) minOf(SIDE_W, maxSideW()) else b.bw))
+        releaseSide(bid)
+        dirty(); norm(); afterStructural()
+    }
+
+    /** Hapus kutipan / kode / garis / tabel. Tidak membuka keyboard. */
+    fun objDelete(bid: String) {
+        val i = idx(bid)
+        if (i < 0) return
+        commit()
+        blocks = blocks.filterIndexed { k, _ -> k != i }.ifEmpty { listOf(Blk()) }
+        tf.removePrefix("$bid:")
+        selObj = null; selImg = null; focus = null
+        norm(); afterStructural()
+    }
+
     fun selectObj(bid: String) {
         if (selOn) dropSel()
         selObj = bid
