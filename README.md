@@ -20,8 +20,6 @@ Everything is stored on your own phone. No account, no server.
 ![Privacy](https://img.shields.io/badge/Data-Stored%20Locally-success?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)
 
-[Bahasa Indonesia](README.md) | **English**
-
 </div>
 
 <br>
