@@ -62,8 +62,8 @@ android {
         applicationId = "app.dinduy"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.3"
         // whisper-android (versi gratis) hanya menyertakan arm64-v8a
         ndk { abiFilters += listOf("arm64-v8a") }
     }
