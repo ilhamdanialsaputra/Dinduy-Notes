@@ -249,11 +249,29 @@ fun Ed.inkErase(ids: Set<String>) {
 }
 
 /** Blok terdekat dari sebuah titik y (piksel konten) beserta posisi atasnya. */
-fun Ed.inkTarget(cy: Float): Pair<Blk, Float>? {
+/** Apakah titik x (px konten) berada di atas objek b? Objek mengambang sempit (kutipan/kode/tabel/foto/garis) tidak mencakup teks di sampingnya. */
+private fun Ed.inkOverObj(b: Blk, x: Float): Boolean {
+    val W = widthDp * dens
+    val w = when (b.ty) {
+        "q", "code", "hr" -> W * b.bw.coerceIn(.2f, 1f)
+        "tbl" -> (tblWidths(b, widthDp).sum() + 3f) * dens
+        "img" -> if (b.im.size == 1) W * b.im[0].w.coerceIn(.2f, 1f) else return true
+        else -> return true
+    }
+    if (w >= W * .98f) return true
+    val al = if (b.ty == "img") b.im[0].al else b.alOf()
+    val x0 = when (al) { "l" -> 0f; "r" -> W - w; else -> (W - w) / 2f }
+    val m = 8f * dens
+    return x >= x0 - m && x <= x0 + w + m
+}
+
+/** Blok terdekat dari sebuah titik (y, dan x bila diketahui) beserta posisi atasnya. x dipakai supaya teks yang mengalir di samping objek tidak "dicuri" objeknya. */
+fun Ed.inkTarget(cy: Float, cxp: Float = Float.NaN): Pair<Blk, Float>? {
     var best: Blk? = null; var bt = 0f; var bg = Float.MAX_VALUE
     for (b in blocks) {
         val p = bpos[b.id] ?: continue
-        val gap = if (cy < p[0]) p[0] - cy else if (cy > p[0] + p[1]) cy - (p[0] + p[1]) else 0f
+        var gap = if (cy < p[0]) p[0] - cy else if (cy > p[0] + p[1]) cy - (p[0] + p[1]) else 0f
+        if (gap == 0f && !cxp.isNaN() && !inkOverObj(b, cxp)) gap = .5f
         if (gap < bg) { bg = gap; best = b; bt = p[0] }
     }
     val b = best ?: blocks.firstOrNull() ?: return null
@@ -644,14 +662,16 @@ internal fun Ed.inkBuild(base: Ink, a: FloatArray, n: Int, W: Float): List<Pair<
     fun single(): List<Pair<String, Ink>> {
         var y0 = Float.MAX_VALUE; var y1 = -Float.MAX_VALUE
         for (i in 0 until n) { y0 = min(y0, a[i * 3 + 1]); y1 = max(y1, a[i * 3 + 1]) }
-        val (tgt, bt) = inkTarget((y0 + y1) / 2f) ?: return emptyList()
+        var sx = 0f
+        for (i in 0 until n) sx += a[i * 3]
+        val (tgt, bt) = inkTarget((y0 + y1) / 2f, sx / n.coerceAtLeast(1)) ?: return emptyList()
         return listOf(tgt.id to withAnchor(base.copy(p = relPts(a, n, bt, W, d)), tgt, a, n))
     }
     if (n < 2 || base.t == 0) return single()   // pena: satu potongan utuh (kaku); stabilo tetap dipecah per baris / blok
     val own = arrayOfNulls<Blk>(n)
     val tops = FloatArray(n)
     for (i in 0 until n) {
-        val (blk, tp) = inkTarget(a[i * 3 + 1]) ?: return single()
+        val (blk, tp) = inkTarget(a[i * 3 + 1], a[i * 3]) ?: return single()
         own[i] = blk; tops[i] = tp
     }
     // blok bukan teks (gambar, tabel, garis) ikut jadi potongan sendiri: potongannya menempel ke blok itu, potongan di teks tetap ikut huruf
