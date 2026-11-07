@@ -373,7 +373,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
                 val rt2 = oldRt.edit(without, typing)
                 putRt(key, rt2)
                 tf[key] = TextFieldValue(Z + rt2.t, TextRange(df.p + 1))
-                if (insStr == "\n") enter(key, df.p) else paste(key, df.p, insStr)
+                if (insStr == "\n") enter(key, df.p) else paste(key, df.p, insStr, lastMd.isNotEmpty() && insStr.trimEnd('\n') == lastMd)
                 return
             }
             if (insStr == "\n" && df.p == nt.length - 1 && (oldRt.t.isEmpty() || oldRt.t.endsWith("\n"))) {
@@ -586,12 +586,12 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         afterStructural()
     }
 
-    private fun paste(key: String, pos: Int, s: String) {
+    private fun paste(key: String, pos: Int, s: String, own: Boolean = false) {
         val i = idx(key)
         if (i < 0) return
         val b = blocks[i]
         commit()
-        val ns0 = md(s.trimEnd('\n'), true)
+        val ns0 = md(s.trimEnd('\n'), true, own)
         if (ns0.isEmpty()) return
         // satu alamat web saja yang ditempel ke paragraf kosong -> kartu pratinjau tautan
         val lone = if (ns0.size == 1 && ns0[0].ty == "p" && b.ty == "p" && b.r.t.isBlank()) asUrl(ns0[0].r.t) else null
@@ -715,7 +715,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     private fun setListRaw(t: String) = convertFocused { b ->
         if (b.ty == "li" && b.lt == t) b.copy(ty = "p", st = 0)
-        else b.copy(ty = "li", lt = t, d = if (b.ty == "li") b.d else 0, r = flat(b.r), st = if (b.ty == "li" && t == "o") b.st else 0)
+        else b.copy(ty = "li", lt = t, d = if (b.ty == "li") b.d else 0, r = flat(b.r), st = if (b.ty == "li" && (t == "o" || t == "a")) b.st else 0)
     }
 
     fun setQuote(k: String) = convertFocused { b ->
@@ -903,7 +903,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             "ac" -> {
                 nb = b.copy(
                     tb = b.tb.map { row -> row.toMutableList().also { it.add(c + 1, Rt()) } },
-                    ca = b.ca.toMutableList().also { if (c + 1 <= it.size) it.add(c + 1, "left") }
+                    ca = b.ca.toMutableList().also { if (c + 1 <= it.size) it.add(c + 1, "left") },
+                    cw = if (b.cw.isEmpty()) emptyList() else b.cw.toMutableList().also { while (it.size < cols) it.add(0f); it.add(c + 1, 0f) }
                 )
                 target = "$bid:$r:${c + 1}"
             }
@@ -914,7 +915,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             }
             "dc" -> {
                 if (cols < 2) { vm.show("At least one column is needed"); return }
-                nb = b.copy(tb = b.tb.map { row -> row.filterIndexed { k, _ -> k != c } }, ca = b.ca.filterIndexed { k, _ -> k != c })
+                nb = b.copy(tb = b.tb.map { row -> row.filterIndexed { k, _ -> k != c } }, ca = b.ca.filterIndexed { k, _ -> k != c }, cw = b.cw.filterIndexed { k, _ -> k != c })
                 target = "$bid:$r:${minOf(c, cols - 2)}"
             }
             "dt" -> {
@@ -932,6 +933,30 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         seed(nb)
         focusAt(target, 0)
         afterStructural()
+    }
+
+    // ---------- lebar kolom tabel ----------
+    /** Ubah lebar kolom [c] (dp) langsung saat pegangan diseret; langkah undo dibuat lewat commit() di awal dan akhir seretan. */
+    fun tblCol(bid: String, c: Int, w: Float) {
+        val i = idx(bid)
+        if (i < 0) return
+        val b = blocks[i]
+        val n = b.tb.firstOrNull()?.size ?: return
+        if (c !in 0 until n) return
+        val l = MutableList(n) { b.cw.getOrNull(it) ?: 0f }
+        if (l[c] == w) return
+        l[c] = w
+        setBlock(i, b.copy(cw = if (l.all { it <= 0f }) emptyList() else l))
+        dirty()
+    }
+
+    /** Kembalikan semua kolom ke lebar otomatis. */
+    fun tblResetCols(bid: String) {
+        val i = idx(bid)
+        if (i < 0 || blocks[i].cw.isEmpty()) return
+        commit()
+        setBlock(i, blocks[i].copy(cw = emptyList()))
+        dirty(); commit()
     }
 
     // ---------- gambar ----------
@@ -1221,7 +1246,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val b = blocks[i]
         val p = bpos[bid] ?: floatArrayOf(0f, 0f)
         commit()
-        selImg = bid to maxOf(0, b.im.indexOfFirst { it.id == imgId })
+        selImg = if (b.ty == "img") bid to maxOf(0, b.im.indexOfFirst { it.id == imgId }) else null
         focus = null; clearReq++
         val hh = if (b.im.size == 1 && sideOk(b)) {
             val m0 = b.im[0]
@@ -1339,7 +1364,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         } else l[i] = b
         blocks = l
         releaseSide(b.id)
-        selImg = b.id to maxOf(0, b.im.indexOfFirst { it.id == m.imgId })
+        selImg = if (b.ty == "img") b.id to maxOf(0, b.im.indexOfFirst { it.id == m.imgId }) else null
         norm(); afterStructural()
     }
 
@@ -1995,7 +2020,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
                 val whole = s <= 0 && e >= rt.t.length
                 val keep = b.isText && (segs.size > 1 || whole)
                 out.add(
-                    if (keep) b.copy(r = part, ik = emptyList(), st = if (b.ty == "li" && b.lt == "o" && out.isEmpty()) (od[b.id] ?: 1) else b.st)
+                    if (keep) b.copy(r = part, ik = emptyList(), st = if (b.ty == "li" && (b.lt == "o" || b.lt == "a") && out.isEmpty()) (od[b.id] ?: 1) else b.st)
                     else Blk(ty = "p", r = part)
                 )
             }
@@ -2063,7 +2088,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         selDelete()
         // teks yang ditempel = Markdown yang baru disalin dari catatan: pulihkan formatnya (blok maupun sebaris)
         val mine = lastMd.isNotEmpty() && s.trimEnd('\n') == lastMd
-        if (mine && lastMdBlocky && !isCellKey(lo.key) && blockOfKey(lo.key)?.isMulti != true) paste(lo.key, lo.off, s)
+        if (mine && lastMdBlocky && !isCellKey(lo.key) && blockOfKey(lo.key)?.isMulti != true) paste(lo.key, lo.off, s, true)
         else typeAt(lo.key, lo.off, s, mine)
     }
 
@@ -2071,7 +2096,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     private fun typeAt(key: String, off: Int, s: String, rich: Boolean = false) {
         val b = blockOfKey(key) ?: return
         if (s.indexOf('\n') >= 0 && !b.isMulti && !isCellKey(key)) {
-            if (s == "\n") enter(key, off) else paste(key, off, s)
+            if (s == "\n") enter(key, off) else paste(key, off, s, rich)
             return
         }
         val clean = if (isCellKey(key)) s.replace('\n', ' ') else s
