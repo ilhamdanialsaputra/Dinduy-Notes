@@ -158,6 +158,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     var reading by mutableStateOf(false)
     var pickQuote by mutableStateOf(false)
     var selImg by mutableStateOf<Pair<String, Int>?>(null)
+    /** Objek sisipan (tabel / kode / kutipan / garis) yang sedang dipilih tanpa masuk ke teksnya: mode atur (geser, ubah lebar). Ketukan kedua di teksnya baru mengedit. */
+    var selObj by mutableStateOf<String?>(null)
     var req by mutableStateOf<Req?>(null)
     var titleFocus by mutableStateOf(false)
     var clearReq by mutableStateOf(0)
@@ -276,7 +278,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     fun onFocus(key: String) {
         titleFocus = false
-        selImg = null
+        selImg = null; selObj = null
         caretMoved(key)
     }
 
@@ -963,8 +965,17 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     }
 
     // ---------- gambar ----------
+    fun selectObj(bid: String) {
+        if (selOn) dropSel()
+        selObj = bid
+        selImg = null
+        focus = null
+        clearReq++
+    }
+
     fun selectImg(bid: String, ix: Int) {
         if (selOn) dropSel()
+        selObj = null
         selImg = bid to ix
         focus = null
         clearReq++
@@ -972,7 +983,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     /** Tutup pilihan gambar: tetap di mode edit (bar alat tetap ada), tanpa membuka keyboard dan tanpa masuk mode baca. */
     fun closeImg() {
-        selImg = null
+        selImg = null; selObj = null
     }
 
     /** Dari mode baca: ketuk dua kali gambar = masuk mode edit dengan gambar itu terpilih. */
@@ -1099,7 +1110,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             else blocks = blocks.filterIndexed { j, _ -> j != i }
         } else if (rest.size == 1) setBlock(i, b.copy(im = listOf(rest[0].copy(a = rest[0].o, w = 0.6f, al = "c"))))
         else setBlock(i, b.copy(im = rest))
-        selImg = null
+        selImg = null; selObj = null
         norm(); afterStructural()
     }
 
@@ -1861,7 +1872,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         commit()
         selOn = true
         pa = a; pf = b
-        reading = true; selImg = null; pickQuote = false; miniBar = false; clearReq++
+        reading = true; selImg = null; selObj = null; pickQuote = false; miniBar = false; clearReq++
     }
 
     fun clearSel() {
@@ -1896,7 +1907,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (edit) {
             commit()
             selBack = Pt(b.key, b.off)
-            selImg = null; pickQuote = false; miniBar = false
+            selImg = null; selObj = null; pickQuote = false; miniBar = false
             // tetap di mode ketik: keyboard terbuka, ketikan langsung mengganti seleksi.
             // Seleksi field = kata itu (tidak kosong) supaya tombol Salin / Pilih semua / lompat Gboard aktif.
             if (a.key == b.key && b.off > a.off) req = Req(b.key, b.off, ++rq, TextRange(a.off + 1, b.off + 1))
@@ -1986,7 +1997,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         commit()
         selBack = Pt(key, caret)
         selWho = 0; selDrag = false
-        selImg = null; pickQuote = false; miniBar = false
+        selImg = null; selObj = null; pickQuote = false; miniBar = false
         selAll()
         // seleksi field dibiarkan tidak kosong: Gboard menonaktifkan (abu-abu) tombol Salin/Potong kalau menganggap tak ada seleksi
         if (v != null) tf[key] = v.copy(selection = if (len > 0) TextRange(1, len + 1) else TextRange(0, 1))
@@ -2027,7 +2038,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         else {
             commit()
             selBack = Pt(key, oldCaret.coerceIn(0, len)); selWho = 0; selDrag = false
-            selImg = null; pickQuote = false; miniBar = false
+            selImg = null; selObj = null; pickQuote = false; miniBar = false
             pa = Pt(key, anchor.coerceIn(0, len)); pf = to; selOn = true
         }
         tf[key]?.let { tf[key] = it.copy(selection = if (len > 0) TextRange(1, len + 1) else TextRange(0, 1)) }
@@ -2070,7 +2081,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (shift) {
             commit()
             selBack = Pt(key, caret); selWho = 0; selDrag = false
-            selImg = null; pickQuote = false; miniBar = false
+            selImg = null; selObj = null; pickQuote = false; miniBar = false
             pa = Pt(key, anchor); pf = to; selOn = true
             revealPf()
         } else focusAt(to.key, to.off)
@@ -2112,7 +2123,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (shift) {
             commit()
             selBack = from; selWho = 0; selDrag = false
-            selImg = null; pickQuote = false; miniBar = false
+            selImg = null; selObj = null; pickQuote = false; miniBar = false
             pa = Pt(key, anchor); pf = to; selOn = true
             revealPf()
         } else focusAt(to.key, to.off)
@@ -2327,7 +2338,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val b = Pt(key, r)
         selBack = b; wordA = a; wordB = b; selWho = 0
         pa = a; pf = b; selOn = true; selDrag = false
-        selImg = null; pickQuote = false; miniBar = false
+        selImg = null; selObj = null; pickQuote = false; miniBar = false
         // seleksi field ikut tidak kosong supaya Salin / Pilih semua / lompat Gboard aktif
         tf[key]?.let { tf[key] = it.copy(selection = TextRange(l + 1, r + 1)) }
         caretMoved(key)
@@ -2430,7 +2441,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     private fun load(s: Snap) {
         blocks = s.bl
         reseedAll()
-        selImg = null
+        selImg = null; selObj = null
         val k = s.key
         if (k != null && tf.containsKey(k)) focusAt(k, (s.sel.start - 1).coerceAtLeast(0))
         tick++
@@ -2528,7 +2539,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     fun openFind() {
         if (selOn) clearSel()
-        selImg = null; pickQuote = false; miniBar = false
+        selImg = null; selObj = null; pickQuote = false; miniBar = false
         findQ = ""; findI = 0
         findOn = true
     }
@@ -2540,7 +2551,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     fun enterReading() {
         commit()
-        if (ink.on) ink.toggle(this); reading = true; selImg = null; pickQuote = false; miniBar = false; sheet = 0; sub = 0; sheetPage = 0; clearReq++
+        if (ink.on) ink.toggle(this); reading = true; selImg = null; selObj = null; pickQuote = false; miniBar = false; sheet = 0; sub = 0; sheetPage = 0; clearReq++
     }
 
     fun exitReading(key: String? = null, off: Int = 0) {
