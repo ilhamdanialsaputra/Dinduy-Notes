@@ -3,10 +3,12 @@
 <!-- Put your main image here, for example: -->
 <!-- <img src="docs/screenshots/banner.png" alt="Dinduy" width="100%"> -->
 
-# Dinduy
+<br>
 
-**Notes that stay neat, quick, and easy on your thumb.**
-Everything is stored on your own phone. No account, no server.
+<h1>D I N D U Y</h1>
+
+<p><b>Notes that stay neat, quick, and easy on your thumb.</b></p>
+<p><sub>Everything is stored on your own phone. No account. No server.</sub></p>
 
 <br>
 
@@ -17,8 +19,12 @@ Everything is stored on your own phone. No account, no server.
 
 ![Min SDK](https://img.shields.io/badge/Min%20SDK-26-informational?style=flat-square)
 ![Version](https://img.shields.io/badge/Version-1.3-blue?style=flat-square)
-![Privacy](https://img.shields.io/badge/Data-Stored%20Locally-success?style=flat-square)
+![Data](https://img.shields.io/badge/Data-Stored%20Locally-success?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)
+
+<br>
+
+[Features](#features) &nbsp;&nbsp;|&nbsp;&nbsp; [Privacy](#privacy) &nbsp;&nbsp;|&nbsp;&nbsp; [Quick Start](#quick-start) &nbsp;&nbsp;|&nbsp;&nbsp; [Backup](#backup-and-restore) &nbsp;&nbsp;|&nbsp;&nbsp; [Build](#building-from-source)
 
 </div>
 
@@ -26,155 +32,282 @@ Everything is stored on your own phone. No account, no server.
 
 ---
 
+<br>
+
+<div align="center">
+
 ## Overview
+
+</div>
 
 Dinduy is a notes app that brings a lot together in one place: writing, doodling, reading PDFs, recording voice, and setting reminders. It follows the Material You look, and almost everything can be done with one thumb.
 
+<br>
+
+<table align="center">
+  <tr>
+    <td align="center" width="25%"><b>Write</b><br><sub>Rich text, tables, quotes, code</sub></td>
+    <td align="center" width="25%"><b>Draw</b><br><sub>Pen, highlighter, auto-tidy shapes</sub></td>
+    <td align="center" width="25%"><b>Read PDFs</b><br><sub>Search, copy, and draw on them</sub></td>
+    <td align="center" width="25%"><b>Record</b><br><sub>Voice notes and transcription</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Photos</b><br><sub>Covers, collages, text scan</sub></td>
+    <td align="center"><b>Reminders</b><br><sub>One-time or repeating</sub></td>
+    <td align="center"><b>Share</b><br><sub>.dinduy files and PDF</sub></td>
+    <td align="center"><b>Look</b><br><sub>Material You and AMOLED</sub></td>
+  </tr>
+</table>
+
+<br>
+
 ---
+
+<br>
+
+<div align="center">
 
 ## Features
 
+</div>
+
 ### Writing
 
-- Rich text: **bold**, *italic*, underline, strikethrough, highlight, and code
-- Headings, bullet lists, numbered lists, lettered lists, and checklists
-- Quotes in several styles: Note, Tip, Important, Warning, Caution, Idea, Definition
-- Code blocks, tables, and dividers
-- Text alignment and paragraph indents
-- Markdown-style typing, for example type `- ` for a bullet or `# ` for a heading
-- Search inside a note, plus undo and redo
+| | |
+|:--|:--|
+| **Rich text** | Bold, italic, underline, strikethrough, highlight, and code |
+| **Lists** | Bullets, numbered, lettered, and checklists |
+| **Quotes** | Note, Tip, Important, Warning, Caution, Idea, Definition |
+| **Special blocks** | Code blocks, tables, and dividers |
+| **Layout** | Text alignment and paragraph indents |
+| **Markdown style** | Type `- ` for a bullet or `# ` for a heading |
+| **Helpers** | Search inside a note, undo, and redo |
 
 ### Photos and covers
 
-- Insert photos from the gallery or straight from the camera
-- Resize, crop, and arrange several photos in one row
-- Text flows automatically beside a photo
-- Add a cover image, and the note's colors follow the photo
-- Scan text from a photo (OCR) without internet, then copy the result
+| | |
+|:--|:--|
+| **Insert photos** | From the gallery or straight from the camera |
+| **Arrange photos** | Resize, crop, and place several photos in one row |
+| **Flowing text** | Text flows automatically beside a photo |
+| **Cover** | The note's colors follow the cover photo |
+| **Text scan (OCR)** | Pull text out of a photo without internet, then copy it |
 
 ### Drawing
 
-- Pen, highlighter, eraser, and a Select tool
-- Works with a finger or a stylus
-- Shapes are tidied up automatically (line, circle, square, triangle) when you hold the end of a stroke for a moment
-- Drawings stick to the text, so they move along when the text changes
+| | |
+|:--|:--|
+| **Tools** | Pen, highlighter, eraser, and a Select tool |
+| **Input** | Works with a finger or a stylus |
+| **Tidy shapes** | Lines, circles, squares, and triangles are cleaned up when you hold the end of a stroke |
+| **Sticks to text** | Drawings move along when the writing changes |
 
 ### PDF reader
 
-- Open PDFs from other apps through Open with or Share
-- Scroll mode or page mode, including a 3D page-curl effect
-- Search words, select and copy text, and a dark page mode
-- Draw directly on top of a PDF
+| | |
+|:--|:--|
+| **Open from anywhere** | Through Open with or Share |
+| **Reading modes** | Scroll or page, including a 3D page-curl effect |
+| **Text tools** | Search words, select and copy text |
+| **Easy on the eyes** | Dark page mode |
+| **Annotations** | Draw directly on top of a PDF |
 
 ### Voice notes
 
-- Record audio inside a note, and it keeps going while the app is minimized
-- Quick record: swipe the New button to the left to start recording right away
-- Turn speech into text in two ways:
+| | |
+|:--|:--|
+| **Record** | Right inside a note, and it keeps going while the app is minimized |
+| **Quick record** | Swipe the New button to the left to start recording |
+| **Language** | Auto, Indonesian, or English |
+| **Auto format** | Punctuation, bold, and italic without changing your words |
+
+Two ways to turn speech into text:
 
 | Method | Strengths | Notes |
-|---|---|---|
-| Online (Groq) | Fast and most accurate | Needs your own Groq API key |
-| Offline (Whisper) | Runs on your phone without internet | Model is downloaded once |
-
-- Language: auto, Indonesian, or English
-- Optional auto format (punctuation, bold, italic) without changing your words
+|:--|:--|:--|
+| **Online (Groq)** | Fast and most accurate | Needs your own Groq API key |
+| **Offline (Whisper)** | Runs on your phone without internet | Model is downloaded once |
 
 ### Reminders
 
-- Add a reminder to any note, with a date and time
-- Can repeat: daily, weekly, monthly, or yearly
-- From the notification, pick Done, Snooze 1 hour, or Tomorrow morning
-- Alarms are set up again automatically after the phone restarts
+| | |
+|:--|:--|
+| **Flexible** | Add to any note, with a date and time |
+| **Repeating** | Daily, weekly, monthly, or yearly |
+| **Quick actions** | From the notification: Done, Snooze 1 hour, or Tomorrow morning |
+| **Restart safe** | Alarms are set up again automatically after the phone restarts |
 
 ### Organizing notes
 
-- Pin important notes to the top
-- Labels to group notes
-- Archive and Trash (Trash is emptied automatically after 30 days)
-- 1 or 2 column layout
-- Press, hold, and drag a card to set your own order
-- Swipe a card right to archive, left to delete
+| | |
+|:--|:--|
+| **Pin** | Important notes stay on top |
+| **Labels** | Group notes however you like |
+| **Archive and Trash** | Trash is emptied automatically after 30 days |
+| **Layout** | 1 or 2 columns |
+| **Free order** | Press, hold, and drag a card to where you want it |
+| **Gestures** | Swipe a card right to archive, left to delete |
 
 ### Sharing and export
 
-- Share a note as a `.dinduy` file, with photos, drawings, audio, and PDFs included
-- Export to PDF (A4) with a preview and adjustable text size
-- Save or copy as Markdown text
-- Import `.md`, `.txt`, and PDF files
+| | |
+|:--|:--|
+| **.dinduy file** | Share a note with its photos, drawings, audio, and PDFs |
+| **PDF export** | A4 size with a preview and adjustable text size |
+| **Markdown** | Save or copy as text |
+| **Import** | .md, .txt, and PDF files |
 
 ### Appearance
 
-- Light, dark (pure black for AMOLED screens), or follow the phone setting
-- Material You dynamic color (Android 12 and up) or pick your own color
-- Monochrome mode
-- Font choices: Default, Roboto Flex, Times New Roman, Reenie Beanie
-- Home screen widgets for quick notes and a notes list
+| | |
+|:--|:--|
+| **Theme** | Light, dark (pure black for AMOLED), or follow the phone |
+| **Color** | Material You (Android 12 and up) or your own color |
+| **Monochrome** | All grayscale |
+| **Fonts** | Default, Roboto Flex, Times New Roman, Reenie Beanie |
+| **Widgets** | Quick note and notes list on the home screen |
+
+<br>
 
 ---
+
+<br>
+
+<div align="center">
 
 ## Privacy
 
+</div>
+
+> [!IMPORTANT]
+> All notes live on your phone. There is no account and no Dinduy server.
+
 | | |
-|---|---|
-| **Storage** | All notes live on your phone. There is no account and no Dinduy server. |
-| **Internet** | Only used when you ask for it: downloading the offline model, Groq transcription, link previews, and checking for updates. |
-| **API key** | Stored encrypted on the device (Android Keystore). It never goes into backups, shared files, or the code. |
-| **Backup** | A single `.dinduy` file that you save wherever you choose. |
+|:--|:--|
+| **Internet** | Only used when you ask for it: downloading the offline model, Groq transcription, link previews, and checking for updates |
+| **API key** | Stored encrypted on the device (Android Keystore). It never goes into backups, shared files, or the code |
+| **Backup** | A single `.dinduy` file that you save wherever you choose |
+
+<br>
 
 ---
+
+<br>
+
+<div align="center">
 
 ## Quick start
 
-1. Tap **New** to create a note.
-2. Hold **New** for the add menu (including voice note), or pull it up to start writing right away.
-3. Hold a note card to select, delete, or duplicate it.
-4. Swipe the bar above the keyboard for formatting tools.
-5. Tap the down arrow to enter reading mode.
-6. Tap the three dots inside a note for labels, cover, PDF export, and sharing.
+</div>
+
+<table align="center">
+  <tr>
+    <td align="center" width="16%"><h3>1</h3><sub>Tap <b>New</b> to create a note</sub></td>
+    <td align="center" width="16%"><h3>2</h3><sub>Hold <b>New</b> for the add menu, or pull it up to start writing</sub></td>
+    <td align="center" width="16%"><h3>3</h3><sub>Hold a card to select, delete, or duplicate</sub></td>
+    <td align="center" width="16%"><h3>4</h3><sub>Swipe the bar above the keyboard for formatting tools</sub></td>
+    <td align="center" width="16%"><h3>5</h3><sub>Tap the down arrow for reading mode</sub></td>
+    <td align="center" width="16%"><h3>6</h3><sub>Tap the three dots for labels, cover, export, and sharing</sub></td>
+  </tr>
+</table>
+
+<br>
 
 ---
+
+<br>
+
+<div align="center">
 
 ## Backup and restore
 
-Open **Settings**, then the **Backup** section. Save or share one `.dinduy` file containing all your notes, photos, audio, and PDFs. When restoring, choose **Merge** (add to your current notes) or **Replace all** (replace everything).
+</div>
+
+Open **Settings**, then the **Backup** section. Save or share one `.dinduy` file containing all your notes, photos, audio, and PDFs.
+
+When restoring, choose one:
+
+| Option | Result |
+|:--|:--|
+| **Merge** | Adds what is in the backup, your current notes stay safe |
+| **Replace all** | Replaces every note with the backup |
+
+> [!TIP]
+> The app reminds you when it has been more than a week since your last backup.
+
+<br>
 
 ---
+
+<br>
+
+<div align="center">
 
 ## Requirements
 
-- Android 8.0 (API 26) or newer
-- An arm64-v8a device, because the offline transcription engine only supports this architecture
+</div>
+
+| | |
+|:--|:--|
+| **Android** | 8.0 (API 26) or newer |
+| **Architecture** | arm64-v8a, because the offline transcription engine only supports this |
+
+<br>
 
 ---
 
+<br>
+
+<div align="center">
+
 ## Building from source
+
+</div>
 
 Dinduy is written in Kotlin with Jetpack Compose and built with Gradle like a regular Android project.
 
 - Fonts are downloaded automatically during the build. If that fails, the app falls back to system fonts.
-- Without a keystore, the APK is signed with the debug key. To update without uninstalling first, provide a keystore through these environment variables:
+- Without a keystore, the APK is signed with the debug key.
+
+> [!NOTE]
+> To update without uninstalling first, provide a keystore through these environment variables:
 
 ```
-KS_FILE   KS_PASS   KS_ALIAS   KEY_PASS
+KS_FILE    KS_PASS    KS_ALIAS    KEY_PASS
 ```
+
+<br>
 
 ---
+
+<br>
+
+<div align="center">
 
 ## Updates
 
+</div>
+
 Check for the latest version from the **Info** menu. Updates can be downloaded and installed right from inside the app.
 
+<br>
+
 ---
+
+<br>
+
+<div align="center">
 
 ## License
 
 Released under the [MIT License](LICENSE).
 
-<div align="center">
+<br>
+
+<sub>Made so that taking notes feels good.</sub>
 
 <br>
 
-Made so that taking notes feels good.
+<img src="https://capsule-render.vercel.app/api?type=waving&color=6750A4&height=120&section=footer" width="100%" alt="">
 
 </div>
