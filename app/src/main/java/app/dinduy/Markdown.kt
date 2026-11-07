@@ -100,7 +100,7 @@ fun inl(s: String, refs: Map<String, String> = emptyMap()): Rt {
     return b.build()
 }
 
-private val RX_LI = Regex("""^(\s*)([-*+]|\d+[.)])\s+(.*)""")
+private val RX_LI = Regex("""^(\s*)([-*+]|\d+[.)]|[A-Z][.)])\s+(.*)""")
 private val RX_BLK = Regex("""^(```|#{1,6}\s|>|\s*([-*+]|\d+[.)])\s+|(-{3,}|\*{3,}|_{3,})\s*$)""")
 private val RX_ROW = Regex("""^\s*\|.*\|\s*$""")
 private val RX_SEP = Regex("""^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$""")
@@ -118,7 +118,24 @@ private val VK = mapOf(
 
 private fun isBl(l: String) = RX_BLK.containsMatchIn(l) || RX_ROW.matches(l)
 
-fun md(src: String, lineBlocks: Boolean = false): List<Blk> {
+private fun liDepth(m: MatchResult) = minOf(4, m.groupValues[1].replace("\t", "    ").length / 2)
+
+/**
+ * Baris butir (atau null). Butir huruf ("A. ", "B) ") rawan bentrok dengan tulisan biasa ("A. Santoso"), jadi hanya dianggap daftar
+ * bila berurutan (A lalu B, dst. di kedalaman yang sama) atau bila teks berasal dari salinan catatan sendiri ([own]).
+ */
+private fun liAt(L: List<String>, i: Int, la: CharArray, own: Boolean): MatchResult? {
+    val m = RX_LI.find(L[i]) ?: return null
+    val c = m.groupValues[2][0]
+    if (!c.isLetter() || own) return m
+    val d = liDepth(m)
+    if (la[d] != '\u0000' && c == la[d] + 1) return m
+    val nx = L.getOrNull(i + 1)?.let { RX_LI.find(it) } ?: return null
+    val nc = nx.groupValues[2][0]
+    return if (nc.isLetter() && nc == c + 1 && liDepth(nx) == d) m else null
+}
+
+fun md(src: String, lineBlocks: Boolean = false, own: Boolean = false): List<Blk> {
     val refs = HashMap<String, String>()
     val L = src.replace("\r", "").split("\n").filter {
         val m = RX_REFDEF.find(it)
@@ -173,19 +190,27 @@ fun md(src: String, lineBlocks: Boolean = false): List<Blk> {
             o.add(Blk(ty = "tbl", tb = rows, ca = al))
             continue
         }
-        if (RX_LI.matches(l)) {
+        val la = CharArray(6)
+        if (liAt(L, i, la, own) != null) {
             while (i < L.size) {
-                val m = RX_LI.find(L[i]) ?: break
-                val d = minOf(4, m.groupValues[1].replace("\t", "    ").length / 2)
-                val ord = m.groupValues[2][0].isDigit()
+                val m = liAt(L, i, la, own) ?: break
+                val d = liDepth(m)
+                val mk0 = m.groupValues[2][0]
+                val ord = mk0.isDigit()
+                val let = mk0.isLetter()
+                val prev = la[d]
+                for (j in d + 1 until 6) la[j] = '\u0000'
+                la[d] = if (let) mk0 else '\u0000'
                 var x = m.groupValues[3]
-                var t = if (ord) "o" else "b"
+                var t = if (ord) "o" else if (let) "a" else "b"
                 var done = false
-                if (!ord) {
+                if (t == "b") {
                     val k = RX_CHK.find(x)
                     if (k != null) { t = "c"; done = k.groupValues[1] != " "; x = k.groupValues[2] }
                 }
-                o.add(Blk(ty = "li", lt = t, d = d, x = done, r = inl(x, refs)))
+                // daftar huruf yang dimulai bukan dari A ("C. ...") tetap mulai dari huruf itu
+                val st = if (let && prev == '\u0000' && mk0 != 'A') mk0 - 'A' + 1 else 0
+                o.add(Blk(ty = "li", lt = t, d = d, x = done, st = st, r = inl(x, refs)))
                 i++
             }
             continue
@@ -240,6 +265,7 @@ fun rtMd(r: Rt): String {
 private fun lineEsc(l: String) = l
     .replace(Regex("^(\\s*)([-#>])"), "$1\\\\$2")
     .replace(Regex("^(\\s*\\d+)([.)])(\\s)"), "$1\\\\$2$3")
+    .replace(Regex("^(\\s*[A-Z])([.)])(\\s)"), "$1\\\\$2$3")
 
 private val TAGMD = mapOf(
     "note" to "NOTE", "tip" to "TIP", "imp" to "IMPORTANT", "warn" to "WARNING", "cau" to "CAUTION",
@@ -256,6 +282,7 @@ fun toMd(bl: List<Blk>): String {
             "li" -> {
                 val mk = when (b.lt) {
                     "o" -> (od[b.id] ?: 1).toString() + "."
+                    "a" -> letterOf(od[b.id] ?: 1) + "."
                     "c" -> if (b.x) "- [x]" else "- [ ]"
                     else -> "-"
                 }
