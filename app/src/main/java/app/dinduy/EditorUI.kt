@@ -410,7 +410,7 @@ fun TF(
                                 return@detectTapGestures
                             }
                             val u = rt.sp.firstOrNull { it.k == K.L && o >= it.s && o < it.e }?.u
-                            if (u != null) uri.openUri(u) else ed.exitReading(key, o)
+                            if (u != null) uri.openUri(u) else ed.tapFromReading(key, o)
                         }
                     )
                 },
