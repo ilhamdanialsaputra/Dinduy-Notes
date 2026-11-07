@@ -150,18 +150,26 @@ object Bg {
 class BgService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
+    private fun tryFg(n: Notification, type: Int): Boolean = try {
+        ServiceCompat.startForeground(this, Bg.ID, n, type)
+        true
+    } catch (e: Exception) { false }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == Bg.A_STOP) Bg.onStopRec?.invoke()
         val s = Bg.snap
         val snap = s ?: Bg.Snap("Dinduy", "Menyelesaikan…", -1, false, false)
-        val type = if (Build.VERSION.SDK_INT >= 30 && snap.mic) 129 else 1   // 1 = dataSync, 128 = microphone
-        try {
-            ServiceCompat.startForeground(this, Bg.ID, Bg.build(this, snap), type)
-        } catch (e: Exception) {
+        val n = Bg.build(this, snap)
+        // Wajib berhasil memanggil startForeground, kalau tidak sistem mematikan aplikasi
+        // ("did not then call Service.startForeground()"). Jadi coba bertahap, jangan langsung stopSelf.
+        var ok = false
+        if (Build.VERSION.SDK_INT >= 30 && snap.mic) ok = tryFg(n, 129)   // dataSync | microphone
+        if (!ok) ok = tryFg(n, 1)                                          // dataSync saja
+        if (!ok) ok = try { startForeground(Bg.ID, n); true } catch (e: Exception) { false }
+        if (!ok || s == null) {
+            Bg.running = false
             stopSelf()
-            return START_NOT_STICKY
         }
-        if (s == null) stopSelf()
         return START_NOT_STICKY
     }
 
