@@ -328,6 +328,27 @@ fun MorphCheck(on: Boolean) {
     }
 }
 
+/** Ikon bagikan universal: tiga titik (node) yang tersambung, seperti di Android / Google. */
+@Composable
+private fun ShareNodesBtn(tint: Color, bg: Color, onClick: () -> Unit) {
+    Box(
+        Modifier.size(44.dp).clip(CircleShape).background(bg).clickable(onClick = onClick),
+        Alignment.Center
+    ) {
+        androidx.compose.foundation.Canvas(Modifier.size(24.dp)) {
+            val k = size.width / 24f
+            val a = androidx.compose.ui.geometry.Offset(18f * k, 5f * k)
+            val b = androidx.compose.ui.geometry.Offset(6f * k, 12f * k)
+            val c = androidx.compose.ui.geometry.Offset(18f * k, 19f * k)
+            val sw = 1.9f * k
+            drawLine(tint, b, a, sw, androidx.compose.ui.graphics.StrokeCap.Round)
+            drawLine(tint, b, c, sw, androidx.compose.ui.graphics.StrokeCap.Round)
+            val r = 3.1f * k
+            drawCircle(tint, r, a); drawCircle(tint, r, b); drawCircle(tint, r, c)
+        }
+    }
+}
+
 /** Satu baris untuk tiga aksi Markdown: bagikan, simpan, salin. */
 @Composable
 private fun MdRow(pos: Int, onShare: () -> Unit, onSave: () -> Unit, onCopy: () -> Unit) {
@@ -338,7 +359,7 @@ private fun MdRow(pos: Int, onShare: () -> Unit, onSave: () -> Unit, onCopy: () 
                 T("Markdown (.md)", 16f, 500, pal.os)
                 T("Share, save or copy", 14f, 400, pal.osv, lh = 1.3f)
             }
-            IconBtn("up", pal.os, onShare, size = 44.dp, bg = pal.c4)
+            ShareNodesBtn(pal.os, pal.c4, onShare)
             Spacer(Modifier.width(6.dp))
             IconBtn("dl", pal.os, onSave, size = 44.dp, bg = pal.c4)
             Spacer(Modifier.width(6.dp))
