@@ -2554,6 +2554,13 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (ink.on) ink.toggle(this); reading = true; selImg = null; selObj = null; pickQuote = false; miniBar = false; sheet = 0; sub = 0; sheetPage = 0; clearReq++
     }
 
+    /** Ketuk di mode baca: tabel / kode / kutipan hanya terpilih (mode atur, tanpa keyboard); teks biasa langsung diedit. */
+    fun tapFromReading(key: String, off: Int) {
+        val bid = keyBlock(key)
+        val ty = blocks.firstOrNull { it.id == bid }?.ty
+        if (ty == "q" || ty == "code" || ty == "tbl") { exitReading(); selectObj(bid) } else exitReading(key, off)
+    }
+
     fun exitReading(key: String? = null, off: Int = 0) {
         selOn = false; pa = null; pf = null; selBack = null; selDrag = false
         reading = false
