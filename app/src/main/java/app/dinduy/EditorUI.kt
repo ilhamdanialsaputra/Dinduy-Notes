@@ -1,2458 +1,2549 @@
-@file:OptIn(ExperimentalFoundationApi::class, ExperimentalComposeUiApi::class)
-
 package app.dinduy
 
-import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.ui.text.style.TextIndent
-
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.expandHorizontally
-import androidx.compose.animation.shrinkHorizontally
-import kotlinx.coroutines.launch
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.ExperimentalFoundationApi
-import kotlinx.coroutines.flow.collectLatest
-import androidx.compose.foundation.gestures.BringIntoViewSpec
-import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.calculatePan
-import androidx.compose.foundation.gestures.calculateZoom
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.FilterQuality
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.positionChange
-import androidx.compose.ui.input.pointer.positionChanged
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.ui.layout.positionInParent
-import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.zIndex
-import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.ui.platform.LocalViewConfiguration
-import androidx.compose.ui.platform.ViewConfiguration
-import androidx.compose.ui.input.pointer.PointerInputChange
-import androidx.compose.runtime.rememberUpdatedState
-import kotlin.math.abs
-import kotlin.math.roundToInt
-import androidx.compose.foundation.LocalIndication
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.wrapContentWidth
-import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.union
-import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.ExperimentalComposeUiApi
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.focusProperties
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.isCtrlPressed
-import androidx.compose.ui.input.key.isShiftPressed
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.text.TextLayoutResult
-import androidx.compose.ui.text.TextMeasurer
-import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.text.withStyle
-import androidx.compose.ui.unit.Constraints
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.input.OffsetMapping
-import androidx.compose.ui.text.input.TransformedText
-import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.em
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.BiasAlignment
+import androidx.compose.ui.text.input.TextFieldValue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
-/** Lebar kapsul saat mengembang, sebagai pecahan dari lebar area. */
-private const val BAR_FRAC = 0.84f
+/** Jarak antara gambar dan teks di sisinya (dp), dan lebar minimum kolom teks samping (dp). */
+/** Ambang komposisi berjendela (biaya blok: 1 per blok, tabel 1 + sel/2). Histeresis: nyala di WIN_ON, mati di bawah WIN_OFF. */
+const val WIN_ON = 140
+const val WIN_OFF = 100
+const val SIDE_GAP = 14f
+const val SIDE_MIN = 110f
+const val SIDE_W = 0.5f
+
+private val RX_BUL = Regex("^([-*•+])\\s")
+private val RX_NUM = Regex("^\\d{1,3}[.)]\\s")
+private val RX_DASHL = Regex("^-\\p{L}")
+private val RX_QT = Regex("^>\\s")
+private val RX_HD = Regex("^(#{1,2})\\s")
+private val RX_CK = Regex("^\\[([ xX]?)]\\s")
+private val RX_URL = Regex("^https?://[^\\s<>\"]{4,}$")
+
+/** Isi [s] kalau seluruhnya hanya satu alamat web, selain itu null. */
+private fun asUrl(s: String): String? {
+    val t = s.trim()
+    return if (t.length <= 2000 && RX_URL.matches(t)) t else null
+}
+
+/**
+ * Pemotongan baris buatan untuk satu paragraf yang melewati dasar gambar mengambang:
+ * [cuts] = offset awal tiap baris yang disisipi pemisah baris visual; [pn] = jumlah spasi-em penggeser di awal tiap baris
+ * (indeks 0 = baris pertama, indeks j = baris sesudah pemotongan ke-(j-1); ukurannya cuts.size + 1);
+ * [pl] = letter-spacing (sp) tiap penggeser agar lebarnya pas. Penggeser dipakai untuk menggeser baris sempit di kanan gambar kiri
+ * dan untuk inden baris pertama / menggantung (inden pada TextField tidak bisa dipakai karena tiap pemotongan memulai paragraf baru).
+ * Hanya tampilan: teks aslinya tidak berubah.
+ */
 
 @androidx.compose.runtime.Immutable
-class Dm(val fs: Float, val lh: Float, val ff: FontFamily = FontFamily.Default)
+class Fold(val cuts: IntArray, val pn: IntArray, val pl: FloatArray, val cutR: Float = 0f) {
+    // [cutR] = px yang dikurangkan dari lebar kolom untuk baris sempit TANPA penggeser (gambar di kanan); dipakai rata kiri-kanan.
+    override fun equals(other: Any?): Boolean =
+        other is Fold && cutR == other.cutR && cuts.contentEquals(other.cuts) && pn.contentEquals(other.pn) && pl.contentEquals(other.pl)
 
-fun spanStyle(k: Int, pal: Pal, fs: Float): SpanStyle = when (k) {
-    K.B -> SpanStyle(fontWeight = FontWeight(850))
-    K.I -> SpanStyle(fontStyle = FontStyle.Italic)
-    K.U -> SpanStyle(textDecoration = TextDecoration.Underline)
-    K.S -> SpanStyle(textDecoration = TextDecoration.LineThrough)
-    K.M -> SpanStyle(background = pal.pc, color = pal.opc)
-    K.C -> SpanStyle(fontFamily = FontFamily.Monospace, fontSize = (fs * .85f).sp, background = pal.sc, color = pal.osc)
-    else -> SpanStyle(color = pal.p, fontWeight = FontWeight(700), textDecoration = TextDecoration.Underline)
-}
+    override fun hashCode(): Int =
+        (((cuts.contentHashCode() * 31 + pn.contentHashCode()) * 31 + pl.contentHashCode()) * 31) + cutR.hashCode()
 
-/** Warna seleksi teks. Bagian yang bertanda stabilo dicampur ke warna stabilonya, jadi stabilo tetap kelihatan. off = awalan tak terlihat. */
-fun AnnotatedString.Builder.addSel(pal: Pal, rt: Rt, a0: Int, b0: Int, off: Int, n: Int) {
-    val a = a0.coerceIn(0, n); val b = b0.coerceIn(0, n)
-    if (b <= a) return
-    val sel = pal.p.copy(alpha = .32f)
-    val onMark = Color(
-        red = sel.red * sel.alpha + pal.pc.red * (1f - sel.alpha),
-        green = sel.green * sel.alpha + pal.pc.green * (1f - sel.alpha),
-        blue = sel.blue * sel.alpha + pal.pc.blue * (1f - sel.alpha)
-    )
-    var cur = a
-    for ((ms, me) in rt.sp.filter { it.k == K.M }.map { (it.s + off).coerceIn(0, n) to (it.e + off).coerceIn(0, n) }.sortedBy { it.first }) {
-        val s = maxOf(ms, cur); val e = minOf(me, b)
-        if (e <= s) continue
-        if (s > cur) addStyle(SpanStyle(background = sel), cur, s)
-        addStyle(SpanStyle(background = onMark), s, e)
-        cur = e
+    private fun p0() = if (pn.isNotEmpty()) pn[0] else 0
+    private fun pAt(j: Int) = if (j < pn.size) pn[j] else 0
+
+    /** Jumlah karakter tambahan (pemisah baris + penggeser) di antara awal baris ke-1 dan pemotongan ke-m. */
+    private fun cum(m: Int): Int {
+        var s = 0
+        for (j in 1..m) s += 1 + pAt(j)
+        return s
     }
-    if (cur < b) addStyle(SpanStyle(background = sel), cur, b)
-}
 
-fun styled(rt: Rt, text: String, off: Int, pal: Pal, fs: Float): AnnotatedString = buildAnnotatedString {
-    append(text)
-    val n = text.length
-    // awalan tak terlihat (Z): lebarnya dibuat nyaris nol, supaya kursor / teks rata tengah benar-benar di tengah (tidak geser setengah lebar Z).
-    // Paragraf KOSONG (hanya Z, n == 1) tidak boleh dikecilkan: baris itu tak punya huruf lain, jadi tinggi baris dan kursornya ikut
-    // menyusut ke 0,01sp dan kursor tak terlihat. Z tak berlebar (zero-width) sehingga tak menggeser kursor.
-    if (off == 1 && n > 1 && text[0] == '\u200B') addStyle(SpanStyle(fontSize = 0.01.sp, letterSpacing = 0.sp), 0, 1)
-    for (s in rt.sp) {
-        val a = (s.s + off).coerceIn(0, n)
-        val b = (s.e + off).coerceIn(0, n)
-        if (b > a) addStyle(spanStyle(s.k, pal, fs), a, b)
+    val total: Int = p0() + cum(cuts.size)
+
+    /** Offset asli (z = jumlah karakter awalan tak terlihat) -> offset tampilan. */
+    fun o2t(o: Int, z: Int): Int {
+        if (o < z) return o
+        val r = o - z
+        var c = 0
+        while (c < cuts.size && cuts[c] <= r) c++
+        return z + r + p0() + cum(c)
     }
-}
 
-/** Sorot kecocokan "cari dalam catatan": yang aktif berwarna primer penuh, sisanya wadah tersier. off = awalan tak terlihat. */
-fun AnnotatedString.Builder.addFind(pal: Pal, hits: List<FHit>, cur: FHit?, off: Int, n: Int) {
-    for (h in hits) {
-        val a = (h.s + off).coerceIn(0, n)
-        val b = (h.e + off).coerceIn(0, n)
-        if (b <= a) continue
-        addStyle(if (h == cur) SpanStyle(background = pal.p, color = pal.op) else SpanStyle(background = pal.tc, color = pal.otc), a, b)
+    /** Offset tampilan -> offset asli. */
+    fun t2o(t: Int, z: Int): Int {
+        if (t < z) return t
+        val tt = t - z - p0()
+        if (tt <= 0) return z
+        var passed = 0
+        for (k in cuts.indices) {
+            val start = cuts[k] + cum(k)
+            if (tt <= start) break
+            val len = 1 + pAt(k + 1)
+            if (tt < start + len) return z + cuts[k]
+            passed = k + 1
+        }
+        return z + maxOf(0, tt - cum(passed))
     }
 }
 
-fun baseStyle(pal: Pal, dm: Dm, color: Color = pal.os, size: Float = dm.fs, w: Int = 400, lhEm: Float = dm.lh, ls: Float = 0f) =
-    TextStyle(color = color, fontFamily = dm.ff, fontSize = size.sp, fontWeight = FontWeight(w), lineHeight = (lhEm * size).sp, letterSpacing = ls.em)
+/** Titik di dalam teks (kunci kolom + offset) untuk seleksi lintas blok. */
+data class Pt(val key: String, val off: Int)
 
-/** Default Compose untuk gulir horizontal (kode / tabel); NoteScreen mematikan gulir vertikal bawaan lewat LocalBringIntoViewSpec. */
-private val LocalHBiv = androidx.compose.runtime.staticCompositionLocalOf<BringIntoViewSpec?> { null }
+/** Gambar yang sedang diangkat (tekan-tahan lalu geser). */
+class Mv(val bid: String, val imgId: String, val row: Boolean, val top: Float, val h: Float)
 
-@Composable
-private fun HBox(modifier: Modifier, content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit) {
-    val d = LocalHBiv.current
-    if (d == null) Box(modifier, content = content)
-    else CompositionLocalProvider(LocalBringIntoViewSpec provides d) { Box(modifier, content = content) }
-}
+class Req(val key: String, val pos: Int, val n: Int, val sel: TextRange? = null)
 
-/** Catat posisi kolom teks di ruang konten, dipakai seleksi lintas blok (mode baca maupun mode ketik). */
-private fun Modifier.trackPos(ed: Ed, key: String): Modifier = onGloballyPositioned { c ->
-    val cc = ed.contentCoords
-    if (cc != null && cc.isAttached && c.isAttached) {
-        val o = cc.localPositionOf(c, Offset.Zero)
-        if (ed.kpos[key] != o) ed.kpos[key] = o
-    }
+/** Sasaran kolase saat gambar diseret ke atas gambar lain: gambar [imgId] di blok [bid]; [after] = true bila gambar yang diseret masuk di kanannya. */
+class MergeT(val bid: String, val imgId: String, val after: Boolean)
+
+/** Satu kecocokan pada mode "cari dalam catatan". key "@t" = judul, selain itu kunci kolom teks. */
+data class FHit(val key: String, val s: Int, val e: Int)
+class Snap(val bl: List<Blk>, val key: String?, val sel: TextRange)
+
+fun keyBlock(k: String) = k.substringBefore(':')
+fun isCellKey(k: String) = k.indexOf(':') >= 0
+fun cellRC(k: String): Pair<Int, Int> {
+    val p = k.split(':')
+    return (p.getOrNull(1)?.toIntOrNull() ?: 0) to (p.getOrNull(2)?.toIntOrNull() ?: 0)
 }
 
 /**
- * Rata kiri-kanan buatan sendiri (justify bawaan Android tidak jalan di sebagian HP / font).
- * Ukur teks dengan rata kiri, lalu tiap baris (kecuali yang terakhir) dilebarkan dengan menambah jarak huruf
- * pada spasi di baris itu sampai pas selebar kolom. Teks tidak diubah, jadi kursor dan seleksi tetap benar.
- * Teks yang mengelilingi gambar (Fold) juga dirata: baris sempit di samping gambar dan baris lebar di bawahnya sama-sama pas ke tepinya,
- * hanya baris terakhir paragraf yang dibiarkan rata kiri.
+ * Penyimpan TextFieldValue per kolom. Tiap kunci punya state sendiri, jadi mengetik di satu blok TIDAK membangunkan
+ * kolom lain (mutableStateMapOf = satu objek state untuk seluruh peta: tiap put meng-invalidate SEMUA kolom yang membacanya).
+ * [ver] naik saat kunci ditambah / dihapus dan hanya dibaca kalau kunci yang diminta belum ada.
  */
-private fun justifySpans(
-    a: AnnotatedString, style: TextStyle, w: Int, tm: androidx.compose.ui.text.TextMeasurer, d: androidx.compose.ui.unit.Density,
-    cutR: Float = 0f
-): AnnotatedString {
-    if (w <= 0 || a.length < 2) return a
-    val r = tm.measure(a, style = style, constraints = androidx.compose.ui.unit.Constraints(maxWidth = w))
-    if (r.lineCount < 2) return a
-    val txt = a.text
-    val maxExtra = with(d) { style.fontSize.toPx() } * 1.5f
-    return buildAnnotatedString {
-        append(a)
-        for (i in 0 until r.lineCount - 1) {
-            val s = r.getLineStart(i)
-            val en = r.getLineEnd(i, visibleEnd = true).coerceAtMost(txt.length)
-            // baris yang berakhir pemisah baris buatan (teks mengelilingi gambar di kanan) lebih sempit dari kolom: ratakan ke tepi gambar, bukan ke tepi kolom
-            val hard = r.getLineEnd(i).let { it in 1..txt.length && txt[it - 1] == '\n' }
-            val tw = if (hard && cutR > 0f) w - cutR else w.toFloat()
-            val slack = tw - r.getLineRight(i)      // tepi kanan sudah termasuk inden (baris pertama / menggantung)
+class TfStore {
+    private val m = HashMap<String, androidx.compose.runtime.MutableState<TextFieldValue>>()
+    private var ver by mutableStateOf(0)
+    val keys: Set<String> get() = m.keys
+
+    operator fun get(key: String): TextFieldValue? {
+        val s = m[key]
+        if (s == null) {
+            if (ver == Int.MIN_VALUE) return null   // hanya untuk berlangganan: kunci baru akan membangunkan pembaca ini
+            return null
+        }
+        return s.value
+    }
+
+    operator fun set(key: String, v: TextFieldValue) {
+        val s = m[key]
+        if (s == null) { m[key] = mutableStateOf(v); ver += 1 } else s.value = v
+    }
+
+    fun remove(key: String) { if (m.remove(key) != null) ver += 1 }
+    fun clear() { if (m.isNotEmpty()) { m.clear(); ver += 1 } }
+    fun containsKey(key: String): Boolean = m.containsKey(key)
+    fun removePrefix(p: String) { if (m.keys.removeAll { it.startsWith(p) }) ver += 1 }
+}
+
+@androidx.compose.runtime.Stable
+class Ed(private val vm: AppVM, val noteId: String, private val scope: CoroutineScope) {
+    var title by mutableStateOf("")
+    var blocks by mutableStateOf<List<Blk>>(listOf(Blk()))
+    val tf = TfStore()
+    var focus by mutableStateOf<String?>(null)
+    var typing by mutableStateOf(setOf<Int>())
+    var reading by mutableStateOf(false)
+    var pickQuote by mutableStateOf(false)
+    var selImg by mutableStateOf<Pair<String, Int>?>(null)
+    var req by mutableStateOf<Req?>(null)
+    var titleFocus by mutableStateOf(false)
+    var clearReq by mutableStateOf(0)
+    var titleReq by mutableStateOf(0)
+    var tick by mutableStateOf(0)
+    var miniBar by mutableStateOf(false)
+    var widthDp by mutableStateOf(340f)
+    var barH by mutableStateOf(0f)        // tinggi kapsul alat (px) yang melayang di atas keyboard
+    var barOn by mutableStateOf(false)    // kapsul alat sedang tampil
+    val ink = InkCtl()                    // keadaan mode coret (lihat Ink.kt)
+    var sheet by mutableStateOf(0)        // sheet bawah: 0 tutup, 1 Sisipkan, 2 Format
+    var sub by mutableStateOf(0)          // sub-bilah toolbar: 0 tutup, 1 perataan, 2 poin
+    var sheetPage by mutableStateOf(0)    // halaman dalam sheet Sisipkan: 0 daftar, 1 pengaturan tabel
+    var tbR by mutableStateOf(3)          // jumlah baris tabel yang akan disisipkan
+    var tbC by mutableStateOf(3)          // jumlah kolom
+
+    // penanda konversi otomatis (mis. "1. " -> nomor), untuk menahan IME yang mengembalikan teks penanda
+    private var convKey: String? = null
+    private var convPrefix = ""
+    private var convAt = 0L
+
+    private var rq = 0
+    private val hist = ArrayList<Snap>()
+    private var hi = 0
+    private var typed = 0
+    private var cJob: Job? = null
+    private var sJob: Job? = null
+    private var chg = false
+
+    init {
+        val n = vm.note(noteId)
+        title = n?.t ?: ""
+        blocks = migrateImgText((n?.bl ?: emptyList()).ifEmpty { listOf(Blk()) })
+        blocks.forEach { seed(it) }
+        norm()
+        hist.add(Snap(blocks, null, TextRange.Zero))
+        // catatan yang sudah ada isinya dibuka di tampilan penuh; hanya catatan baru (kosong) langsung ke editor
+        if (title.isNotBlank() || plainOf(blocks).isNotEmpty() || blocks.any { it.isObj || it.ik.isNotEmpty() }) reading = true
+    }
+
+    /** Catatan lama menyimpan teks "di samping gambar" di blok gambar; sekarang jadi paragraf biasa tepat setelah gambar. */
+    private fun migrateImgText(l: List<Blk>): List<Blk> {
+        val out = ArrayList<Blk>()
+        for (b in l) {
+            if (b.ty == "img" && b.r.t.isNotEmpty()) { out.add(b.copy(r = Rt())); out.add(Blk(ty = "p", r = b.r)) }
+            else out.add(b)
+        }
+        return out
+    }
+
+    // ---------- util ----------
+    private fun seed(b: Blk) {
+        if (b.ty == "tbl") {
+            b.tb.forEachIndexed { r, row ->
+                row.forEachIndexed { c, cell -> tf["${b.id}:$r:$c"] = TextFieldValue(Z + cell.t, TextRange(1)) }
+            }
+        } else if (b.isText) tf[b.id] = TextFieldValue(Z + b.r.t, TextRange(1))
+    }
+
+    private fun reseedAll() {
+        tf.clear(); blocks.forEach { seed(it) }
+    }
+
+    fun idx(id: String) = blocks.indexOfFirst { it.id == id }
+    // peta id -> blok, dibangun ulang hanya kalau daftar blok berganti: pencarian O(1), bukan O(N) per kolom per ketikan
+    private var idMapFor: List<Blk>? = null
+    private var idMap = HashMap<String, Blk>()
+    fun blockOfKey(k: String): Blk? {
+        val bl = blocks
+        if (idMapFor !== bl) {
+            val mm = HashMap<String, Blk>(bl.size * 2 + 4)
+            for (x in bl) if (x.id !in mm) mm[x.id] = x
+            idMap = mm; idMapFor = bl
+        }
+        return idMap[keyBlock(k)]
+    }
+
+    fun rtOf(key: String): Rt {
+        val b = blockOfKey(key) ?: return Rt()
+        if (!isCellKey(key)) return b.r
+        val (r, c) = cellRC(key)
+        return b.tb.getOrNull(r)?.getOrNull(c) ?: Rt()
+    }
+
+    private fun putRt(key: String, rt: Rt) {
+        val id = keyBlock(key)
+        val rc = if (isCellKey(key)) cellRC(key) else null
+        blocks = blocks.map { b ->
+            if (b.id != id) b
+            else if (rc != null) b.copy(tb = b.tb.mapIndexed { ri, row ->
+                if (ri != rc.first) row else row.mapIndexed { ci, cell -> if (ci == rc.second) rt else cell }
+            })
+            else b.copy(r = rt, ik = inkRemap(b.ik, b.r.t, rt.t))   // jangkar coretan ikut bergeser mengikuti perubahan huruf
+        }
+    }
+
+    private fun setBlock(i: Int, nb: Blk) {
+        blocks = blocks.toMutableList().also { it[i] = nb }
+    }
+
+    fun focusAt(key: String, pos: Int) {
+        req = Req(key, pos, ++rq)
+    }
+
+    fun applyReq(r: Req) {
+        val v = tf[r.key] ?: return
+        val rs = r.sel
+        val p = (r.pos + 1).coerceIn(1, v.text.length.coerceAtLeast(1))
+        tf[r.key] = if (rs != null) {
+            val n = v.text.length
+            v.copy(selection = TextRange(rs.start.coerceIn(0, n), rs.end.coerceIn(0, n)))
+        } else v.copy(selection = TextRange(p))
+        caretMoved(r.key)
+        if (req === r) req = null
+    }
+
+    fun onFocus(key: String) {
+        titleFocus = false
+        selImg = null
+        caretMoved(key)
+    }
+
+    fun caretMoved(key: String) {
+        focus = key
+        val v = tf[key] ?: return
+        typing = rtOf(key).flags(v.selection.min - 1, v.selection.max - 1)
+    }
+
+    fun activeFlags(): Set<Int> {
+        val k = focus ?: return emptySet()
+        val v = tf[k] ?: return emptySet()
+        val a = v.selection.min - 1
+        val b = v.selection.max - 1
+        return if (a == b) typing else rtOf(k).flags(a, b)
+    }
+
+    private fun clampSel(v: TextFieldValue): TextFieldValue =
+        if (v.selection.min >= 1) v
+        else v.copy(selection = TextRange(maxOf(1, v.selection.start), maxOf(1, v.selection.end)))
+
+    // ---------- teks ----------
+    fun onText(key: String, v0: TextFieldValue) {
+        val old = tf[key] ?: return
+        if (v0.text == old.text) {
+            val whole = v0.text.isNotEmpty() && !v0.selection.collapsed &&
+                v0.selection.min <= 1 && v0.selection.max >= v0.text.length
+            if (whole) {
+                // "Pilih semua" (Gboard / keyboard) memilih seluruh kolom: naikkan jadi seleksi seluruh catatan
+                if (!selOn) selectAllKey(key) else selAll()
+                return
+            }
+            // tombol "lompat ke awal/akhir teks" Gboard saat menyeleksi = setSelection(jangkar, ujung blok): perluas ke ujung catatan
+            if (!v0.selection.collapsed && !isCellKey(key)) {
+                val vl = v0.text.length
+                val toEnd = v0.selection.end >= vl && old.selection.end < vl - 1
+                val toStart = v0.selection.end <= 0 && old.selection.end > 1
+                if (toEnd || toStart) {
+                    ordRefresh()
+                    val k = (if (toEnd) ordList.lastOrNull() else ordList.firstOrNull())
+                    if (k != null && k != key) {
+                        extendJump(key, (v0.selection.start - 1).coerceAtLeast(0), (old.selection.end - 1).coerceAtLeast(0), Pt(k, if (toEnd) rtOf(k).t.length else 0))
+                        return
+                    }
+                }
+            }
+            val v = clampSel(v0)
+            tf[key] = v
+            if (v.selection != old.selection) { if (selEdit) dropSel(); caretMoved(key) }
+            return
+        }
+        if (selEdit && selSpan()?.let { it.first != it.second } == true && typeOverSel(key, v0)) return
+        val oldRt = rtOf(key)
+        var v = v0
+        if (!v.text.startsWith(Z)) {
+            if (v.text == oldRt.t && v.selection.collapsed && v.selection.start == 0 && !isCellKey(key)) {
+                tf[key] = TextFieldValue(Z + oldRt.t, TextRange(1))
+                backStart(key)
+                return
+            }
+            v = TextFieldValue(Z + v.text, TextRange(v.selection.min + 1, v.selection.max + 1))
+        }
+        if (v.text == old.text) {
+            tf[key] = clampSel(v); return
+        }
+        val nt = v.text.substring(1)
+        val b = blockOfKey(key) ?: return
+        if (key == convKey && System.currentTimeMillis() - convAt < 1500 &&
+            convPrefix.isNotEmpty() && nt.startsWith(convPrefix) && !oldRt.t.startsWith(convPrefix)
+        ) {
+            // IME mengembalikan "1. " / "- " yang sudah jadi penanda: buang lagi
+            convKey = null
+            val rt2 = oldRt.edit(nt.substring(convPrefix.length), typing)
+            putRt(key, rt2)
+            tf[key] = TextFieldValue(Z + rt2.t, TextRange((v.selection.max - convPrefix.length).coerceIn(1, rt2.t.length + 1)))
+            dirty()
+            return
+        }
+        val df = diff(oldRt.t, nt)
+        val insStr = nt.substring(df.p, df.p + df.ins)
+        val cell = isCellKey(key)
+        // URL ditempel ke paragraf kosong -> kartu pratinjau tautan (ketikan biasa satu-satu tidak ikut, hanya tempel)
+        if (df.ins >= 8 && !cell && b.ty == "p" && oldRt.t.isBlank()) {
+            val u = asUrl(nt)
+            if (u != null) { linkize(key, u); return }
+        }
+        if (df.ins > 0 && insStr.indexOf('\n') >= 0) {
+            val without = nt.removeRange(df.p, df.p + df.ins)
+            if (cell) {
+                val rt2 = oldRt.edit(without, typing)
+                putRt(key, rt2)
+                tf[key] = TextFieldValue(Z + rt2.t, TextRange(df.p + 1))
+                cellEnter(key)
+                return
+            }
+            if (!b.isMulti) {
+                val rt2 = oldRt.edit(without, typing)
+                putRt(key, rt2)
+                tf[key] = TextFieldValue(Z + rt2.t, TextRange(df.p + 1))
+                if (insStr == "\n") enter(key, df.p) else paste(key, df.p, insStr, lastMd.isNotEmpty() && insStr.trimEnd('\n') == lastMd)
+                return
+            }
+            if (insStr == "\n" && df.p == nt.length - 1 && (oldRt.t.isEmpty() || oldRt.t.endsWith("\n"))) {
+                val keep = if (oldRt.t.endsWith("\n")) oldRt.slice(0, oldRt.t.length - 1) else oldRt
+                exitMulti(key, keep)
+                return
+            }
+        }
+        val rt = oldRt.edit(nt, typing)
+        putRt(key, rt)
+        tf[key] = v
+        typing = rt.flags(v.selection.min - 1, v.selection.max - 1)
+        // pengelompokan undo per kalimat
+        if (df.ins > 0) {
+            typed += df.ins
+            if (insStr.last() in ".!?") commit()
+            else if (insStr == " " && typed >= 28) commit()
+            else scheduleCommit()
+        } else scheduleCommit()
+        if (df.ins > 0 && v.selection.collapsed && !b.isMulti && !cell) {
+            if (autoBlock(key, v, df)) return
+        }
+        if (df.ins > 0 && v.selection.collapsed && b.ty != "code") autoInline(key)
+        dirty()
+    }
+
+    private fun scheduleCommit() {
+        cJob?.cancel()
+        cJob = scope.launch { delay(800); commit() }
+    }
+
+    private fun autoBlock(key: String, v: TextFieldValue, df: Df): Boolean {
+        val i = idx(key)
+        if (i < 0) return false
+        val b = blocks[i]
+        val rt = b.r
+        val tx = rt.t
+        if (tx.contains('\n')) return false
+        val c = v.selection.start - 1
+        var nb: Blk? = null
+        var len = 0
+        if (b.ty == "p") {
+            var m = RX_BUL.find(tx)
+            if (m != null && c == m.value.length) { nb = Blk(id = b.id, ik = b.ik, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi, ty = "li", lt = "b"); len = m.value.length }
+            if (nb == null) {
+                m = RX_NUM.find(tx)
+                if (m != null && c == m.value.length) {
+                    // "4. " -> butir bernomor 4 (nomor berikutnya melanjutkan dari angka itu)
+                    val num = m.value.takeWhile { it.isDigit() }.toIntOrNull() ?: 0
+                    nb = Blk(id = b.id, ik = b.ik, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi, ty = "li", lt = "o", st = num); len = m.value.length
+                }
+            }
+            if (nb == null && RX_DASHL.containsMatchIn(tx) && c >= 2 && c <= 1 + df.ins) {
+                nb = Blk(id = b.id, ik = b.ik, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi, ty = "li", lt = "b"); len = 1
+            }
+            if (nb == null) {
+                m = RX_QT.find(tx)
+                if (m != null && c == 2) { nb = Blk(id = b.id, ik = b.ik, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi, ty = "q", k = "quote"); len = 2 }
+            }
+            if (nb == null) {
+                m = RX_HD.find(tx)
+                if (m != null && c == m.value.length) { nb = Blk(id = b.id, ik = b.ik, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi, ty = "h", lv = m.groupValues[1].length); len = m.value.length }
+            }
+        } else if (b.ty == "li" && b.lt == "b") {
+            val m = RX_CK.find(tx)
+            if (m != null && c == m.value.length) {
+                nb = Blk(id = b.id, ik = b.ik, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi, ty = "li", lt = "c", d = b.d, x = m.groupValues[1].isNotBlank()); len = m.value.length
+            }
+        }
+        if (nb == null) return false
+        commit()
+        val nr = rt.slice(len, tx.length)
+        setBlock(i, nb.copy(r = nr, ik = inkRemap(b.ik, tx, nr.t)))
+        val np = (c - len).coerceAtLeast(0)
+        tf[key] = TextFieldValue(Z + nr.t, TextRange(np + 1))
+        typing = emptySet()
+        convKey = key; convPrefix = tx.substring(0, len); convAt = System.currentTimeMillis()
+        afterStructural()
+        focusAt(key, np)
+        return true
+    }
+
+    private fun autoInline(key: String) {
+        val v = tf[key] ?: return
+        val rt = rtOf(key)
+        val c = v.selection.start - 1
+        if (c < 2 || c > rt.t.length) return
+        val tx = rt.t
+        val ch = tx[c - 1]
+        if ("*_~`".indexOf(ch) < 0) return
+        val mks = if (tx[c - 2] == ch && ch != '`') listOf("$ch$ch", "$ch") else listOf("$ch")
+        for (mk in mks) {
+            val L = mk.length
+            if (c - L < 0) continue
+            val body = tx.substring(0, c - L)
+            val oi = body.lastIndexOf(mk)
+            if (oi < 0) continue
+            val content = body.substring(oi + L)
+            if (content.isEmpty()) continue
+            if (ch != '`' && (content.first().isWhitespace() || content.last().isWhitespace() || content.contains(ch))) continue
+            if (oi > 0 && " \t\n([{\"'\u201C\u2018".indexOf(body[oi - 1]) < 0) continue
+            val kind = when (ch) { '*' -> K.B; '_' -> K.I; '~' -> K.S; else -> K.C }
+            commit()
+            val nr = rt.slice(0, oi) + Rt(content).withKind(kind) + rt.slice(c, tx.length)
+            putRt(key, nr)
+            tf[key] = TextFieldValue(Z + nr.t, TextRange(oi + content.length + 1))
+            typing = emptySet()
+            dirty(); commit()
+            return
+        }
+    }
+
+    // ---------- Enter / Backspace ----------
+    private fun enter(key: String, pos: Int) {
+        val i = idx(key)
+        if (i < 0) return
+        val b = blocks[i]
+        commit()
+        when {
+            b.ty == "li" && b.r.t.isEmpty() -> {
+                setBlock(i, if (b.d > 0) b.copy(d = b.d - 1) else b.copy(ty = "p"))
+                focusAt(b.id, 0)
+            }
+            b.ty == "h" && b.r.t.isNotEmpty() && pos == 0 -> {
+                val nb = Blk()
+                blocks = blocks.toMutableList().also { it.add(i, nb) }
+                seed(nb)
+                focusAt(b.id, 0)
+            }
+            else -> split(i, pos, if (b.ty == "li") "li" else "p")
+        }
+        afterStructural()
+    }
+
+    private fun split(i: Int, pos: Int, nty: String) {
+        val b = blocks[i]
+        var left = b.r.slice(0, pos)
+        var right = b.r.slice(pos, b.r.t.length)
+        if (right.t.startsWith("\n")) right = right.slice(1, right.t.length)
+        if (left.t.endsWith("\n")) left = left.slice(0, left.t.length - 1)
+        val nb = if (nty == "li") Blk(ty = "li", lt = b.lt, d = b.d, r = right, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi) else Blk(ty = "p", r = right, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi)
+        blocks = blocks.toMutableList().also { it[i] = b.copy(r = left, ik = inkRemap(b.ik, b.r.t, left.t)); it.add(i + 1, nb) }
+        tf[b.id] = TextFieldValue(Z + left.t, TextRange(left.t.length + 1))
+        seed(nb)
+        focusAt(nb.id, 0)
+    }
+
+    private fun exitMulti(key: String, keep: Rt) {
+        val i = idx(key)
+        if (i < 0) return
+        val b = blocks[i]
+        commit()
+        if (keep.t.isEmpty()) {
+            setBlock(i, b.copy(ty = "p", r = Rt()))
+            tf[b.id] = TextFieldValue(Z, TextRange(1))
+            focusAt(b.id, 0)
+        } else {
+            val nb = Blk()
+            blocks = blocks.toMutableList().also { it[i] = b.copy(r = keep, ik = inkRemap(b.ik, b.r.t, keep.t)); it.add(i + 1, nb) }
+            tf[b.id] = TextFieldValue(Z + keep.t, TextRange(keep.t.length + 1))
+            seed(nb)
+            focusAt(nb.id, 0)
+        }
+        afterStructural()
+    }
+
+    private fun backStart(key: String) {
+        val i = idx(key)
+        if (i < 0) return
+        val b = blocks[i]
+        commit()
+        if (b.ty == "li") {
+            setBlock(i, if (b.d > 0) b.copy(d = b.d - 1) else b.copy(ty = "p"))
+            focusAt(b.id, 0)
+        } else if (b.ty == "h" || b.isMulti) {
+            setBlock(i, b.copy(ty = "p"))
+            focusAt(b.id, 0)
+        } else {
+            if (i == 0) return
+            val pv = blocks[i - 1]
+            when {
+                pv.ty == "img" -> selectImg(pv.id, 0)   // jangan hapus gambar diam-diam: pilih dulu
+                pv.ty == "hr" -> {
+                    blocks = blocks.filterIndexed { j, _ -> j != i - 1 }
+                    focusAt(b.id, 0)
+                }
+                pv.ty == "lnk" -> {
+                    // kartu tautan kembali jadi tautan biasa (teks); Backspace berikutnya menghapusnya
+                    val nb = Blk(id = pv.id, ty = "p", r = Rt(pv.l, listOf(Sp(0, pv.l.length, K.L, pv.l))))
+                    blocks = blocks.toMutableList().also { it[i - 1] = nb }
+                    seed(nb)
+                    focusAt(nb.id, nb.r.t.length)
+                }
+                pv.ty == "tbl" -> {
+                    val r = pv.tb.size - 1
+                    val c = pv.tb[r].size - 1
+                    val k = "${pv.id}:$r:$c"
+                    focusAt(k, pv.tb[r][c].t.length)
+                }
+                else -> {
+                    val at = pv.r.t.length
+                    val merged = pv.r + b.r
+                    blocks = blocks.toMutableList().also { it[i - 1] = pv.copy(r = merged); it.removeAt(i) }
+                    tf.remove(b.id)
+                    tf[pv.id] = TextFieldValue(Z + merged.t, TextRange(at + 1))
+                    focusAt(pv.id, at)
+                }
+            }
+        }
+        afterStructural()
+    }
+
+    private fun paste(key: String, pos: Int, s: String, own: Boolean = false) {
+        val i = idx(key)
+        if (i < 0) return
+        val b = blocks[i]
+        commit()
+        val ns0 = md(s.trimEnd('\n'), true, own)
+        if (ns0.isEmpty()) return
+        // satu alamat web saja yang ditempel ke paragraf kosong -> kartu pratinjau tautan
+        val lone = if (ns0.size == 1 && ns0[0].ty == "p" && b.ty == "p" && b.r.t.isBlank()) asUrl(ns0[0].r.t) else null
+        val ns = if (lone != null) listOf(Blk(ty = "lnk", l = lone)) else ns0
+        val l = blocks.toMutableList()
+        val rt = b.r
+        if (b.ty == "img") l.addAll(i + 1, ns)
+        else if (rt.t.isEmpty()) {
+            l.removeAt(i); l.addAll(i, ns)
+        } else if (pos >= rt.t.length) l.addAll(i + 1, ns)
+        else if (pos <= 0) l.addAll(i, ns)
+        else {
+            val right = if (b.ty == "li") Blk(ty = "li", lt = b.lt, d = b.d, r = rt.slice(pos, rt.t.length), ta = b.ta, il = b.il, ir = b.ir, fi = b.fi)
+            else Blk(ty = "p", r = rt.slice(pos, rt.t.length), ta = b.ta, il = b.il, ir = b.ir, fi = b.fi)
+            l[i] = b.copy(r = rt.slice(0, pos), ik = inkRemap(b.ik, rt.t, rt.t.substring(0, pos.coerceIn(0, rt.t.length))))
+            l.addAll(i + 1, ns + right)
+        }
+        blocks = l
+        norm()
+        reseedAll()
+        val last = ns.last()
+        if (last.isText) focusAt(last.id, last.r.t.length)
+        else {
+            val j = idx(last.id)
+            blocks.getOrNull(j + 1)?.let { if (it.isText) focusAt(it.id, 0) }
+        }
+        afterStructural()
+        if (lone != null) revealMedia(last.id)
+    }
+
+    // ---------- perintah toolbar ----------
+    fun toggleFmt(kind: Int) {
+        if (selOn) { selFmt(kind); return }
+        val key = focus ?: return
+        val v = tf[key] ?: return
+        val blk = blockOfKey(key) ?: return
+        if (blk.ty == "code") return
+        if (blk.ty == "h" && kind == K.B) return
+        val a = v.selection.min - 1
+        val b = v.selection.max - 1
+        commit()
+        if (a == b) {
+            typing = if (kind in typing) typing - kind else typing + kind
+            return
+        }
+        putRt(key, rtOf(key).toggle(a, b, kind))
+        typing = rtOf(key).flags(a, b)
+        dirty(); commit()
+    }
+
+    private fun flat(r: Rt) = r.copy(t = r.t.replace('\n', ' '))
+
+    /** Ubah jenis semua blok yang tersentuh seleksi (judul, poin, kutipan, ...). */
+    private fun convertSel(f: (Blk) -> Blk) {
+        val ids = selSegs().filter { !isCellKey(it.first) }.map { keyBlock(it.first) }.distinct()
+        if (ids.isEmpty()) return
+        commit()
+        blocks = blocks.map { b -> if (b.id in ids && b.isText) f(b) else b }
+        afterStructural()
+    }
+
+    private fun convertFocused(f: (Blk) -> Blk) {
+        if (selOn) { convertSel(f); return }
+        val key = focus ?: return
+        if (isCellKey(key)) return
+        val i = idx(key)
+        if (i < 0) return
+        if (blocks[i].ty == "img") return
+        val keepSel = tf[key]?.selection
+        commit()
+        val nb = f(blocks[i])
+        setBlock(i, nb)
+        afterStructural()
+        // jenis blok berubah = TextField dibuat ulang; minta fokus balik (dengan posisi kursor/seleksi sama) supaya keyboard tidak menutup
+        req = Req(key, 0, ++rq, keepSel)
+    }
+
+    /** Paragraf berisi beberapa baris (\n) dipecah jadi satu blok per baris; kembalikan kunci blok di baris kursor. */
+    private fun explodeLines(key: String): String {
+        val i = idx(key)
+        if (i < 0 || isCellKey(key)) return key
+        val b = blocks[i]
+        if ((b.ty != "p" && b.ty != "li") || !b.r.t.contains('\n')) return key
+        val cur = ((tf[key]?.selection?.min ?: 1) - 1).coerceIn(0, b.r.t.length)
+        commit()
+        val parts = ArrayList<Blk>()
+        var start = 0
+        var target: Blk? = null
+        var off = 0
+        for ((n, ln) in b.r.t.split('\n').withIndex()) {
+            val end = start + ln.length
+            val r = b.r.slice(start, end)
+            val nb = if (n == 0) b.copy(r = r)
+                else if (b.ty == "li") Blk(ty = "li", lt = b.lt, d = b.d, r = r, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi)
+                else Blk(ty = "p", r = r, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi)
+            if (target == null && cur <= end) { target = nb; off = (cur - start).coerceAtLeast(0) }
+            parts.add(nb)
+            start = end + 1
+        }
+        val tg = target ?: parts.last()
+        blocks = blocks.toMutableList().also { it[i] = parts[0]; it.addAll(i + 1, parts.drop(1)) }
+        parts.forEach { seed(it) }
+        tf[tg.id] = tf[tg.id]!!.copy(selection = TextRange(off + 1))
+        focus = tg.id
+        return tg.id
+    }
+
+    fun setHead(lv: Int) {
+        if (!selOn) focus?.let { explodeLines(it) }
+        setHeadRaw(lv)
+    }
+
+    private fun setHeadRaw(lv: Int) = convertFocused { b ->
+        if (b.ty == "h" && b.lv == lv) b.copy(ty = "p") else b.copy(ty = "h", lv = lv, r = flat(b.r))
+    }
+
+    fun setList(t: String) {
+        if (!selOn) focus?.let { explodeLines(it) }
+        setListRaw(t)
+    }
+
+    private fun setListRaw(t: String) = convertFocused { b ->
+        if (b.ty == "li" && b.lt == t) b.copy(ty = "p", st = 0)
+        else b.copy(ty = "li", lt = t, d = if (b.ty == "li") b.d else 0, r = flat(b.r), st = if (b.ty == "li" && (t == "o" || t == "a")) b.st else 0)
+    }
+
+    fun setQuote(k: String) = convertFocused { b ->
+        if (b.ty == "q" && b.k == k) b.copy(ty = "p") else b.copy(ty = "q", k = k)
+    }
+
+    fun setPlain() = convertFocused { b -> b.copy(ty = "p") }
+
+    /** Perataan paragraf: "" kiri, c tengah, r kanan, j rata kiri-kanan. Tidak berlaku untuk blok kode. */
+    fun setAlign(a: String) = convertFocused { b -> if (b.isText && b.ty != "code") b.copy(ta = a) else b }
+
+    /**
+     * Inden paragraf (dp, nilai mutlak). kind: 0 kiri, 1 kanan, 2 baris pertama, 3 menggantung.
+     * Baris pertama dan menggantung saling meniadakan (satu angka bertanda di Blk.fi). Tidak berlaku untuk kode;
+     * kutipan hanya mengenal inden kiri / kanan (baris pertama / menggantung per paragraf, bukan per baris kutipan).
+     */
+    fun setIndent(kind: Int, v: Int) = convertFocused { b ->
+        if (!b.isText || b.ty == "code") b else when (kind) {
+            0 -> b.copy(il = v.coerceIn(0, IND_MAX))
+            1 -> b.copy(ir = v.coerceIn(0, IND_MAX))
+            2 -> if (b.ty == "q") b else b.copy(fi = v.coerceIn(0, IND_MAX_FI))
+            else -> if (b.ty == "q") b else b.copy(fi = -v.coerceIn(0, IND_MAX_FI))
+        }
+    }
+
+    fun resetIndent() = convertFocused { b ->
+        if (!b.isText || b.ty == "code") b else b.copy(il = 0, ir = 0, fi = 0)
+    }
+
+    fun setCode() = convertFocused { b ->
+        if (b.ty == "code") b.copy(ty = "p") else b.copy(ty = "code", r = Rt(b.r.t))
+    }
+
+    fun indent(dir: Int) {
+        val key = focus ?: return
+        val i = idx(key)
+        if (i < 0 || blocks[i].ty != "li") return
+        commit()
+        setBlock(i, blocks[i].copy(d = (blocks[i].d + dir).coerceIn(0, 4)))
+        afterStructural()
+    }
+
+    fun toggleCheck(id: String) {
+        val i = idx(id)
+        if (i < 0) return
+        commit()
+        setBlock(i, blocks[i].copy(x = !blocks[i].x))
+        dirty(); commit()
+    }
+
+    fun grid(c: Int, r: Int): List<List<Rt>> = List(r) { List(c) { Rt() } }
+
+    fun insertObjs(list: List<Blk>) {
+        val key = focus?.let { keyBlock(it) } ?: selImg?.first ?: blocks.last().id
+        var i = idx(key)
+        if (i < 0) i = blocks.size - 1
+        commit()
+        val cur = blocks[i]
+        val l = blocks.toMutableList()
+        if (cur.ty == "p" && cur.r.t.isEmpty()) {
+            l.removeAt(i); l.addAll(i, list)
+        } else l.addAll(i + 1, list)
+        blocks = l
+        list.forEach { seed(it) }
+        norm()
+        val last = list.last()
+        when (last.ty) {
+            "tbl" -> focusAt("${last.id}:0:0", 0)
+            "hr" -> blocks.getOrNull(idx(last.id) + 1)?.let { focusAt(it.id, 0) }
+            "img" -> { selImg = last.id to 0; clearReq++ }
+        }
+        afterStructural()
+    }
+
+    fun insTable(r: Int = 3, c: Int = 3) = insertObjs(listOf(Blk(ty = "tbl", tb = grid(c, r), ca = List(c) { "left" })))
+    fun insHr() = insertObjs(listOf(Blk(ty = "hr")))
+    fun addImages(imgs: List<Img>) {
+        if (imgs.isEmpty()) return
+        val list = imgs.map { Blk(ty = "img", im = listOf(it)) }
+        insertObjs(list)
+        revealMedia(list.first().id)
+    }
+
+    /** URL ditempel di paragraf kosong [key]: ganti jadi kartu pratinjau tautan, kursor pindah ke paragraf sesudahnya. */
+    private fun linkize(key: String, url: String) {
+        val i = idx(key)
+        if (i < 0) return
+        val b = blocks[i]
+        commit()
+        val nb = Blk(ty = "lnk", l = url)
+        blocks = blocks.toMutableList().also { it[i] = nb }
+        tf.remove(b.id)
+        afterStructural()
+        val j = idx(nb.id)
+        blocks.getOrNull(j + 1)?.let { if (it.isText) focusAt(it.id, 0) }
+        revealMedia(nb.id)
+    }
+
+    /** Kartu tautan jadi tautan biasa (teks berisi alamatnya). */
+    fun linkToText(id: String) {
+        val i = idx(id)
+        if (i < 0 || blocks[i].ty != "lnk") return
+        val b = blocks[i]
+        commit()
+        val nb = Blk(id = b.id, ty = "p", r = Rt(b.l, listOf(Sp(0, b.l.length, K.L, b.l))))
+        setBlock(i, nb)
+        seed(nb)
+        afterStructural()
+        focusAt(nb.id, nb.r.t.length)
+    }
+
+    /** Hasil ambil data tautan (judul + alamat gambar) disimpan di kartu; tidak menambah langkah undo. */
+    fun setLinkMeta(id: String, title: String, image: String) {
+        val i = idx(id)
+        if (i < 0) return
+        val b = blocks[i]
+        if (b.ty != "lnk" || (title.isEmpty() && image.isEmpty())) return
+        val synced = hist[hi].bl === blocks || hist[hi].bl == blocks
+        setBlock(i, b.copy(r = Rt(title.take(300)), pi = image))
+        if (synced) hist[hi] = Snap(blocks, hist[hi].key, hist[hi].sel)
+        dirty()
+    }
+
+    /** Gulir halus ke media yang baru disisipkan (gambar, kartu tautan) bila belum terlihat penuh. */
+    fun revealMedia(id: String) {
+        scope.launch {
+            delay(280)   // tunggu keyboard turun dan tata letak selesai
             var n = 0
-            for (k in s until en) if (txt[k] == ' ') n++
-            if (n == 0 || slack <= 1f) continue
-            val extra = ((slack - 1f) / n).coerceAtMost(maxExtra)
-            val sp = with(d) { extra.toSp() }
-            for (k in s until en) if (txt[k] == ' ') addStyle(SpanStyle(letterSpacing = sp), k, k + 1)
-        }
-    }
-}
-
-/** Terapkan pemotongan baris buatan (teks mengelilingi gambar) pada teks bergaya. z = awalan tak terlihat di depan. */
-private fun Fold.applyTo(a: AnnotatedString, z: Int): AnnotatedString = buildAnnotatedString {
-    fun pad(j: Int) {
-        val n = if (j < pn.size) pn[j] else 0
-        if (n > 0) withStyle(SpanStyle(letterSpacing = pl[j].sp)) { append("\u2003".repeat(n)) }
-    }
-    var from = 0
-    if (pn.isNotEmpty() && pn[0] > 0) {
-        append(a.subSequence(0, z)); from = z
-        pad(0)
-    }
-    for (k in cuts.indices) {
-        val at = (cuts[k] + z).coerceIn(from, a.length)
-        append(a.subSequence(from, at)); from = at
-        append("\n")
-        pad(k + 1)
-    }
-    append(a.subSequence(from, a.length))
-}
-
-/**
- * Deteksi ketuk sekali / dua kali tanpa mengonsumsi apa pun (dibaca di pass Final), jadi tidak mengganggu
- * ketukan bawaan BasicTextField (fokus, posisi kursor) maupun scroll.
- */
-@Composable
-private fun Modifier.wordTap(onTap: () -> Unit, onDouble: (Offset) -> Unit): Modifier {
-    val t by rememberUpdatedState(onTap)
-    val d by rememberUpdatedState(onDouble)
-    return pointerInput(Unit) {
-        var lastUp = -1L
-        var lastPos = Offset.Zero
-        awaitEachGesture {
-            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Final)
-            val slop = viewConfiguration.touchSlop
-            var up: PointerInputChange? = null
-            while (true) {
-                val ev = awaitPointerEvent(PointerEventPass.Final)
-                val c = ev.changes.firstOrNull { it.id == down.id } ?: break
-                if ((c.position - down.position).getDistance() > slop || c.uptimeMillis - down.uptimeMillis > 400L) break
-                if (!c.pressed) { up = c; break }
-            }
-            val u = up
-            if (u == null) { lastUp = -1L; return@awaitEachGesture }
-            if (lastUp >= 0L && down.uptimeMillis - lastUp <= 300L && (down.position - lastPos).getDistance() < slop * 4f) {
-                lastUp = -1L
-                d(u.position)
-            } else {
-                lastUp = u.uptimeMillis
-                lastPos = u.position
-                t()
-            }
-        }
-    }
-}
-
-/** Satu kolom teks: BasicTextField saat mengedit, Text biasa saat mode baca. */
-@Composable
-fun TF(
-    ed: Ed, key: String, base: TextStyle, modifier: Modifier = Modifier,
-    hint: String? = null, wrap: Boolean = true, fold: Fold? = null
-) {
-    val pal = LocalPal.current
-    val v = ed.tf[key] ?: return
-    // Rt dibaca lewat derivedStateOf: blok lain yang berubah tidak membangunkan kolom ini (Rt blok yang tak berubah = instance sama)
-    val rtS = remember(key) { androidx.compose.runtime.derivedStateOf { ed.rtOf(key) } }
-    val rt = rtS.value
-    val fs = base.fontSize.value
-    val just = base.textAlign == androidx.compose.ui.text.style.TextAlign.Justify
-    val base2 = if (base.textAlign == androidx.compose.ui.text.style.TextAlign.Justify)
-        base.copy(textAlign = androidx.compose.ui.text.style.TextAlign.Start, lineBreak = androidx.compose.ui.text.style.LineBreak.Simple) else base
-    val tm = androidx.compose.ui.text.rememberTextMeasurer()
-    val dn = androidx.compose.ui.platform.LocalDensity.current
-    var jw by remember { mutableStateOf(0) }       // lebar kolom teks (px), dipakai rata kiri-kanan
-    // Sel tabel yang tidak sedang diedit digambar sebagai Text ringan (sama seperti mode baca); BasicTextField hanya dipasang di sel aktif.
-    val activeS = remember(key) { androidx.compose.runtime.derivedStateOf { ed.focus == key || ed.req?.key == key } }
-    val lite = !ed.reading && isCellKey(key) && !activeS.value
-    if (ed.reading || lite) {
-        val sr = if (ed.selOn) ed.selRangeOf(key) else null
-        val fh = if (ed.findOn) ed.hitsOf(key) else emptyList()
-        val fc = if (fh.isEmpty()) null else ed.curHit()?.takeIf { it.key == key }
-        val ann = remember(rt, pal, fs, sr, fold, fh, fc, jw, just, base.textIndent) {
-            val a = styled(rt, rt.t, 0, pal, fs)
-            val a2 = if (sr == null && fh.isEmpty()) a else buildAnnotatedString {
-                append(a)
-                if (sr != null) addSel(pal, rt, sr.first, sr.second, 0, rt.t.length)
-                addFind(pal, fh, fc, 0, rt.t.length)
-            }
-            if (fold == null) (if (just && jw > 0) justifySpans(a2, base2, jw, tm, dn) else a2)
-            else fold.applyTo(a2, 0).let { fa -> if (just && jw > 0) justifySpans(fa, base2, jw, tm, dn, fold.cutR) else fa }
-        }
-        val uri = LocalUriHandler.current
-        var lay by remember { mutableStateOf<TextLayoutResult?>(null) }
-        LaunchedEffect(lay) { lay?.let { ed.lays[key] = it; ed.lsh[key] = 0 } }
-        Text(
-            ann,
-            modifier.heightIn(min = base.lineHeight.value.dp)
-                .onGloballyPositioned { c ->
-                    val cc = ed.contentCoords
-                    if (cc != null && cc.isAttached && c.isAttached) {
-                        val o = cc.localPositionOf(c, Offset.Zero)
-                        if (ed.kpos[key] != o) ed.kpos[key] = o
+            while (n < 20) {
+                val p = bpos[id]
+                val sc = scroll
+                if (p != null && sc != null && p[1] > 0f) {
+                    delay(60)
+                    val q = bpos[id] ?: p
+                    val top = q[0]
+                    val bot = top + q[1]
+                    val m = 24f * dens
+                    val vis = viewH - cursorClear()
+                    val cur = sc.value.toFloat()
+                    val want = when {
+                        q[1] + 2f * m >= vis -> top - m
+                        top < cur + m -> top - m
+                        bot > cur + vis - m -> bot - vis + m
+                        else -> return@launch
                     }
+                    sc.animateScrollTo(want.toInt().coerceIn(0, sc.maxValue), tween(420, easing = Emph))
+                    return@launch
                 }
-                .pointerInput(rt, ed.selOn, lite) {
-                    if (ed.selOn && !lite) detectTapGestures { ed.clearSel() }
-                    else detectTapGestures(
-                        // mode baca: ketuk sekali di teks mana pun = langsung mengedit di situ (ketuk tautan = buka tautan)
-                        // sel tabel ringan (mode ketik): ketuk = pasang kolom teks sungguhan di sel itu dan fokus ke sana
-                        onTap = { pos ->
-                            if (ed.selOn) ed.dropSel()
-                            if (ed.ink.on) return@detectTapGestures
-                            val l = lay ?: return@detectTapGestures
-                            val o0 = l.getOffsetForPosition(pos)
-                            val o = fold?.t2o(o0, 0) ?: o0
-                            if (lite) { ed.focusAt(key, o); return@detectTapGestures }
-                            val u = rt.sp.firstOrNull { it.k == K.L && o >= it.s && o < it.e }?.u
-                            if (u != null) uri.openUri(u) else ed.exitReading(key, o)
-                        }
-                    )
-                },
-            style = base2, softWrap = wrap, onTextLayout = { lay = it; jw = it.layoutInput.constraints.maxWidth }
-        )
-    } else {
-        val fr = remember { FocusRequester() }
-        var lay by remember { mutableStateOf<TextLayoutResult?>(null) }
-        var foc by remember { mutableStateOf(false) }
-        var layN by remember { mutableStateOf(-1) }   // panjang teks saat layout 'lay' dibuat
-        LaunchedEffect(lay) { lay?.let { ed.layLen[key] = layN; ed.lays[key] = it; ed.lsh[key] = 1 } }
-        // permintaan fokus dibaca di dalam efek (bukan di komposisi): ed.req berubah tidak membangunkan semua kolom
-        LaunchedEffect(key) {
-            androidx.compose.runtime.snapshotFlow { ed.req }.collect { r ->
-                if (r != null && r.key == key) {
-                    try { fr.requestFocus() } catch (e: Exception) { }
-                    ed.applyReq(r)
-                }
+                n++
+                delay(60)
             }
         }
-        val kbc = LocalSoftwareKeyboardController.current
-        // gulir ke kursor kini ditangani NoteScreen (ed.cursorScrollDelta): langsung ikut keyboard tiap frame, tanpa delay / animasi tambahan
-        val sr = if (ed.selOn) ed.selRangeOf(key) else null
-        val fh = if (ed.findOn) ed.hitsOf(key) else emptyList()
-        val fc = if (fh.isEmpty()) null else ed.curHit()?.takeIf { it.key == key }
-        val vt = remember(rt, pal, fs, fold, sr, fh, fc, jw, just, base.textIndent) {
-            VisualTransformation { t ->
-                val a0 = styled(rt, t.text, 1, pal, fs)
-                val a = if (sr == null && fh.isEmpty()) a0 else buildAnnotatedString {
-                    append(a0)
-                    if (sr != null) {
-                        addSel(pal, rt, sr.first + 1, sr.second + 1, 1, t.text.length)
-                    }
-                    addFind(pal, fh, fc, 1, t.text.length)
-                }
-                if (fold == null) TransformedText(if (just && jw > 0) justifySpans(a, base2, jw, tm, dn) else a, OffsetMapping.Identity)
+    }
+
+    // ---------- tabel ----------
+    fun cellEnter(key: String) {
+        val b = blockOfKey(key) ?: return
+        val (r, c) = cellRC(key)
+        if (r + 1 < b.tb.size) {
+            val k = "${b.id}:${r + 1}:$c"
+            focusAt(k, rtOf(k).t.length)
+        } else {
+            focus = key; tOp("ar")
+        }
+    }
+
+    fun tOp(op: String) {
+        val key = focus ?: return
+        if (!isCellKey(key)) return
+        val bid = keyBlock(key)
+        val (r, c) = cellRC(key)
+        val i = idx(bid)
+        if (i < 0) return
+        val b = blocks[i]
+        commit()
+        val cols = b.tb[0].size
+        var nb = b
+        var target = key
+        when (op) {
+            "ar" -> {
+                val at = if (r == 0) 1 else r + 1
+                nb = b.copy(tb = b.tb.toMutableList().also { it.add(at, List(cols) { Rt() }) })
+                target = "$bid:$at:$c"
+            }
+            "ac" -> {
+                nb = b.copy(
+                    tb = b.tb.map { row -> row.toMutableList().also { it.add(c + 1, Rt()) } },
+                    ca = b.ca.toMutableList().also { if (c + 1 <= it.size) it.add(c + 1, "left") },
+                    cw = if (b.cw.isEmpty()) emptyList() else b.cw.toMutableList().also { while (it.size < cols) it.add(0f); it.add(c + 1, 0f) }
+                )
+                target = "$bid:$r:${c + 1}"
+            }
+            "dr" -> {
+                if (r == 0 || b.tb.size < 3) { vm.show("This row can't be deleted"); return }
+                nb = b.copy(tb = b.tb.filterIndexed { k, _ -> k != r })
+                target = "$bid:${minOf(r, nb.tb.size - 1)}:$c"
+            }
+            "dc" -> {
+                if (cols < 2) { vm.show("At least one column is needed"); return }
+                nb = b.copy(tb = b.tb.map { row -> row.filterIndexed { k, _ -> k != c } }, ca = b.ca.filterIndexed { k, _ -> k != c }, cw = b.cw.filterIndexed { k, _ -> k != c })
+                target = "$bid:$r:${minOf(c, cols - 2)}"
+            }
+            "dt" -> {
+                blocks = blocks.filterIndexed { k, _ -> k != i }
+                tf.removePrefix("$bid:")
+                norm()
+                focus = null
+                afterStructural()
+                blocks.getOrNull(minOf(i, blocks.size - 1))?.let { if (it.isText) focusAt(it.id, it.r.t.length) }
+                return
+            }
+        }
+        if (nb.ty == "tbl" && nb.ta != "") nb = fitFloat(nb)   // tabel mengambang tetap muat setelah kolom bertambah
+        setBlock(i, nb)
+        tf.removePrefix("$bid:")
+        seed(nb)
+        focusAt(target, 0)
+        afterStructural()
+    }
+
+    // ---------- lebar kolom tabel ----------
+    /** Ubah lebar kolom [c] (dp) langsung saat pegangan diseret; langkah undo dibuat lewat commit() di awal dan akhir seretan. */
+    fun tblCol(bid: String, c: Int, w: Float) {
+        val i = idx(bid)
+        if (i < 0) return
+        val b = blocks[i]
+        val n = b.tb.firstOrNull()?.size ?: return
+        if (c !in 0 until n) return
+        val l = MutableList(n) { b.cw.getOrNull(it) ?: 0f }
+        if (l[c] == w) return
+        l[c] = w
+        setBlock(i, b.copy(cw = if (l.all { it <= 0f }) emptyList() else l))
+        dirty()
+    }
+
+    /** Kembalikan semua kolom ke lebar otomatis. */
+    fun tblResetCols(bid: String) {
+        val i = idx(bid)
+        if (i < 0 || blocks[i].cw.isEmpty()) return
+        commit()
+        setBlock(i, blocks[i].copy(cw = emptyList(), ta = ""))   // lebar otomatis = selebar layar, jadi tak lagi mengambang
+        dirty(); commit()
+    }
+
+    // ---------- gambar ----------
+    fun selectImg(bid: String, ix: Int) {
+        if (selOn) dropSel()
+        selImg = bid to ix
+        focus = null
+        clearReq++
+    }
+
+    /** Tutup pilihan gambar: tetap di mode edit (bar alat tetap ada), tanpa membuka keyboard dan tanpa masuk mode baca. */
+    fun closeImg() {
+        selImg = null
+    }
+
+    /** Dari mode baca: ketuk dua kali gambar = masuk mode edit dengan gambar itu terpilih. */
+    fun openImgFromReading(bid: String, ix: Int) {
+        exitReading()
+        selectImg(bid, ix)
+    }
+
+    private fun imgSet(bid: String, ix: Int, f: (Img) -> Img) {
+        blocks = blocks.map { b ->
+            if (b.id == bid) b.copy(im = b.im.mapIndexed { j, m -> if (j == ix) f(m) else m }) else b
+        }
+    }
+
+    /** Lebar relatif terbesar gambar supaya masih ada kolom teks di sampingnya. */
+    fun maxSideW(): Float = (1f - (SIDE_MIN + SIDE_GAP) / widthDp.coerceAtLeast(200f)).coerceIn(.3f, .9f)
+
+    fun sideOk(b: Blk): Boolean {
+        val m = b.im.singleOrNull() ?: return false
+        return b.ty == "img" && m.al != "c" && m.w.coerceIn(.2f, 1f) <= maxSideW() + .001f
+    }
+
+    /** Dulu memindahkan teks samping ke bawah gambar. Sekarang teks mengalir otomatis di sekitar gambar, jadi tak ada yang perlu dipindah. */
+    fun releaseSide(bid: String, force: Boolean = false) {}
+
+    /** Tabel rata kiri/kanan cukup sempit sehingga teks bisa mengalir di sampingnya. */
+    fun tblSideOk(b: Blk): Boolean =
+        b.ty == "tbl" && (b.ta == "l" || b.ta == "r") && tblWidths(b, widthDp).sum() + 3f <= widthDp * maxSideW() + .001f
+
+    /** Kecilkan lebar kolom (sebanding) supaya tabel mengambang muat; bila kolomnya terlalu banyak, kembali ke lebar penuh. */
+    fun fitFloat(b: Blk): Blk {
+        val n = b.tb.firstOrNull()?.size ?: return b
+        val maxW = widthDp * maxSideW() - 3f
+        val ws = tblWidths(b, widthDp)
+        if (ws.sum() <= maxW && b.cw.isNotEmpty()) return b
+        if (n * COL_MIN > maxW) return b.copy(ta = "")
+        val over = ws.map { (it - COL_MIN).coerceAtLeast(0f) }
+        val so = over.sum()
+        val k = if (so <= 0f) 0f else ((maxW - n * COL_MIN) / so).coerceIn(0f, 1f)
+        return b.copy(cw = ws.mapIndexed { c, _ -> ((COL_MIN + over[c] * k) * 10f).toInt() / 10f })
+    }
+
+    /** Perataan tabel: "l" / "r" = mengambang (teks mengalir di sampingnya), "c" = selebar penuh. */
+    fun tblAlign(al: String) {
+        val key = focus ?: return
+        if (!isCellKey(key)) return
+        val i = idx(keyBlock(key))
+        if (i < 0) return
+        val b = blocks[i]
+        if (b.ty != "tbl") return
+        commit()
+        var nb = b.copy(ta = if (al == "c") "" else al)
+        if (nb.ta != "") {
+            nb = fitFloat(nb)
+            if (nb.ta == "") { vm.show("Too many columns to wrap text around this table"); return }
+        }
+        setBlock(i, nb)
+        dirty(); commit()
+    }
+
+    fun imgAlign(al: String) {
+        val s = selImg ?: return
+        commit()
+        imgSet(s.first, s.second) {
+            val w = if (al != "c" && it.w > maxSideW()) minOf(SIDE_W, maxSideW()) else it.w
+            it.copy(al = al, w = w)
+        }
+        releaseSide(s.first)
+        dirty(); commit()
+    }
+
+    /** Ubah rasio tampil gambar terpilih (null = rasio asli). Di kolase, hanya gambar ini yang berubah; baris menyesuaikan. */
+    fun imgRatio(r: Float?) {
+        val s = selImg ?: return
+        commit()
+        imgSet(s.first, s.second) { it.copy(a = (r ?: it.o).coerceIn(.2f, 5f)) }
+        dirty(); commit()
+    }
+
+    fun imgResetCrop() {
+        val s = selImg ?: return
+        commit()
+        imgSet(s.first, s.second) { it.copy(px = .5f, py = .5f, z = 1f) }
+        dirty(); commit()
+    }
+
+    fun imgOf(bid: String, ix: Int): Img? = blocks.firstOrNull { it.id == bid }?.im?.getOrNull(ix)
+
+    /** Geser pembatas antara gambar [left] dan [left]+1 di kolase; tinggi baris tetap, jadi stabil di bawah jari. */
+    fun rowDivider(bid: String, left: Int, da: Float, minA: Float) {
+        blocks = blocks.map { b ->
+            if (b.id != bid || left < 0 || left + 1 >= b.im.size) b
+            else {
+                val l = b.im[left]
+                val r = b.im[left + 1]
+                val lo = minA - l.a
+                val hi = r.a - minA
+                if (lo > hi) b
                 else {
-                    val n = t.text.length
-                    val tn = n + fold.total
-                    val fa = fold.applyTo(a, 1)
-                    TransformedText(if (just && jw > 0) justifySpans(fa, base2, jw, tm, dn, fold.cutR) else fa, object : OffsetMapping {
-                        override fun originalToTransformed(offset: Int): Int = fold.o2t(offset, 1).coerceIn(0, tn)
-                        override fun transformedToOriginal(offset: Int): Int = fold.t2o(offset, 1).coerceIn(0, n)
+                    val d = da.coerceIn(lo, hi)
+                    b.copy(im = b.im.mapIndexed { j, m ->
+                        if (j == left) m.copy(a = m.a + d) else if (j == left + 1) m.copy(a = m.a - d) else m
                     })
                 }
             }
         }
-        // tekan-tahan ditangani seleksi milik editor (satu jenis seleksi, keyboard tetap terbuka), bukan seleksi bawaan field
-        val vcBase = LocalViewConfiguration.current
-        val vcNoLong = remember(vcBase) {
-            object : ViewConfiguration by vcBase { override val longPressTimeoutMillis: Long get() = 60_000L }
+        dirty()
+    }
+
+    fun rowSwap(bid: String, ix: Int, dir: Int) {
+        val i = idx(bid)
+        if (i < 0) return
+        val b = blocks[i]
+        val j = ix + dir
+        if (j !in b.im.indices) return
+        val l = b.im.toMutableList()
+        val t = l[ix]; l[ix] = l[j]; l[j] = t
+        setBlock(i, b.copy(im = l))
+        if (selImg?.first == bid) selImg = bid to j
+        dirty()
+    }
+
+    fun imgLive(bid: String, ix: Int, f: (Img) -> Img) {
+        imgSet(bid, ix, f); dirty()
+    }
+
+    fun rowScale(bid: String, k: Float) {
+        blocks = blocks.map { b -> if (b.id == bid) b.copy(im = b.im.map { it.copy(a = it.a * k) }) else b }
+        dirty()
+    }
+
+    fun imgDelete() {
+        val s = selImg ?: return
+        val i = idx(s.first)
+        if (i < 0) return
+        commit()
+        val b = blocks[i]
+        val rest = b.im.filterIndexed { j, _ -> j != s.second }
+        if (rest.isEmpty()) {
+            // teks di sisi gambar tidak ikut hilang: jadi paragraf biasa
+            if (b.r.t.isNotEmpty()) setBlock(i, Blk(id = b.id, ik = b.ik, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi, ty = "p", r = b.r))
+            else blocks = blocks.filterIndexed { j, _ -> j != i }
+        } else if (rest.size == 1) setBlock(i, b.copy(im = listOf(rest[0].copy(a = rest[0].o, w = 0.6f, al = "c"))))
+        else setBlock(i, b.copy(im = rest))
+        selImg = null
+        norm(); afterStructural()
+    }
+
+    fun imgMove(dir: Int) {
+        val s = selImg ?: return
+        val i = idx(s.first)
+        val j = i + dir
+        if (i < 0 || j < 0 || j >= blocks.size) return
+        commit()
+        val l = blocks.toMutableList()
+        val t = l[i]; l[i] = l[j]; l[j] = t
+        blocks = l
+        norm(); afterStructural()
+    }
+
+    fun toggleRow() {
+        val s = selImg ?: return
+        val i = idx(s.first)
+        if (i < 0) return
+        val b = blocks[i]
+        commit()
+        if (b.im.size == 1) releaseSide(b.id, true)
+        if (b.im.size > 1) {
+            val n = b.im.size
+            val sum = b.im.sumOf { it.a.toDouble() }.toFloat()
+            fun share(m: Img) = (m.a / sum * (1f - (n - 1) * GAP)).coerceIn(0.2f, 1f)
+            val m = b.im[s.second]
+            val solo = Blk(ty = "img", im = listOf(m.copy(a = m.o, w = share(m), al = "c")))
+            val rest = b.im.filterIndexed { j, _ -> j != s.second }
+            val restB = if (rest.size == 1) b.copy(im = listOf(rest[0].copy(a = rest[0].o, w = share(rest[0]), al = "c")))
+            else b.copy(im = rest)
+            val l = blocks.toMutableList()
+            l.removeAt(i)
+            if (s.second == 0) { l.add(i, restB); l.add(i, solo) } else { l.add(i, solo); l.add(i, restB) }
+            blocks = l
+            selImg = solo.id to 0
+            norm(); afterStructural()
+            return
         }
-        val selCols = androidx.compose.foundation.text.selection.LocalTextSelectionColors.current
-        @Suppress("DEPRECATION")
-        val clipM = androidx.compose.ui.platform.LocalClipboardManager.current
-        val hideNative = ed.selOn   // seleksi editor aktif: sembunyikan kursor + pegangan bawaan field supaya tidak dobel
-        val cols = if (hideNative) androidx.compose.foundation.text.selection.TextSelectionColors(Color.Transparent, Color.Transparent) else selCols
-        CompositionLocalProvider(
-            LocalViewConfiguration provides vcNoLong,
-            androidx.compose.foundation.text.selection.LocalTextSelectionColors provides cols
-        ) {
-            BasicTextField(
-                value = v, onValueChange = { ed.onText(key, it) },
-                modifier = modifier.focusProperties { canFocus = !ed.ink.on }.focusRequester(fr).trackPos(ed, key)
-                    .then(
-                        // sheet bawah aktif => field readOnly (kursor bawaan tidak digambar), jadi kursor digambar manual agar tetap terlihat
-                        if (foc && ed.sheet != 0) Modifier.drawWithContent {
-                            drawContent()
-                            val l = lay
-                            if (l != null && v.selection.collapsed) {
-                                val o = (fold?.o2t(v.selection.start, 1) ?: v.selection.start).coerceIn(0, l.layoutInput.text.length)
-                                val r = l.getCursorRect(o)
-                                val w = 2.dp.toPx()
-                                drawLine(pal.p, Offset(r.left + w / 2f, r.top), Offset(r.left + w / 2f, r.bottom), w, androidx.compose.ui.graphics.StrokeCap.Round)
-                            }
-                        } else Modifier
-                    )
-                    .onPreviewKeyEvent { e ->
-                        if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                        val ctrl = e.isCtrlPressed
-                        when {
-                            ctrl && e.key == Key.A -> { ed.selectAllKey(key); true }
-                            (ctrl && e.key == Key.C) || e.key == Key.Copy ->
-                                if (ed.selOn) { clipM.setText(androidx.compose.ui.text.AnnotatedString(ed.selMd())); true } else false
-                            (ctrl && e.key == Key.X) || e.key == Key.Cut ->
-                                if (ed.selOn) { clipM.setText(androidx.compose.ui.text.AnnotatedString(ed.selMd())); ed.selDelete(); true } else false
-                            (ctrl && e.key == Key.V) || e.key == Key.Paste ->
-                                if (ed.selOn) {
-                                    val s = clipM.getText()?.text
-                                    if (!s.isNullOrEmpty()) ed.selPaste(s)
-                                    true
-                                } else false
-                            e.key == Key.MoveHome -> ed.jumpKey(key, false, ctrl, e.isShiftPressed)
-                            e.key == Key.MoveEnd -> ed.jumpKey(key, true, ctrl, e.isShiftPressed)
-                            e.key == Key.PageUp -> ed.selOn && ed.jumpKey(key, false, true, e.isShiftPressed)
-                            e.key == Key.PageDown -> ed.selOn && ed.jumpKey(key, true, true, e.isShiftPressed)
-                            e.key == Key.DirectionLeft -> ed.navKey(key, 0, e.isShiftPressed)
-                            e.key == Key.DirectionRight -> ed.navKey(key, 1, e.isShiftPressed)
-                            e.key == Key.DirectionUp -> ed.navKey(key, 2, e.isShiftPressed)
-                            e.key == Key.DirectionDown -> ed.navKey(key, 3, e.isShiftPressed)
-                            else -> false
-                        }
-                    }
-                    .onFocusChanged { foc = it.isFocused; if (it.isFocused) { ed.onFocus(key); if (ed.sheet != 0) kbc?.hide() } }
-                    .wordTap(
-                        onTap = { if (ed.selEdit) ed.dropSel() },
-                        onDouble = { pos ->
-                            val l = lay
-                            if (l != null) {
-                                val t = l.getOffsetForPosition(pos)
-                                val o = (fold?.t2o(t, 1) ?: t) - 1
-                                ed.dblWord(key, o.coerceAtLeast(0))
-                            }
-                        }
-                    ),
-                textStyle = base2, cursorBrush = SolidColor(if (hideNative) Color.Transparent else pal.p), visualTransformation = vt,
-                onTextLayout = { lay = it; layN = v.text.length; jw = it.layoutInput.constraints.maxWidth },
-                readOnly = foc && ed.sheet != 0,      // sheet bawah aktif: hanya kolom yang fokus yang membaca ed.sheet (kolom lain tidak ikut recompose)
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                decorationBox = { inner ->
-                    Box {
-                        if (hint != null && v.text.length <= 1) {
-                            Text(hint, style = base.copy(color = base.color.copy(alpha = .4f)))
-                        }
-                        inner()
-                    }
+        fun emptyP(x: Blk) = x.ty == "p" && x.r.t.isEmpty()
+        var j = i - 1
+        while (j >= 0 && emptyP(blocks[j])) j--
+        var prev = true
+        var tgt = if (j >= 0 && blocks[j].ty == "img" && blocks[j].im.size < 3) j else -1
+        if (tgt < 0) {
+            j = i + 1
+            while (j < blocks.size && emptyP(blocks[j])) j++
+            prev = false
+            tgt = if (j < blocks.size && blocks[j].ty == "img" && blocks[j].im.size < 3) j else -1
+        }
+        if (tgt < 0) { vm.show("No nearby image to place side by side"); return }
+        val t = blocks[tgt]
+        val me = b.im[0].copy(al = "c", w = 1f)
+        val merged = if (prev) t.im + me else listOf(me) + t.im
+        val n = merged.size
+        val sum = merged.sumOf { it.a.toDouble() }.toFloat()
+        val u = widthDp * (1f - (n - 1) * GAP)
+        val h = u / sum
+        val h2 = h.coerceIn(120f, 520f)
+        val k = if (h2 != h) h / h2 else 1f
+        val fin = merged.map { it.copy(a = it.a * k, al = "c", w = 1f) }
+        val lo = minOf(tgt, i)
+        val hiI = maxOf(tgt, i)
+        val l = blocks.toMutableList()
+        l[tgt] = t.copy(im = fin)
+        blocks = l.filterIndexed { q, x -> q != i && !(q > lo && q < hiI && emptyP(x)) }
+        selImg = t.id to (if (prev) n - 1 else 0)
+        norm(); afterStructural()
+    }
+
+
+    // ---------- gambar: angkat & geser (tekan-tahan) ----------
+    var mv by mutableStateOf<Mv?>(null)
+    var mvX by mutableStateOf(0f)
+    var mvY by mutableStateOf(0f)
+    var mvAl by mutableStateOf("c")
+    var dropAt by mutableStateOf(-1)
+    var mergeT by mutableStateOf<MergeT?>(null)   // gambar yang sedang diseret berada di atas gambar lain: lepas = jadi kolase
+    var replT: Pair<String, Int>? = null          // gambar yang akan diganti (dicatat saat tombol Ganti diketuk)
+    var dens = 1f
+    var viewH by mutableStateOf(0f)
+    var barHLive by mutableStateOf(0f)            // tinggi kapsul/sheet langsung (tanpa debounce), dipakai gulir kursor
+    // memakai tinggi kapsul yang sudah tenang (barH, debounce), BUKAN barHLive: saat fokus pindah judul<->isi kapsul beranimasi tiap frame,
+    // dan tinggi per-frame itu memicu gulir kursor berulang (layar turun sendiri tanpa henti)
+    fun cursorClear(): Float = if (barH > 0f) barH + 12f * dens else 12f * dens
+    var scroll: ScrollState? = null
+
+    // ---- komposisi berjendela (catatan sangat panjang) ----
+    // Catatan yang sangat besar (ratusan blok / banyak sel tabel) tidak lagi menyusun SEMUA blok sekaligus:
+    // hanya blok di sekitar layar (plus yang "wajib hidup": fokus, seleksi, hasil cari, gambar diangkat) yang disusun,
+    // sisanya diganti Spacer setinggi terakhir terukur (atau perkiraan bila belum pernah diukur).
+    // Catatan biasa tidak terpengaruh (ambang di bawah).
+    var liveLo = 0f
+    var liveHi = 4500f
+    private var winFlag = false
+    val windowed: Boolean by androidx.compose.runtime.derivedStateOf {
+        var c = 0
+        for (b in blocks) c += if (b.ty == "tbl") 1 + b.tb.sumOf { it.size } / 2 else 1
+        winFlag = if (winFlag) c >= WIN_OFF else c >= WIN_ON
+        winFlag
+    }
+
+    /** Blok (atau kelompok gambar-apung) beserta rencananya, urutan sama dengan yang digambar di NoteScreen. */
+    fun slotsOf(plans: Map<String, FloatPlan>): List<Pair<Blk, FloatPlan?>> {
+        val bl = blocks
+        val out = ArrayList<Pair<Blk, FloatPlan?>>(bl.size)
+        var i = 0
+        while (i < bl.size) {
+            val b = bl[i]
+            val p = plans[b.id]
+            out.add(b to p)
+            i += 1 + (p?.parts?.size ?: 0)
+        }
+        return out
+    }
+
+    /** Perkiraan tinggi (px) satu blok yang belum pernah diukur. Kasar saja: selisihnya dikoreksi otomatis saat blok benar-benar tampil. */
+    fun estimateH(b: Blk, fs: Float, lh: Float): Float {
+        val w = (widthDp - b.il - b.ir - (if (b.ty == "li") 24f * (b.d + 1) else 0f)).coerceAtLeast(120f)
+        val cw = (fs * 0.52f).coerceAtLeast(4f)
+        fun lines(t: String, width: Float): Int {
+            val cpl = (width / cw).toInt().coerceAtLeast(4)
+            var n = 0
+            var s = 0
+            while (true) {
+                val e = t.indexOf('\n', s)
+                val len = (if (e < 0) t.length else e) - s
+                n += maxOf(1, (len + cpl - 1) / cpl)
+                if (e < 0) break
+                s = e + 1
+            }
+            return n
+        }
+        val dp = when (b.ty) {
+            "h" -> lines(b.r.t, w) * fs * 1.5f * 1.25f + 20f
+            "tbl" -> {
+                val nc = maxOf(1, b.tb.firstOrNull()?.size ?: 1)
+                val colW = (w / nc).coerceAtLeast(90f)
+                var sum = 8f
+                for (row in b.tb) {
+                    var mx = 1
+                    for (cell in row) mx = maxOf(mx, lines(cell.t, colW - 16f))
+                    sum += mx * fs * lh + 20f
                 }
-            )
-        }
-    }
-}
-
-class QS(val bg: Color, val fg: Color, val shape: Shape, val label: String?, val bar: Boolean = false, val border: Boolean = false)
-
-fun qs(k: String, p: Pal): QS = when (k) {
-    "note" -> QS(p.pc, p.opc, RoundedCornerShape(28.dp), "Note")
-    "tip" -> QS(p.sc, p.osc, RoundedCornerShape(40.dp, 12.dp, 40.dp, 12.dp), "Tip")
-    "imp" -> QS(p.p, p.op, RoundedCornerShape(12.dp, 40.dp, 12.dp, 40.dp), "Important")
-    "warn" -> QS(p.wc, p.owc, RoundedCornerShape(24.dp), "Warning", bar = true)
-    "cau" -> QS(p.ec, p.oec, RoundedCornerShape(6.dp, 32.dp, 32.dp, 32.dp), "Caution")
-    "idea" -> QS(p.ac, p.oac, RoundedCornerShape(44.dp, 44.dp, 12.dp, 44.dp), "Idea")
-    "def" -> QS(Color.Transparent, p.os, RoundedCornerShape(32.dp), "Definition", border = true)
-    else -> QS(p.tc, p.otc, RoundedCornerShape(28.dp, 28.dp, 28.dp, 8.dp), null)
-}
-
-val VARS = listOf(
-    "quote" to "Quote", "note" to "Note", "tip" to "Tip", "imp" to "Important",
-    "warn" to "Warning", "cau" to "Caution", "idea" to "Idea", "def" to "Definition"
-)
-
-@Composable
-fun BlockView(ed: Ed, vm: AppVM, b: Blk, ordN: Int, dm: Dm, fold: Fold? = null, mk: Float = 0f) {
-    val pal = LocalPal.current
-    val fs = dm.fs
-    val bottom = (fs * 1.1f).dp
-    when (b.ty) {
-        "p", "li" -> {
-            // paragraf dan poin memakai satu composable yang sama: mengubah poin <-> paragraf tidak membuat TextField baru (keyboard tetap)
-            val only = b.ty == "p" && b.r.t.isEmpty() && ed.blocks.size == 1
-            ParaRow(ed, b, ordN, dm, pal, fold, mk, if (only) "Write a note…" else null)
-        }
-        "h" -> {
-            val st = when (b.lv) {
-                1 -> baseStyle(pal, dm, pal.p, fs * 2.5f, 1000, 1.02f, -.02f)
-                2 -> baseStyle(pal, dm, pal.os, fs * 1.85f, 1000, 1.02f, -.02f)
-                3 -> baseStyle(pal, dm, pal.p, fs * 1.45f, 1000, 1.02f, -.02f)
-                else -> baseStyle(pal, dm, pal.os, fs * 1.15f, 1000, 1.02f, -.02f)
+                sum
             }
-            val (il, ir) = fitInd(b.il, b.ir, ed.widthDp)
-            TF(ed, b.id, st.aligned(b), Modifier.fillMaxWidth().padding(start = il.dp, end = ir.dp, top = (fs * .4f).dp, bottom = (fs * .5f).dp))
-        }
-        "q" -> {
-            val q = qs(b.k, pal)
-            val (il, ir) = fitInd(b.il, b.ir, ed.widthDp)
-            Box(
-                Modifier.fillMaxWidth().padding(start = il.dp, end = ir.dp, bottom = bottom).clip(q.shape).background(q.bg)
-                    .then(if (q.border) Modifier.border(3.dp, pal.p, q.shape) else Modifier)
-                    .drawBehind { if (q.bar) drawRect(pal.owc, size = Size(7.dp.toPx(), size.height)) }
-                    .padding(horizontal = 22.dp, vertical = 18.dp)
-            ) {
-                Column {
-                    if (q.label != null) {
-                        T(
-                            q.label.uppercase(), fs * .7f * 1.05f, 900, if (b.k == "def") pal.p else q.fg,
-                            Modifier.padding(bottom = (fs * .45f * .7f).dp), ls = .12f, alpha = if (b.k == "def") 1f else .85f
-                        )
-                    }
-                    TF(ed, b.id, baseStyle(pal, dm, q.fg, fs * 1.05f, 500).aligned(b), Modifier.fillMaxWidth())
-                }
+            "img" -> {
+                val m = b.im.firstOrNull()
+                if (m == null) 120f else w * m.w.coerceIn(.2f, 1f) / m.a.coerceIn(.2f, 5f) + 16f
             }
+            "hr" -> 28f
+            "lnk" -> 110f
+            "code", "q" -> lines(b.r.t, w - 24f) * fs * lh + 28f
+            else -> lines(b.r.t, w) * fs * lh + 8f
         }
-        "code" -> {
-            Box(Modifier.fillMaxWidth().padding(bottom = bottom).clip(RoundedCornerShape(28.dp)).background(pal.c3).padding(20.dp)) {
-                Column {
-                    if (b.l.isNotEmpty()) {
-                        T(
-                            b.l.uppercase(), 12f, 900, pal.op,
-                            Modifier.padding(bottom = 14.dp).clip(RoundedCornerShape(12.dp)).background(pal.p)
-                                .padding(horizontal = 12.dp, vertical = 4.dp), ls = .1f
-                        )
-                    }
-                    HBox(Modifier.horizontalScroll(rememberScrollState())) {
-                        TF(
-                            ed, b.id,
-                            TextStyle(
-                                color = pal.os, fontFamily = FontFamily.Monospace, fontSize = (fs * .82f).sp,
-                                lineHeight = (fs * .82f * 1.55f).sp
-                            ),
-                            Modifier.widthIn(min = 240.dp), wrap = false
-                        )
-                    }
-                }
+        return dp * dens
+    }
+
+    fun estimateSlot(b: Blk, plan: FloatPlan?, fs: Float, lh: Float): Float {
+        val e0 = estimateH(b, fs, lh)
+        if (plan == null) return e0
+        var s = 0f
+        for ((x, _) in plan.parts) s += estimateH(x, fs, lh)
+        return maxOf(e0, s)
+    }
+
+    /** Himpunan id slot yang harus tersusun. Membaca state (dipakai di dalam snapshotFlow), jadi berlangganan semua yang relevan. */
+    fun computeLive(scrollV: Int, plans: Map<String, FloatPlan>, fs: Float, lh: Float): Set<String> {
+        val vh = if (viewH > 0f) viewH else 1600f
+        val top = scrollV.toFloat()
+        val bot = top + vh
+        val m = .75f * vh
+        val k = .35f * vh
+        if (top - liveLo < k || liveHi - bot < k || liveHi - liveLo < vh + 1.2f * m) {
+            liveLo = top - m
+            liveHi = bot + m
+        }
+        ink.lay   // berlangganan perubahan posisi blok
+        val forced = HashSet<String>()
+        focus?.let { forced.add(keyBlock(it)) }
+        req?.let { forced.add(keyBlock(it.key)) }
+        selImg?.let { forced.add(it.first) }
+        mv?.let { forced.add(it.bid) }
+        mergeT?.let { forced.add(it.bid) }
+        if (selOn) {
+            pa?.let { forced.add(keyBlock(it.key)) }
+            pf?.let { forced.add(keyBlock(it.key)) }
+        }
+        if (findOn) curHit()?.let { if (it.key != "@t") forced.add(keyBlock(it.key)) }
+        val out = HashSet<String>()
+        var y = 0f
+        for ((b, p) in slotsOf(plans)) {
+            val pos = bpos[b.id]
+            val t = pos?.get(0) ?: y
+            val h = pos?.get(1) ?: estimateSlot(b, p, fs, lh)
+            y = t + h
+            var hit = t <= liveHi && y >= liveLo
+            if (!hit && forced.isNotEmpty()) {
+                hit = b.id in forced || (p != null && p.parts.any { it.first.id in forced })
             }
+            if (hit) out.add(b.id)
         }
-        "hr" -> Box(
-            Modifier.fillMaxWidth().padding(vertical = (fs * .9f).dp).height(8.dp)
-                .clip(RoundedCornerShape(4.dp)).background(pal.sc)
-        )
-        "tbl" -> TableView(ed, b, dm, pal)
-        "img" -> ImgView(ed, vm, b, dm)
-        "lnk" -> LinkCard(ed, b, dm)
+        return out
     }
-}
 
-@Composable
-fun ParaRow(ed: Ed, b: Blk, ordN: Int, dm: Dm, pal: Pal, fold: Fold?, mk: Float, hint: String?) {
-    val fs = dm.fs
-    val li = b.ty == "li"
-    val lineH = fs * dm.lh
-    val mw = when (b.lt) { "o", "a" -> 2.2f; "c" -> 1.9f; else -> 1.7f } * fs
-    val done = li && b.lt == "c" && b.x
-    val (il, ir) = fitInd(b.il, b.ir, ed.widthDp)
-    val st = baseStyle(pal, dm).let {
-        if (done) it.copy(color = it.color.copy(alpha = .6f), textDecoration = TextDecoration.LineThrough) else it
-    }.aligned(b)
-    val dn = LocalDensity.current
-    val tm = rememberTextMeasurer()
-    // garis dasar baris pertama (dp dari atas kolom teks): penanda disejajarkan dengan tengah huruf kecil baris pertama, bukan tengah kotak baris
-    val baseDp = if (li) remember(st.fontFamily, st.fontSize, st.lineHeight, st.fontWeight, dn.density) {
-        tm.measure("x", st).getLineBaseline(0) / dn.density
-    } else 0f
-    val fsDp = with(dn) { st.fontSize.toDp().value }
-    val cy = baseDp - .31f * fsDp
-    // butir terakhir sebuah daftar: jarak bawahnya sama dengan paragraf biasa (bukan jarak rapat antarbutir)
-    val lastLi = li && androidx.compose.runtime.remember(b.id, ed) {
-        androidx.compose.runtime.derivedStateOf {
-            val l = ed.blocks
-            val i = l.indexOfFirst { it.id == b.id }
-            i < 0 || i == l.size - 1 || l[i + 1].ty != "li"
+    /** Catat posisi slot. Bila slot yang seluruhnya di atas layar berubah tinggi, gulir digeser sebesar selisihnya agar isi di layar tidak melompat. */
+    fun setSlotPos(id: String, y: Float, h: Float) {
+        val o = bpos[id]
+        if (windowed && o != null && o[1] != h) {
+            val sc = scroll
+            if (sc != null && y + o[1] <= sc.value.toFloat()) sc.dispatchRawDelta(h - o[1])
         }
-    }.value
-    // teks yang dipotong di sekitar gambar: inden baris pertama tidak dipakai (tiap pemotongan memulai paragraf baru), diganti penggeser di Fold
-    val stF = if (fold == null) st else st.copy(
-        textIndent = if (b.fi < 0 && (b.ty == "p" || b.ty == "li")) TextIndent(0.sp, with(dn) { (-b.fi).coerceIn(0, IND_MAX_FI).dp.toSp() }) else null
-    )
-    Row(
-        Modifier.fillMaxWidth().padding(
-            start = (if (li) (b.d * 1.4f * fs).dp else 0.dp) + il.dp,
-            end = ir.dp,
-            bottom = (if (li && !lastLi) fs * .5f else fs * 1.1f).dp
-        )
-    ) {
-        if (li) {
-            Box(
-                Modifier.offset(mk.dp, 0.dp).width(mw.dp).height(lineH.dp).then(
-                    if (b.lt == "c") Modifier.clickable(
-                        interactionSource = remember { MutableInteractionSource() }, indication = null
-                    ) { ed.toggleCheck(b.id) } else Modifier
-                )
-            ) {
-                when (b.lt) {
-                    "o", "a" -> {
-                        val sz = 1.55f * fs
-                        val label = if (b.lt == "a") letterOf(ordN) else ordN.toString()
-                        Box(
-                            Modifier.offset(0.dp, (cy - sz / 2f).dp).size(sz.dp).clip(CircleShape).background(pal.p),
-                            Alignment.Center
-                        ) { T(label, fs * (if (label.length > 1) .62f else .85f), 900, pal.op) }
+        setPos(id, y, h)
+    }
+
+    /** Slot keluar dari komposisi: buang layout/posisi basi supaya seleksi, hit-test, dan coretan tidak memakainya. */
+    fun leaveSlot(blks: List<Blk>, leader: String) {
+        if (!windowed) return
+        val ids = HashSet<String>()
+        for (x in blks) ids.add(x.id)
+        lays.keys.filter { keyBlock(it) in ids }.forEach { lays.remove(it); lsh.remove(it); layLen.remove(it) }
+        kpos.keys.filter { keyBlock(it) in ids }.forEach { kpos.remove(it) }
+        for (x in blks) {
+            for (m in x.im) ipos.remove(m.id)
+            if (x.id != leader) bpos.remove(x.id)
+        }
+        ink.lay++
+    }
+
+    // ---- gulir otomatis ke kursor ----
+    // Prinsip: HANYA satu sistem yang menggulir (fungsi ini). Gulir bawaan BasicTextField dimatikan di NoteScreen (cursorSpec).
+    // Gulir hanya terjadi bila (a) kursor/teks/blok fokus berubah, atau (b) keyboard/kapsul berubah DAN kursor tadinya masih terlihat.
+    // Perubahan layout kebetulan (blok lain berubah ukuran, dll) tidak boleh menyeret layar kembali ke kursor.
+    private class CsSig(val key: String, val sel: Int, val len: Int, val vh: Float, val bh: Float) {
+        override fun equals(other: Any?) = other is CsSig && key == other.key && sel == other.sel && len == other.len && vh == other.vh && bh == other.bh
+        override fun hashCode() = ((key.hashCode() * 31 + sel) * 31 + len) * 31 + vh.hashCode() + bh.hashCode()
+        fun sameCaret(o: CsSig) = key == o.key && sel == o.sel && len == o.len
+    }
+    private var csSig: CsSig? = null
+    private var csPend = false          // ada perubahan yang belum sempat dihitung (menunggu layout yang sudah segar)
+    private var csForce = false         // true: kursor berpindah / teks berubah -> wajib terlihat; false: hanya viewport berubah
+    private var csLastForce = false
+    private var csRefVh = 0f            // ukuran viewport sebelum perubahan (untuk cek "tadinya terlihat")
+    private var csRefBh = 0f
+    private var csTry = 0
+    private var csBump by mutableStateOf(0)
+
+    /** Dipanggil collector setelah menggulir: bila gulir terpotong (batas gulir belum ikut membesar), coba lagi beberapa frame. */
+    fun csApplied(want: Float, used: Float) {
+        if (kotlin.math.abs(want - used) > 1f && csTry < 5) {
+            csTry++
+            csPend = true
+            csForce = csLastForce
+            csBump++
+        }
+    }
+
+    /** Selisih gulir agar kursor tetap terlihat di atas keyboard + kapsul; dipanggil lewat snapshotFlow. */
+    fun cursorScrollDelta(scrollV: Int): Float {
+        if (reading || selOn || ink.on || titleFocus || findOn) { csPend = false; return 0f }
+        val key = focus ?: run { csSig = null; csPend = false; return 0f }
+        val v = tf[key] ?: return 0f
+        if (!v.selection.collapsed || viewH <= 0f) return 0f
+        if (csBump < 0) return 0f   // hanya untuk berlangganan (dipakai coba-ulang)
+        val sig = CsSig(key, v.selection.start, v.text.length, viewH, barH)
+        val old = csSig
+        if (sig != old) {
+            csSig = sig
+            if (old == null || !sig.sameCaret(old)) { csForce = true; csTry = 0; csPend = true }
+            else if (!csPend) { csForce = false; csRefVh = old.vh; csRefBh = old.bh; csPend = true }
+        }
+        if (!csPend) return 0f
+        val lay = lays[key] ?: return 0f
+        val pos = kpos[key] ?: return 0f
+        // layout harus layout dari kolom edit dan dari teks yang sekarang (kalau belum, tunggu: lays berubah => dihitung lagi)
+        if (lsh[key] != 1 || layLen[key] != v.text.length) return 0f
+        val lt = lay.layoutInput.text.length
+        val o = toLay(key, v.selection.start - 1).coerceIn(0, lt)
+        val r = lay.getCursorRect(o)
+        val top = pos.y + r.top
+        val bot = pos.y + r.bottom
+        val vt = scrollV + 12f * dens
+        val vb = scrollV + viewH - cursorClear()
+        csPend = false
+        csLastForce = csForce
+        val force = csForce
+        csForce = false
+        if (!force) {
+            // hanya keyboard/kapsul yang berubah: ikuti kursor hanya bila tadinya memang terlihat (pembaca yang sengaja menggulir menjauh tidak diseret balik)
+            val clr0 = (if (csRefBh > 0f) csRefBh + 12f * dens else 12f * dens)
+            val vb0 = scrollV + csRefVh - clr0
+            if (!(bot <= vb0 + 2f && top >= vt - 2f)) return 0f
+        }
+        return when { bot > vb -> bot - vb; top < vt -> top - vt; else -> 0f }
+    }
+    var buzz: (() -> Unit)? = null
+    val bpos = HashMap<String, FloatArray>()   // id blok -> [atas, tinggi] di ruang konten
+    private var mvDir = 0
+    private var autoJob: Job? = null
+
+    private fun isEmptyP(x: Blk) = x.ty == "p" && x.r.t.isEmpty()
+
+    fun mvBegin(bid: String, imgId: String) {
+        val i = idx(bid)
+        if (i < 0) return
+        val b = blocks[i]
+        val p = bpos[bid] ?: floatArrayOf(0f, 0f)
+        commit()
+        selImg = if (b.ty == "img") bid to maxOf(0, b.im.indexOfFirst { it.id == imgId }) else null
+        focus = null; clearReq++
+        val hh = if (b.im.size == 1 && sideOk(b)) {
+            val m0 = b.im[0]
+            widthDp * m0.w.coerceIn(.2f, 1f) / m0.a.coerceIn(.2f, 5f) * dens
+        } else p[1]
+        mv = Mv(bid, imgId, b.im.size > 1, p[0], hh)
+        mvX = 0f; mvY = 0f; dropAt = -1; mvDir = 0; mergeT = null
+        mvAl = b.im.firstOrNull()?.al ?: "c"
+        buzz?.invoke()
+        autoJob?.cancel()
+        autoJob = scope.launch {
+            while (mv != null) {
+                val m = mv
+                val sc = scroll
+                if (m != null && sc != null && mvDir != 0 && viewH > 0f) {
+                    val cy = m.top + m.h / 2f + mvY - sc.value
+                    val z = viewH * .2f
+                    val v = when {
+                        mvDir < 0 && cy < z -> -(z - cy) / z
+                        mvDir > 0 && cy > viewH - z -> (cy - (viewH - z)) / z
+                        else -> 0f
                     }
-                    "c" -> {
-                        val sz = 1.15f * fs
-                        val shape = RoundedCornerShape((.3f * sz).dp)
-                        Box(
-                            Modifier.offset((.1f * fs).dp, (cy - sz / 2f).dp).size(sz.dp).clip(shape)
-                                .then(if (done) Modifier.background(pal.p) else Modifier.border((.14f * fs).dp, pal.p, shape)),
-                            Alignment.Center
-                        ) { if (done) Ic("ok", Color.White, (sz * .78f).dp) }
-                    }
-                    else -> {
-                        val sz = .5f * fs
-                        Box(
-                            Modifier.offset((.3f * fs).dp, (cy - sz / 2f).dp).size(sz.dp).clip(
-                                RoundedCornerShape(topStartPercent = 40, topEndPercent = 60, bottomEndPercent = 55, bottomStartPercent = 45)
-                            ).background(pal.p)
-                        )
-                    }
-                }
-            }
-        }
-        TF(ed, b.id, stF, Modifier.weight(1f), hint = hint, fold = fold)
-    }
-}
-
-/** Lebar tiap kolom tabel (dp): lebar yang disetel pengguna, atau lebar bawaan (lebar layar dibagi rata, minimal 110dp). */
-fun tblWidths(b: Blk, viewDp: Float): List<Float> {
-    val n = b.tb.firstOrNull()?.size ?: 1
-    val def = maxOf(110f, viewDp / n)
-    return List(n) { c -> b.cw.getOrNull(c)?.takeIf { it >= 40f } ?: def }
-}
-
-const val COL_MIN = 56f
-private const val COL_MAX = 640f
-
-@Composable
-fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier = Modifier) {
-    val cols = b.tb.firstOrNull()?.size ?: 1
-    val dens = LocalDensity.current.density
-    val haptic = LocalHapticFeedback.current
-    val ws = tblWidths(b, ed.widthDp)
-    val def = maxOf(110f, ed.widthDp / cols)
-    // sel yang sedang diedit di tabel ini (null = tidak ada). derivedStateOf: hanya tabel yang fokusnya berubah yang recompose.
-    val fkS = remember(b.id) {
-        androidx.compose.runtime.derivedStateOf {
-            val f = ed.focus
-            if (f != null && !ed.reading && isCellKey(f) && keyBlock(f) == b.id) f else null
-        }
-    }
-    val fk = fkS.value
-    val fRC = if (fk != null) cellRC(fk) else null
-    val hs = rememberScrollState()
-    var viewW by remember { mutableStateOf(0) }
-    var dragC by remember { mutableStateOf(-1) }
-    var snapOn by remember { mutableStateOf(false) }
-    // [0] lebar yang ditampilkan (dp), [1] gulir-tepi sudah aktif (0/1), [2] lebar mentah (dp), [3] x jari sekarang (px, ruang layar),
-    // [4] x jari saat mulai, [5] -, [6] lebar kolom saat mulai (dp), [7] total geseran otomatis (px), [8] tepi kanan tabel di layar (px)
-    val dw = remember { FloatArray(9) }
-    val bS by rememberUpdatedState(b)
-    val wsS by rememberUpdatedState(ws)
-    val lifted = ed.mv?.let { it.bid == b.id } == true
-    val active = fk != null && !ed.reading && ed.mv == null
-    val showH = (active || dragC >= 0) && !lifted
-
-    // Lebar kolom dihitung MUTLAK dari posisi jari di layar (bukan dari selisih per-frame): pegangan ikut bergeser saat kolom
-    // melebar, jadi pendekatan selisih membuat lebar loncat-loncat. Dengan titik awal tetap, tepi kolom selalu mengikuti jari.
-    fun applyW(c: Int) {
-        val others = wsS.sum() - wsS.getOrElse(c) { def }
-        val floated = bS.ta == "l" || bS.ta == "r"
-        val cap = if (floated) minOf(COL_MAX, ed.widthDp * ed.maxSideW() - 3f - others) else COL_MAX   // tabel yang dililit teks tak boleh melebihi batasnya
-        val raw = dw[6] + ((dw[3] - dw[4]) + dw[7]) / dens
-        dw[2] = raw.coerceIn(COL_MIN, maxOf(COL_MIN, cap))
-        // menempel ke lebar bawaan saat sudah dekat (getar kecil), seperti gambar menempel ke rasio aslinya
-        val near = kotlin.math.abs(dw[2] - def) < 8f && def <= cap
-        if (near && !snapOn) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        snapOn = near
-        dw[0] = if (near) def else dw[2]
-        ed.tblCol(bS.id, c, dw[0])
-    }
-
-    // Jari ditahan di tepi kanan layar: tabel ikut tergulir dan kolom terus melebar. Hanya aktif bila jari BENAR-BENAR berada di zona tepi
-    // setelah sengaja digeser ke sana; sebelumnya, kolom terakhir melebar sendiri begitu disentuh.
-    LaunchedEffect(dragC) {
-        if (dragC < 0) return@LaunchedEffect
-        val c = dragC
-        val zone = 40f * dens
-        while (true) {
-            delay(16)
-            if (viewW <= 0) continue
-            val inZone = dw[3] > dw[8] - zone
-            if (dw[1] == 0f && (!inZone || dw[3] - dw[4] > 36f * dens)) dw[1] = 1f   // 'siap': jari pernah keluar zona atau sudah geser jauh ke kanan
-            if (dw[1] == 1f && inZone) {
-                val f = ((dw[3] - (dw[8] - zone)) / zone).coerceIn(0f, 1f)
-                val v = f * f * 5f * dens          // maks ~5dp per frame, naik pelan-pelan
-                val before = dw[2]
-                dw[7] += v
-                applyW(c)
-                if (dw[2] == before) dw[7] -= v else hs.scrollBy(v)
-            }
-        }
-    }
-
-    Column(modifier.fillMaxWidth().padding(bottom = (dm.fs * 1.1f).dp)) {
-        // tab pegangan di pojok kiri atas: tekan sebentar lalu geser = angkat dan pindahkan seluruh tabel (seperti foto)
-        if (!ed.reading) TableTab(ed, b, active, lifted, pal)
-        HBox(
-            Modifier.clip(RoundedCornerShape(4.dp)).background(pal.c2)
-                .border(1.5.dp, if (active) pal.p.copy(alpha = .75f) else pal.osv.copy(alpha = .75f), RoundedCornerShape(4.dp))   // garis luar jelas di tema terang maupun gelap
-                .onGloballyPositioned { viewW = it.size.width; dw[8] = it.positionInRoot().x + it.size.width }
-                .horizontalScroll(hs)
-        ) {
-            Column {
-                b.tb.forEachIndexed { r, row ->
-                    val head = r == 0
-                    val fc = if (fRC != null && fRC.first == r) fRC.second else -1
-                    // satu baris = satu Layout sendiri (satu kali ukur, tanpa IntrinsicSize): tinggi baris = sel tertinggi
-                    TRow(ws.map { it.dp }, head, r > 0, fc, if (head) dragC else -1, pal) {
-                        row.forEachIndexed { c, _ ->
-                            val k = "${b.id}:$r:$c"
-                            val focused = fc == c
-                            val fg = if (focused) pal.opc else if (head) pal.osc else pal.os
-                            val al = when (b.ca.getOrNull(c)) {
-                                "center" -> androidx.compose.ui.text.style.TextAlign.Center
-                                "right" -> androidx.compose.ui.text.style.TextAlign.End
-                                else -> androidx.compose.ui.text.style.TextAlign.Start
-                            }
-                            // dibungkus Box: tiap sel selalu tepat satu anak Layout (TF bisa kosong sesaat), supaya pegangan tak salah urut
-                            Box(Modifier.fillMaxWidth()) {
-                                TF(
-                                    ed, k,
-                                    TextStyle(
-                                        color = fg, fontFamily = dm.ff, fontSize = (dm.fs * .9f).sp, lineHeight = (dm.fs * .9f * 1.45f).sp,
-                                        fontWeight = FontWeight(if (head) 850 else 400), textAlign = al
-                                    ),
-                                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)
-                                )
-                            }
-                        }
-                        if (head) for (c in 0 until cols) key(c) {
-                            ColHandle(
-                                pal, c == cols - 1, showH, dragC == c,
-                                onStart = { rx ->
-                                    ed.commit()
-                                    dragC = c; snapOn = false
-                                    dw[0] = wsS.getOrElse(c) { def }; dw[1] = 0f; dw[2] = dw[0]
-                                    dw[3] = rx; dw[4] = rx; dw[6] = dw[0]; dw[7] = 0f
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                },
-                                onDrag = { rx -> dw[3] = rx; applyW(c) },
-                                onEnd = { dragC = -1; snapOn = false; ed.commit() },
-                                onReset = { ed.commit(); ed.tblCol(bS.id, c, 0f); ed.commit() }
-                            )
-                        }
+                    if (v != 0f) {
+                        val got = sc.scrollBy(v.coerceIn(-1f, 1f) * 16f * dens)
+                        if (got != 0f) { mvY += got; mvRecalc() }
                     }
                 }
+                delay(16)
             }
         }
     }
-}
 
-/** Tab pegangan tabel (pojok kiri atas, seperti tab map): area sentuh lebar, tekan sebentar lalu geser untuk memindahkan tabel. */
-@Composable
-private fun TableTab(ed: Ed, b: Blk, active: Boolean, lifted: Boolean, pal: Pal) {
-    val sc by animateFloatAsState(if (lifted) 1.12f else 1f, spring(.6f, 500f), label = "tab")
-    val dots = if (active || lifted) pal.op else pal.osv
-    Box(
-        Modifier.size(64.dp, 28.dp).graphicsLayer { scaleX = sc; scaleY = sc; transformOrigin = TransformOrigin(0f, 1f) }
-            .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
-            .background(if (active || lifted) pal.p else pal.c4)
-            .holdDrag(
-                true,
-                onStart = { if (ed.ink.on) false else { ed.mvBegin(b.id, ""); true } },
-                onMove = { _, d -> ed.mvDrag(d.x, d.y) },
-                onEnd = { ok -> ed.mvEnd(ok) },
-                lead = 300L   // tekan ~0,1 detik saja: cukup untuk membedakan dari gulir halaman
-            ),
-        Alignment.Center
-    ) {
-        Canvas(Modifier.size(24.dp, 12.dp)) {
-            val r = 1.8.dp.toPx()
-            for (i in 0 until 4) for (j in 0 until 2) {
-                drawCircle(dots, r, Offset(size.width * (i + .5f) / 4f, size.height * (j + .5f) / 2f))
-            }
-        }
+    fun mvDrag(dx: Float, dy: Float) {
+        val m = mv ?: return
+        mvX += dx; mvY += dy
+        if (dy > .5f) mvDir = 1 else if (dy < -.5f) mvDir = -1
+        if (m.row) {
+            if (mergeT == null && dropAt < 0) rowDragStep(m)   // di atas gambar lain / di luar baris: jangan tukar urutan di barisnya sendiri
+            mergeCheck()
+            rowOut(m)
+        } else mvRecalc()
     }
-}
 
-/**
- * Pegangan lebar kolom di tepi kanan sel kepala: batang kecil yang terlihat, area sentuh 44dp (kolom terakhir 32dp, di dalam tabel).
- * Seret ke kiri / kanan untuk mengubah lebar, ketuk dua kali untuk mengembalikan ke lebar otomatis.
- * Hanya geseran HORIZONTAL yang diambil (lewat ambang geser), jadi menggulir halaman ke atas / bawah dari sini tidak mengubah kolom.
- * Posisi jari dilaporkan dalam ruang layar (bukan relatif ke pegangan yang ikut bergeser).
- */
-@Composable
-private fun ColHandle(
-    pal: Pal, last: Boolean, show: Boolean, dragging: Boolean,
-    onStart: (Float) -> Unit, onDrag: (Float) -> Unit, onEnd: () -> Unit, onReset: () -> Unit
-) {
-    val st by rememberUpdatedState(onStart)
-    val dr by rememberUpdatedState(onDrag)
-    val en by rememberUpdatedState(onEnd)
-    val rs by rememberUpdatedState(onReset)
-    val sc by animateFloatAsState(if (dragging) 1.45f else 1f, spring(.6f, 600f), label = "chs")
-    val al by animateFloatAsState(if (show) 1f else 0f, tween(160), label = "cha")
-    val co = remember { arrayOfNulls<androidx.compose.ui.layout.LayoutCoordinates>(1) }
-    Box(
-        Modifier
-            .onGloballyPositioned { co[0] = it }
-            .pointerInput(show) { if (show) detectTapGestures(onDoubleTap = { rs() }) }
-            .pointerInput(show) {
-                if (show) awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    val rootX = { p: Offset -> co[0]?.takeIf { it.isAttached }?.localToRoot(p)?.x ?: p.x }
-                    val slop = androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation(down.id) { ch, _ -> ch.consume() }
-                        ?: return@awaitEachGesture
-                    st(rootX(slop.position))
-                    try {
-                        androidx.compose.foundation.gestures.horizontalDrag(slop.id) { ch -> ch.consume(); dr(rootX(ch.position)) }
-                    } finally {
-                        en()
-                    }
-                }
-            },
-        if (last) Alignment.CenterEnd else Alignment.Center
-    ) {
-        Box(
-            Modifier.padding(end = if (last) 6.dp else 0.dp)
-                .graphicsLayer { scaleX = sc; scaleY = sc; alpha = al }
-                .size(5.dp, 28.dp).clip(CircleShape).background(pal.s).padding(1.dp).clip(CircleShape).background(pal.p)
-        )
-    }
-}
-
-/**
- * Satu baris tabel. Latar sel (kepala / sel aktif / kolom yang sedang dilebarkan) dan garis pemisah digambar di sini.
- * Anak pertama sampai ke-n = sel; sisanya (kalau ada) = pegangan lebar kolom, ditaruh di tepi kanan tiap kolom.
- */
-@Composable
-private fun TRow(ws: List<Dp>, head: Boolean, topLine: Boolean, fc: Int, dc: Int, pal: Pal, content: @Composable () -> Unit) {
-    androidx.compose.ui.layout.Layout(
-        content = content,
-        modifier = Modifier.drawBehind {
-            var x = 0f
-            ws.forEachIndexed { c, wd ->
-                val w = wd.toPx()
-                if (c == fc) drawRect(pal.pc, Offset(x, 0f), Size(w, size.height))
-                else if (head) drawRect(pal.sc, Offset(x, 0f), Size(w, size.height))
-                if (c == dc) drawRect(pal.p.copy(alpha = .16f), Offset(x, 0f), Size(w, size.height))
-                x += w
-            }
-            if (topLine) drawLine(pal.ol, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx())   // garis pemisah baris
-            var cx = 0f
-            for (c in 0 until ws.size - 1) {
-                cx += ws[c].toPx()
-                drawLine(pal.ol, Offset(cx, 0f), Offset(cx, size.height), 1.dp.toPx())   // garis pemisah kolom
-            }
-        }
-    ) { ms, _ ->
-        val n = ws.size
-        val px = ws.map { it.roundToPx() }
-        val cells = (0 until n).map { i -> ms[i].measure(Constraints(minWidth = px[i], maxWidth = px[i])) }
-        val h = cells.maxOfOrNull { it.height } ?: 0
-        val hw = 44.dp.roundToPx()
-        val hwL = 32.dp.roundToPx()   // pegangan kolom terakhir lebih sempit: tidak menutupi teks sel di tepi kanan
-        val hands = (n until ms.size).mapIndexed { k, i -> ms[i].measure(Constraints.fixed(if (k == n - 1) hwL else hw, h)) }
-        layout(px.sum(), h) {
-            var x = 0
-            cells.forEachIndexed { i, p -> p.placeRelative(x, 0); x += px[i] }
-            var e = 0
-            hands.forEachIndexed { i, p ->
-                e += px[i]
-                p.placeRelative(if (i == n - 1) e - hwL else e - hw / 2, 0)
-            }
-        }
-    }
-}
-
-/** Menempel halus ke rasio asli gambar saat sudah dekat (ada getar kecil); tanpa angka apa pun di layar. */
-private fun snapRatio(a: Float, o: Float): Pair<Float, Boolean> =
-    if (abs(a / o - 1f) < .03f) o to true else a to false
-
-/** Ukuran konten gambar (px) saat menutup bingkai bw x bh dengan zoom z. */
-private fun cropSize(o: Float, bw: Float, bh: Float, z: Float): Pair<Float, Float> =
-    if (o > bw / bh) (bh * o * z) to (bh * z) else (bw * z) to (bw / o * z)
-
-/** Posisi geser baru agar pusat bagian yang terlihat tidak berpindah saat zoom berubah. */
-private fun rezoom(p: Float, v0: Float, v1: Float): Float {
-    if (v1 >= .999f) return .5f
-    val c = (1f - v0) * p + v0 / 2f
-    return ((c - v1 / 2f) / (1f - v1)).coerceIn(0f, 1f)
-}
-
-/**
- * Tekan-tahan lalu geser. Dibaca di pass Initial supaya anak (ketuk, geser pangkas) tidak ikut bereaksi
- * setelah tekan-tahan terpicu; ketukan dan scroll biasa tetap lewat seperti semula.
- */
-@Composable
-fun Modifier.holdDrag(
-    enabled: Boolean,
-    onStart: (Offset) -> Boolean,
-    onMove: (Offset, Offset) -> Unit,
-    onEnd: (Boolean) -> Unit,
-    lead: Long = 0L
-): Modifier {
-    val st by rememberUpdatedState(onStart)
-    val mo by rememberUpdatedState(onMove)
-    val en by rememberUpdatedState(onEnd)
-    if (!enabled) return this
-    return pointerInput(Unit) {
-        awaitEachGesture {
-            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-            val slop = viewConfiguration.touchSlop
-            val early = withTimeoutOrNull((viewConfiguration.longPressTimeoutMillis - lead).coerceAtLeast(100L)) {
-                var done = false
-                while (!done) {
-                    val ev = awaitPointerEvent(PointerEventPass.Initial)
-                    val c = ev.changes.firstOrNull { it.id == down.id }
-                    if (c == null || !c.pressed || (c.position - down.position).getDistance() > slop) done = true
-                }
-                true
-            }
-            if (early != null) return@awaitEachGesture
-            if (!st(down.position)) return@awaitEachGesture
-            var ok = true
-            try {
-                while (true) {
-                    val ev = awaitPointerEvent(PointerEventPass.Initial)
-                    val c = ev.changes.firstOrNull { it.id == down.id }
-                    if (c == null) { ok = false; break }
-                    if (!c.pressed) { c.consume(); break }
-                    val d = c.positionChange()
-                    if (d != Offset.Zero) mo(c.position, d)
-                    ev.changes.forEach { it.consume() }
-                }
-            } catch (e: Throwable) {
-                ok = false; throw e
-            } finally {
-                en(ok)   // gesture dibatalkan di tengah jalan pun tetap diakhiri, jadi gulir-tepi seleksi tidak pernah nyangkut
-            }
-        }
-    }
-}
-
-/** Pegangan seret: area sentuh besar (44dp+), gagang kecil di dekat tepi. kind: 0 gagang tegak, 1 gagang datar, 2 titik sudut. */
-@Composable
-fun Grip(
-    modifier: Modifier, kind: Int, pill: Alignment,
-    onStart: () -> Unit, onDrag: (Float, Float) -> Unit, onEnd: () -> Unit
-) {
-    val pal = LocalPal.current
-    val st by rememberUpdatedState(onStart)
-    val dr by rememberUpdatedState(onDrag)
-    val en by rememberUpdatedState(onEnd)
-    var act by remember { mutableStateOf(false) }
-    val sc by animateFloatAsState(if (act) 1.3f else 1f, spring(.6f, 600f), label = "grip")
-    Box(
-        modifier.pointerInput(Unit) {
-            detectDragGestures(
-                onDragStart = { act = true; st() },
-                onDragEnd = { act = false; en() },
-                onDragCancel = { act = false; en() }
-            ) { ch, d -> ch.consume(); dr(d.x, d.y) }
-        },
-        pill
-    ) {
-        val (w, h) = when (kind) { 0 -> 5.dp to 30.dp; 1 -> 30.dp to 5.dp; else -> 16.dp to 16.dp }
-        Box(Modifier.padding(10.dp).graphicsLayer { scaleX = sc; scaleY = sc }.size(w, h)) {
-            Box(Modifier.matchParentSize().clip(CircleShape).background(pal.s).padding(1.5.dp).clip(CircleShape).background(pal.p))
-        }
-    }
-}
-
-@Composable
-fun ImgView(ed: Ed, vm: AppVM, b: Blk, dm: Dm) {
-    val sel = ed.selImg?.takeIf { it.first == b.id }?.second
-    val n = b.im.size
-    val bottom = (dm.fs * 1.1f).dp
-    if (n == 1) {
-        val m = b.im[0]
-        BoxWithConstraints(Modifier.fillMaxWidth().padding(bottom = bottom)) {
-            val w = m.w.coerceIn(.2f, 1f)
-            val imgW = maxWidth * w
-            val ratio = m.a.coerceIn(.2f, 5f)
-            val room = maxWidth.value * (1f - w) - SIDE_GAP
-            val side = false   // teks di samping gambar kini mengalir otomatis (lihat FloatGroup)
-            val cell: @Composable () -> Unit = {
-                ImgCell(ed, vm, b, 0, Modifier.width(imgW).aspectRatio(ratio), sel == 0)
-            }
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = when (m.al) { "l" -> Arrangement.Start; "r" -> Arrangement.End; else -> Arrangement.Center },
-                verticalAlignment = Alignment.Top
-            ) {
-                if (side && m.al == "r") {
-                    SideText(ed, b, dm, Modifier.weight(1f), imgW / ratio, sel == 0)
-                    Spacer(Modifier.width(SIDE_GAP.dp))
-                }
-                cell()
-                if (side && m.al == "l") {
-                    Spacer(Modifier.width(SIDE_GAP.dp))
-                    SideText(ed, b, dm, Modifier.weight(1f), imgW / ratio, sel == 0)
-                }
-            }
-        }
-    } else if (n > 1) {
+    private fun rowDragStep(m: Mv) {
+        val i = idx(m.bid)
+        if (i < 0) return
+        val b = blocks[i]
+        val ix = b.im.indexOfFirst { it.id == m.imgId }
+        if (ix < 0) return
+        val n = b.im.size
         val sum = b.im.sumOf { it.a.toDouble() }.toFloat().coerceAtLeast(.1f)
-        Row(
-            Modifier.fillMaxWidth().padding(bottom = bottom).aspectRatio(sum / (1f - (n - 1) * GAP)),
-            horizontalArrangement = Arrangement.spacedBy((ed.widthDp * GAP).dp)
-        ) {
-            b.im.forEachIndexed { j, m ->
-                key(m.id) {
-                    ImgCell(ed, vm, b, j, Modifier.weight(m.a.coerceAtLeast(.05f)).fillMaxHeight(), sel == j)
-                }
-            }
+        val rowW = widthDp * dens
+        val u = rowW * (1f - (n - 1) * GAP)
+        val gap = rowW * GAP
+        if (mvX > 0f && ix + 1 < n) {
+            val nw = u * b.im[ix + 1].a / sum
+            if (mvX > nw * .6f + gap) { rowSwap(m.bid, ix, 1); mvX -= nw + gap; buzz?.invoke() }
+        } else if (mvX < 0f && ix > 0) {
+            val nw = u * b.im[ix - 1].a / sum
+            if (-mvX > nw * .6f + gap) { rowSwap(m.bid, ix, -1); mvX += nw + gap; buzz?.invoke() }
         }
     }
-}
 
-/** Sisi kosong di samping gambar: seluruh areanya bisa diketuk untuk mulai menulis. */
-@Composable
-fun SideText(ed: Ed, b: Blk, dm: Dm, modifier: Modifier, minH: Dp, imgSel: Boolean) {
-    val pal = LocalPal.current
-    if (ed.reading && b.r.t.isEmpty()) { Spacer(modifier); return }
-    Box(
-        modifier.heightIn(min = minH).then(
-            if (ed.reading) Modifier
-            else Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                ed.focusAt(b.id, b.r.t.length)
-            }
-        )
-    ) {
-        TF(
-            ed, b.id, baseStyle(pal, dm), Modifier.fillMaxWidth(),
-            hint = if (ed.reading) null else if (imgSel) "Tap here to write…" else "Write beside it…"
-        )
-    }
-}
-
-@Composable
-fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Boolean) {
-    val pal = LocalPal.current
-    val m = b.im[ix]
-    val bmp = rememberImg(vm, m.id)
-    val dens = LocalDensity.current.density
-    val haptic = LocalHapticFeedback.current
-    var box by remember { mutableStateOf(IntSize.Zero) }
-    var frame by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
-    var snapOn by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(8.dp)
-    val row = b.im.size > 1
-    val mS by rememberUpdatedState(m)
-    val bS by rememberUpdatedState(b)
-    val ixS by rememberUpdatedState(ix)
-    val rs = remember { floatArrayOf(0f, 0f, 0f, 0f) }
-    val mvNow = ed.mv
-    val liftedRow = mvNow != null && mvNow.row && mvNow.bid == b.id && mvNow.imgId == m.id
-    val liftedBlk = mvNow != null && !mvNow.row && mvNow.bid == b.id
-    val lift by animateFloatAsState(if (liftedRow) 1.06f else 1f, spring(.6f, 500f), label = "lift")
-
-    // pangkas: geser dan cubit (zoom) di dalam bingkai
-    val cropBy: (Float, Offset) -> Unit = { zf, pn ->
-        val mm = mS
-        val bw = box.width.toFloat().coerceAtLeast(1f)
-        val bh = box.height.toFloat().coerceAtLeast(1f)
-        val (cw0, ch0) = cropSize(mm.o, bw, bh, mm.z)
-        var z = mm.z
-        var pxn = mm.px
-        var pyn = mm.py
-        if (zf != 1f) {
-            val nz = (z * zf).coerceIn(1f, 4f)
-            val (cw1, ch1) = cropSize(mm.o, bw, bh, nz)
-            pxn = rezoom(pxn, bw / cw0, bw / cw1)
-            pyn = rezoom(pyn, bh / ch0, bh / ch1)
-            z = nz
+    private fun mvRecalc() {
+        val m = mv ?: return
+        val i = idx(m.bid)
+        if (i < 0) return
+        mergeCheck()
+        if (m.row) { rowOut(m); return }
+        val cy = m.top + m.h / 2f + mvY
+        var gap = blocks.size
+        for ((j, b) in blocks.withIndex()) {
+            if (j == i) continue
+            val q = bpos[b.id] ?: continue
+            if (q[0] + q[1] / 2f >= cy) { gap = j; break }
         }
-        val (cw, ch) = cropSize(mm.o, bw, bh, z)
-        val rx = cw - bw
-        val ry = ch - bh
-        if (rx > 2f) pxn = (pxn - pn.x / rx).coerceIn(0f, 1f)
-        if (ry > 2f) pyn = (pyn - pn.y / ry).coerceIn(0f, 1f)
-        ed.imgLive(bS.id, ixS) { it.copy(z = z, px = pxn, py = pyn) }
-    }
-
-    // ubah bentuk gambar tunggal: lebar & tinggi bebas, menempel ke rasio umum
-    val applyResize: (Float, Float) -> Unit = { wpx, hpx ->
-        val cw = ed.widthDp * dens
-        val wC = wpx.coerceIn(cw * .22f, cw)
-        val hC = hpx.coerceIn(70f * dens, 1100f * dens)
-        val (a, snapped) = snapRatio(wC / hC, mS.o)
-        if (snapped && !snapOn) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        snapOn = snapped
-        ed.imgLive(bS.id, ixS) { it.copy(w = wC / cw, a = a) }
-    }
-
-    Box(
-        modifier
-            .holdDrag(
-                true,
-                // mode baca: tahan lama pada foto langsung masuk mode edit dan foto terangkat (bisa diseret)
-                onStart = {
-                    if (ed.reading) { if (ed.ink.on) return@holdDrag false; ed.exitReading() }
-                    ed.mvBegin(bS.id, mS.id); true
-                },
-                onMove = { _, d -> ed.mvDrag(d.x, d.y) },
-                onEnd = { ok -> ed.mvEnd(ok) },
-                lead = 150L   // foto terangkat lebih cepat dari tekan-tahan biasa (~350 ms), jadi terasa langsung
-            )
-            .pointerInput(ed.reading) {
-                if (!ed.reading) detectTapGestures(onTap = { ed.selectImg(bS.id, ixS) })
-                else detectTapGestures(onTap = { ed.openImgFromReading(bS.id, ixS) })
-            }
-            .zIndex(if (liftedRow) 2f else 0f)
-            .graphicsLayer {
-                if (liftedRow) { translationX = ed.mvX; translationY = ed.mvY }
-                scaleX = lift; scaleY = lift
-                alpha = if (liftedRow) .94f else 1f
-            }
-            .onSizeChanged { box = it }
-            .photoBounds { frame = it }
-            .onGloballyPositioned { c ->
-                val cc = ed.contentCoords
-                if (cc != null && cc.isAttached && c.isAttached) {
-                    val o = cc.localPositionOf(c, Offset.Zero)
-                    val nr = androidx.compose.ui.geometry.Rect(o, Size(c.size.width.toFloat(), c.size.height.toFloat()))
-                    if (ed.ipos[mS.id] != nr) { ed.ipos[mS.id] = nr; ed.ink.lay++ }   // coretan di atas gambar ikut posisi / ukuran gambar
-                }
-            }
-    ) {
-        Box(
-            Modifier.matchParentSize().clip(shape).background(pal.c3)
-                .pointerInput(selected, m.id) {
-                    if (!selected) return@pointerInput
-                    awaitEachGesture {
-                        awaitFirstDown(requireUnconsumed = false)
-                        var acc = Offset.Zero
-                        var slopOk = false
-                        var panning = false
-                        var began = false
-                        do {
-                            val ev = awaitPointerEvent()
-                            if (ed.mv != null || ev.changes.any { it.isConsumed }) break
-                            val down = ev.changes.count { it.pressed }
-                            if (down >= 2) {
-                                if (!began) { began = true; ed.commit() }
-                                cropBy(ev.calculateZoom(), ev.calculatePan())
-                                ev.changes.forEach { if (it.positionChanged()) it.consume() }
-                                slopOk = true; panning = true
-                            } else if (down == 1) {
-                                val pn = ev.calculatePan()
-                                if (!slopOk) {
-                                    acc += pn
-                                    if (acc.getDistance() > viewConfiguration.touchSlop) {
-                                        slopOk = true
-                                        val mm = mS
-                                        val bw = box.width.toFloat().coerceAtLeast(1f)
-                                        val bh = box.height.toFloat().coerceAtLeast(1f)
-                                        val (cw, ch) = cropSize(mm.o, bw, bh, mm.z)
-                                        panning = if (abs(acc.x) > abs(acc.y)) cw - bw > 2f else ch - bh > 2f
-                                        if (panning) {
-                                            began = true; ed.commit()
-                                            cropBy(1f, acc)
-                                            ev.changes.forEach { it.consume() }
-                                        }
-                                    }
-                                } else if (panning) {
-                                    cropBy(1f, pn)
-                                    ev.changes.forEach { it.consume() }
-                                }
-                            }
-                        } while (ev.changes.any { it.pressed })
-                        if (began) ed.commit()
-                    }
-                }
-        ) {
-            if (bmp != null) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val bw = size.width
-                    val bh = size.height
-                    val iw = bmp.width
-                    val ih = bmp.height
-                    val z = m.z.coerceIn(1f, 4f)
-                    val (cw, ch) = cropSize(iw.toFloat() / ih, bw, bh, z)
-                    val vw = (iw * bw / cw).coerceIn(1f, iw.toFloat())
-                    val vh = (ih * bh / ch).coerceIn(1f, ih.toFloat())
-                    val ox = ((iw - vw) * m.px).coerceIn(0f, iw - vw)
-                    val oy = ((ih - vh) * m.py).coerceIn(0f, ih - vh)
-                    drawImage(
-                        bmp, IntOffset(ox.roundToInt(), oy.roundToInt()), IntSize(vw.roundToInt(), vh.roundToInt()),
-                        dstSize = IntSize(bw.roundToInt(), bh.roundToInt()), filterQuality = FilterQuality.Medium
-                    )
-                }
-            }
-        }
-        // gambar lain yang sedang ditimpa gambar seretan: sorot, dan tandai sisi masuknya (kiri / kanan)
-        val mt = ed.mergeT
-        if (mt != null && mt.imgId == m.id) {
-            Box(Modifier.matchParentSize().clip(shape).background(pal.p.copy(alpha = .22f)).border(3.dp, pal.p, shape))
-            Box(
-                Modifier.align(if (mt.after) Alignment.CenterEnd else Alignment.CenterStart).padding(horizontal = 6.dp)
-                    .size(7.dp, 64.dp).clip(CircleShape).background(pal.p)
-            )
-        }
-        if (ed.mv == null && bmp != null && !ed.reading) {
-            // tombol perluas: buka menu foto (morph dari bingkai ini ke layar penuh)
-            Box(
-                Modifier.align(Alignment.TopStart).padding(8.dp).size(32.dp).clip(CircleShape)
-                    .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = .5f))
-                    .clickable { PhotoHost.req = PhotoReq(m.id, frame) },
-                Alignment.Center
-            ) { PIc("expand", androidx.compose.ui.graphics.Color.White, 16.dp) }
-        }
-        if (selected && !ed.reading && ed.mv == null) {
-            Box(Modifier.matchParentSize().border(2.dp, pal.p, shape))
-            // centang tutup mode edit gambar: menempel di gambarnya, bukan di toolbar
-            Box(
-                Modifier.align(Alignment.TopEnd).padding(8.dp).size(34.dp).clip(CircleShape).background(pal.p)
-                    .clickable { ed.closeImg() },
-                Alignment.Center
-            ) { Ic("ok", pal.op, 20.dp) }
-            val right = m.al != "r"
-            val gx = if (right) 1f else -1f
-            val kk = if (m.al == "c") 2f else 1f
-            if (!row) {
-                // tepi samping: ubah lebar saja (tinggi tetap) -> rasio berubah
-                Grip(
-                    Modifier.align(if (right) Alignment.CenterEnd else Alignment.CenterStart).size(46.dp, 96.dp),
-                    0, if (right) Alignment.CenterEnd else Alignment.CenterStart,
-                    onStart = { ed.commit(); rs[0] = box.width.toFloat(); rs[1] = box.height.toFloat(); rs[2] = 0f },
-                    onDrag = { dx, _ -> rs[2] += dx * gx * kk; applyResize(rs[0] + rs[2], rs[1]) },
-                    onEnd = { snapOn = false; ed.releaseSide(bS.id); ed.commit() }
-                )
-                // tepi bawah: ubah tinggi saja -> rasio berubah
-                Grip(
-                    Modifier.align(Alignment.BottomCenter).size(96.dp, 46.dp), 1, Alignment.BottomCenter,
-                    onStart = { ed.commit(); rs[0] = box.width.toFloat(); rs[1] = box.height.toFloat(); rs[3] = 0f },
-                    onDrag = { _, dy -> rs[3] += dy; applyResize(rs[0], rs[1] + rs[3]) },
-                    onEnd = { snapOn = false; ed.commit() }
-                )
-                // sudut: perbesar/perkecil dengan rasio tetap
-                Grip(
-                    Modifier.align(if (right) Alignment.BottomEnd else Alignment.BottomStart).size(50.dp), 2,
-                    if (right) Alignment.BottomEnd else Alignment.BottomStart,
-                    onStart = { ed.commit(); rs[0] = box.width.toFloat(); rs[1] = box.height.toFloat(); rs[2] = 0f },
-                    onDrag = { dx, dy ->
-                        rs[2] += (dx * gx * kk + dy * (rs[0] / rs[1].coerceAtLeast(1f))) / 2f
-                        val cw = ed.widthDp * dens
-                        val wC = (rs[0] + rs[2]).coerceIn(cw * .22f, cw)
-                        ed.imgLive(bS.id, ixS) { it.copy(w = wC / cw) }
-                    },
-                    onEnd = { ed.releaseSide(bS.id); ed.commit() }
-                )
-            } else {
-                val last = b.im.size - 1
-                // pembatas kolase: geser untuk menukar lebar dengan tetangga; tinggi baris tetap
-                if (ix > 0) Grip(
-                    Modifier.align(Alignment.CenterStart).size(46.dp, 96.dp), 0, Alignment.CenterStart,
-                    onStart = { ed.commit() },
-                    onDrag = { dx, _ ->
-                        val h = box.height.toFloat().coerceAtLeast(1f)
-                        ed.rowDivider(bS.id, ixS - 1, dx / h, 64f * dens / h)
-                    },
-                    onEnd = { ed.commit() }
-                )
-                if (ix < last) Grip(
-                    Modifier.align(Alignment.CenterEnd).size(46.dp, 96.dp), 0, Alignment.CenterEnd,
-                    onStart = { ed.commit() },
-                    onDrag = { dx, _ ->
-                        val h = box.height.toFloat().coerceAtLeast(1f)
-                        ed.rowDivider(bS.id, ixS, dx / h, 64f * dens / h)
-                    },
-                    onEnd = { ed.commit() }
-                )
-                // tepi bawah: tinggi seluruh baris
-                Grip(
-                    Modifier.align(Alignment.BottomCenter).size(96.dp, 46.dp), 1, Alignment.BottomCenter,
-                    onStart = { ed.commit(); rs[1] = box.height.toFloat(); rs[2] = rs[1]; rs[3] = 0f },
-                    onDrag = { _, dy ->
-                        rs[3] += dy
-                        val hNew = (rs[1] + rs[3]).coerceIn(70f * dens, 1100f * dens)
-                        ed.rowScale(bS.id, rs[2] / hNew); rs[2] = hNew
-                    },
-                    onEnd = { ed.commit() }
-                )
-            }
+        val nd = if (mergeT != null || gap == i || gap == i + 1) -1 else gap
+        if (nd != dropAt) { dropAt = nd; if (nd >= 0) buzz?.invoke() }
+        val b = blocks[i]
+        if (b.im.size == 1) {
+            val w = widthDp * dens
+            val mi = b.im[0]
+            val wp = w * mi.w.coerceIn(.2f, 1f)
+            val base = when (mi.al) { "l" -> wp / 2f; "r" -> w - wp / 2f; else -> w / 2f }
+            val cx = base + mvX
+            val al = if (cx < w / 3f) "l" else if (cx > w * 2f / 3f) "r" else "c"
+            if (al != mvAl) { mvAl = al; buzz?.invoke() }
         }
     }
-}
 
-// ---------- gambar mengambang: teks mengalir di sekelilingnya ----------
-/** Tambahan tata letak satu blok peserta (dp): geser kiri/kanan, ruang bawah ekstra, dan pemotongan baris bila blok melewati dasar gambar. */
-class FSpec(val ps: Float, val pe: Float, var extra: Float, val fold: Fold?, val mk: Float = 0f)
-
-/** Blok-blok setelah gambar yang ikut mengelilinginya, beserta tata letaknya. */
-class FloatPlan(val parts: List<Pair<Blk, FSpec>>)
-
-private class BM(val style: TextStyle, val top: Float, val bottom: Float, val inset: Float)
-
-/** Gaya dan jarak tiap jenis blok (harus sama dengan BlockView / ListItem). null = bukan peserta (mengakhiri aliran). */
-private fun blockBM(b: Blk, pal: Pal, dm: Dm): BM? {
-    val fs = dm.fs
-    return when (b.ty) {
-        "p" -> BM(baseStyle(pal, dm), 0f, fs * 1.1f, 0f)
-        "h" -> {
-            val st = when (b.lv) {
-                1 -> baseStyle(pal, dm, pal.p, fs * 2.5f, 1000, 1.02f, -.02f)
-                2 -> baseStyle(pal, dm, pal.os, fs * 1.85f, 1000, 1.02f, -.02f)
-                3 -> baseStyle(pal, dm, pal.p, fs * 1.45f, 1000, 1.02f, -.02f)
-                else -> baseStyle(pal, dm, pal.os, fs * 1.15f, 1000, 1.02f, -.02f)
-            }
-            BM(st, fs * .4f, fs * .5f, 0f)
+    fun mvEnd(apply: Boolean) {
+        val m = mv ?: return
+        autoJob?.cancel()
+        val i = idx(m.bid)
+        val to = dropAt
+        val al = mvAl
+        val anchor = if (to in 0 until blocks.size) blocks[to].id else null
+        val mt = mergeT
+        mv = null; mvX = 0f; mvY = 0f; dropAt = -1; mergeT = null
+        if (!apply || i < 0) return
+        if (mt != null) { mergeImg(m.bid, m.imgId, mt); return }   // dilepas di atas gambar lain: otomatis jadi kolase
+        if (m.row && to >= 0) { extractImg(m.bid, m.imgId, anchor); return }   // kolase diseret keluar barisnya: jadi gambar sendiri
+        var b = blocks[i]
+        if (!m.row && b.im.size == 1 && al != b.im[0].al) {
+            val mi = b.im[0]
+            val w = if (al != "c" && mi.w > maxSideW()) minOf(SIDE_W, maxSideW()) else mi.w
+            b = b.copy(im = listOf(mi.copy(al = al, w = w)))
         }
-        "li" -> {
-            val mw = when (b.lt) { "o", "a" -> 2.2f; "c" -> 1.9f; else -> 1.7f } * fs
-            BM(baseStyle(pal, dm), 0f, fs * .5f, b.d * 1.4f * fs + mw)
-        }
-        else -> null
+        val l = blocks.toMutableList()
+        if (!m.row && to >= 0 && to != i && to != i + 1) {
+            l.removeAt(i)
+            if (i > 0 && i < l.size && isEmptyP(l[i - 1]) && isEmptyP(l[i])) l.removeAt(i)
+            val at = if (anchor == null) l.size else l.indexOfFirst { it.id == anchor }.let { if (it < 0) l.size else it }
+            l.add(at, b)
+        } else l[i] = b
+        blocks = l
+        releaseSide(b.id)
+        selImg = if (b.ty == "img") b.id to maxOf(0, b.im.indexOfFirst { it.id == m.imgId }) else null
+        norm(); afterStructural()
     }
-}
 
-/** Perkiraan tinggi tabel (dp): sel diukur pada lebar kolomnya, tinggi baris = sel tertinggi. Termasuk tab pegangan saat mode ketik. */
-private fun tblHeightDp(ed: Ed, b: Blk, dm: Dm, pal: Pal, tm: TextMeasurer, dn: Density): Float {
-    val ws = tblWidths(b, ed.widthDp)
-    val d = dn.density
-    val fsz = dm.fs * .9f
-    val lhPx = with(dn) { (fsz * 1.45f).sp.toPx() }
-    var tot = 3f
-    b.tb.forEachIndexed { r, row ->
-        val st = TextStyle(
-            fontFamily = dm.ff, fontSize = fsz.sp, lineHeight = (fsz * 1.45f).sp, fontWeight = FontWeight(if (r == 0) 850 else 400)
-        )
-        var mx = lhPx
-        row.forEachIndexed { c, cell ->
-            val avail = ((ws.getOrElse(c) { 110f } - 32f) * d).toInt().coerceAtLeast(1)
-            val res = tm.measure(styled(cell, cell.t, 0, pal, fsz), st, constraints = Constraints(maxWidth = avail))
-            mx = maxOf(mx, res.size.height.toFloat())
+    // ---------- gambar: kolase otomatis saat dijatuhkan di atas gambar lain ----------
+    /** Kotak gambar ke-[ix] di blok [b] pada ruang konten (px). Dihitung dari model + posisi blok, jadi tidak ikut bergeser oleh gestur angkat. */
+    private fun imgRect(b: Blk, ix: Int): Rect? {
+        val top = bpos[b.id]?.get(0) ?: return null
+        val w = widthDp * dens
+        if (w <= 0f || ix !in b.im.indices) return null
+        val n = b.im.size
+        if (n == 1) {
+            val m = b.im[0]
+            val wp = w * m.w.coerceIn(.2f, 1f)
+            val x = when (m.al) { "l" -> 0f; "r" -> w - wp; else -> (w - wp) / 2f }
+            return Rect(x, top, x + wp, top + wp / m.a.coerceIn(.2f, 5f))
         }
-        tot += mx / d + 24f + (if (r > 0) 1f else 0f)
+        val sum = b.im.sumOf { it.a.toDouble() }.toFloat().coerceAtLeast(.1f)
+        val u = w * (1f - (n - 1) * GAP)
+        val gap = w * GAP
+        var x = 0f
+        for (j in 0 until ix) x += u * b.im[j].a / sum + gap
+        val cw = u * b.im[ix].a / sum
+        return Rect(x, top, x + cw, top + u / sum)
     }
-    return tot + (if (ed.reading) 0f else 28f)
-}
 
-/**
- * Simulasi aliran teks: blok setelah gambar diukur pada lebar sempit sampai tinggi gambar habis.
- * Paragraf yang melewati dasar gambar dipotong barisnya (baris atas sempit, sisanya selebar penuh).
- * Judul / poin yang melewati dasar gambar tetap sempit seluruhnya.
- */
-private fun planFloat(ed: Ed, i: Int, dm: Dm, pal: Pal, tm: TextMeasurer, dn: Density): FloatPlan {
-    val b = ed.blocks[i]
-    val d = dn.density
-    val fs = dm.fs
-    val left: Boolean
-    val imgW: Float
-    val imgH: Float
-    if (b.ty == "tbl") {
-        // tabel mengambang: lebar = jumlah lebar kolom, tinggi = hasil ukur isi sel
-        left = b.ta == "l"
-        imgW = tblWidths(b, ed.widthDp).sum() + 3f
-        imgH = tblHeightDp(ed, b, dm, pal, tm, dn)
-    } else {
-        val m = b.im[0]
-        left = m.al == "l"
-        imgW = ed.widthDp * m.w.coerceIn(.2f, 1f)
-        imgH = imgW / m.a.coerceIn(.2f, 5f)
+    /** Titik tengah gambar yang sedang diseret di ruang konten (px). */
+    private fun mvCenter(m: Mv): Offset? {
+        val b = blocks.firstOrNull { it.id == m.bid } ?: return null
+        val ix = b.im.indexOfFirst { it.id == m.imgId }
+        val r = imgRect(b, ix) ?: return null
+        return Offset(r.center.x + mvX, r.center.y + mvY)
     }
-    val indent = imgW + SIDE_GAP
-    var rem = (imgH + fs * 1.1f) * d
-    val out = ArrayList<Pair<Blk, FSpec>>()
-    var j = i + 1
-    while (j < ed.blocks.size && rem > 0f) {
-        val x = ed.blocks[j]
-        val bm = blockBM(x, pal, dm) ?: break
-        val top = bm.top * d
-        if (top >= rem) break
-        val fsz = bm.style.fontSize.value
-        val isLi = x.ty == "li"
-        val mwLi = if (isLi) (when (x.lt) { "o", "a" -> 2.2f; "c" -> 1.9f; else -> 1.7f } * fs) else 0f
-        // inden kiri / kanan paragraf ikut dihitung: kolom teks mulai di base0 (dp dari tepi kiri) dan berakhir di W - irf
-        val (ilf, irf) = fitInd(x.il, x.ir, ed.widthDp)
-        val base0 = (if (isLi) x.d * 1.4f * fs else 0f) + ilf
-        val startX = if (left) maxOf(indent, base0) else base0
-        val endX = if (left) ed.widthDp - irf else ed.widthDp - maxOf(indent, irf)
-        val gapDp = startX - base0   // geseran baris sempit ke kanan gambar (gambar di kiri); 0 bila kolom sudah di kanan gambar
-        val avail = ((endX - startX - mwLi - 4f) * d).toInt().coerceAtLeast(1)
-        // inden baris pertama / menggantung dipakai juga saat mengukur, jadi pemenggalan baris sama dengan tampilan akhir
-        val fiDp = x.fi.coerceIn(-IND_MAX_FI, IND_MAX_FI)
-        val mst = if (fiDp != 0) bm.style.copy(
-            textIndent = TextIndent(with(dn) { maxOf(fiDp, 0).dp.toSp() }, with(dn) { maxOf(-fiDp, 0).dp.toSp() })
-        ) else bm.style
-        val res = tm.measure(styled(x.r, x.r.t, 0, pal, fsz), mst, constraints = Constraints(maxWidth = avail))
-        val h = maxOf(res.size.height.toFloat(), with(dn) { bm.style.lineHeight.toPx() })
-        val fits = top + h <= rem
-        var fold: Fold? = null
-        var mk = 0f
-        if (!fits && (x.ty == "p" || x.ty == "li") && x.r.t.indexOf('\n') < 0) {
-            var k = 0
-            while (k < res.lineCount && top + res.getLineTop(k) < rem) k++
-            if (k in 1 until res.lineCount) {
-                val cuts = IntArray(k) { res.getLineEnd(it) }
-                val em = tm.measure("\u2003", bm.style).size.width.toFloat().let { if (it < 1f) fsz * d else it }
-                val first = if (fiDp > 0) fiDp.toFloat() else 0f
-                val hang = if (fiDp < 0) -fiDp.toFloat() else 0f
-                // geseran tiap baris (dp): baris sempit = geseran gambar + inden; baris pertama setelah pemotongan terakhir = inden menggantung
-                val pn = IntArray(k + 1)
-                val pl = FloatArray(k + 1)
-                for (jj in 0..k) {
-                    val offDp = if (jj < k) gapDp + (if (jj == 0) first else hang) else hang
-                    val offPx = offDp * d
-                    if (offPx >= 1f) {
-                        val n = (offPx / em).roundToInt().coerceIn(1, 40)
-                        pn[jj] = n
-                        pl[jj] = with(dn) { ((offPx - n * em) / n).toSp() }.value
-                    }
-                }
-                mk = if (left) gapDp else 0f
-                fold = Fold(cuts, pn, pl, if (!left) maxOf(0f, indent - irf) * d else 0f)
-            }
-        }
-        val narrow = fold == null
-        out.add(x to FSpec(if (narrow && left) gapDp else 0f, if (narrow && !left) maxOf(0f, indent - irf) else 0f, 0f, fold, mk))
-        j++
-        if (!fits) { rem = 0f; break }
-        rem -= top + h + bm.bottom * d
-    }
-    if (out.isNotEmpty() && rem > 0f) out.last().second.extra = rem / d
-    return FloatPlan(out)
-}
 
-/** Rencana untuk semua gambar mengambang (kiri/kanan dan cukup ruang) di catatan ini. */
-@Composable
-fun floatPlans(ed: Ed, dm: Dm): Map<String, FloatPlan> {
-    val pal = LocalPal.current
-    val tm = rememberTextMeasurer()
-    val dn = LocalDensity.current
-    var out: HashMap<String, FloatPlan>? = null
-    val bl = ed.blocks
-    for ((i, b) in bl.withIndex()) {
-        // semua gambar tunggal rata kiri/kanan selalu lewat FloatGroup, walau tak ada teks di sampingnya,
-        // supaya komponen gambar tidak berganti (dan gestur ubah ukuran tidak putus) saat teks samping habis
-        if (b.ty == "tbl") {
-            // tabel rata kiri/kanan yang cukup sempit: teks sesudahnya mengalir di sampingnya, seperti gambar
-            if ((b.ta == "l" || b.ta == "r") && ed.tblSideOk(b)) {
-                if (out == null) out = HashMap()
-                out[b.id] = planFloat(ed, i, dm, pal, tm, dn)
-            }
-            continue
-        }
-        if (b.ty != "img" || b.im.size != 1 || b.im[0].al == "c") continue
-        val p = if (ed.sideOk(b)) planFloat(ed, i, dm, pal, tm, dn) else FloatPlan(emptyList())
-        if (out == null) out = HashMap()
-        out[b.id] = p
-    }
-    return out ?: emptyMap()
-}
-
-/** Gambar di kiri/kanan dengan paragraf sesudahnya mengalir di sampingnya, lalu lanjut selebar penuh di bawahnya. */
-@Composable
-fun FloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<String, Int>, dm: Dm) {
-    if (b.ty == "tbl") { TblFloatGroup(ed, vm, b, plan, od, dm); return }
-    val m = b.im[0]
-    val sel = ed.selImg?.takeIf { it.first == b.id }?.second
-    val bottom = (dm.fs * 1.1f).dp
-    val imgW = (ed.widthDp * m.w.coerceIn(.2f, 1f)).dp
-    val ratio = m.a.coerceIn(.2f, 5f)
-    val lifted = ed.mv?.let { it.bid == b.id && !it.row } == true
-    Box(Modifier.fillMaxWidth().heightIn(min = imgW / ratio + bottom)) {
-        Column(Modifier.fillMaxWidth()) {
-            plan.parts.forEach { (x, sp) ->
-                key(x.id) {
-                    Box(
-                        Modifier.padding(start = sp.ps.dp, end = sp.pe.dp, bottom = sp.extra.dp)
-                            .onGloballyPositioned { c ->
-                                val cc = ed.contentCoords
-                                if (cc != null && cc.isAttached && c.isAttached) {
-                                    ed.setPos(x.id, cc.localPositionOf(c, Offset.Zero).y, c.size.height.toFloat())
-                                }
-                            }
-                    ) { BlockView(ed, vm, x, od[x.id] ?: 1, dm, sp.fold, sp.mk) }
-                }
-            }
-        }
-        Box(
-            Modifier.align(if (m.al == "r") Alignment.TopEnd else Alignment.TopStart)
-                .zIndex(if (lifted) 3f else 1f)
-                .graphicsLayer {
-                    if (lifted) { translationX = ed.mvX; translationY = ed.mvY; scaleX = 1.03f; scaleY = 1.03f; alpha = .94f }
-                }
-        ) { ImgCell(ed, vm, b, 0, Modifier.width(imgW).aspectRatio(ratio), sel == 0) }
-    }
-}
-
-/** Tabel di kiri/kanan dengan paragraf sesudahnya mengalir di sampingnya (sama seperti gambar mengambang). */
-@Composable
-private fun TblFloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<String, Int>, dm: Dm) {
-    val pal = LocalPal.current
-    val tw = (tblWidths(b, ed.widthDp).sum() + 3f).dp
-    val lifted = ed.mv?.let { it.bid == b.id } == true
-    Box(Modifier.fillMaxWidth()) {
-        Column(Modifier.fillMaxWidth()) {
-            plan.parts.forEach { (x, sp) ->
-                key(x.id) {
-                    Box(
-                        Modifier.padding(start = sp.ps.dp, end = sp.pe.dp, bottom = sp.extra.dp)
-                            .onGloballyPositioned { c ->
-                                val cc = ed.contentCoords
-                                if (cc != null && cc.isAttached && c.isAttached) {
-                                    ed.setPos(x.id, cc.localPositionOf(c, Offset.Zero).y, c.size.height.toFloat())
-                                }
-                            }
-                    ) { BlockView(ed, vm, x, od[x.id] ?: 1, dm, sp.fold, sp.mk) }
-                }
-            }
-        }
-        Box(
-            Modifier.align(if (b.ta == "r") Alignment.TopEnd else Alignment.TopStart)
-                .zIndex(if (lifted) 3f else 1f)
-                .graphicsLayer {
-                    if (lifted) { translationX = ed.mvX; translationY = ed.mvY; scaleX = 1.03f; scaleY = 1.03f; alpha = .94f }
-                }
-        ) { TableView(ed, b, dm, pal, Modifier.width(tw)) }
-    }
-}
-
-// ---------- toolbar ----------
-@Composable
-fun Tbn(content: @Composable (Color) -> Unit, on: Boolean, enabled: Boolean, onClick: () -> Unit) {
-    val pal = LocalPal.current
-    val src = remember { MutableInteractionSource() }
-    val pr by src.collectIsPressedAsState()
-    val r by animateDpAsState(if (pr) 14.dp else 23.dp, spring(.6f, 600f), label = "r")
-    val sc by animateFloatAsState(if (pr) .88f else 1f, spring(.5f, 600f), label = "s")
-    val fg = if (on) pal.op else pal.os
-    Box(
-        Modifier.size(46.dp).graphicsLayer { scaleX = sc; scaleY = sc; alpha = if (enabled) 1f else .28f }
-            .clip(RoundedCornerShape(r)).background(if (on) pal.p else Color.Transparent)
-            .clickable(interactionSource = src, indication = LocalIndication.current, enabled = enabled, onClick = onClick),
-        Alignment.Center
-    ) { content(fg) }
-}
-
-@Composable
-fun Chip(text: String, bg: Color, fg: Color, shape: Shape, h: Dp = 46.dp, minW: Dp = 0.dp, onClick: () -> Unit) {
-    val src = remember { MutableInteractionSource() }
-    val pr by src.collectIsPressedAsState()
-    val sc by animateFloatAsState(if (pr) .92f else 1f, spring(.5f, 600f), label = "c")
-    Box(
-        Modifier.height(h).widthIn(min = minW).graphicsLayer { scaleX = sc; scaleY = sc }.clip(shape).background(bg)
-            .clickable(interactionSource = src, indication = LocalIndication.current, onClick = onClick)
-            .padding(horizontal = 18.dp),
-        Alignment.Center
-    ) { T(text, 15f, 850, fg, ls = 0f) }
-}
-
-@Composable
-fun EdBar(ed: Ed, act: Actions, imeOpen: Boolean) {
-    val pal = LocalPal.current
-    val selMode = ed.selOn
-    val key = if (selMode) null else ed.focus
-    val blk = key?.let { ed.blockOfKey(it) }
-    val cell = key != null && isCellKey(key)
-    val fl = if (selMode) FMT.filter { ed.selAllFmt(it) }.toSet() else ed.activeFlags()
-    val ty = blk?.ty
-    val noI = ty == "code"
-    val noB = noI || (ty == "h")
-    val blkOff = cell || selMode
-    val convOff = cell || ty == "img"   // teks samping gambar tidak bisa diubah jadi judul/daftar
-    val capShape = RoundedCornerShape(30.dp)
-    val haptic = LocalHapticFeedback.current
-    Column(
-        Modifier.widthIn(max = 560.dp).fillMaxWidth().padding(horizontal = 10.dp)
-    ) {
-        // kapsul tambahan (gambar / tabel / kutipan): muncul dan hilang dengan animasi mulus
-        val kindNow = if (ed.miniBar) 0 else if (ed.selImg != null) 1 else if (cell) 2 else if (ed.pickQuote) 3 else 0
-        var kindShown by remember { mutableStateOf(0) }
-        var lastSel by remember { mutableStateOf<Pair<String, Int>?>(null) }
-        SideEffect {
-            if (kindNow != 0) kindShown = kindNow
-            ed.selImg?.let { lastSel = it }
-        }
-        val kind = if (kindNow != 0) kindNow else kindShown
-        AnimatedVisibility(
-            visible = kindNow != 0,
-            enter = fadeIn(tween(220, easing = Emph)) + slideInVertically(tween(300, easing = Emph)) { it / 2 } +
-                expandVertically(tween(300, easing = Emph)),
-            exit = fadeOut(tween(140)) + slideOutVertically(tween(220, easing = Emph)) { it / 2 } +
-                shrinkVertically(tween(240, easing = Emph))
-        ) {
-            Box(Modifier.padding(bottom = 8.dp)) {
-                when (kind) {
-                    1 -> {
-                        val s = ed.selImg ?: lastSel
-                        if (s != null) {
-                            val b = ed.blocks.firstOrNull { it.id == s.first }
-                            val inRow = (b?.im?.size ?: 1) > 1
-                            Row(
-                                Modifier.fillMaxWidth().shadow(if (pal.dark) 6.dp else 1.dp, RoundedCornerShape(28.dp)).clip(RoundedCornerShape(28.dp))
-                                    .background(pal.c3).horizontalScroll(rememberScrollState()).padding(6.dp),
-                                horizontalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                Tbn({ Ic("ok", it) }, true, true) { ed.closeImg() }
-                                Sep()
-                                if (!inRow) {
-                                    val al = b?.im?.getOrNull(s.second)?.al
-                                    Tbn({ Ic("aL", it) }, al == "l", true) { ed.imgAlign("l") }
-                                    Tbn({ Ic("aC", it) }, al == "c", true) { ed.imgAlign("c") }
-                                    Tbn({ Ic("aR", it) }, al == "r", true) { ed.imgAlign("r") }
-                                }
-                                Tbn({ Ic(if (inRow) "rows" else "cols", it) }, false, true) { ed.toggleRow() }
-                                Tbn({ Ic("aup", it) }, false, true) { ed.imgMove(-1) }
-                                Tbn({ Ic("adn", it) }, false, true) { ed.imgMove(1) }
-                                Tbn({ Ic("del", it) }, false, true) { ed.imgDelete() }
-                            }
-                        }
-                    }
-                    2 -> Row(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(pal.c3)
-                            .horizontalScroll(rememberScrollState()).padding(6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        listOf("ar" to "+ Row", "ac" to "+ Column", "dr" to "− Row", "dc" to "− Column").forEach { (k, l) ->
-                            Chip(l, pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.tOp(k) }
-                        }
-                        if (blk != null && blk.cw.isNotEmpty()) Chip("Reset widths", pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.tblResetCols(blk.id) }
-                        Chip("Delete table", pal.ec, pal.oec, RoundedCornerShape(23.dp)) { ed.tOp("dt") }
-                    }
-                    3 -> Row(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(pal.c3)
-                            .horizontalScroll(rememberScrollState()).padding(6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        VARS.forEach { (k, l) ->
-                            val q = qs(k, pal)
-                            Chip(l, if (k == "def") pal.c4 else q.bg, q.fg, q.shape, 52.dp, 104.dp) {
-                                ed.pickQuote = false; ed.setQuote(k)
-                            }
-                        }
-                        if (ty == "q") Chip("Plain text", pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.pickQuote = false; ed.setPlain() }
+    /** Cari gambar lain yang sedang ditimpa gambar seretan (titik tengahnya masuk kotak gambar itu). Baris yang sudah 3 gambar tidak bisa ditambah. */
+    private fun mergeCheck() {
+        val m = mv
+        var found: MergeT? = null
+        val c = if (m == null) null else mvCenter(m)
+        if (m != null && c != null) {
+            val pad = 10f * dens
+            loop@ for (b in blocks) {
+                if (b.ty != "img" || b.id == m.bid || b.im.isEmpty() || b.im.size >= 3) continue
+                for (j in b.im.indices) {
+                    val r = imgRect(b, j) ?: continue
+                    if (c.x >= r.left - pad && c.x <= r.right + pad && c.y >= r.top - pad && c.y <= r.bottom + pad) {
+                        found = MergeT(b.id, b.im[j].id, c.x > r.center.x)
+                        break@loop
                     }
                 }
             }
         }
-        // satu kapsul: lebarnya mengecil ke kanan (tinggal dua tombol) dan mengembang lagi ke kiri
-        val f by animateFloatAsState(if (ed.miniBar) 1f else 0f, tween(420, easing = Emph), label = "mini")
-        val toolsScroll = rememberScrollState()
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val full = maxWidth
-            val expW = full * BAR_FRAC
-            val miniW = 102.dp
-            val w = expW + (miniW - expW) * f
-            val endPad = (full - expW) / 2 * (1f - f)
-        Row(
-            Modifier.align(Alignment.CenterEnd).padding(end = endPad).width(w).height(56.dp)
-                .shadow(if (pal.dark) 6.dp else 1.dp, capShape).clip(capShape)
-                .background(pal.c4).padding(horizontal = 5.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                Modifier.weight(1f).fillMaxHeight().horizontalScroll(toolsScroll),
-                horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically
-            ) {
-                @Composable fun I(id: String, icon: String, on: Boolean = false, off: Boolean = false, f: () -> Unit) =
-                    Tbn({ Ic(icon, it) }, on, !off) { if (id != "quote") ed.pickQuote = false; f() }
-                @Composable fun H(id: String, lv: Int) = Tbn(
-                    { c ->
-                        Row(verticalAlignment = Alignment.Bottom) {
-                            T("H", 19f, 1000, c); T(lv.toString(), 12f, 1000, c)
-                        }
-                    }, ty == "h" && blk?.lv == lv, !convOff
-                ) { ed.pickQuote = false; ed.setHead(lv) }
-                val isLi = ty == "li" && !cell
-                I("undo", "undo", off = !ed.canUndo || selMode) { ed.undo() }
-                I("redo", "redo", off = !ed.canRedo || selMode) { ed.redo() }
-                Sep()
-                H("h1", 1); H("h2", 2)
-                I("b", "b", K.B in fl && !noB, noB) { ed.toggleFmt(K.B) }
-                I("i", "i", K.I in fl && !noI, noI) { ed.toggleFmt(K.I) }
-                I("u", "u", K.U in fl && !noI, noI) { ed.toggleFmt(K.U) }
-                I("s", "s", K.S in fl && !noI, noI) { ed.toggleFmt(K.S) }
-                I("mark", "mark", K.M in fl && !noI, noI) { ed.toggleFmt(K.M) }
-                I("code", "code", K.C in fl && !noI, noI) { ed.toggleFmt(K.C) }
-                Sep()
-                I("ul", "ul", isLi && blk?.lt == "b", convOff) { ed.setList("b") }
-                I("ol", "ol", isLi && blk?.lt == "o", convOff) { ed.setList("o") }
-                Tbn({ LetterListIcon(it) }, isLi && blk?.lt == "a", !convOff) { ed.pickQuote = false; ed.setList("a") }
-                I("chk", "chk", isLi && blk?.lt == "c", convOff) { ed.setList("c") }
-                I("out", "out", off = !isLi) { ed.indent(-1) }
-                I("ind", "ind", off = !isLi) { ed.indent(1) }
-                Sep()
-                I("quote", "quote", ty == "q" || ed.pickQuote, convOff) { if (ed.focus != null) ed.pickQuote = !ed.pickQuote }
-                I("pre", "pre", ty == "code", convOff) { ed.setCode() }
-                I("table", "table", off = blkOff) { ed.insTable() }
-                I("img", "img", off = blkOff) { act.pickImages() }
-                I("mic", "mic", ed.recActive, ed.recActive || selMode) {
-                    act.requestMic {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        ed.startVoice()
-                    }
-                }
-                I("hr", "hr", off = blkOff) { ed.insHr() }
-            }
-            Box(Modifier.width(10.dp * (1f - f)).clipToBounds().wrapContentWidth(Alignment.Start, unbounded = true)) { Sep() }
-            // keyboard terbuka: ">" menciutkan kapsul ke kanan; "<" mengembangkannya lagi; keyboard tertutup: panah bawah = mode baca
-            Tbn({ Ic("pen", it) }, false, !ed.reading) { ed.ink.toggle(ed) }
-            Tbn({ Ic(if (ed.miniBar) "chl" else if (imeOpen) "chr" else "hide", it) }, false, true) {
-                if (ed.selOn) ed.clearSel()
-                else if (ed.miniBar) ed.miniBar = false
-                else if (imeOpen) { ed.pickQuote = false; ed.miniBar = true }
-                else ed.enterReading()
-            }
-            if (f > .01f) {
-                Box(Modifier.width(46.dp * f).clipToBounds().wrapContentWidth(Alignment.Start, unbounded = true).graphicsLayer { alpha = f }) {
-                    Tbn({ Ic("hide", it) }, false, ed.miniBar) { ed.enterReading() }
-                }
-            }
+        val o = mergeT
+        if (found?.bid != o?.bid || found?.imgId != o?.imgId || found?.after != o?.after) {
+            mergeT = found
+            if (found != null) buzz?.invoke()
         }
-        }
+        if (found != null && dropAt != -1) dropAt = -1
     }
-}
 
-/** Ikon daftar huruf: dua baris kecil "A —" dan "B —", sejajar dengan ikon daftar lain di toolbar. */
-@Composable
-fun LetterListIcon(c: Color) {
-    Column(Modifier.size(24.dp), verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically)) {
-        for (l in listOf("A", "B")) {
-            Row(Modifier.fillMaxWidth().height(11.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.width(9.dp), Alignment.Center) { T(l, 10f, 1000, c, lh = 1f) }
-                Box(Modifier.padding(start = 2.dp).weight(1f).height(2.5.dp).clip(RoundedCornerShape(1.dp)).background(c))
+    /** Gambar kolase diseret keluar dari barisnya (tanpa sasaran kolase): tentukan celah antar blok tempat ia akan dilepas. */
+    private fun rowOut(m: Mv) {
+        val i = idx(m.bid)
+        if (i < 0) return
+        val b = blocks[i]
+        val r = imgRect(b, b.im.indexOfFirst { it.id == m.imgId }) ?: return
+        val c = mvCenter(m) ?: return
+        val pad = 8f * dens
+        var nd = -1
+        if (mergeT == null && (c.y < r.top - pad || c.y > r.bottom + pad)) {
+            var gap = blocks.size
+            for ((j, x) in blocks.withIndex()) {
+                val q = bpos[x.id] ?: continue
+                if (q[0] + q[1] / 2f >= c.y) { gap = j; break }
             }
+            nd = gap
         }
+        if (nd != dropAt) { dropAt = nd; if (nd >= 0) buzz?.invoke() }
     }
-}
 
-@Composable
-fun Sep() {
-    val pal = LocalPal.current
-    Box(Modifier.padding(horizontal = 4.dp).width(2.dp).height(24.dp).clip(RoundedCornerShape(1.dp)).background(pal.ol))
-}
+    /** Keluarkan satu gambar dari kolase jadi blok gambar sendiri, ditaruh sebelum blok [anchor] (null = paling akhir). Gambar lain di kolase tetap. */
+    private fun extractImg(bid: String, imgId: String, anchor: String?) {
+        val i = idx(bid)
+        if (i < 0) return
+        val src = blocks[i]
+        val n = src.im.size
+        val mi = src.im.firstOrNull { it.id == imgId } ?: return
+        if (n < 2) return
+        val sum = src.im.sumOf { it.a.toDouble() }.toFloat().coerceAtLeast(.1f)
+        fun share(x: Img) = (x.a / sum * (1f - (n - 1) * GAP)).coerceIn(.2f, 1f)   // lebar tampil lama, jadi tinggi gambar tidak berubah
+        val rest = src.im.filter { it.id != imgId }
+        val solo = Blk(ty = "img", im = listOf(mi.copy(w = share(mi), al = "c")))
+        val l = blocks.toMutableList()
+        l[i] = if (rest.size == 1) src.copy(im = listOf(rest[0].copy(w = share(rest[0]), al = "c"))) else src.copy(im = rest)
+        val at = if (anchor == null) l.size else l.indexOfFirst { it.id == anchor }.let { if (it < 0) l.size else it }
+        l.add(at, solo)
+        blocks = l
+        selImg = solo.id to 0
+        focus = null; clearReq++
+        norm(); afterStructural()
+        buzz?.invoke()
+    }
 
-// ---------- slot blok (komposisi berjendela) ----------
-private val NO_OD: Map<String, Int> = emptyMap()
+    /** Samakan tinggi semua gambar dalam satu baris kolase (lebar = bobot rasio), dengan tinggi dibatasi 120..520 dp. */
+    private fun fitRow(l: List<Img>): List<Img> {
+        val n = l.size
+        val sum = l.sumOf { it.a.toDouble() }.toFloat().coerceAtLeast(.1f)
+        val u = widthDp * (1f - (n - 1) * GAP)
+        val h = u / sum
+        val h2 = h.coerceIn(120f, 520f)
+        val k = if (h2 != h) h / h2 else 1f
+        return l.map { it.copy(a = it.a * k, al = "c", w = 1f) }
+    }
 
-/**
- * Satu slot di kolom isi catatan. Kotak luar SELALU ada (melaporkan posisi/tinggi); isi dalamnya hidup hanya bila [live],
- * selain itu diganti Spacer setinggi terakhir terukur (atau perkiraan). Pada catatan biasa [live] selalu true, jadi sama dengan sebelumnya.
- */
-@Composable
-private fun BlockSlot(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan?, ordN: Int, od: Map<String, Int>, dm: Dm, live: Boolean) {
-    val lifted = ed.mv?.let { it.bid == b.id && !it.row } == true
-    val dragging = ed.mv?.bid == b.id
-    val den = LocalDensity.current
-    Box(
-        Modifier
-            .zIndex(if (dragging) 3f else 0f)
-            .onGloballyPositioned { c -> ed.setSlotPos(b.id, c.positionInParent().y, c.size.height.toFloat()) }
-            .graphicsLayer {
-                if (lifted && plan == null) {
-                    translationX = ed.mvX; translationY = ed.mvY
-                    scaleX = 1.03f; scaleY = 1.03f; alpha = .94f
-                }
-            }
-    ) {
-        if (live) {
-            val blks = plan?.parts?.map { it.first }?.let { listOf(b) + it } ?: listOf(b)
-            val cur by rememberUpdatedState(blks)
-            DisposableEffect(b.id) { onDispose { ed.leaveSlot(cur, b.id) } }
-            if (plan != null) FloatGroup(ed, vm, b, plan, od, dm)
-            else BlockView(ed, vm, b, ordN, dm)
+    /** Gambar [imgId] dari blok [srcBid] disatukan ke baris kolase gambar sasaran [t]. Sumbernya dilepas dari tempat lamanya. */
+    private fun mergeImg(srcBid: String, imgId: String, t: MergeT) {
+        val si = idx(srcBid)
+        val ti = idx(t.bid)
+        if (si < 0 || ti < 0 || si == ti) return
+        val src = blocks[si]
+        val tgt = blocks[ti]
+        val mi = src.im.firstOrNull { it.id == imgId } ?: return
+        if (tgt.im.size >= 3) { vm.show("A photo row holds up to 3 photos"); return }
+        val tx = tgt.im.indexOfFirst { it.id == t.imgId }.coerceAtLeast(0)
+        val ins = if (t.after) tx + 1 else tx
+        val row = tgt.im.toMutableList().also { it.add(ins, mi) }
+        val l = blocks.toMutableList()
+        l[ti] = tgt.copy(im = fitRow(row))
+        if (src.im.size > 1) {
+            // sumber adalah kolase: hanya satu gambarnya yang pindah, sisanya tetap dengan ukuran tampil yang sama
+            val n = src.im.size
+            val sum = src.im.sumOf { it.a.toDouble() }.toFloat().coerceAtLeast(.1f)
+            val rest = src.im.filter { it.id != imgId }
+            l[si] = if (rest.size == 1) {
+                val r0 = rest[0]
+                src.copy(im = listOf(r0.copy(w = (r0.a / sum * (1f - (n - 1) * GAP)).coerceIn(.2f, 1f), al = "c")))
+            } else src.copy(im = rest)
         } else {
-            val h = ed.bpos[b.id]?.get(1) ?: ed.estimateSlot(b, plan, dm.fs, dm.lh)
-            Spacer(Modifier.fillMaxWidth().height(with(den) { h.toDp() }))
+            l.removeAt(si)
+            if (si > 0 && si < l.size && isEmptyP(l[si - 1]) && isEmptyP(l[si])) l.removeAt(si)
         }
-    }
-}
-
-// ---------- layar catatan ----------
-@Composable
-fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
-    val pal = LocalPal.current
-    val ffNow = LocalFF.current
-    val nfs = vm.noteFs(ed.noteId)
-    val dm = remember(nfs, ffNow) { Dm(nfs.toFloat(), LH, ffNow) }   // instance stabil: blok tidak recompose tanpa sebab
-    val scroll = rememberScrollState()
-    InkSetup(ed)
-    // Tombol back Android: tutup yang paling atas dulu. Mode ketik -> mode baca (tampilan penuh) -> baru keluar catatan.
-    BackHandler(true) {
-        when {
-            ed.sheet != 0 && ed.sheetPage != 0 -> ed.sheetPage = 0
-            ed.sheet != 0 -> ed.sheet = 0
-            ed.sub != 0 -> ed.sub = 0
-            ed.ink.on -> ed.ink.toggle(ed)
-            ed.findOn -> ed.closeFind()
-            ed.selOn -> ed.clearSel()
-            !ed.reading -> ed.enterReading()
-            else -> act.back()
-        }
-    }
-    val focusMgr = LocalFocusManager.current
-    val kb = LocalSoftwareKeyboardController.current
-    val density = LocalDensity.current
-    LaunchedEffect(ed.clearReq) {
-        if (ed.clearReq > 0) { focusMgr.clearFocus(); kb?.hide() }
-    }
-    val od = remember(ed.blocks) { ords(ed.blocks) }
-    val plans = floatPlans(ed, dm)
-    SideEffect {
-        ed.folds.clear()
-        plans.values.forEach { p -> p.parts.forEach { (x, s) -> s.fold?.let { ed.folds[x.id] = it } } }
-    }
-    // komposisi berjendela: himpunan slot yang hidup (hanya dipakai bila catatan sangat panjang)
-    val winOn = ed.windowed
-    val plansNow by rememberUpdatedState(plans)
-    var liveSet by remember {
-        mutableStateOf<Set<String>>(
-            if (ed.windowed) androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { ed.computeLive(0, plans, dm.fs, dm.lh) } else emptySet()
-        )
-    }
-    LaunchedEffect(winOn, dm) {
-        if (!winOn) { liveSet = emptySet(); return@LaunchedEffect }
-        androidx.compose.runtime.snapshotFlow { ed.computeLive(scroll.value, plansNow, dm.fs, dm.lh) }.collect { liveSet = it }
-    }
-    val titleFr = remember { FocusRequester() }
-    val titleNote = vm.note(ed.noteId)
-    val tBold = titleNote?.tbo ?: true
-    val tItal = titleNote?.tit ?: false
-    val tColor = titleColor(titleNote?.tcl ?: 0)
-    LaunchedEffect(ed.titleReq) {
-        if (ed.titleReq > 0) {
-            delay(380)
-            try { titleFr.requestFocus() } catch (e: Exception) { }
-        }
+        blocks = l
+        selImg = t.bid to ins
+        focus = null; clearReq++
+        norm(); afterStructural()
+        buzz?.invoke()
     }
 
-    @Composable
-    fun TopBar() {
-        // bilah cari menggantikan bilah biasa dengan geser + pudar (mode "cari dalam catatan")
-        // pil pencarian tumbuh dari tombol titik tiga ke kiri dan menguncup kembali ke sana; tombol kembali satu-satunya
-        // dan tidak pernah memudar, jadi tidak ada kedipan saat bilah berganti
-        val fa by animateFloatAsState(if (ed.findOn) 1f else 0f, spring(.9f, 380f), label = "fa")
-        Box(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.statusBars)) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                DocTopLeft(ed, act)
-                Spacer(Modifier.weight(1f))
-                DocTopActions(ed)
-                Row(Modifier.graphicsLayer {
-                    val k = (((1f - fa) - .3f) / .7f).coerceIn(0f, 1f)
-                    alpha = k; scaleX = .6f + .4f * k; scaleY = .6f + .4f * k
-                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(1f, .5f)
-                }) {
-                    // pengingat: lonceng terisi bila sudah diatur, lonceng + bila belum (seperti Google Keep)
-                    val hasRem = (vm.note(ed.noteId)?.rm ?: 0L) > 0L
-                    IconBtn(if (hasRem) "bell" else "bellplus", if (hasRem) pal.p else pal.os, {
-                        ed.flush(); focusMgr.clearFocus(); kb?.hide()
-                        vm.remDlg = ed.noteId
-                    }, enabled = !ed.findOn)
-                    IconBtn("more", pal.os, {
-                        ed.flush(); focusMgr.clearFocus(); kb?.hide()
-                        vm.nav.push(Scr.NoteMenu(ed.noteId))
-                    }, enabled = !ed.findOn)
-                }
-            }
-            if (fa > .005f || ed.findOn) FindBar(ed, fa.coerceIn(0f, 1f))
-        }
+    // ---------- gambar: ganti foto (bingkai tetap) ----------
+    /** Isi bingkai gambar terpilih dengan foto lain: ukuran bingkai, perataan, dan posisinya tidak berubah; pangkas diatur ulang. */
+    /** false setelah komposisi editor ini dibuang (mis. Activity dibuat ulang); hasil galeri yang telat tiba tidak boleh dikirim ke editor mati. */
+    @Volatile var alive = true
+
+    /** Isi bingkai gambar [bid] / [ix] dengan foto baru (target dicatat Activity sebelum galeri dibuka, jadi tak bergantung pada seleksi). */
+    fun replaceImgAt(bid: String, ix: Int, n: Img) {
+        replT = bid to ix
+        replaceImg(n)
     }
 
-    // judul ikut disorot saat mode cari dalam catatan
-    val tFh = if (ed.findOn) ed.hitsOf("@t") else emptyList()
-    val tFc = if (tFh.isEmpty()) null else ed.curHit()?.takeIf { it.key == "@t" }
-    val titleVt = remember(tFh, tFc, pal) {
-        if (tFh.isEmpty()) VisualTransformation.None
-        else VisualTransformation { t ->
-            TransformedText(buildAnnotatedString { append(t.text); addFind(pal, tFh, tFc, 0, t.text.length) }, OffsetMapping.Identity)
-        }
+    fun replaceImg(n: Img) {
+        val s = replT ?: selImg
+        replT = null
+        if (s == null) return
+        val i = idx(s.first)
+        if (i < 0 || s.second !in blocks[i].im.indices) return
+        commit()
+        imgSet(s.first, s.second) { it.copy(id = n.id, o = n.o, px = .5f, py = .5f, z = 1f) }
+        selImg = s
+        dirty(); commit()
     }
 
-    // derivedStateOf: hanya berubah saat keyboard benar-benar buka/tutup, bukan tiap frame animasinya (dulu seluruh layar recompose per frame)
-    val imeInsets = WindowInsets.ime
-    val imeOpen by remember(density) { androidx.compose.runtime.derivedStateOf { imeInsets.getBottom(density) > 0 } }
-    // tinggi keyboard yang stabil (px). Bukan state: hanya dibaca saat sheet dibuka, jadi tidak membuat NoteScreen recompose tiap frame keyboard.
-    // Naik langsung mengikuti keyboard; turun baru diterapkan setelah tenang. Dibekukan selama sheet terbuka.
-    val kbBox = remember { intArrayOf(0) }
-    LaunchedEffect(imeInsets, density) {
-        androidx.compose.runtime.snapshotFlow { imeInsets.getBottom(density) to ed.sheet }.collectLatest { (v, sh) ->
-            if (sh != 0) return@collectLatest
-            if (v > kbBox[0]) kbBox[0] = v
-            else { delay(250); if (ed.sheet == 0) kbBox[0] = v }
-        }
-    }
-    // Sheet terbuka => area catatan TIDAK lagi mengikuti keyboard (sheet menggantikan tempat keyboard), jadi layar tidak loncat saat keyboard turun.
-    // Dibaca di fase ukur (bukan komposisi), jadi cukup re-layout, tidak recompose.
-    val navInsets = WindowInsets.navigationBars
-    val areaInsets = remember(imeInsets, navInsets, ed) {
-        val base = imeInsets.union(navInsets)
-        object : WindowInsets {
-            override fun getLeft(density: androidx.compose.ui.unit.Density, layoutDirection: androidx.compose.ui.unit.LayoutDirection) = base.getLeft(density, layoutDirection)
-            override fun getTop(density: androidx.compose.ui.unit.Density) = base.getTop(density)
-            override fun getRight(density: androidx.compose.ui.unit.Density, layoutDirection: androidx.compose.ui.unit.LayoutDirection) = base.getRight(density, layoutDirection)
-            override fun getBottom(density: androidx.compose.ui.unit.Density) = if (ed.sheet != 0) 0 else base.getBottom(density)
-        }
-    }
-    val haptic = LocalHapticFeedback.current
-    val hasAu = vm.note(ed.noteId)?.au?.isNotEmpty() == true
-    // voice note baru: layar menggulir halus ke kartu rekaman di bawah catatan
-    val auN = vm.note(ed.noteId)?.au?.size ?: 0
-    val auSeen = remember { intArrayOf(auN) }
-    val audBox = remember { floatArrayOf(0f, 0f) }   // [atas, tinggi] bagian rekaman di ruang gulir
-    LaunchedEffect(auN) {
-        if (auN > auSeen[0]) {
-            delay(350)
-            val m = 24f * ed.dens
-            val want = audBox[0] + audBox[1] - (ed.viewH - ed.cursorClear()) + m
-            if (audBox[1] > 0f && want > scroll.value + 1f) scroll.animateScrollTo(want.toInt().coerceIn(0, scroll.maxValue), tween(420, easing = Emph))
-        }
-        auSeen[0] = auN
-    }
-    SideEffect {
-        ed.scroll = scroll
-        ed.dens = density.density
-        ed.buzz = { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
-    }
+    // ---------- seleksi lintas blok ----------
+    var selOn by mutableStateOf(false)
+    var pa by mutableStateOf<Pt?>(null)        // titik jangkar
+    var pf by mutableStateOf<Pt?>(null)        // titik lawan
+    var selDrag by mutableStateOf(false)
+    val lays = mutableStateMapOf<String, TextLayoutResult>()
+    val kpos = mutableStateMapOf<String, Offset>()
+    val layLen = HashMap<String, Int>()       // panjang teks kolom edit saat layout di lays dibuat (deteksi layout basi)
+    val lsh = HashMap<String, Int>()          // 1 bila layout berasal dari kolom edit (ada awalan Z di indeks 0)
+    val ipos = HashMap<String, Rect>()        // kotak tiap gambar di ruang konten
+    val folds = HashMap<String, Fold>()       // pemotongan baris buatan (teks mengelilingi gambar), per kolom teks
+    var contentCoords: LayoutCoordinates? = null
+    private var selBack: Pt? = null            // asal dari mode ketik: kembali ke sana saat selesai
+    /** Seleksi yang dimulai dari mode ketik (bar alat tetap tampil, kursor kembali setelah selesai). */
+    val selEdit: Boolean get() = selOn && selBack != null
+    private var wordA: Pt? = null
+    private var wordB: Pt? = null
+    private var selWho = 0                     // 0 tekan-tahan, 1 pegangan jangkar, 2 pegangan lawan
+    private var selTarget = Offset.Zero
+    private var selFinger = 0f
+    private var selJob: Job? = null
+    private var ordFor: List<Blk>? = null
+    private var ordMap: Map<String, Int> = emptyMap()
+    private var ordList: List<String> = emptyList()
 
-    // gulir otomatis ke kecocokan aktif bila belum terlihat
-    val hitNow = if (ed.findOn) ed.curHit() else null
-    LaunchedEffect(hitNow) {
-        val h = hitNow ?: return@LaunchedEffect
-        if (h.key == "@t") { scroll.animateScrollTo(0, tween(380, easing = Emph)); return@LaunchedEffect }
-        // catatan berjendela: blok sasaran mungkin baru tersusun (lama) dan perkiraan tinggi bisa meleset, jadi tunggu lebih lama dan periksa ulang posisinya
-        var fixes = 0
-        repeat(if (ed.windowed) 30 else 8) {
-            val lay = ed.lays[h.key]
-            val pos = ed.kpos[h.key]
-            if (lay != null && pos != null && lay.layoutInput.text.isNotEmpty()) {
-                val o = ed.toLay(h.key, h.s).coerceIn(0, lay.layoutInput.text.length - 1)
-                val r = lay.getBoundingBox(o)
-                val y = pos.y + r.top
-                val yb = pos.y + r.bottom
-                val topV = scroll.value + 24f * ed.dens
-                val botV = scroll.value + ed.viewH - 160f * ed.dens
-                if (y < topV || yb > botV) {
-                    scroll.animateScrollTo((y - ed.viewH * .3f).toInt().coerceIn(0, scroll.maxValue), tween(380, easing = Emph))
-                    if (ed.windowed && fixes++ < 3) { delay(150); return@repeat }
-                }
-                return@LaunchedEffect
-            }
-            delay(50)
-        }
-    }
-
-    // Gulir bawaan Compose (BringIntoView) untuk kolom catatan DIMATIKAN: dulu ia bersaing dengan gulir per-frame di bawah
-    // (dua sistem menggulir untuk satu ketukan => loncat / ngegulir sendiri). Satu-satunya yang menggulir ke kursor
-    // adalah Ed.cursorScrollDelta. Judul tetap memakai perilaku geser-seminimal lama.
-    val defSpec = LocalBringIntoViewSpec.current
-    val cursorSpec = remember {
-        object : BringIntoViewSpec {
-            override val scrollAnimationSpec: androidx.compose.animation.core.AnimationSpec<Float> = tween(120, easing = Emph)
-            override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
-                if (!ed.titleFocus) return 0f
-                val cs = containerSize - ed.cursorClear()
-                val trail = offset + size
-                return when {
-                    size > cs -> 0f
-                    offset >= 0f && trail <= cs -> 0f
-                    offset < 0f -> offset
-                    else -> trail - cs
-                }
+    private fun ordRefresh() {
+        if (ordFor === blocks) return
+        val l = ArrayList<String>()
+        for (b in blocks) {
+            when {
+                b.ty == "tbl" -> b.tb.forEachIndexed { r, row -> row.indices.forEach { c -> l.add("${b.id}:$r:$c") } }
+                b.isText -> l.add(b.id)
+                b.ty == "img" && b.r.t.isNotEmpty() -> l.add(b.id)
             }
         }
-    }
-    // kursor ikut naik bareng keyboard: selisih dihitung ulang saat kursor / teks / keyboard / kapsul berubah, tanpa delay & animasi
-    LaunchedEffect(ed, scroll) {
-        androidx.compose.runtime.snapshotFlow {
-            val d = ed.cursorScrollDelta(androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { scroll.value })
-            d to Any()
-        }.collect { (d, _) -> if (d != 0f) ed.csApplied(d, scroll.dispatchRawDelta(d)) }
+        ordList = l
+        ordMap = l.withIndex().associate { it.value to it.index }
+        ordFor = blocks
     }
 
-    // sampul: lapisan di belakang bilah atas, ikut tergulir; judul turun supaya menimpa bagian bawah banner
-    val coverNote = vm.note(ed.noteId)?.takeIf { it.cv.isNotEmpty() }
-    val sat = satDp()
-    val coverInset = if (coverNote == null) 0.dp
-    else (LocalConfiguration.current.screenWidthDp.dp / EDIT_RATIO - sat - 64.dp - 72.dp - 48.dp).coerceAtLeast(0.dp)
-    // Latar dan isi memudar sendiri-sendiri (noteFade), sedangkan sampul TIDAK ikut memudar: ia buram penuh sejak awal morph,
-    // persis menimpa sampul kartu. Dulu seluruh isi (termasuk sampul) memudar sambil bayangan kartu juga memudar, dan dua lapisan
-    // setengah-transparan yang identik itu bertumpuk menjadi ~75% sehingga sampul tampak pucat sesaat = "kedip".
-    Box(Modifier.fillMaxSize()) {
-    Box(Modifier.fillMaxSize().graphicsLayer { alpha = noteFade(vm) }.background(pal.s))
-    if (coverNote != null) EditorCover(vm, coverNote) { scroll.value }
-    Box(Modifier.fillMaxSize().graphicsLayer { alpha = noteFade(vm) }) {
-    Column(Modifier.fillMaxSize()) {
-        TopBar()
-        // area catatan berhenti tepat di atas keyboard / navbar; kapsul melayang di atasnya tanpa latar
-        Box(
-            Modifier.weight(1f).fillMaxWidth().windowInsetsPadding(areaInsets)
-                .onSizeChanged { ed.viewH = it.height.toFloat() }
-                .clipToBounds()
-                .inkPinch(ed, scroll)
-        ) {
-            CompositionLocalProvider(LocalBringIntoViewSpec provides cursorSpec, LocalHBiv provides defSpec) {
-            Column(Modifier.fillMaxSize().inkZoom(ed).verticalScroll(scroll), horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(
-                    Modifier.widthIn(max = 700.dp).fillMaxWidth().padding(horizontal = 24.dp)
-                        .onSizeChanged { ed.widthDp = with(density) { it.width.toDp().value } }
-                        .onGloballyPositioned { ed.contentCoords = it }
-                        .inkInput(ed, vm, scroll)
-                        .holdDrag(
-                            true,
-                            onStart = { pos -> !ed.ink.on && !ed.ink.busy && ed.mv == null && ed.selLong(pos, pos.y - scroll.value) },
-                            onMove = { pos, _ -> ed.selMove(pos, pos.y - scroll.value) },
-                            onEnd = { ed.selEnd() },
-                            lead = 70L
-                        )
-                        .drawWithContent {
-                            inkContent(ed.ink)
-                            val at = ed.dropAt
-                            if (at >= 0) {
-                                val th = 4.dp.toPx()
-                                val y = if (at < ed.blocks.size) (ed.bpos[ed.blocks[at].id]?.get(0) ?: -1f) - th
-                                else ed.blocks.lastOrNull()?.let { l -> ed.bpos[l.id]?.let { it[0] + it[1] } } ?: -100f
-                                if (y >= -th) drawRoundRect(pal.p, Offset(0f, y), Size(size.width, th), CornerRadius(th / 2f))
-                            }
-                        }
-                ) {
-                    Column(Modifier.fillMaxWidth()) {
-                        val firstText = { ed.blocks.firstOrNull { it.isText }?.let { ed.focusAt(it.id, 0) } }
-                        // lencana label di atas judul; ketuk untuk membuka halaman label
-                        val headNote = vm.note(ed.noteId)
-                        val noteLb = headNote?.lb ?: emptyList()
-                        val remOn = headNote != null && headNote.rm > 0L
-                        Row(
-                            Modifier.fillMaxWidth().animateContentSize(spring(.8f, 400f)).horizontalScroll(rememberScrollState())
-                                .padding(top = if (noteLb.isEmpty() && !remOn) 0.dp else 6.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            // lencana pengingat di depan lencana label; ketuk untuk mengubah atau menghapusnya
-                            if (remOn && headNote != null) key("rem") {
-                                ReminderBadge(Rem.stamp(headNote), Rem.overdue(headNote), headNote.rr.isNotEmpty()) {
-                                    ed.flush(); focusMgr.clearFocus(); kb?.hide()
-                                    vm.remDlg = ed.noteId
-                                }
-                            }
-                            noteLb.forEach { n ->
-                                key(n) {
-                                    LabelBadge(n) {
-                                        ed.flush(); focusMgr.clearFocus(); kb?.hide()
-                                        vm.nav.push(Scr.NoteLabels(ed.noteId))
-                                    }
-                                }
-                            }
-                        }
-                        Box(Modifier.padding(top = 48.dp + coverInset, bottom = 20.dp)) {
-                            if (ed.title.isEmpty()) {
-                                T("Title", 46f, if (tBold) 1000 else 400, pal.osv, alpha = .5f, ls = -.02f)
-                            }
-                            androidx.compose.foundation.text.BasicTextField(
-                                value = ed.title,
-                                onValueChange = { v -> val nl = v.contains('\n'); ed.titleChanged(v); if (nl) firstText() },
-                                readOnly = ed.reading,
-                                visualTransformation = titleVt,
-                                textStyle = TextStyle(
-                                    color = tColor, fontFamily = dm.ff, fontSize = 46.sp, fontWeight = FontWeight(if (tBold) 1000 else 400),
-                                    fontStyle = if (tItal) FontStyle.Italic else FontStyle.Normal,
-                                    lineHeight = (46 * 1.1f).sp, letterSpacing = (-.02f).em
-                                ),
-                                cursorBrush = SolidColor(pal.p),
-                                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
-                                keyboardActions = KeyboardActions(onNext = { firstText() }),
-                                modifier = Modifier.fillMaxWidth().focusProperties { canFocus = !ed.ink.on }.focusRequester(titleFr)
-                                    .onFocusChanged { ed.titleFocus = it.isFocused; if (it.isFocused) ed.selImg = null }
-                                    .then(
-                                        if (ed.reading) Modifier.wordTap(
-                                            onTap = { if (ed.selOn) ed.clearSel() else { ed.exitReading(); ed.titleReq++ } },
-                                            onDouble = { if (ed.selOn) ed.clearSel() else { ed.exitReading(); ed.titleReq++ } }
-                                        ) else Modifier
-                                    )
-                            )
-                        }
-                        for ((sb, splan) in ed.slotsOf(plans)) {
-                            key(sb.id) {
-                                BlockSlot(
-                                    ed, vm, sb, splan,
-                                    if (splan == null) (od[sb.id] ?: 1) else 1,
-                                    if (splan == null) NO_OD else od,
-                                    dm,
-                                    !winOn || sb.id in liveSet
-                                )
-                            }
-                        }
-                        Box(
-                            Modifier.fillMaxWidth().height(if (hasAu) 28.dp else 220.dp).pointerInput(ed.reading, ed.selOn) {
-                                detectTapGestures {
-                                    if (ed.selOn) ed.clearSel()
-                                    else {
-                                        val l = ed.blocks.lastOrNull { it.isText }
-                                        if (l != null) ed.focusAt(l.id, l.r.t.length)
-                                        else if (ed.reading) ed.exitReading()
-                                    }
-                                }
-                            }
-                        )
+    fun selKeys(): List<String> { ordRefresh(); return ordList }
+
+    private fun lessPt(a: Pt, b: Pt): Boolean {
+        ordRefresh()
+        val ia = ordMap[a.key] ?: return false
+        val ib = ordMap[b.key] ?: return false
+        return ia < ib || (ia == ib && a.off < b.off)
+    }
+
+    fun selSpan(): Pair<Pt, Pt>? {
+        val a = pa ?: return null
+        val f = pf ?: return null
+        return if (lessPt(f, a)) f to a else a to f
+    }
+
+    /** Rentang terseleksi pada satu kolom teks, atau null. */
+    fun selRangeOf(key: String): Pair<Int, Int>? {
+        val (lo, hi) = selSpan() ?: return null
+        val ik = ordMap[key] ?: return null
+        val il = ordMap[lo.key] ?: return null
+        val ih = ordMap[hi.key] ?: return null
+        if (ik < il || ik > ih) return null
+        val len = rtOf(key).t.length
+        val s = if (ik == il) lo.off else 0
+        val e = if (ik == ih) hi.off else len
+        return if (e > s) s.coerceIn(0, len) to e.coerceIn(0, len) else null
+    }
+
+    /** Offset teks asli -> offset di layout yang tampil (memperhitungkan awalan Z dan pemotongan baris buatan). */
+    fun toLay(key: String, off: Int): Int {
+        val z = lsh[key] ?: 0
+        val f = folds[key]
+        return if (f == null) off + z else f.o2t(off + z, z)
+    }
+
+    fun fromLay(key: String, t: Int): Int {
+        val z = lsh[key] ?: 0
+        val f = folds[key]
+        val o = if (f == null) t else f.t2o(t, z)
+        return (o - z).coerceAtLeast(0)
+    }
+
+    fun ptRect(p: Pt): Rect? {
+        val lay = lays[p.key] ?: return null
+        val pos = kpos[p.key] ?: return null
+        val o = toLay(p.key, p.off).coerceIn(0, lay.layoutInput.text.length)
+        return lay.getCursorRect(o).translate(pos)
+    }
+
+    private fun nearest(p: Offset): Pair<String, Float>? {
+        ordRefresh()
+        var best: String? = null
+        var bd = Float.MAX_VALUE
+        for (k in ordList) {
+            val lay = lays[k] ?: continue
+            val pos = kpos[k] ?: continue
+            val w = lay.size.width.toFloat()
+            val h = lay.size.height.toFloat()
+            val dy = if (p.y < pos.y) pos.y - p.y else if (p.y > pos.y + h) p.y - (pos.y + h) else 0f
+            val dx = if (p.x < pos.x) pos.x - p.x else if (p.x > pos.x + w) p.x - (pos.x + w) else 0f
+            val d = dy * 4f + dx
+            if (d < bd) { bd = d; best = k }
+        }
+        return best?.let { it to bd }
+    }
+
+    fun hitPt(p: Offset): Pt? {
+        val k = nearest(p)?.first ?: return null
+        val lay = lays[k] ?: return null
+        val pos = kpos[k] ?: return null
+        val len = rtOf(k).t.length
+        val local = Offset(p.x - pos.x, (p.y - pos.y).coerceIn(0f, maxOf(0f, lay.size.height - 1f)))
+        return Pt(k, fromLay(k, lay.getOffsetForPosition(local)).coerceIn(0, len))
+    }
+
+    /** Masuk mode seleksi dari mode ketik: mulai dari seleksi/kata di kursor. */
+    fun enterSelect() {
+        if (selOn) { selAll(); return }
+        val key = focus
+        var a: Pt? = null
+        var b: Pt? = null
+        selBack = null
+        if (key != null) {
+            val v = tf[key]
+            val rt = rtOf(key)
+            if (v != null) {
+                var s = (v.selection.min - 1).coerceIn(0, rt.t.length)
+                var e = (v.selection.max - 1).coerceIn(0, rt.t.length)
+                if (s == e && rt.t.isNotEmpty()) {
+                    fun w(c: Char) = c.isLetterOrDigit() || c == '_'
+                    var l = s
+                    var r = s
+                    while (l > 0 && w(rt.t[l - 1])) l--
+                    while (r < rt.t.length && w(rt.t[r])) r++
+                    if (r > l) { s = l; e = r } else { s = 0; e = rt.t.length }
+                }
+                if (e > s) { a = Pt(key, s); b = Pt(key, e) }
+                selBack = Pt(key, e)
+            }
+        }
+        commit()
+        selOn = true
+        pa = a; pf = b
+        reading = true; selImg = null; pickQuote = false; miniBar = false; clearReq++
+    }
+
+    fun clearSel() {
+        val back = selBack
+        selOn = false; pa = null; pf = null; selBack = null; selDrag = false
+        selJob?.cancel()
+        if (back != null && tf.containsKey(back.key)) exitReading(back.key, back.off.coerceAtLeast(0))
+    }
+
+    /**
+     * Tekan-tahan di teks: pilih satu kata, lalu geser untuk memperluas ke blok mana pun.
+     * Berlaku di mode baca MAUPUN mode ketik; dari mode ketik, setelah selesai kursor kembali ke teks.
+     */
+    fun selLong(p: Offset, fingerY: Float): Boolean {
+        val edit = !reading
+        // tekan-tahan di atas gambar (mode baca MAUPUN ketik) bukan seleksi teks: biarkan gambar yang mengangkat dirinya
+        if (ipos.values.any { it.contains(p) }) return false
+        if (edit) {
+            val nr = nearest(p) ?: return false
+            if (nr.second > 32f * dens) return false                       // jauh dari teks (mis. judul / ruang kosong)
+        }
+        val h = hitPt(p) ?: return false
+        val lay = lays[h.key] ?: return false
+        val len = rtOf(h.key).t.length
+        var a = h
+        var b = h
+        if (len > 0) {
+            val lt = lay.layoutInput.text.length
+            val w = lay.getWordBoundary(toLay(h.key, h.off).coerceIn(0, maxOf(0, lt - 1)))
+            a = Pt(h.key, fromLay(h.key, w.start).coerceIn(0, len)); b = Pt(h.key, fromLay(h.key, w.end).coerceIn(0, len))
+        }
+        if (edit) {
+            commit()
+            selBack = Pt(b.key, b.off)
+            selImg = null; pickQuote = false; miniBar = false
+            // tetap di mode ketik: keyboard terbuka, ketikan langsung mengganti seleksi.
+            // Seleksi field = kata itu (tidak kosong) supaya tombol Salin / Pilih semua / lompat Gboard aktif.
+            if (a.key == b.key && b.off > a.off) req = Req(b.key, b.off, ++rq, TextRange(a.off + 1, b.off + 1))
+            else focusAt(b.key, b.off)
+        }
+        wordA = a; wordB = b; selWho = 0
+        pa = a; pf = b
+        selOn = true
+        selTarget = p; selFinger = fingerY; selDrag = true
+        selAuto()
+        buzz?.invoke()
+        return true
+    }
+
+    /** Jari bergerak setelah tekan-tahan (posisi absolut di ruang konten). */
+    fun selMove(p: Offset, fingerY: Float) {
+        selTarget = p; selFinger = fingerY
+        selApply(p)
+    }
+
+    /** Pegangan digeser sejauh d (relatif). */
+    fun selNudge(d: Offset) {
+        selTarget += d
+        selFinger = selTarget.y - (scroll?.value ?: 0).toFloat() + 36f * dens
+        selApply(selTarget)
+    }
+
+    fun selHandleStart(which: Int): Boolean {
+        val pt = (if (which == 1) pa else pf) ?: return false
+        val r = ptRect(pt) ?: return false
+        selWho = which
+        selTarget = Offset(r.left, r.center.y)
+        selFinger = selTarget.y - (scroll?.value ?: 0).toFloat() + 36f * dens
+        selDrag = true
+        selAuto()
+        return true
+    }
+
+    fun selEnd() {
+        selDrag = false
+        selJob?.cancel()
+    }
+
+    private fun selApply(p: Offset) {
+        val h = hitPt(p) ?: return
+        when (selWho) {
+            0 -> {
+                val wa = wordA ?: return
+                val wb = wordB ?: return
+                if (lessPt(h, wa)) { pa = wb; pf = h }
+                else if (lessPt(wb, h)) { pa = wa; pf = h }
+                else { pa = wa; pf = wb }
+            }
+            1 -> pa = h
+            else -> pf = h
+        }
+    }
+
+    private fun selAuto() {
+        selJob?.cancel()
+        selJob = scope.launch {
+            while (selDrag) {
+                val sc = scroll
+                if (sc != null && viewH > 0f) {
+                    val edge = 80f * dens
+                    val v = when {
+                        selFinger < edge -> -(edge - selFinger) / edge
+                        selFinger > viewH - edge -> (selFinger - (viewH - edge)) / edge
+                        else -> 0f
                     }
-                    InkLayers(ed, vm, scroll)
-                    if (ed.selOn) SelHandles(ed)
-                    SelBubble(ed, vm, act, scroll.value)   // selalu ada di komposisi supaya bisa animasi keluar
-                }
-                // kartu suara + transkrip: selalu di bawah isi catatan (editor dan mode baca), di luar area seleksi teks
-                if (hasAu) {
-                    Box(
-                        Modifier.widthIn(max = 700.dp).fillMaxWidth().padding(horizontal = 24.dp)
-                            .onGloballyPositioned { c -> audBox[0] = c.positionInParent().y; audBox[1] = c.size.height.toFloat() }
-                    ) {
-                        AudioSection(vm, ed.noteId, act)
+                    if (v != 0f) {
+                        val got = sc.scrollBy(v.coerceIn(-1f, 1f) * 18f * dens)
+                        if (got != 0f) { selTarget = Offset(selTarget.x, selTarget.y + got); selApply(selTarget) }
                     }
-                    Box(
-                        Modifier.widthIn(max = 700.dp).fillMaxWidth().height(220.dp).pointerInput(ed.reading, ed.selOn) {
-                            detectTapGestures {
-                                if (ed.selOn) ed.clearSel()
-                                else {
-                                    val l = ed.blocks.lastOrNull { it.isText }
-                                    if (l != null) ed.focusAt(l.id, l.r.t.length)
-                                    else if (ed.reading) ed.exitReading()
-                                }
-                            }
-                        }
-                    )
                 }
+                delay(16)
             }
-            }
-            InkFrame(ed)
-            BottomBars(ed, vm, act, (!ed.reading || ed.selEdit) && !ed.titleFocus && !ed.findOn && !ed.ink.on, imeOpen) { kbBox[0] }
-            InkBar(ed, vm)
         }
     }
-    }
-    }
-}
 
-private class BubbleHold {
-    var x = 0f
-    var y = 0f
-    var mode = -1          // 0 di atas seleksi, 1 di bawah, 2 menempel di area terlihat
-    var has = false
-    var edit = false
-}
+    // ---------- keyboard: pilih semua, panah, shift+panah (panel "pengeditan teks" Gboard / keyboard fisik) ----------
+    fun selectAllKey(key: String) {
+        if (selOn) { selAll(); return }
+        val v = tf[key]
+        val len = rtOf(key).t.length
+        val caret = ((v?.selection?.end ?: 1) - 1).coerceIn(0, len)
+        commit()
+        selBack = Pt(key, caret)
+        selWho = 0; selDrag = false
+        selImg = null; pickQuote = false; miniBar = false
+        selAll()
+        // seleksi field dibiarkan tidak kosong: Gboard menonaktifkan (abu-abu) tombol Salin/Potong kalau menganggap tak ada seleksi
+        if (v != null) tf[key] = v.copy(selection = if (len > 0) TextRange(1, len + 1) else TextRange(0, 1))
+        caretMoved(key)
+    }
 
-/** Tombol di gelembung seleksi: sudut menyempit + sedikit mengecil saat ditekan (M3 Expressive). */
-@Composable
-fun SelBtn(enabled: Boolean, padH: Dp, padV: Dp, onClick: () -> Unit, content: @Composable () -> Unit) {
-    val src = remember { MutableInteractionSource() }
-    val pr by src.collectIsPressedAsState()
-    val r by animateDpAsState(if (pr) 8.dp else 16.dp, spring(.55f, 700f), label = "r")
-    val sc by animateFloatAsState(if (pr) .92f else 1f, spring(.5f, 700f), label = "sc")
-    Box(
-        Modifier.graphicsLayer { scaleX = sc; scaleY = sc }.clip(RoundedCornerShape(r))
-            .clickable(interactionSource = src, indication = LocalIndication.current, enabled = enabled, onClick = onClick)
-            .padding(horizontal = padH, vertical = padV),
-        Alignment.Center
-    ) { content() }
-}
+    private fun stepPt(p: Pt, dir: Int): Pt? {
+        ordRefresh()
+        val i = ordMap[p.key] ?: return null
+        val len = rtOf(p.key).t.length
+        if (dir == 0) return if (p.off > 0) Pt(p.key, p.off - 1) else ordList.getOrNull(i - 1)?.let { Pt(it, rtOf(it).t.length) }
+        if (dir == 1) return if (p.off < len) Pt(p.key, p.off + 1) else ordList.getOrNull(i + 1)?.let { Pt(it, 0) }
+        val up = dir == 2
+        val lay = lays[p.key]
+        val pos = kpos[p.key]
+        val r = ptRect(p)
+        if (lay != null && pos != null && r != null) {
+            val ln = lay.getLineForOffset(toLay(p.key, p.off).coerceIn(0, lay.layoutInput.text.length))
+            if (if (up) ln > 0 else ln < lay.lineCount - 1) {
+                val local = Offset(r.left - pos.x, if (up) r.top - pos.y - 2f else r.bottom - pos.y + 2f)
+                return Pt(p.key, fromLay(p.key, lay.getOffsetForPosition(local)).coerceIn(0, len))
+            }
+            val nk = ordList.getOrNull(if (up) i - 1 else i + 1) ?: return Pt(p.key, if (up) 0 else len)
+            val l2 = lays[nk]
+            val p2 = kpos[nk]
+            val n2 = rtOf(nk).t.length
+            if (l2 == null || p2 == null) return Pt(nk, if (up) n2 else 0)
+            val local = Offset(r.left - p2.x, if (up) l2.size.height - 1f else 0f)
+            return Pt(nk, fromLay(nk, l2.getOffsetForPosition(local)).coerceIn(0, n2))
+        }
+        val nk = ordList.getOrNull(if (up) i - 1 else i + 1) ?: return Pt(p.key, if (up) 0 else len)
+        return Pt(nk, if (up) rtOf(nk).t.length else 0)
+    }
+
+    private fun extendJump(key: String, anchor: Int, oldCaret: Int, to: Pt) {
+        val len = rtOf(key).t.length
+        if (selOn) pf = to
+        else {
+            commit()
+            selBack = Pt(key, oldCaret.coerceIn(0, len)); selWho = 0; selDrag = false
+            selImg = null; pickQuote = false; miniBar = false
+            pa = Pt(key, anchor.coerceIn(0, len)); pf = to; selOn = true
+        }
+        tf[key]?.let { tf[key] = it.copy(selection = if (len > 0) TextRange(1, len + 1) else TextRange(0, 1)) }
+        caretMoved(key)
+        revealPf()
+    }
+
+    /** Gulir supaya titik lawan seleksi (pf) terlihat. */
+    private fun revealPf() {
+        scope.launch {
+            delay(32)
+            val sc = scroll ?: return@launch
+            val r = pf?.let { ptRect(it) } ?: return@launch
+            if (viewH <= 0f) return@launch
+            val m = 56f * dens
+            val top = sc.value.toFloat()
+            val d = when {
+                r.bottom > top + viewH - m -> r.bottom - (top + viewH - m)
+                r.top < top + m -> r.top - (top + m)
+                else -> 0f
+            }
+            if (d != 0f) sc.scrollBy(d)
+        }
+    }
+
+    /** Home/End (ctrl = awal/akhir seluruh teks). Saat seleksi aktif selalu lompat ke awal/akhir seluruh teks. */
+    fun jumpKey(key: String, toEnd: Boolean, ctrl: Boolean, shift: Boolean): Boolean {
+        if (!selOn && !ctrl) return false
+        ordRefresh()
+        val k = (if (toEnd) ordList.lastOrNull() else ordList.firstOrNull()) ?: return false
+        val to = Pt(k, if (toEnd) rtOf(k).t.length else 0)
+        if (selOn) {
+            if (shift) { pf = to; revealPf() } else { dropSel(); focusAt(to.key, to.off) }
+            return true
+        }
+        val v = tf[key] ?: return false
+        val len = rtOf(key).t.length
+        val caret = (v.selection.end - 1).coerceIn(0, len)
+        val anchor = (v.selection.start - 1).coerceIn(0, len)
+        if (shift) {
+            commit()
+            selBack = Pt(key, caret); selWho = 0; selDrag = false
+            selImg = null; pickQuote = false; miniBar = false
+            pa = Pt(key, anchor); pf = to; selOn = true
+            revealPf()
+        } else focusAt(to.key, to.off)
+        return true
+    }
+
+    /** dir: 0 kiri, 1 kanan, 2 atas, 3 bawah. true = tombol sudah ditangani (field tidak perlu memprosesnya). */
+    fun navKey(key: String, dir: Int, shift: Boolean): Boolean {
+        if (selOn) {
+            val (lo, hi) = selSpan() ?: return false
+            if (shift) {
+                val np = stepPt(pf ?: return false, dir)
+                if (np != null) { pf = np; revealPf() }
+                return true
+            }
+            val t = if (dir == 0 || dir == 2) lo else hi
+            dropSel()
+            focusAt(t.key, t.off)
+            return true
+        }
+        val v = tf[key] ?: return false
+        val len = rtOf(key).t.length
+        if (!shift && !v.selection.collapsed) return false
+        val caret = (v.selection.end - 1).coerceIn(0, len)
+        val anchor = (v.selection.start - 1).coerceIn(0, len)
+        val edge = when (dir) {
+            0 -> caret <= 0
+            1 -> caret >= len
+            else -> {
+                val lay = lays[key] ?: return false
+                val ln = lay.getLineForOffset(toLay(key, caret).coerceIn(0, lay.layoutInput.text.length))
+                if (dir == 2) ln == 0 else ln == lay.lineCount - 1
+            }
+        }
+        if (!edge) return false
+        val from = Pt(key, caret)
+        val to = stepPt(from, dir) ?: return true
+        if (to == from) return true
+        if (shift) {
+            commit()
+            selBack = from; selWho = 0; selDrag = false
+            selImg = null; pickQuote = false; miniBar = false
+            pa = Pt(key, anchor); pf = to; selOn = true
+            revealPf()
+        } else focusAt(to.key, to.off)
+        return true
+    }
+
+    fun selAll() {
+        val ks = selKeys()
+        if (ks.isEmpty()) return
+        pa = Pt(ks.first(), 0)
+        pf = Pt(ks.last(), rtOf(ks.last()).t.length)
+        selOn = true
+    }
+
+    private fun selSegs(): List<Triple<String, Int, Int>> {
+        val (lo, hi) = selSpan() ?: return emptyList()
+        ordRefresh()
+        val il = ordMap[lo.key] ?: return emptyList()
+        val ih = ordMap[hi.key] ?: return emptyList()
+        val out = ArrayList<Triple<String, Int, Int>>()
+        for (j in il..ih) {
+            val k = ordList[j]
+            val len = rtOf(k).t.length
+            val s = if (j == il) lo.off.coerceIn(0, len) else 0
+            val e = if (j == ih) hi.off.coerceIn(0, len) else len
+            out.add(Triple(k, s, maxOf(s, e)))
+        }
+        return out
+    }
+
+    fun selText(): String {
+        val sb = StringBuilder()
+        var prev: String? = null
+        for ((k, s, e) in selSegs()) {
+            if (prev != null) {
+                val sameRow = isCellKey(k) && isCellKey(prev) && keyBlock(k) == keyBlock(prev) && cellRC(k).first == cellRC(prev).first
+                sb.append(if (sameRow) '\t' else '\n')
+            }
+            sb.append(rtOf(k).t.substring(s, e))
+            prev = k
+        }
+        return sb.toString()
+    }
+
+    /** Markdown yang terakhir disalin dari seleksi (dipakai supaya tempel di catatan ini memulihkan format aslinya). */
+    var lastMd: String = ""
+    private var lastMdBlocky = false
+
+    /** Isi seleksi sebagai Markdown (tebal, miring, judul, butir, kutipan, kode, tabel ikut terbawa). */
+    fun selMd(): String {
+        val segs = selSegs()
+        if (segs.isEmpty()) return ""
+        val od = ords(blocks)
+        val out = ArrayList<Blk>()
+        var i = 0
+        while (i < segs.size) {
+            val (k, s, e) = segs[i]
+            if (isCellKey(k)) {
+                val bid = keyBlock(k)
+                var j = i
+                while (j < segs.size && isCellKey(segs[j].first) && keyBlock(segs[j].first) == bid) j++
+                val grp = segs.subList(i, j)
+                val tb = blocks.firstOrNull { it.id == bid }
+                val total = tb?.tb?.sumOf { it.size } ?: -1
+                val full = tb != null && grp.size == total && grp.all { (ck, cs, ce) -> cs == 0 && ce >= rtOf(ck).t.length }
+                if (full && tb != null) out.add(tb)
+                else {
+                    val rows = ArrayList<String>()
+                    var prev: String? = null
+                    val cur = StringBuilder()
+                    for ((ck, cs, ce) in grp) {
+                        if (prev != null) {
+                            if (cellRC(ck).first == cellRC(prev).first) cur.append('\t') else { rows.add(cur.toString()); cur.setLength(0) }
+                        }
+                        cur.append(rtOf(ck).t.substring(cs, ce))
+                        prev = ck
+                    }
+                    rows.add(cur.toString())
+                    rows.forEach { out.add(Blk(ty = "p", r = Rt(it))) }
+                }
+                i = j
+                continue
+            }
+            val b = blockOfKey(k)
+            if (b != null) {
+                val rt = rtOf(k)
+                val part = rt.slice(s, e)
+                val whole = s <= 0 && e >= rt.t.length
+                val keep = b.isText && (segs.size > 1 || whole)
+                out.add(
+                    if (keep) b.copy(r = part, ik = emptyList(), st = if (b.ty == "li" && (b.lt == "o" || b.lt == "a") && out.isEmpty()) (od[b.id] ?: 1) else b.st)
+                    else Blk(ty = "p", r = part)
+                )
+            }
+            i++
+        }
+        val md = toMd(out).trimEnd('\n')
+        if (md.isBlank()) return selText()
+        lastMd = md
+        lastMdBlocky = out.size > 1 || out.firstOrNull()?.ty != "p"
+        return md
+    }
+
+    private fun fmtTargets(kind: Int) = selSegs().filter { (k, s, e) ->
+        e > s && blockOfKey(k)?.let { it.ty != "code" && !(it.ty == "h" && kind == K.B) } == true
+    }
+
+    fun selAllFmt(kind: Int): Boolean {
+        val t = fmtTargets(kind)
+        return t.isNotEmpty() && t.all { (k, s, e) -> rtOf(k).sp.any { it.k == kind && it.s <= s && it.e >= e } }
+    }
+
+    fun selFmt(kind: Int) {
+        val t = fmtTargets(kind)
+        if (t.isEmpty()) return
+        val on = !selAllFmt(kind)
+        commit()
+        for ((k, s, e) in t) putRt(k, rtOf(k).setFmt(s, e, kind, on))
+        dirty(); commit()
+    }
+
+    /** Hapus isi seleksi (lintas blok digabung seperti editor biasa), lalu kembali mengetik di titik awalnya. */
+    fun selDelete() {
+        val (lo, hi) = selSpan() ?: return
+        commit()
+        if (lo.key == hi.key) {
+            val rt = rtOf(lo.key)
+            putRt(lo.key, rt.slice(0, lo.off) + rt.slice(hi.off, rt.t.length))
+        } else if (isCellKey(lo.key) || isCellKey(hi.key)) {
+            for ((k, s, e) in selSegs()) if (e > s) {
+                val rt = rtOf(k)
+                putRt(k, rt.slice(0, s) + rt.slice(e, rt.t.length))
+            }
+        } else {
+            val i0 = idx(lo.key)
+            val i1 = idx(hi.key)
+            if (i0 < 0 || i1 < 0) return
+            val a = blocks[i0]
+            val z = blocks[i1]
+            val merged = a.r.slice(0, lo.off) + z.r.slice(hi.off, z.r.t.length)
+            blocks = blocks.toMutableList().also { l ->
+                l[i0] = a.copy(r = merged)
+                for (j in i1 downTo i0 + 1) l.removeAt(j)
+            }
+        }
+        reseedAll()
+        afterStructural()
+        selOn = false; pa = null; pf = null; selBack = null; selDrag = false
+        exitReading(lo.key, lo.off)
+    }
+
+    /** Tempel teks di tempat seleksi (menggantikannya), lalu lanjut mengetik setelah teks yang ditempel. */
+    fun selPaste(s: String) {
+        if (s.isEmpty()) return
+        val (lo, _) = selSpan() ?: return
+        selDelete()
+        // teks yang ditempel = Markdown yang baru disalin dari catatan: pulihkan formatnya (blok maupun sebaris)
+        val mine = lastMd.isNotEmpty() && s.trimEnd('\n') == lastMd
+        if (mine && lastMdBlocky && !isCellKey(lo.key) && blockOfKey(lo.key)?.isMulti != true) paste(lo.key, lo.off, s, true)
+        else typeAt(lo.key, lo.off, s, mine)
+    }
+
+    /** Sisipkan teks s di posisi off (dipakai tempel dan mengetik di atas seleksi), lalu kursor di akhir teks itu. */
+    private fun typeAt(key: String, off: Int, s: String, rich: Boolean = false) {
+        val b = blockOfKey(key) ?: return
+        if (s.indexOf('\n') >= 0 && !b.isMulti && !isCellKey(key)) {
+            if (s == "\n") enter(key, off) else paste(key, off, s, rich)
+            return
+        }
+        val clean = if (isCellKey(key)) s.replace('\n', ' ') else s
+        val ins = if (rich && !b.isMulti && !isCellKey(key)) inl(clean) else Rt(clean)
+        val rt = rtOf(key)
+        val nr = rt.slice(0, off) + ins + rt.slice(off, rt.t.length)
+        putRt(key, nr)
+        tf[key] = TextFieldValue(Z + nr.t, TextRange(off + ins.t.length + 1))
+        dirty(); commit()
+        focusAt(key, off + ins.t.length)
+    }
+
+    /** Ada seleksi di mode ketik lalu pengguna mengetik / menekan hapus: seleksi diganti ketikan itu, seperti editor biasa. */
+    private fun typeOverSel(key: String, v: TextFieldValue): Boolean {
+        if (!v.text.startsWith(Z)) { dropSel(); return false }
+        val (lo, _) = selSpan() ?: return false
+        val oldT = rtOf(key).t
+        val nt = v.text.substring(1)
+        val df = diff(oldT, nt)
+        val ins = nt.substring(df.p, df.p + df.ins)
+        selDelete()
+        if (ins.isNotEmpty()) typeAt(lo.key, lo.off, ins)
+        return true
+    }
+
+    /** Lepas seleksi tanpa mengubah fokus / keyboard. */
+    fun dropSel() {
+        selOn = false; pa = null; pf = null; selBack = null; selDrag = false
+        selJob?.cancel()
+    }
+
+    /** Ketuk dua kali di mode ketik: pilih kata di situ. Keyboard tetap terbuka. */
+    fun dblWord(key: String, off: Int) {
+        val t = rtOf(key).t
+        if (t.isEmpty()) return
+        fun w(c: Char) = c.isLetterOrDigit() || c == '_'
+        val i = off.coerceIn(0, t.length)
+        if (!((i < t.length && w(t[i])) || (i > 0 && w(t[i - 1])))) return
+        var l = i
+        var r = i
+        while (l > 0 && w(t[l - 1])) l--
+        while (r < t.length && w(t[r])) r++
+        commit()
+        val a = Pt(key, l)
+        val b = Pt(key, r)
+        selBack = b; wordA = a; wordB = b; selWho = 0
+        pa = a; pf = b; selOn = true; selDrag = false
+        selImg = null; pickQuote = false; miniBar = false
+        // seleksi field ikut tidak kosong supaya Salin / Pilih semua / lompat Gboard aktif
+        tf[key]?.let { tf[key] = it.copy(selection = TextRange(l + 1, r + 1)) }
+        caretMoved(key)
+        buzz?.invoke()
+    }
+
+    // ---------- struktur ----------
+    private fun norm() {
+        val out = ArrayList<Blk>()
+        for (b in blocks) {
+            // gambar / kartu tautan boleh di baris paling atas, tanpa paragraf kosong di atasnya
+            val atTop = out.isEmpty() && (b.ty == "img" || b.ty == "lnk")
+            if (b.isObj && !atTop && (out.isEmpty() || out.last().isObj)) out.add(Blk())
+            out.add(b)
+        }
+        // paragraf kosong lama di atas gambar / kartu tautan paling atas ikut dibuang
+        if (out.size > 1 && (out[1].ty == "img" || out[1].ty == "lnk")) {
+            val f0 = out[0]
+            if (f0.ty == "p" && f0.r.t.isEmpty() && f0.ik.isEmpty() && f0.il == 0 && f0.ir == 0 && f0.fi == 0 && f0.ta.isEmpty()) {
+                tf.remove(f0.id)
+                out.removeAt(0)
+            }
+        }
+        if (out.isEmpty() || out.last().isObj || out.last().isMulti) out.add(Blk())
+        if (out != blocks) {
+            blocks = out
+            out.forEach { if ((it.isText || it.ty == "img") && !tf.containsKey(it.id)) seed(it) }
+        }
+    }
+
+    private fun afterStructural() {
+        norm(); dirty(); commit()
+    }
+
+    // ---------- riwayat ----------
+    fun commit() {
+        cJob?.cancel()
+        typed = 0
+        if (!ink.noRescue) blocks = inkRescue(hist[hi].bl, blocks, bpos, dens)   // coretan dari blok yang hilang dipindah, bukan dibuang
+        if (hist[hi].bl == blocks) return
+        while (hist.size > hi + 1) hist.removeAt(hist.size - 1)
+        hist.add(Snap(blocks, focus, focus?.let { tf[it]?.selection } ?: TextRange.Zero))
+        if (hist.size > 150) hist.removeAt(0)
+        hi = hist.size - 1
+        tick++
+    }
+
+    val canUndo: Boolean get() { tick; return hi > 0 || hist[hi].bl != blocks }
+    val canRedo: Boolean get() { tick; return hi < hist.size - 1 }
 
 /**
- * Gelembung Potong / Salin / Tempel yang menempel di seleksi (di atasnya, atau di bawahnya bila tak muat).
- * Muncul/hilang dengan spring (membesar dari sisi yang menghadap seleksi, sedikit memantul), tidak berkedip
- * karena baru ditampilkan setelah ukurannya terukur, pindah atas/bawah digeser mulus, dan tombolnya
- * masuk/keluar dengan melebar-menyempit.
- */
-@Composable
-fun SelBubble(ed: Ed, vm: AppVM, act: Actions, scrollY: Int) {
-    val pal = LocalPal.current
-    val dn = LocalDensity.current
-    @Suppress("DEPRECATION")
-    val clip = androidx.compose.ui.platform.LocalClipboardManager.current
-    val hold = remember { BubbleHold() }
-    // Salin lewat jalur mana pun (menu keyboard, tombol Salin Gboard, dll): isi clipboard diganti Markdown seleksinya
-    val ctxClip = androidx.compose.ui.platform.LocalContext.current
-    androidx.compose.runtime.DisposableEffect(ed) {
-        val cm = ctxClip.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-        val l = android.content.ClipboardManager.OnPrimaryClipChangedListener {
-            try {
-                if (!ed.selOn) return@OnPrimaryClipChangedListener
-                val t = cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.toString() ?: return@OnPrimaryClipChangedListener
-                if (t != ed.selText()) return@OnPrimaryClipChangedListener
-                val md = ed.selMd()
-                if (md.isNotEmpty() && md != t) cm.setPrimaryClip(android.content.ClipData.newPlainText("Dinduy", md))
-            } catch (_: Exception) {}
-        }
-        cm.addPrimaryClipChangedListener(l)
-        onDispose { cm.removePrimaryClipChangedListener(l) }
-    }
-    var bs by remember { mutableStateOf(IntSize.Zero) }
-    val vis = remember { Animatable(0f) }
-    val corrX = remember { Animatable(0f) }
-    val corrY = remember { Animatable(0f) }
-    val span = if (ed.selOn) ed.selSpan() else null
-    val r0 = span?.let { ed.ptRect(it.first) }
-    val r1 = span?.let { ed.ptRect(it.second) }
-    val live = ed.selOn && !ed.selDrag && span != null && r0 != null && r1 != null
-    val measured = bs != IntSize.Zero
-    var x = hold.x
-    var y = hold.y
-    var mode = hold.mode
-    var has = hold.has
-    var edit = hold.edit
-    if (live && span != null && r0 != null && r1 != null) {
-        has = span.first != span.second
-        edit = ed.selEdit
-        val gap = with(dn) { 10.dp.toPx() }
-        // bubble selalu diusahakan tampil di area layar yang terlihat (di luar kapsul alat), mengikuti scroll
-        val m = with(dn) { 8.dp.toPx() }
-        val visTop = scrollY + m
-        val visBot = scrollY + ed.viewH - (if (ed.barOn) ed.barH + with(dn) { 10.dp.toPx() } else 0f) - m
-        val belowGap = with(dn) { 52.dp.toPx() }
-        val aboveY = r0.top - bs.height - gap
-        val belowY = r1.bottom + belowGap
-        val canAbove = aboveY >= visTop && r0.top < visBot
-        val canBelow = belowY + bs.height <= visBot && r1.bottom > visTop
-        val pinned = !canAbove && !canBelow
-        val yRaw = when {
-            canAbove -> aboveY
-            canBelow -> belowY
-            else -> visTop + (visBot - visTop - bs.height).coerceAtLeast(0f) * .35f   // seleksi menutupi layar: tempel di area terlihat
-        }
-        y = yRaw.coerceIn(visTop, maxOf(visTop, visBot - bs.height))
-        val maxX = ed.widthDp * dn.density
-        val cx = if (pinned) maxX / 2f else (r0.left + r1.left) / 2f
-        x = (cx - bs.width / 2f).coerceIn(0f, (maxX - bs.width).coerceAtLeast(0f))
-        mode = if (canAbove) 0 else if (canBelow) 1 else 2
-        // pindah atas <-> bawah: geser mulus dari posisi lama, bukan melompat
-        val sx = if (measured && vis.value > .5f && hold.mode != -1 && hold.mode != mode) hold.x - x else 0f
-        val sy = if (measured && vis.value > .5f && hold.mode != -1 && hold.mode != mode) hold.y - y else 0f
-        LaunchedEffect(mode) {
-            if (sx != 0f || sy != 0f) {
-                corrX.snapTo(sx); corrY.snapTo(sy)
-                launch { corrX.animateTo(0f, spring(.78f, 420f)) }
-                corrY.animateTo(0f, spring(.78f, 420f))
+     * Coretan lama (atau yang belum berjangkar) dipasangi jangkar huruf berdasarkan posisinya sekarang di layar, jadi tidak ada lompatan.
+     * Diam-diam: tidak membuat langkah riwayat dan tidak menandai catatan berubah. Hanya jalan kalau tidak ada ketikan yang belum di-commit.
+     */
+    fun inkUpgrade() {
+        if (blocks.none { b -> b.ik.any { !it.anc && !it.img } }) return
+        if (hist[hi].bl !== blocks && hist[hi].bl != blocks) return
+        val W = (contentCoords?.size?.width ?: 0).toFloat()
+        if (W <= 0f) return
+        val adds = HashMap<String, ArrayList<Ink>>()
+        val drop = HashSet<String>()
+        for (b in blocks) {
+            if (b.ik.none { !it.anc && !it.img }) continue
+            val top = bpos[b.id]?.get(0) ?: continue
+            for (s in b.ik) {
+                if (s.anc || s.img || s.p.isEmpty()) continue
+                val raw = s.copy(an = emptyList(), ah = 0f, av = 0)
+                val a = inkPts(s, b.id, top, W, dens)          // posisi sekarang (goresan berskala ikut ukuran huruf), bukan p mentah
+                val ps = inkBuild(raw, a, a.size / 3, W)
+                if (ps.none { it.second.anc }) continue          // tidak bisa dijangkarkan: biarkan seperti semula
+                drop.add(s.id)
+                for ((bid, st) in ps) adds.getOrPut(bid) { ArrayList() }.add(st)
             }
         }
-        val fx = x; val fy = y; val fm = mode; val fh = has; val fe = edit
-        SideEffect { hold.x = fx; hold.y = fy; hold.mode = fm; hold.has = fh; hold.edit = fe }
+        if (drop.isEmpty()) return
+        val nb = blocks.map { b ->
+            val keep = if (b.ik.any { it.id in drop }) b.ik.filter { it.id !in drop } else b.ik
+            val add = adds[b.id]
+            if (add == null && keep === b.ik) b else b.copy(ik = keep + (add ?: emptyList()))
+        }
+        blocks = nb
+        hist[hi] = Snap(nb, hist[hi].key, hist[hi].sel)
+        vm.syncInk(noteId, inkSyncP(nb))   // simpan jangkarnya supaya ekspor PDF catatan lama juga akurat
     }
-    // muncul hanya setelah ukuran terukur (tidak ada frame di posisi salah = tidak berkedip); hilang pakai spring tanpa pantulan
-    LaunchedEffect(live && measured) {
-        if (live && measured) vis.animateTo(1f, spring(.62f, 520f))
-        else if (!live) vis.animateTo(0f, spring(1f, 800f))
-    }
-    if (!live && vis.value <= .001f) return
-    val m0 = mode
-    Row(
-        Modifier.offset { IntOffset((x + corrX.value).roundToInt(), (y + corrY.value).roundToInt()) }
-            .graphicsLayer {
-                val v = vis.value
-                alpha = if (measured) (v * 1.5f).coerceIn(0f, 1f) else 0f
-                val sc = .55f + .45f * v
-                scaleX = sc; scaleY = sc
-                transformOrigin = TransformOrigin(.5f, if (m0 == 0) 1f else if (m0 == 1) 0f else .5f)
-                translationY = (1f - v) * (if (m0 == 0) 12f else if (m0 == 1) -12f else 0f) * density
-            }
-            .onSizeChanged { bs = it }
-            .shadow(if (pal.dark) 6.dp else 3.dp, RoundedCornerShape(20.dp)).clip(RoundedCornerShape(20.dp))
-            .background(pal.bar2()).padding(horizontal = 3.dp, vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        val enter = fadeIn(tween(180, 40)) + expandHorizontally(tween(260, easing = Emph))
-        val exit = fadeOut(tween(110)) + shrinkHorizontally(tween(220, easing = Emph))
-        @Composable
-        fun Act(label: String, f: () -> Unit) {
-            SelBtn(live, 10.dp, 9.dp, f) { T(label, 14f, 800, pal.os, maxLines = 1) }
-        }
-        AnimatedVisibility(edit && has, enter = enter, exit = exit) {
-            Act("Cut") { act.copyText(ed.selMd()); ed.selDelete() }
-        }
-        AnimatedVisibility(has, enter = enter, exit = exit) {
-            Act("Copy") { act.copyText(ed.selMd()); vm.show("Copied"); ed.clearSel() }
-        }
-        AnimatedVisibility(edit, enter = enter, exit = exit) {
-            Act("Paste") {
-                val s = clip.getText()?.text
-                if (!s.isNullOrEmpty()) ed.selPaste(s) else vm.show("Nothing to paste")
-            }
-        }
-        AnimatedVisibility(edit && has, enter = enter, exit = exit) {
-            SelBtn(live, 9.dp, 7.dp, { ed.selDelete() }) { Ic("del", pal.os, 22.dp) }
-        }
-        Act("Select all") { ed.selAll() }
-    }
-}
 
-/** Pegangan awal/akhir seleksi, digambar di ruang konten dan bisa diseret melewati blok mana pun. */
-@Composable
-fun SelHandles(ed: Ed) {
-    val a = ed.pa ?: return
-    val f = ed.pf ?: return
-    val pal = LocalPal.current
-    val dn = LocalDensity.current
-    val lo = ed.selSpan()?.first
-    @Composable
-    fun H(which: Int, pt: Pt) {
-        val r = ed.ptRect(pt) ?: return
-        val isStart = if (a == f) which == 1 else lo == pt
-        val h11 = with(dn) { 11.dp.toPx() }
-        val t24 = with(dn) { 24.dp.toPx() }
-        val cx = if (isStart) r.left - h11 else r.left + h11
-        val cy = r.bottom + h11
-        Box(
-            Modifier.offset { IntOffset((cx - t24).roundToInt(), (cy - t24).roundToInt()) }.size(48.dp)
-                .pointerInput(which) {
-                    detectDragGestures(
-                        onDragStart = { ed.selHandleStart(which) },
-                        onDragEnd = { ed.selEnd() },
-                        onDragCancel = { ed.selEnd() }
-                    ) { ch, d -> ch.consume(); ed.selNudge(Offset(d.x, d.y)) }
-                },
-            Alignment.Center
-        ) {
-            Box(
-                Modifier.size(22.dp).shadow(2.dp, CircleShape).clip(
-                    if (isStart) RoundedCornerShape(50, 0, 50, 50) else RoundedCornerShape(0, 50, 50, 50)
-                ).background(pal.p)
-            )
-        }
+    fun undo() {
+        if (reading) return
+        commit()
+        if (hi <= 0) return
+        hi--; load(hist[hi])
     }
-    H(1, a)
-    H(2, f)
-}
 
-/** Dipisah dari NoteScreen supaya tidak terjebak receiver ColumnScope milik Column di luarnya. */
-@Composable
-fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boolean, holdH: () -> Int) {
-    val recOn = ed.recActive
-    // judul sedang diketik: kapsul judul (tebal / miring / warna) menggantikan kapsul isi catatan
-    val titleBarOn = ed.titleFocus && !ed.reading && !ed.findOn && !ed.ink.on && ed.sheet == 0
-    SideEffect { ed.barOn = showBar || recOn || ed.sheet != 0 || titleBarOn }
-    // Tinggi bilah berubah tiap frame saat bilah / sheet beranimasi. Kalau langsung ditulis ke ed.barH, SETIAP blok teks
-    // ikut recompose + restart efek tiap frame (penyebab sheet "+" dan "A" lemot). Sekarang baru diterapkan setelah animasi tenang.
-    var rawBarH by remember { mutableStateOf(0f) }
-    LaunchedEffect(Unit) {
-        androidx.compose.runtime.snapshotFlow { rawBarH }.collectLatest { h -> delay(80); ed.barH = h }
+    fun redo() {
+        if (reading) return
+        commit()
+        if (hi >= hist.size - 1) return
+        hi++; load(hist[hi])
     }
-    Box(Modifier.fillMaxSize()) {
-        // kartu rekaman + kapsul alat dalam satu kolom yang diukur bersama (barH), jadi teks / kursor tidak pernah tertutup
-        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().onSizeChanged { rawBarH = it.height.toFloat(); ed.barHLive = rawBarH }) {
-            AnimatedVisibility(
-                visible = recOn,
-                enter = fadeIn(tween(220, easing = Emph)) +
-                    scaleIn(spring(.8f, 380f), .86f, TransformOrigin(.9f, 1f)) +
-                    expandVertically(tween(300, easing = Emph)),
-                exit = fadeOut(tween(160)) +
-                    scaleOut(tween(220, easing = Emph), .9f, TransformOrigin(.9f, 1f)) +
-                    shrinkVertically(tween(260, easing = Emph))
-            ) {
-                RecordCard(vm)
-            }
-            DocSheet(ed, act, vm, holdH())
-            // bilah datar: gerak kecil + pudar, karena keyboard sudah ikut bergerak sendiri
-            AnimatedVisibility(
-                visible = showBar && ed.sheet == 0,
-                enter = fadeIn(tween(160, delayMillis = 140)) + expandVertically(tween(280, easing = EmphDecel), expandFrom = Alignment.Top),
-                // sheet membuka => kapsul hilang seketika (tanpa menyusut), supaya tidak ada gerakan ganda di atas sheet
-                exit = if (ed.sheet != 0) androidx.compose.animation.ExitTransition.None
-                else fadeOut(tween(140)) + shrinkVertically(tween(260, easing = Emph), shrinkTowards = Alignment.Top)
-            ) {
-                DocBar(ed, act)
-            }
-            AnimatedVisibility(
-                visible = titleBarOn,
-                enter = fadeIn(tween(160, delayMillis = 140)) + expandVertically(tween(280, easing = EmphDecel), expandFrom = Alignment.Top),
-                exit = fadeOut(tween(140)) + shrinkVertically(tween(260, easing = Emph), shrinkTowards = Alignment.Top)
-            ) {
-                TitleBar(ed, vm)
+
+    private fun load(s: Snap) {
+        blocks = s.bl
+        reseedAll()
+        selImg = null
+        val k = s.key
+        if (k != null && tf.containsKey(k)) focusAt(k, (s.sel.start - 1).coerceAtLeast(0))
+        tick++
+        dirty()
+    }
+
+    // ---------- simpan ----------
+    fun dirty() {
+        chg = true
+        sJob?.cancel()
+        sJob = scope.launch { delay(450); flush() }
+    }
+
+    fun titleChanged(t: String) {
+        title = t.replace("\n", " ")
+        dirty()
+    }
+
+    fun flush() {
+        sJob?.cancel()
+        if (!chg) return
+        chg = false
+        commit()
+        vm.saveNote(noteId, title, inkSyncP(blocks))
+    }
+
+    /** Ganti blok transkrip lama dengan yang baru (atau sisipkan di akhir isi catatan). */
+    fun putTranscript(old: List<String>, nw: List<Blk>) {
+        commit()
+        if (focus != null && keyBlock(focus!!) in old) focus = null
+        blocks = putBlocks(blocks, old, nw)
+        old.forEach { tf.remove(it) }
+        nw.forEach { seed(it) }
+        norm()
+        afterStructural()
+    }
+
+    /** Rekaman suara sedang berjalan untuk catatan ini. */
+    val recActive: Boolean get() = vm.rec.noteId == noteId
+
+    fun startVoice() {
+        flush()
+        vm.startRec(noteId)
+    }
+
+    fun leave() {
+        flush()
+        if (vm.rec.noteId == noteId) vm.stopRec()   // keluar dari catatan = menyelesaikan rekaman
+        vm.player.stop()                             // lepaskan pemutar
+        vm.dropIfEmpty(noteId, title, blocks)
+    }
+
+    // ---------- cari dalam catatan ----------
+    var findOn by mutableStateOf(false)
+    var findQ by mutableStateOf("")
+    var findI by mutableStateOf(0)
+    private var hitsFor: List<Blk>? = null
+    private var hitsT = ""
+    private var hitsQ = ""
+    private var hitsC: List<FHit> = emptyList()
+
+    /** Semua kecocokan (judul dulu, lalu isi menurut urutan dokumen). Membaca state, jadi pemanggil ikut berlangganan. */
+    fun hitList(): List<FHit> {
+        val q = findQ
+        val bl = blocks
+        val tt = title
+        if (!findOn || q.isBlank()) return emptyList()
+        if (hitsFor === bl && hitsQ == q && hitsT == tt) return hitsC
+        val out = ArrayList<FHit>()
+        fun scan(key: String, t: String) {
+            var i = t.indexOf(q, 0, ignoreCase = true)
+            while (i >= 0) {
+                out.add(FHit(key, i, i + q.length))
+                i = t.indexOf(q, i + q.length, ignoreCase = true)
             }
         }
+        scan("@t", tt)
+        for (k in selKeys()) scan(k, rtOf(k).t)
+        hitsFor = bl; hitsQ = q; hitsT = tt; hitsC = out
+        return out
+    }
+
+    fun hitsOf(key: String): List<FHit> = hitList().filter { it.key == key }
+
+    fun curHit(): FHit? {
+        val l = hitList()
+        return if (l.isEmpty()) null else l[findI.coerceIn(0, l.size - 1)]
+    }
+
+    fun findStep(d: Int) {
+        val n = hitList().size
+        if (n == 0) return
+        findI = ((findI.coerceIn(0, n - 1) + d) % n + n) % n
+    }
+
+    fun openFind() {
+        if (selOn) clearSel()
+        selImg = null; pickQuote = false; miniBar = false
+        findQ = ""; findI = 0
+        findOn = true
+    }
+
+    /** Teks pencarian sengaja tidak dihapus: bilah cari masih terlihat selama animasi keluar. Direset saat openFind(). */
+    fun closeFind() {
+        findOn = false
+    }
+
+    fun enterReading() {
+        commit()
+        if (ink.on) ink.toggle(this); reading = true; selImg = null; pickQuote = false; miniBar = false; sheet = 0; sub = 0; sheetPage = 0; clearReq++
+    }
+
+    fun exitReading(key: String? = null, off: Int = 0) {
+        selOn = false; pa = null; pf = null; selBack = null; selDrag = false
+        reading = false
+        if (key != null) focusAt(key, off)
     }
 }
