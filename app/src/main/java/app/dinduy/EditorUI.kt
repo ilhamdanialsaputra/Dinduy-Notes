@@ -577,53 +577,7 @@ fun BlockView(ed: Ed, vm: AppVM, b: Blk, ordN: Int, dm: Dm, fold: Fold? = null, 
             val (il, ir) = fitInd(b.il, b.ir, ed.widthDp)
             TF(ed, b.id, st.aligned(b), Modifier.fillMaxWidth().padding(start = il.dp, end = ir.dp, top = (fs * .4f).dp, bottom = (fs * .5f).dp))
         }
-        "q" -> {
-            val q = qs(b.k, pal)
-            val (il, ir) = fitInd(b.il, b.ir, ed.widthDp)
-            Box(
-                Modifier.fillMaxWidth().padding(start = il.dp, end = ir.dp, bottom = bottom).clip(q.shape).background(q.bg)
-                    .then(if (q.border) Modifier.border(3.dp, pal.p, q.shape) else Modifier)
-                    .drawBehind { if (q.bar) drawRect(pal.owc, size = Size(7.dp.toPx(), size.height)) }
-                    .padding(horizontal = 22.dp, vertical = 18.dp)
-            ) {
-                Column {
-                    if (q.label != null) {
-                        T(
-                            q.label.uppercase(), fs * .7f * 1.05f, 900, if (b.k == "def") pal.p else q.fg,
-                            Modifier.padding(bottom = (fs * .45f * .7f).dp), ls = .12f, alpha = if (b.k == "def") 1f else .85f
-                        )
-                    }
-                    TF(ed, b.id, baseStyle(pal, dm, q.fg, fs * 1.05f, 500).aligned(b), Modifier.fillMaxWidth())
-                }
-            }
-        }
-        "code" -> {
-            Box(Modifier.fillMaxWidth().padding(bottom = bottom).clip(RoundedCornerShape(28.dp)).background(pal.c3).padding(20.dp)) {
-                Column {
-                    if (b.l.isNotEmpty()) {
-                        T(
-                            b.l.uppercase(), 12f, 900, pal.op,
-                            Modifier.padding(bottom = 14.dp).clip(RoundedCornerShape(12.dp)).background(pal.p)
-                                .padding(horizontal = 12.dp, vertical = 4.dp), ls = .1f
-                        )
-                    }
-                    HBox(Modifier.horizontalScroll(rememberScrollState())) {
-                        TF(
-                            ed, b.id,
-                            TextStyle(
-                                color = pal.os, fontFamily = FontFamily.Monospace, fontSize = (fs * .82f).sp,
-                                lineHeight = (fs * .82f * 1.55f).sp
-                            ),
-                            Modifier.widthIn(min = 240.dp), wrap = false
-                        )
-                    }
-                }
-            }
-        }
-        "hr" -> Box(
-            Modifier.fillMaxWidth().padding(vertical = (fs * .9f).dp).height(8.dp)
-                .clip(RoundedCornerShape(4.dp)).background(pal.sc)
-        )
+        "q", "code", "hr" -> BoxBlock(ed, b, dm, pal)
         "tbl" -> TableView(ed, b, dm, pal)
         "img" -> ImgView(ed, vm, b, dm)
         "lnk" -> LinkCard(ed, b, dm)
@@ -862,7 +816,7 @@ private fun TableTab(ed: Ed, b: Blk, active: Boolean, lifted: Boolean, pal: Pal)
             .background(if (active || lifted) pal.p else pal.c4)
             .holdDrag(
                 true,
-                onStart = { if (ed.ink.on) false else { ed.mvBegin(b.id, ""); true } },
+                onStart = { pos -> if (ed.ink.on) false else { ed.mvBegin(b.id, "", pos.y); true } },   // pos.y = letak jari di tab: acuan gulir-tepi
                 onMove = { _, d -> ed.mvDrag(d.x, d.y) },
                 onEnd = { ok -> ed.mvEnd(ok) },
                 lead = 300L   // tekan ~0,1 detik saja: cukup untuk membedakan dari gulir halaman
@@ -1433,6 +1387,26 @@ private fun tblHeightDp(ed: Ed, b: Blk, dm: Dm, pal: Pal, tm: TextMeasurer, dn: 
     return tot + (if (ed.reading) 0f else 28f)
 }
 
+/** Perkiraan tinggi (dp) kutipan / kode / garis sebelum tampilannya terukur. */
+private fun boxHeightEst(ed: Ed, b: Blk, dm: Dm, pal: Pal, tm: TextMeasurer, dn: Density): Float {
+    val fs = dm.fs
+    val w = ed.widthDp * b.bw.coerceIn(.2f, 1f)
+    return when (b.ty) {
+        "hr" -> 8f + fs * 1.8f
+        "q" -> {
+            val q = qs(b.k, pal)
+            val avail = ((w - 44f) * dn.density).toInt().coerceAtLeast(1)
+            val fz = fs * 1.05f
+            val h = tm.measure(styled(b.r, b.r.t, 0, pal, fz), baseStyle(pal, dm, q.fg, fz, 500), constraints = Constraints(maxWidth = avail)).size.height / dn.density
+            h + 36f + (if (q.label != null) fs * .7f * 1.05f * 1.4f + fs * .45f * .7f else 0f)
+        }
+        else -> {
+            val lines = b.r.t.count { it == '\n' } + 1
+            lines * fs * .82f * 1.55f + 40f + (if (b.l.isNotEmpty()) 12f * 1.4f + 8f + 14f else 0f)
+        }
+    }
+}
+
 /**
  * Simulasi aliran teks: blok setelah gambar diukur pada lebar sempit sampai tinggi gambar habis.
  * Paragraf yang melewati dasar gambar dipotong barisnya (baris atas sempit, sisanya selebar penuh).
@@ -1447,9 +1421,14 @@ private fun planFloat(ed: Ed, i: Int, dm: Dm, pal: Pal, tm: TextMeasurer, dn: De
     val imgH: Float
     if (b.ty == "tbl") {
         // tabel mengambang: lebar = jumlah lebar kolom, tinggi = hasil ukur isi sel
-        left = true
+        left = b.alOf() != "r"
         imgW = tblWidths(b, ed.widthDp).sum() + 3f
         imgH = tblHeightDp(ed, b, dm, pal, tm, dn)
+    } else if (b.isBox) {
+        // kutipan / kode / garis: sama seperti foto; lebar = lebar relatif, tinggi = hasil ukur tampilan (perkiraan sebelum terukur)
+        left = b.alOf() != "r"
+        imgW = ed.widthDp * b.bw.coerceIn(.2f, 1f)
+        imgH = ed.objH[b.id] ?: boxHeightEst(ed, b, dm, pal, tm, dn)
     } else {
         val m = b.im[0]
         left = m.al == "l"
@@ -1457,7 +1436,7 @@ private fun planFloat(ed: Ed, i: Int, dm: Dm, pal: Pal, tm: TextMeasurer, dn: De
         imgH = imgW / m.a.coerceIn(.2f, 5f)
     }
     val indent = imgW + SIDE_GAP
-    var rem = (imgH + fs * 1.1f) * d
+    var rem = (imgH + (if (b.ty == "hr") 0f else fs * 1.1f)) * d
     val out = ArrayList<Pair<Blk, FSpec>>()
     var j = i + 1
     while (j < ed.blocks.size && rem > 0f) {
@@ -1537,6 +1516,13 @@ fun floatPlans(ed: Ed, dm: Dm): Map<String, FloatPlan> {
             out[b.id] = if (ed.tblSideOk(b)) planFloat(ed, i, dm, pal, tm, dn) else FloatPlan(emptyList())
             continue
         }
+        if (b.isBox) {
+            // kutipan / kode / garis yang sudah menempel ke kiri / kanan selalu lewat BoxFloatGroup (komposisi tidak berganti saat lebar diseret)
+            if (b.alOf() == "c") continue
+            if (out == null) out = HashMap()
+            out[b.id] = if (ed.boxSideOk(b)) planFloat(ed, i, dm, pal, tm, dn) else FloatPlan(emptyList())
+            continue
+        }
         if (b.ty != "img" || b.im.size != 1 || b.im[0].al == "c") continue
         val p = if (ed.sideOk(b)) planFloat(ed, i, dm, pal, tm, dn) else FloatPlan(emptyList())
         if (out == null) out = HashMap()
@@ -1549,6 +1535,7 @@ fun floatPlans(ed: Ed, dm: Dm): Map<String, FloatPlan> {
 @Composable
 fun FloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<String, Int>, dm: Dm) {
     if (b.ty == "tbl") { TblFloatGroup(ed, vm, b, plan, od, dm); return }
+    if (b.isBox) { BoxFloatGroup(ed, vm, b, plan, od, dm); return }
     val m = b.im[0]
     val sel = ed.selImg?.takeIf { it.first == b.id }?.second
     val bottom = (dm.fs * 1.1f).dp
@@ -1605,12 +1592,195 @@ private fun TblFloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<St
             }
         }
         Box(
-            Modifier.align(Alignment.TopStart)
+            Modifier.align(when (b.alOf()) { "r" -> Alignment.TopEnd; "c" -> Alignment.TopCenter; else -> Alignment.TopStart })
                 .zIndex(if (lifted) 3f else 1f)
                 .graphicsLayer {
                     if (lifted) { translationX = ed.mvX; translationY = ed.mvY; scaleX = 1.03f; scaleY = 1.03f; alpha = .94f }
                 }
-        ) { TableView(ed, b, dm, pal, if (narrow) Modifier.width(tw) else Modifier.fillMaxWidth()) }
+        ) { TableView(ed, b, dm, pal, if (narrow || (b.alOf() != "l" && tw.value < ed.widthDp)) Modifier.width(tw) else Modifier.fillMaxWidth()) }
+    }
+}
+
+/** Kutipan / kode / garis pemisah di kiri / kanan dengan paragraf sesudahnya mengalir di sampingnya (sama seperti foto). */
+@Composable
+private fun BoxFloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<String, Int>, dm: Dm) {
+    val pal = LocalPal.current
+    val bottom = if (b.ty == "hr") 0f else dm.fs * 1.1f
+    val hDp = ed.objH[b.id] ?: 0f
+    val w = (ed.widthDp * b.bw.coerceIn(.2f, 1f)).dp
+    val lifted = ed.mv?.let { it.bid == b.id } == true
+    Box(Modifier.fillMaxWidth().heightIn(min = (hDp + bottom).dp)) {
+        Column(Modifier.fillMaxWidth()) {
+            plan.parts.forEach { (x, sp) ->
+                key(x.id) {
+                    Box(
+                        Modifier.padding(start = sp.ps.dp, end = sp.pe.dp, bottom = sp.extra.dp)
+                            .onGloballyPositioned { c ->
+                                val cc = ed.contentCoords
+                                if (cc != null && cc.isAttached && c.isAttached) {
+                                    ed.setPos(x.id, cc.localPositionOf(c, Offset.Zero).y, c.size.height.toFloat())
+                                }
+                            }
+                    ) { BlockView(ed, vm, x, od[x.id] ?: 1, dm, sp.fold, sp.mk) }
+                }
+            }
+        }
+        Box(
+            Modifier.align(if (b.alOf() == "r") Alignment.TopEnd else Alignment.TopStart)
+                .zIndex(if (lifted) 3f else 1f)
+                .graphicsLayer {
+                    if (lifted) { translationX = ed.mvX; translationY = ed.mvY; scaleX = 1.03f; scaleY = 1.03f; alpha = .94f }
+                }
+        ) { BoxCell(ed, b, dm, pal, Modifier.width(w)) }
+    }
+}
+
+/** Kutipan / kode / garis yang tidak mengambang: satu baris penuh, diletakkan kiri / tengah / kanan sesuai lebarnya. */
+@Composable
+private fun BoxBlock(ed: Ed, b: Blk, dm: Dm, pal: Pal) {
+    val bottom = (if (b.ty == "hr") 0f else dm.fs * 1.1f).dp
+    val full = b.bw >= .999f
+    val (il, ir) = if (full && b.ty == "q") fitInd(b.il, b.ir, ed.widthDp) else 0f to 0f
+    // satu pemanggilan BoxCell saja (tanpa cabang), supaya gestur ubah lebar tidak putus saat lebar menyentuh penuh
+    Box(
+        Modifier.fillMaxWidth().padding(start = il.dp, end = ir.dp, bottom = bottom),
+        contentAlignment = when (b.alOf()) { "l" -> Alignment.TopStart; "r" -> Alignment.TopEnd; else -> Alignment.TopCenter }
+    ) { BoxCell(ed, b, dm, pal, if (full) Modifier.fillMaxWidth() else Modifier.width((ed.widthDp * b.bw.coerceIn(.2f, 1f)).dp)) }
+}
+
+/**
+ * Satu kutipan / kode / garis lengkap dengan pegangan: gagang seret di pojok kanan atas (tekan sebentar lalu geser = pindah; dilepas di sepertiga
+ * kiri / kanan = menempel dan teks mengelilingi), dan pegangan lebar di tepi samping. Garis pemisah diangkat langsung dari barnya.
+ */
+@Composable
+private fun BoxCell(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
+    val dn = LocalDensity.current
+    val bS by rememberUpdatedState(b)
+    val hr = b.ty == "hr"
+    val focusedHere by remember(b.id) {
+        androidx.compose.runtime.derivedStateOf { val f = ed.focus; f != null && keyBlock(f) == b.id }
+    }
+    val lifted = ed.mv?.let { it.bid == b.id } == true
+    val edit = !ed.reading && !ed.ink.on
+    val al = b.alOf()
+    val rs = remember { floatArrayOf(0f, 0f) }
+    Box(modifier.onSizeChanged { ed.setObjH(bS.id, with(dn) { it.height.toDp().value }) }) {
+        BoxBody(
+            ed, b, dm, pal,
+            Modifier.fillMaxWidth().then(
+                if (hr && edit) Modifier.holdDrag(
+                    true,
+                    onStart = { pos -> ed.mvBegin(bS.id, "", pos.y); true },
+                    onMove = { _, d -> ed.mvDrag(d.x, d.y) },
+                    onEnd = { ok -> ed.mvEnd(ok) },
+                    lead = 150L
+                ) else Modifier
+            )
+        )
+        if (!hr && edit) BoxHandle(ed, b, pal, Modifier.align(Alignment.TopEnd), focusedHere)
+        if (edit && !lifted && (hr || focusedHere)) {
+            val right = al != "r"
+            val gx = if (right) 1f else -1f
+            val kk = if (al == "c") 2f else 1f
+            Grip(
+                Modifier.align(if (right) Alignment.CenterEnd else Alignment.CenterStart).size(36.dp, 88.dp),
+                0, if (right) Alignment.CenterEnd else Alignment.CenterStart,
+                onStart = { ed.commit(); rs[0] = ed.widthDp * dn.density * bS.bw.coerceIn(.2f, 1f); rs[1] = 0f },
+                onDrag = { dx, _ ->
+                    rs[1] += dx * gx * kk
+                    val cw = ed.widthDp * dn.density
+                    val minF = if (bS.ty == "hr") .2f else (150f / ed.widthDp.coerceAtLeast(150f)).coerceIn(.3f, .6f)
+                    var f = ((rs[0] + rs[1]) / cw).coerceIn(minF, 1f)
+                    if (f > .94f) f = 1f
+                    ed.boxLive(bS.id, f)
+                },
+                onEnd = { ed.commit() }
+            )
+        }
+    }
+}
+
+/** Gagang seret kutipan / kode: pil kecil bertitik di pojok kanan atas, area sentuh 56x30dp. */
+@Composable
+private fun BoxHandle(ed: Ed, b: Blk, pal: Pal, modifier: Modifier, active: Boolean) {
+    val lifted = ed.mv?.let { it.bid == b.id } == true
+    val sc by animateFloatAsState(if (lifted) 1.15f else 1f, spring(.6f, 500f), label = "bh")
+    val on = active || lifted
+    val dots = if (on) pal.op else pal.osv
+    val bid by rememberUpdatedState(b.id)
+    Box(
+        modifier.size(56.dp, 22.dp).holdDrag(
+            true,
+            onStart = { pos -> if (ed.ink.on) false else { ed.mvBegin(bid, "", pos.y); true } },
+            onMove = { _, d -> ed.mvDrag(d.x, d.y) },
+            onEnd = { ok -> ed.mvEnd(ok) },
+            lead = 300L
+        ),
+        Alignment.Center
+    ) {
+        Box(
+            Modifier.graphicsLayer { scaleX = sc; scaleY = sc }.size(40.dp, 16.dp).clip(CircleShape)
+                .background(if (on) pal.p else pal.c4.copy(alpha = .85f)),
+            Alignment.Center
+        ) {
+            Canvas(Modifier.size(22.dp, 8.dp)) {
+                val r = 1.5.dp.toPx()
+                for (i in 0 until 4) for (j in 0 until 2) {
+                    drawCircle(dots, r, Offset(size.width * (i + .5f) / 4f, size.height * (j + .5f) / 2f))
+                }
+            }
+        }
+    }
+}
+
+/** Isi kutipan / kode / garis tanpa letak dan pegangan. Lebarnya ditentukan pemanggil lewat [modifier]. */
+@Composable
+private fun BoxBody(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
+    val fs = dm.fs
+    when (b.ty) {
+        "q" -> {
+            val q = qs(b.k, pal)
+            Box(
+                modifier.clip(q.shape).background(q.bg)
+                    .then(if (q.border) Modifier.border(3.dp, pal.p, q.shape) else Modifier)
+                    .drawBehind { if (q.bar) drawRect(pal.owc, size = Size(7.dp.toPx(), size.height)) }
+                    .padding(horizontal = 22.dp, vertical = 18.dp)
+            ) {
+                Column {
+                    if (q.label != null) {
+                        T(
+                            q.label.uppercase(), fs * .7f * 1.05f, 900, if (b.k == "def") pal.p else q.fg,
+                            Modifier.padding(bottom = (fs * .45f * .7f).dp), ls = .12f, alpha = if (b.k == "def") 1f else .85f
+                        )
+                    }
+                    TF(ed, b.id, baseStyle(pal, dm, q.fg, fs * 1.05f, 500).aligned(b), Modifier.fillMaxWidth())
+                }
+            }
+        }
+        "code" -> {
+            Box(modifier.clip(RoundedCornerShape(28.dp)).background(pal.c3).padding(20.dp)) {
+                Column {
+                    if (b.l.isNotEmpty()) {
+                        T(
+                            b.l.uppercase(), 12f, 900, pal.op,
+                            Modifier.padding(bottom = 14.dp).clip(RoundedCornerShape(12.dp)).background(pal.p)
+                                .padding(horizontal = 12.dp, vertical = 4.dp), ls = .1f
+                        )
+                    }
+                    HBox(Modifier.horizontalScroll(rememberScrollState())) {
+                        TF(
+                            ed, b.id,
+                            TextStyle(
+                                color = pal.os, fontFamily = FontFamily.Monospace, fontSize = (fs * .82f).sp,
+                                lineHeight = (fs * .82f * 1.55f).sp
+                            ),
+                            Modifier.widthIn(min = if (b.bw >= .999f) 240.dp else 100.dp), wrap = false
+                        )
+                    }
+                }
+            }
+        }
+        else -> Box(modifier.padding(vertical = (fs * .9f).dp).height(8.dp).clip(RoundedCornerShape(4.dp)).background(pal.sc))
     }
 }
 
