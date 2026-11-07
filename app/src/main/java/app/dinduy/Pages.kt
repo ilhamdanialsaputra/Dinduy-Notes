@@ -359,8 +359,8 @@ private fun MdRow(pos: Int, onSave: () -> Unit, onCopy: () -> Unit) {
     SCard(pos, null, PaddingValues(start = 20.dp, end = 8.dp, top = 10.dp, bottom = 10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                T("Markdown (.md)", 16f, 500, pal.os)
-                T("Save or copy as text", 14f, 400, pal.osv, lh = 1.3f)
+                T("Text only", 16f, 500, pal.os)
+                T("Save or copy the words", 14f, 400, pal.osv, lh = 1.3f)
             }
             IconBtn("dl", pal.os, onSave, size = 44.dp, bg = pal.c4)
             Spacer(Modifier.width(6.dp))
@@ -376,8 +376,8 @@ private fun DinduyRow(pos: Int, onShare: () -> Unit) {
     SCard(pos, null, PaddingValues(start = 20.dp, end = 8.dp, top = 10.dp, bottom = 10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                T("Dinduy file (.dinduy)", 16f, 500, pal.os)
-                T("Opens only in Dinduy. Images, drawings, audio, and PDFs come along", 14f, 400, pal.osv, lh = 1.3f)
+                T("Share note", 16f, 500, pal.os)
+                T("Opens in Dinduy, with everything in it", 14f, 400, pal.osv, lh = 1.3f)
             }
             ShareNodesBtn(pal.os, pal.c4, onShare)
         }
