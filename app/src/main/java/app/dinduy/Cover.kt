@@ -27,6 +27,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -68,8 +70,11 @@ private fun coverRezoom(p: Float, v0: Float, v1: Float): Float {
     return ((c - v1 / 2f) / (1f - v1)).coerceIn(0f, 1f)
 }
 
-/** Gambar mengisi bingkai (cover-fit), dipangkas dengan titik fokus (px, py) dan zoom z. */
-fun DrawScope.drawCover(bmp: ImageBitmap, z0: Float, px: Float, py: Float) {
+/** Sedikit meredam warna foto di mode terang supaya sampul tak terlalu mencolok (kejenuhan 100% -> 84%). */
+private val SOFT_COVER = ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(.84f) })
+
+/** Gambar mengisi bingkai (cover-fit), dipangkas dengan titik fokus (px, py) dan zoom z. [soft] = redam warna (sampul di editor, mode terang). */
+fun DrawScope.drawCover(bmp: ImageBitmap, z0: Float, px: Float, py: Float, soft: Boolean = false) {
     val bw = size.width
     val bh = size.height
     if (bw < 1f || bh < 1f) return
@@ -83,7 +88,8 @@ fun DrawScope.drawCover(bmp: ImageBitmap, z0: Float, px: Float, py: Float) {
     val oy = ((ih - vh) * py).coerceIn(0f, ih - vh)
     drawImage(
         bmp, IntOffset(ox.roundToInt(), oy.roundToInt()), IntSize(vw.roundToInt(), vh.roundToInt()),
-        dstSize = IntSize(bw.roundToInt(), bh.roundToInt()), filterQuality = FilterQuality.Medium
+        dstSize = IntSize(bw.roundToInt(), bh.roundToInt()), filterQuality = FilterQuality.Medium,
+        colorFilter = if (soft) SOFT_COVER else null
     )
 }
 
@@ -132,7 +138,7 @@ fun EditorCover(vm: AppVM, d: Note, scroll: () -> Int) {
             }
             .background(pal.c3)
     ) {
-        Canvas(Modifier.fillMaxSize()) { if (bmp != null) drawCover(bmp, d.cz, d.cx, d.cy) }
+        Canvas(Modifier.fillMaxSize()) { if (bmp != null) drawCover(bmp, d.cz, d.cx, d.cy, soft = !pal.dark) }
         Box(
             Modifier.fillMaxSize().drawBehind {
                 val e = cSmooth(vm.openP.value)
@@ -143,12 +149,14 @@ fun EditorCover(vm: AppVM, d: Note, scroll: () -> Int) {
                             .28f to clear,
                             .42f to clear,
                             1f to pal.s.copy(alpha = e)
-                        ) else Array(16) { i ->
-                            // terang: kurva smootherstep (awal dan akhirnya sangat landai) dari 18% sampai tepi bawah:
-                            // foto larut ke kertas tanpa tepi tegas, tanpa pita kabut di tengah
-                            val u = i / 15f
-                            val a = u * u * u * (u * (u * 6f - 15f) + 10f)
-                            (.18f + .82f * u) to pal.s.copy(alpha = a * e)
+                        ) else arrayOf(0f to pal.s.copy(alpha = .20f * e)) + Array(14) { i ->
+                            // terang: kerudung tipis di tepi atas (ikon status tetap terbaca di atas foto gelap), lalu foto larut ke kertas
+                            // lewat kurva smootherstep yang sangat landai di awal dan mendarat halus di kertas (tanpa tepi tegas):
+                            // ~5% di 30% tinggi, ~33% di 45%, ~70% di 60% (area judul: teks gelap tetap kontras), penuh di bagian paling bawah
+                            val u = i / 13f
+                            val t = (u * 1.18f).coerceAtMost(1f)
+                            val a = t * t * t * (t * (t * 6f - 15f) + 10f)
+                            (.16f + .84f * u) to pal.s.copy(alpha = a * e)
                         }
                     )
                 )
