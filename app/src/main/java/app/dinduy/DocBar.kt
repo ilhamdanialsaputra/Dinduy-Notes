@@ -273,6 +273,7 @@ fun DocBar(ed: Ed, act: Actions) {
                     } else {
                         Tbn({ Ic("ul", it) }, isLi && blk?.lt == "b", !convOff) { ed.setList("b"); ed.sub = 0 }
                         Tbn({ Ic("ol", it) }, isLi && blk?.lt == "o", !convOff) { ed.setList("o"); ed.sub = 0 }
+                        Tbn({ LetterListIcon(it) }, isLi && blk?.lt == "a", !convOff) { ed.setList("a"); ed.sub = 0 }
                         Tbn({ Ic("chk", it) }, isLi && blk?.lt == "c", !convOff) { ed.setList("c"); ed.sub = 0 }
                         Sep()
                         Tbn({ Ic("out", it) }, false, isLi) { ed.indent(-1) }
@@ -327,6 +328,7 @@ fun DocBar(ed: Ed, act: Actions) {
                     listOf("ar" to "+ Row", "ac" to "+ Column", "dr" to "− Row", "dc" to "− Column").forEach { (k, l) ->
                         Chip(l, pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.tOp(k) }
                     }
+                    if (blk != null && blk.cw.isNotEmpty()) Chip("Reset widths", pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.tblResetCols(blk.id) }
                     Chip("Delete table", pal.ec, pal.oec, RoundedCornerShape(23.dp)) { ed.tOp("dt") }
                 }
                 3 -> Row(
