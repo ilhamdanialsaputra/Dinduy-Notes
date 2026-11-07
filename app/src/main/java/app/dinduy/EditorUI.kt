@@ -45,6 +45,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -713,11 +714,11 @@ fun tblWidths(b: Blk, viewDp: Float): List<Float> {
     return List(n) { c -> b.cw.getOrNull(c)?.takeIf { it >= 40f } ?: def }
 }
 
-private const val COL_MIN = 56f
+const val COL_MIN = 56f
 private const val COL_MAX = 640f
 
 @Composable
-fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal) {
+fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier = Modifier) {
     val cols = b.tb.firstOrNull()?.size ?: 1
     val dens = LocalDensity.current.density
     val haptic = LocalHapticFeedback.current
@@ -736,42 +737,60 @@ fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal) {
     var viewW by remember { mutableStateOf(0) }
     var dragC by remember { mutableStateOf(-1) }
     var snapOn by remember { mutableStateOf(false) }
-    // [0] lebar yang sedang ditampilkan (dp), [1] arah geser terakhir (px), [2] lebar mentah tanpa tempel (dp)
-    val dw = remember { floatArrayOf(0f, 0f, 0f) }
+    // [0] lebar yang ditampilkan (dp), [1] gulir-tepi sudah aktif (0/1), [2] lebar mentah (dp), [3] x jari sekarang (px, ruang layar),
+    // [4] x jari saat mulai, [5] -, [6] lebar kolom saat mulai (dp), [7] total geseran otomatis (px), [8] tepi kanan tabel di layar (px)
+    val dw = remember { FloatArray(9) }
     val bS by rememberUpdatedState(b)
     val wsS by rememberUpdatedState(ws)
     val lifted = ed.mv?.let { it.bid == b.id } == true
     val active = fk != null && !ed.reading && ed.mv == null
     val showH = (active || dragC >= 0) && !lifted
 
-    // pegangan ditahan di tepi kanan layar: tabel ikut tergulir dan kolom terus melebar (jempol tak perlu bolak-balik)
+    // Lebar kolom dihitung MUTLAK dari posisi jari di layar (bukan dari selisih per-frame): pegangan ikut bergeser saat kolom
+    // melebar, jadi pendekatan selisih membuat lebar loncat-loncat. Dengan titik awal tetap, tepi kolom selalu mengikuti jari.
+    fun applyW(c: Int) {
+        val others = wsS.sum() - wsS.getOrElse(c) { def }
+        val floated = bS.ta == "l" || bS.ta == "r"
+        val cap = if (floated) minOf(COL_MAX, ed.widthDp * ed.maxSideW() - 3f - others) else COL_MAX   // tabel yang dililit teks tak boleh melebihi batasnya
+        val raw = dw[6] + ((dw[3] - dw[4]) + dw[7]) / dens
+        dw[2] = raw.coerceIn(COL_MIN, maxOf(COL_MIN, cap))
+        // menempel ke lebar bawaan saat sudah dekat (getar kecil), seperti gambar menempel ke rasio aslinya
+        val near = kotlin.math.abs(dw[2] - def) < 8f && def <= cap
+        if (near && !snapOn) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        snapOn = near
+        dw[0] = if (near) def else dw[2]
+        ed.tblCol(bS.id, c, dw[0])
+    }
+
+    // Jari ditahan di tepi kanan layar: tabel ikut tergulir dan kolom terus melebar. Hanya aktif bila jari BENAR-BENAR berada di zona tepi
+    // setelah sengaja digeser ke sana; sebelumnya, kolom terakhir melebar sendiri begitu disentuh.
     LaunchedEffect(dragC) {
         if (dragC < 0) return@LaunchedEffect
         val c = dragC
+        val zone = 40f * dens
         while (true) {
             delay(16)
-            if (dw[1] < 0f || viewW <= 0) continue
-            var edge = 0f
-            for (k in 0..c.coerceAtMost(wsS.size - 1)) edge += wsS[k]
-            val zone = 44f * dens
-            val over = edge * dens - hs.value - (viewW - zone)
-            if (over > 0f) {
-                val v = (over / zone).coerceIn(0f, 1f) * 12f * dens
-                dw[2] = (dw[2] + v / dens).coerceAtMost(COL_MAX)
-                dw[0] = if (kotlin.math.abs(dw[2] - def) < 8f) def else dw[2]
-                ed.tblCol(bS.id, c, dw[0])
-                hs.scrollBy(v)
+            if (viewW <= 0) continue
+            val inZone = dw[3] > dw[8] - zone
+            if (dw[1] == 0f && (!inZone || dw[3] - dw[4] > 36f * dens)) dw[1] = 1f   // 'siap': jari pernah keluar zona atau sudah geser jauh ke kanan
+            if (dw[1] == 1f && inZone) {
+                val f = ((dw[3] - (dw[8] - zone)) / zone).coerceIn(0f, 1f)
+                val v = f * f * 5f * dens          // maks ~5dp per frame, naik pelan-pelan
+                val before = dw[2]
+                dw[7] += v
+                applyW(c)
+                if (dw[2] == before) dw[7] -= v else hs.scrollBy(v)
             }
         }
     }
 
-    Column(Modifier.fillMaxWidth().padding(bottom = (dm.fs * 1.1f).dp)) {
+    Column(modifier.fillMaxWidth().padding(bottom = (dm.fs * 1.1f).dp)) {
         // tab pegangan di pojok kiri atas: tekan sebentar lalu geser = angkat dan pindahkan seluruh tabel (seperti foto)
         if (!ed.reading) TableTab(ed, b, active, lifted, pal)
         HBox(
             Modifier.clip(RoundedCornerShape(4.dp)).background(pal.c2)
                 .border(1.5.dp, if (active) pal.p.copy(alpha = .75f) else pal.osv.copy(alpha = .75f), RoundedCornerShape(4.dp))   // garis luar jelas di tema terang maupun gelap
-                .onSizeChanged { viewW = it.width }
+                .onGloballyPositioned { viewW = it.size.width; dw[8] = it.positionInRoot().x + it.size.width }
                 .horizontalScroll(hs)
         ) {
             Column {
@@ -804,21 +823,14 @@ fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal) {
                         if (head) for (c in 0 until cols) key(c) {
                             ColHandle(
                                 pal, c == cols - 1, showH, dragC == c,
-                                onStart = {
+                                onStart = { rx ->
                                     ed.commit()
                                     dragC = c; snapOn = false
                                     dw[0] = wsS.getOrElse(c) { def }; dw[1] = 0f; dw[2] = dw[0]
+                                    dw[3] = rx; dw[4] = rx; dw[6] = dw[0]; dw[7] = 0f
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 },
-                                onDrag = { dx ->
-                                    dw[1] = dx
-                                    dw[2] = (dw[2] + dx / dens).coerceIn(COL_MIN, COL_MAX)
-                                    // menempel ke lebar bawaan saat sudah dekat (getar kecil), seperti gambar menempel ke rasio aslinya
-                                    val near = kotlin.math.abs(dw[2] - def) < 8f
-                                    if (near && !snapOn) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    snapOn = near
-                                    dw[0] = if (near) def else dw[2]
-                                    ed.tblCol(bS.id, c, dw[0])
-                                },
+                                onDrag = { rx -> dw[3] = rx; applyW(c) },
                                 onEnd = { dragC = -1; snapOn = false; ed.commit() },
                                 onReset = { ed.commit(); ed.tblCol(bS.id, c, 0f); ed.commit() }
                             )
@@ -858,13 +870,15 @@ private fun TableTab(ed: Ed, b: Blk, active: Boolean, lifted: Boolean, pal: Pal)
 }
 
 /**
- * Pegangan lebar kolom di tepi kanan sel kepala: batang kecil yang terlihat, area sentuh 44dp.
+ * Pegangan lebar kolom di tepi kanan sel kepala: batang kecil yang terlihat, area sentuh 44dp (kolom terakhir 32dp, di dalam tabel).
  * Seret ke kiri / kanan untuk mengubah lebar, ketuk dua kali untuk mengembalikan ke lebar otomatis.
+ * Hanya geseran HORIZONTAL yang diambil (lewat ambang geser), jadi menggulir halaman ke atas / bawah dari sini tidak mengubah kolom.
+ * Posisi jari dilaporkan dalam ruang layar (bukan relatif ke pegangan yang ikut bergeser).
  */
 @Composable
 private fun ColHandle(
     pal: Pal, last: Boolean, show: Boolean, dragging: Boolean,
-    onStart: () -> Unit, onDrag: (Float) -> Unit, onEnd: () -> Unit, onReset: () -> Unit
+    onStart: (Float) -> Unit, onDrag: (Float) -> Unit, onEnd: () -> Unit, onReset: () -> Unit
 ) {
     val st by rememberUpdatedState(onStart)
     val dr by rememberUpdatedState(onDrag)
@@ -872,13 +886,24 @@ private fun ColHandle(
     val rs by rememberUpdatedState(onReset)
     val sc by animateFloatAsState(if (dragging) 1.45f else 1f, spring(.6f, 600f), label = "chs")
     val al by animateFloatAsState(if (show) 1f else 0f, tween(160), label = "cha")
+    val co = remember { arrayOfNulls<androidx.compose.ui.layout.LayoutCoordinates>(1) }
     Box(
         Modifier
+            .onGloballyPositioned { co[0] = it }
             .pointerInput(show) { if (show) detectTapGestures(onDoubleTap = { rs() }) }
             .pointerInput(show) {
-                if (show) detectDragGestures(
-                    onDragStart = { st() }, onDragEnd = { en() }, onDragCancel = { en() }
-                ) { ch, d -> ch.consume(); dr(d.x) }
+                if (show) awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val rootX = { p: Offset -> co[0]?.takeIf { it.isAttached }?.localToRoot(p)?.x ?: p.x }
+                    val slop = androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation(down.id) { ch, _ -> ch.consume() }
+                        ?: return@awaitEachGesture
+                    st(rootX(slop.position))
+                    try {
+                        androidx.compose.foundation.gestures.horizontalDrag(slop.id) { ch -> ch.consume(); dr(rootX(ch.position)) }
+                    } finally {
+                        en()
+                    }
+                }
             },
         if (last) Alignment.CenterEnd else Alignment.Center
     ) {
@@ -920,14 +945,15 @@ private fun TRow(ws: List<Dp>, head: Boolean, topLine: Boolean, fc: Int, dc: Int
         val cells = (0 until n).map { i -> ms[i].measure(Constraints(minWidth = px[i], maxWidth = px[i])) }
         val h = cells.maxOfOrNull { it.height } ?: 0
         val hw = 44.dp.roundToPx()
-        val hands = (n until ms.size).map { i -> ms[i].measure(Constraints.fixed(hw, h)) }
+        val hwL = 32.dp.roundToPx()   // pegangan kolom terakhir lebih sempit: tidak menutupi teks sel di tepi kanan
+        val hands = (n until ms.size).mapIndexed { k, i -> ms[i].measure(Constraints.fixed(if (k == n - 1) hwL else hw, h)) }
         layout(px.sum(), h) {
             var x = 0
             cells.forEachIndexed { i, p -> p.placeRelative(x, 0); x += px[i] }
             var e = 0
             hands.forEachIndexed { i, p ->
                 e += px[i]
-                p.placeRelative(if (i == n - 1) e - hw else e - hw / 2, 0)
+                p.placeRelative(if (i == n - 1) e - hwL else e - hw / 2, 0)
             }
         }
     }
@@ -1376,6 +1402,28 @@ private fun blockBM(b: Blk, pal: Pal, dm: Dm): BM? {
     }
 }
 
+/** Perkiraan tinggi tabel (dp): sel diukur pada lebar kolomnya, tinggi baris = sel tertinggi. Termasuk tab pegangan saat mode ketik. */
+private fun tblHeightDp(ed: Ed, b: Blk, dm: Dm, pal: Pal, tm: TextMeasurer, dn: Density): Float {
+    val ws = tblWidths(b, ed.widthDp)
+    val d = dn.density
+    val fsz = dm.fs * .9f
+    val lhPx = with(dn) { (fsz * 1.45f).sp.toPx() }
+    var tot = 3f
+    b.tb.forEachIndexed { r, row ->
+        val st = TextStyle(
+            fontFamily = dm.ff, fontSize = fsz.sp, lineHeight = (fsz * 1.45f).sp, fontWeight = FontWeight(if (r == 0) 850 else 400)
+        )
+        var mx = lhPx
+        row.forEachIndexed { c, cell ->
+            val avail = ((ws.getOrElse(c) { 110f } - 32f) * d).toInt().coerceAtLeast(1)
+            val res = tm.measure(styled(cell, cell.t, 0, pal, fsz), st, constraints = Constraints(maxWidth = avail))
+            mx = maxOf(mx, res.size.height.toFloat())
+        }
+        tot += mx / d + 24f + (if (r > 0) 1f else 0f)
+    }
+    return tot + (if (ed.reading) 0f else 28f)
+}
+
 /**
  * Simulasi aliran teks: blok setelah gambar diukur pada lebar sempit sampai tinggi gambar habis.
  * Paragraf yang melewati dasar gambar dipotong barisnya (baris atas sempit, sisanya selebar penuh).
@@ -1383,12 +1431,22 @@ private fun blockBM(b: Blk, pal: Pal, dm: Dm): BM? {
  */
 private fun planFloat(ed: Ed, i: Int, dm: Dm, pal: Pal, tm: TextMeasurer, dn: Density): FloatPlan {
     val b = ed.blocks[i]
-    val m = b.im[0]
     val d = dn.density
     val fs = dm.fs
-    val left = m.al == "l"
-    val imgW = ed.widthDp * m.w.coerceIn(.2f, 1f)
-    val imgH = imgW / m.a.coerceIn(.2f, 5f)
+    val left: Boolean
+    val imgW: Float
+    val imgH: Float
+    if (b.ty == "tbl") {
+        // tabel mengambang: lebar = jumlah lebar kolom, tinggi = hasil ukur isi sel
+        left = b.ta == "l"
+        imgW = tblWidths(b, ed.widthDp).sum() + 3f
+        imgH = tblHeightDp(ed, b, dm, pal, tm, dn)
+    } else {
+        val m = b.im[0]
+        left = m.al == "l"
+        imgW = ed.widthDp * m.w.coerceIn(.2f, 1f)
+        imgH = imgW / m.a.coerceIn(.2f, 5f)
+    }
     val indent = imgW + SIDE_GAP
     var rem = (imgH + fs * 1.1f) * d
     val out = ArrayList<Pair<Blk, FSpec>>()
@@ -1463,6 +1521,14 @@ fun floatPlans(ed: Ed, dm: Dm): Map<String, FloatPlan> {
     for ((i, b) in bl.withIndex()) {
         // semua gambar tunggal rata kiri/kanan selalu lewat FloatGroup, walau tak ada teks di sampingnya,
         // supaya komponen gambar tidak berganti (dan gestur ubah ukuran tidak putus) saat teks samping habis
+        if (b.ty == "tbl") {
+            // tabel rata kiri/kanan yang cukup sempit: teks sesudahnya mengalir di sampingnya, seperti gambar
+            if ((b.ta == "l" || b.ta == "r") && ed.tblSideOk(b)) {
+                if (out == null) out = HashMap()
+                out[b.id] = planFloat(ed, i, dm, pal, tm, dn)
+            }
+            continue
+        }
         if (b.ty != "img" || b.im.size != 1 || b.im[0].al == "c") continue
         val p = if (ed.sideOk(b)) planFloat(ed, i, dm, pal, tm, dn) else FloatPlan(emptyList())
         if (out == null) out = HashMap()
@@ -1474,6 +1540,7 @@ fun floatPlans(ed: Ed, dm: Dm): Map<String, FloatPlan> {
 /** Gambar di kiri/kanan dengan paragraf sesudahnya mengalir di sampingnya, lalu lanjut selebar penuh di bawahnya. */
 @Composable
 fun FloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<String, Int>, dm: Dm) {
+    if (b.ty == "tbl") { TblFloatGroup(ed, vm, b, plan, od, dm); return }
     val m = b.im[0]
     val sel = ed.selImg?.takeIf { it.first == b.id }?.second
     val bottom = (dm.fs * 1.1f).dp
@@ -1503,6 +1570,38 @@ fun FloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<String, Int>,
                     if (lifted) { translationX = ed.mvX; translationY = ed.mvY; scaleX = 1.03f; scaleY = 1.03f; alpha = .94f }
                 }
         ) { ImgCell(ed, vm, b, 0, Modifier.width(imgW).aspectRatio(ratio), sel == 0) }
+    }
+}
+
+/** Tabel di kiri/kanan dengan paragraf sesudahnya mengalir di sampingnya (sama seperti gambar mengambang). */
+@Composable
+private fun TblFloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<String, Int>, dm: Dm) {
+    val pal = LocalPal.current
+    val tw = (tblWidths(b, ed.widthDp).sum() + 3f).dp
+    val lifted = ed.mv?.let { it.bid == b.id } == true
+    Box(Modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth()) {
+            plan.parts.forEach { (x, sp) ->
+                key(x.id) {
+                    Box(
+                        Modifier.padding(start = sp.ps.dp, end = sp.pe.dp, bottom = sp.extra.dp)
+                            .onGloballyPositioned { c ->
+                                val cc = ed.contentCoords
+                                if (cc != null && cc.isAttached && c.isAttached) {
+                                    ed.setPos(x.id, cc.localPositionOf(c, Offset.Zero).y, c.size.height.toFloat())
+                                }
+                            }
+                    ) { BlockView(ed, vm, x, od[x.id] ?: 1, dm, sp.fold, sp.mk) }
+                }
+            }
+        }
+        Box(
+            Modifier.align(if (b.ta == "r") Alignment.TopEnd else Alignment.TopStart)
+                .zIndex(if (lifted) 3f else 1f)
+                .graphicsLayer {
+                    if (lifted) { translationX = ed.mvX; translationY = ed.mvY; scaleX = 1.03f; scaleY = 1.03f; alpha = .94f }
+                }
+        ) { TableView(ed, b, dm, pal, Modifier.width(tw)) }
     }
 }
 
