@@ -68,8 +68,11 @@ class Rec(private val ctx: Context, private val scope: CoroutineScope) {
     private fun newRecorder(): MediaRecorder =
         if (Build.VERSION.SDK_INT >= 31) MediaRecorder(ctx) else MediaRecorder()
 
+    @Volatile var lastError: String? = null
+
     fun start(note: String): Boolean {
-        if (mr != null) return false
+        lastError = null
+        if (mr != null) { lastError = "recorder busy"; return false }
         val nid = uid()
         val f = AudioFiles.file(ctx, nid)
         f.parentFile?.mkdirs()
@@ -85,6 +88,7 @@ class Rec(private val ctx: Context, private val scope: CoroutineScope) {
             r.prepare()
             r.start()
         } catch (e: Exception) {
+            lastError = e.javaClass.simpleName + (e.message?.let { ": $it" } ?: "")
             try { r.release() } catch (x: Exception) { }
             f.delete()
             return false
