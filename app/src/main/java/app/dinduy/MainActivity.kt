@@ -964,10 +964,17 @@ class MainActivity : ComponentActivity(), Actions {
                         // callback izin bisa datang sebelum layar RESUMED: tunggu lagi sebelum mulai merekam
                         lifecycleScope.launch {
                             awaitResumed()
-                            try {
-                                if (quickStart(vm)) QuickFx.p.animateTo(1f, spring(.8f, 480f))
-                            } catch (e: Exception) {
-                                vm.show("Can't start recording")
+                            // mikrofon kadang belum siap tepat saat layar muncul: coba ulang diam-diam, pesan galat hanya di percobaan terakhir
+                            var started = false
+                            for (k in 0 until 3) {
+                                started = quickStart(vm, quiet = k < 2)
+                                if (started || vm.rec.active) break
+                                delay(400)
+                            }
+                            if (started) {
+                                try { QuickFx.p.animateTo(1f, spring(.8f, 480f)) }
+                                catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                                catch (e: Exception) { QuickFx.p.snapTo(1f) }
                             }
                         }
                     }
