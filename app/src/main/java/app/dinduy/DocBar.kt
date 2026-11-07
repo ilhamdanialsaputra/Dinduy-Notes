@@ -266,7 +266,7 @@ fun DocBar(ed: Ed, act: Actions) {
                     if (subShown == 1) {
                         val cur = blk?.ta ?: ""
                         listOf("" to "aL", "c" to "aC", "r" to "aR", "j" to "aJ").forEach { (a, ic) ->
-                            Tbn({ if (ic == "aJ") JustifyIcon(it) else Ic(ic, it) }, cur == a, !cell && ty != "code" && ty != "img") {
+                            Tbn({ if (ic == "aJ") JustifyIcon(it) else Ic(ic, it) }, cur == a, !cell && ty != "code" && ty != "q" && ty != "hr" && ty != "tbl" && ty != "img") {
                                 ed.setAlign(a); ed.sub = 0
                             }
                         }
@@ -376,7 +376,10 @@ fun DocBar(ed: Ed, act: Actions) {
                         Sep()
                         // tombol yang tergeser tetap ada: perataan dan stabilo ketik pindah ke belakang
                         val ta = blk?.ta ?: ""
-                        DropBtn(false, ed.sub == 1, !cell && ty != "code" && ty != "img", { ed.sub = if (ed.sub == 1) 0 else 1 }) { AlignIcon(ta, it) }
+                        // tabel, kutipan, kode, garis, foto: letaknya diatur langsung dengan seret (kiri / tengah / kanan), jadi tombol perataan tidak ada
+                        if (!cell && ty != "code" && ty != "q" && ty != "hr" && ty != "tbl" && ty != "img") {
+                            DropBtn(false, ed.sub == 1, true, { ed.sub = if (ed.sub == 1) 0 else 1 }) { AlignIcon(ta, it) }
+                        }
                         Tbn({ Ic("mark", it) }, K.M in fl && !noI, !noI) { ed.sub = 0; ed.toggleFmt(K.M) }
                     }
                 }
