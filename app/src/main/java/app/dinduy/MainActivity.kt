@@ -814,10 +814,24 @@ class MainActivity : ComponentActivity(), Actions {
     }
     private val mdPicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) lifecycleScope.launch {
+            val dn = uris.filter { isDinduyUri(this@MainActivity, it) }
             val pdfs = uris.filter { isPdfUri(this@MainActivity, it) }
-            val ns = vm.importPdfs(pdfs) + vm.importMd(uris - pdfs.toSet())
-            if (ns.size == 1) vm.nav.openNote(ns[0].id, null)
-            else vm.show(if (ns.isEmpty()) "No readable files" else "Imported ${cnt(ns.size, "note")}")
+            var added = 0
+            var sid: String? = null
+            var bk = false
+            for (u in dn) {
+                when (vm.openDinduyFile(u)) {
+                    2 -> { added++; sid = vm.sharedId }
+                    1 -> bk = true
+                    else -> {}
+                }
+                if (bk) break
+            }
+            if (bk) return@launch   // cadangan penuh: lembar pemulihan sudah terbuka
+            val ns = vm.importPdfs(pdfs) + vm.importMd(uris - pdfs.toSet() - dn.toSet())
+            val total = ns.size + added
+            if (total == 1) (ns.firstOrNull()?.id ?: sid)?.let { vm.nav.openNote(it, null) }
+            else vm.show(if (total == 0) "No readable files" else "Imported ${cnt(total, "note")}")
         }
     }
     private val bkSaver = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
@@ -833,7 +847,11 @@ class MainActivity : ComponentActivity(), Actions {
     }
     private val bkOpener = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) lifecycleScope.launch {
-            if (vm.stageBackup(uri)) vm.sheet = Sheet.Bk else vm.show("This isn't a valid Dinduy backup")
+            when (vm.openDinduyFile(uri)) {
+                0 -> vm.show("This isn't a valid Dinduy file")
+                2 -> vm.sharedId?.let { vm.nav.openNote(it, null) }   // catatan yang dibagikan: langsung dibuka
+                else -> {}
+            }
         }
     }
     private var micCb: (() -> Unit)? = null
@@ -893,6 +911,7 @@ class MainActivity : ComponentActivity(), Actions {
         )
         if (Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
         setContent { AppRoot(vm, this) }
+        vm.onShareNote = { shareNote(it) }
         Rem.ensureChannel(this)
         // izin (mikrofon, notifikasi, kamera) ditawarkan sekali lewat PermissionHost pada pemasangan baru
         openFromIntent(intent)
@@ -902,6 +921,11 @@ class MainActivity : ComponentActivity(), Actions {
         super.onNewIntent(intent)
         setIntent(intent)
         openFromIntent(intent)
+    }
+
+    override fun onDestroy() {
+        if (isFinishing) vm.onShareNote = null
+        super.onDestroy()
     }
 
     override fun onResume() {
@@ -948,14 +972,32 @@ class MainActivity : ComponentActivity(), Actions {
             i.data = null
             i.removeExtra(Intent.EXTRA_STREAM)
             if (us.isNotEmpty()) lifecycleScope.launch {
-                val ns = vm.importPdfs(us)
+                val pdfs = us.filter { isPdfUri(this@MainActivity, it) }
+                val rest = us - pdfs.toSet()
                 vm.remDlg = null; vm.sheet = null; vm.addOn = false
+                val ns = if (pdfs.isNotEmpty()) vm.importPdfs(pdfs) else emptyList<Note>()
+                // selain PDF: coba sebagai berkas .dinduy (catatan yang dibagikan atau cadangan)
+                var added = 0
+                var sid: String? = null
+                var bk = false
+                for (u in rest) {
+                    when (vm.openDinduyFile(u)) {
+                        2 -> { added++; sid = vm.sharedId }
+                        1 -> bk = true
+                        else -> {}
+                    }
+                    if (bk) break
+                }
                 if (vm.nav.stack.size > 1) {
                     while (vm.nav.stack.size > 1) vm.nav.pop()
                     delay(380)
                 }
-                if (ns.size == 1) vm.nav.openNote(ns[0].id, null)
-                else vm.show(if (ns.isEmpty()) "Couldn't open this PDF" else "Imported ${cnt(ns.size, "PDF")}")
+                val total = ns.size + added
+                when {
+                    bk -> {}   // lembar pemulihan sudah terbuka di beranda
+                    total == 1 -> (ns.firstOrNull()?.id ?: sid)?.let { vm.nav.openNote(it, null) }
+                    else -> vm.show(if (total == 0) "Couldn't open this file" else "Imported ${cnt(total, "note")}")
+                }
             }
             return
         }
@@ -1119,18 +1161,23 @@ class MainActivity : ComponentActivity(), Actions {
         mdSaver.launch(name)
     }
 
-    override fun shareMd(name: String, text: String) {
+    /** Bagikan satu catatan sebagai berkas .dinduy (ZIP: catatan + gambar, coretan, suara, PDF). Hanya bisa dibuka di Dinduy. */
+    fun shareNote(id: String) {
+        val n = vm.note(id) ?: return
         lifecycleScope.launch {
             val f = withContext(Dispatchers.IO) {
-                val file = File(cacheDir, name)
-                file.writeText(text, Charsets.UTF_8)
-                file
+                try {
+                    val file = File(cacheDir, noteShareName(n))
+                    file.outputStream().use { vm.writeNoteFile(n, it) }
+                    file
+                } catch (e: Exception) { null }
             }
+            if (f == null) { vm.show("Couldn't prepare the file"); return@launch }
             val uri = FileProvider.getUriForFile(this@MainActivity, "$packageName.fileprovider", f)
             val i = Intent(Intent.ACTION_SEND).apply {
-                type = "text/markdown"
+                type = "application/x-dinduy"
                 putExtra(Intent.EXTRA_STREAM, uri)
-                putExtra(Intent.EXTRA_SUBJECT, name.removeSuffix(".md"))
+                putExtra(Intent.EXTRA_SUBJECT, n.t.ifEmpty { "Dinduy note" })
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             startActivity(Intent.createChooser(i, "Share note"))
