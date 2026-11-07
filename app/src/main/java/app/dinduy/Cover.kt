@@ -26,11 +26,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -119,6 +122,22 @@ private val LIGHT_FADE = FloatArray(LIGHT_N) { i ->
     1f - (1f - top) * (1f - body)
 }
 
+/** Seberapa lambat gambar bergerak dibanding isi saat digulir (0 = ikut isi, 1 = diam di layar). Makin besar, makin terasa parallax. */
+private const val COVER_PARALLAX = .55f
+
+/** Tambahan zoom gambar saat sampul tergulir habis (0.6 = membesar sampai 160%). */
+private const val COVER_ZOOM = .6f
+
+/** Kemiringan 3D (derajat) saat sampul tergulir habis. Kalau yang terlihat malah sisi atas maju ke arah kita, ubah tandanya jadi minus. */
+private const val COVER_TILT = 20f
+
+/** Blur maksimum (dp) saat sampul tergulir habis. Hanya Android 12+; di bawahnya dilewati. */
+private const val COVER_BLUR = 22f
+
+/** Kemajuan gulir sampul 0..1 (1 = sampul sudah tergulir keluar seluruhnya). Hanya aktif setelah catatan terbuka penuh, jadi morph buka/tutup tidak terganggu. */
+private fun coverQ(open: Float, scrollPx: Int, h: Float): Float =
+    (scrollPx / h.coerceAtLeast(1f)).coerceIn(0f, 1f) * cSmooth((open - .5f) / .5f)
+
 /**
  * Banner sampul di atas editor, digambar sebagai lapisan di belakang bilah atas dan ikut tergulir bersama isi.
  * Sampul ini TIDAK memudar saat morph: ia buram penuh sejak awal dan menimpa sampul kartu (bayangan kartu tidak menggambar sampul,
@@ -154,7 +173,25 @@ fun EditorCover(vm: AppVM, d: Note, scroll: () -> Int) {
             }
             .background(pal.c3)
     ) {
-        Canvas(Modifier.fillMaxSize()) { if (bmp != null) drawCover(bmp, d.cz, d.cx, d.cy, soft = !pal.dark) }
+        // lapisan gambar: tertinggal dari isi (parallax), membesar dari tepi bawah, miring ke belakang seperti halaman yang dilipat, dan memburam
+        Canvas(
+            Modifier.fillMaxSize().graphicsLayer {
+                val sp = scroll()
+                val open = vm.openP.value
+                val q = coverQ(open, sp, size.height)
+                translationY = sp * COVER_PARALLAX * cSmooth((open - .5f) / .5f)
+                val z = 1f + COVER_ZOOM * cSmooth(q)
+                scaleX = z; scaleY = z
+                transformOrigin = TransformOrigin(.5f, 1f)
+                cameraDistance = 14f * density
+                rotationX = COVER_TILT * cSmooth(q)
+                if (android.os.Build.VERSION.SDK_INT >= 31) {
+                    // dibulatkan per .5 supaya efek blur tidak dibuat ulang tiap piksel gulir
+                    val r = (cSmooth((q - .12f) / .88f) * COVER_BLUR * density * 2f).roundToInt() / 2f
+                    renderEffect = if (r > .5f) BlurEffect(r, r, TileMode.Clamp) else null
+                }
+            }
+        ) { if (bmp != null) drawCover(bmp, d.cz, d.cx, d.cy, soft = !pal.dark) }
         Box(
             Modifier.fillMaxSize().drawBehind {
                 val e = cSmooth(vm.openP.value)
@@ -172,6 +209,13 @@ fun EditorCover(vm: AppVM, d: Note, scroll: () -> Int) {
                     )
                 )
             }
+        )
+        // sampul larut ke warna kertas saat digulir (satu lapisan polos, murah digambar)
+        Box(
+            Modifier.fillMaxSize().graphicsLayer {
+                val q = coverQ(vm.openP.value, scroll(), size.height)
+                alpha = .94f * cSmooth((q - .18f) / .82f)
+            }.background(pal.s)
         )
     }
 }
