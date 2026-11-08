@@ -1587,13 +1587,13 @@ fun floatPlans(ed: Ed, dm: Dm): Map<String, FloatPlan> {
             continue
         }
         if (b.isBox) {
-            // kutipan / kode / garis yang sudah menempel ke kiri / kanan selalu lewat BoxFloatGroup (komposisi tidak berganti saat lebar diseret)
-            if (b.alOf() == "c") continue
+            // semua kutipan / kode / garis (kiri, tengah, kanan) selalu lewat BoxFloatGroup: komposisi tidak berganti saat letak / lebar
+            // berubah (juga saat diseret), jadi gestur sentuh tidak putus. Tengah = rencana kosong (tidak ada teks yang mengalir).
             if (out == null) out = HashMap()
             out[b.id] = if (ed.boxSideOk(b)) planFloat(ed, i, dm, pal, tm, dn) else FloatPlan(emptyList())
             continue
         }
-        if (b.ty != "img" || b.im.size != 1 || b.im[0].al == "c") continue
+        if (b.ty != "img" || b.im.size != 1) continue   // tengah juga lewat FloatGroup (rencana kosong): komposisi tidak berganti saat letak berubah
         val p = if (ed.sideOk(b)) planFloat(ed, i, dm, pal, tm, dn) else FloatPlan(emptyList())
         if (out == null) out = HashMap()
         out[b.id] = p
@@ -1629,7 +1629,7 @@ fun FloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<String, Int>,
             }
         }
         Box(
-            Modifier.align(if (m.al == "r") Alignment.TopEnd else Alignment.TopStart)
+            Modifier.align(when (m.al) { "r" -> Alignment.TopEnd; "c" -> Alignment.TopCenter; else -> Alignment.TopStart })
                 .zIndex(if (lifted) 3f else 1f)
                 .graphicsLayer {
                     if (lifted) { translationX = ed.liftX(); translationY = ed.liftY(); scaleX = ed.liftSc; scaleY = ed.liftSc; rotationZ = ed.liftRot; alpha = .97f }
@@ -1679,6 +1679,10 @@ private fun BoxFloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<St
     val hDp = ed.objH[b.id] ?: 0f
     val w = (ed.widthDp * b.bw.coerceIn(.2f, 1f)).dp
     val lifted = ed.mv?.let { it.bid == b.id } == true
+    val al = b.alOf()
+    val ctr = al == "c"
+    val full = b.bw >= .999f
+    val (il, ir) = if (ctr && full && b.ty == "q") fitInd(b.il, b.ir, ed.widthDp) else 0f to 0f
     Box(Modifier.fillMaxWidth().heightIn(min = (hDp + bottom).dp)) {
         Column(Modifier.fillMaxWidth()) {
             plan.parts.forEach { (x, sp) ->
@@ -1696,12 +1700,13 @@ private fun BoxFloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<St
             }
         }
         Box(
-            Modifier.align(if (b.alOf() == "r") Alignment.TopEnd else Alignment.TopStart)
+            Modifier.align(when (al) { "r" -> Alignment.TopEnd; "c" -> Alignment.TopCenter; else -> Alignment.TopStart })
                 .zIndex(if (lifted) 3f else 1f)
                 .graphicsLayer {
                     if (lifted) { translationX = ed.liftX(); translationY = ed.liftY(); scaleX = ed.liftSc; scaleY = ed.liftSc; rotationZ = ed.liftRot; alpha = .97f }
                 }
-        ) { BoxCell(ed, b, dm, pal, Modifier.width(w)) }
+                .padding(start = il.dp, end = ir.dp, bottom = if (ctr) bottom.dp else 0.dp)
+        ) { BoxCell(ed, b, dm, pal, if (ctr && full) Modifier.fillMaxWidth() else Modifier.width(w)) }
     }
 }
 
@@ -2248,20 +2253,6 @@ private fun BlockSlot(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan?, ordN: Int, od
     Box(
         Modifier
             .zIndex(if (dragging || flying) 3f else 0f)
-            // Bila node asal gestur terlepas (perataan tengah <-> samping mengganti komposisi), slot inilah yang melanjutkan seretan
-            .pointerInput(b.id) {
-                awaitPointerEventScope {
-                    while (true) {
-                        val ev = awaitPointerEvent(PointerEventPass.Initial)
-                        if (!ed.mvOrphan || ed.mv?.bid != b.id) continue
-                        val c = ev.changes.firstOrNull() ?: continue
-                        if (!c.pressed) { c.consume(); ed.mvOrphan = false; ed.mvEnd(true); continue }
-                        val d = c.positionChange()
-                        if (d != Offset.Zero) ed.mvDrag(d.x, d.y)
-                        ev.changes.forEach { it.consume() }
-                    }
-                }
-            }
             .onGloballyPositioned { c -> ed.setSlotPos(b.id, c.positionInParent().y, c.size.height.toFloat()) }
             .graphicsLayer {
                 if (lifted && plan == null) {
