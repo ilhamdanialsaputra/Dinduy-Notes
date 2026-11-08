@@ -1031,7 +1031,7 @@ fun Modifier.objLift(
                 true
             },
             onMove = { _, d -> ed.mvDrag(d.x, d.y) },
-            onEnd = { ok -> ed.mvEnd(ok) },
+            onEnd = { ok -> ed.mvEndInner(ok) },
             lead = 150L,   // sama dengan foto: terangkat cepat, tapi tetap beda dari gulir halaman
             accept = { pos ->
                 if (sk(pos)) false
@@ -1212,7 +1212,7 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
                     ed.mvBegin(bS.id, mS.id); true
                 },
                 onMove = { _, d -> ed.mvDrag(d.x, d.y) },
-                onEnd = { ok -> ed.mvEnd(ok) },
+                onEnd = { ok -> ed.mvEndInner(ok) },
                 lead = 150L   // foto terangkat lebih cepat dari tekan-tahan biasa (~350 ms), jadi terasa langsung
             )
             .pointerInput(ed.reading) {
@@ -1632,7 +1632,7 @@ fun FloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<String, Int>,
             Modifier.align(if (m.al == "r") Alignment.TopEnd else Alignment.TopStart)
                 .zIndex(if (lifted) 3f else 1f)
                 .graphicsLayer {
-                    if (lifted) { translationX = ed.liftX(); translationY = ed.liftY(); scaleX = 1.02f; scaleY = 1.02f; alpha = .96f }
+                    if (lifted) { translationX = ed.liftX(); translationY = ed.liftY(); scaleX = ed.liftSc; scaleY = ed.liftSc; rotationZ = ed.liftRot; alpha = .97f }
                 }
         ) { ImgCell(ed, vm, b, 0, Modifier.width(imgW).aspectRatio(ratio), sel == 0) }
     }
@@ -1665,7 +1665,7 @@ private fun TblFloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<St
             Modifier.align(when (b.alOf()) { "r" -> Alignment.TopEnd; "c" -> Alignment.TopCenter; else -> Alignment.TopStart })
                 .zIndex(if (lifted) 3f else 1f)
                 .graphicsLayer {
-                    if (lifted) { translationX = ed.liftX(); translationY = ed.liftY(); scaleX = 1.02f; scaleY = 1.02f; alpha = .96f }
+                    if (lifted) { translationX = ed.liftX(); translationY = ed.liftY(); scaleX = ed.liftSc; scaleY = ed.liftSc; rotationZ = ed.liftRot; alpha = .97f }
                 }
         ) { TableView(ed, b, dm, pal, if (narrow || (b.alOf() != "l" && tw.value < ed.widthDp)) Modifier.width(tw) else Modifier.fillMaxWidth()) }
     }
@@ -1699,7 +1699,7 @@ private fun BoxFloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<St
             Modifier.align(if (b.alOf() == "r") Alignment.TopEnd else Alignment.TopStart)
                 .zIndex(if (lifted) 3f else 1f)
                 .graphicsLayer {
-                    if (lifted) { translationX = ed.liftX(); translationY = ed.liftY(); scaleX = 1.02f; scaleY = 1.02f; alpha = .96f }
+                    if (lifted) { translationX = ed.liftX(); translationY = ed.liftY(); scaleX = ed.liftSc; scaleY = ed.liftSc; rotationZ = ed.liftRot; alpha = .97f }
                 }
         ) { BoxCell(ed, b, dm, pal, Modifier.width(w)) }
     }
@@ -2248,11 +2248,25 @@ private fun BlockSlot(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan?, ordN: Int, od
     Box(
         Modifier
             .zIndex(if (dragging || flying) 3f else 0f)
+            // Bila node asal gestur terlepas (perataan tengah <-> samping mengganti komposisi), slot inilah yang melanjutkan seretan
+            .pointerInput(b.id) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val ev = awaitPointerEvent(PointerEventPass.Initial)
+                        if (!ed.mvOrphan || ed.mv?.bid != b.id) continue
+                        val c = ev.changes.firstOrNull() ?: continue
+                        if (!c.pressed) { c.consume(); ed.mvOrphan = false; ed.mvEnd(true); continue }
+                        val d = c.positionChange()
+                        if (d != Offset.Zero) ed.mvDrag(d.x, d.y)
+                        ev.changes.forEach { it.consume() }
+                    }
+                }
+            }
             .onGloballyPositioned { c -> ed.setSlotPos(b.id, c.positionInParent().y, c.size.height.toFloat()) }
             .graphicsLayer {
                 if (lifted && plan == null) {
                     translationX = ed.liftX(); translationY = ed.liftY()
-                    scaleX = 1.02f; scaleY = 1.02f; alpha = .96f
+                    scaleX = ed.liftSc; scaleY = ed.liftSc; rotationZ = ed.liftRot; alpha = .97f
                 }
             }
             // Luncuran halus lewat gambar (bukan layer): posisi layout (bpos) tidak pernah tercemar, jadi penentuan sasaran tetap stabil.
@@ -2260,17 +2274,19 @@ private fun BlockSlot(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan?, ordN: Int, od
                 var dy = 0f
                 var dx = 0f
                 var sc = 1f
+                var rot = 0f
                 val fp = ed.flipP
                 if (fp != 0f && !(lifted && plan == null) && ed.mv?.bid != b.id) {
                     val now = ed.bpos[b.id]?.get(0)
                     val from = ed.flipFrom[b.id]
                     if (now != null && from != null) dy = (from - now) * fp
-                    if (ed.flipId == b.id) { dx = ed.flipDx * fp; sc = 1f + .02f * fp }
+                    if (ed.flipId == b.id) { dx = ed.flipDx * fp; sc = 1f + (ed.flipSc - 1f) * fp; rot = ed.flipRot * fp }
                 }
                 val la = ed.landA
                 drawContext.canvas.save()
                 drawContext.transform.translate(dx, dy)
                 if (sc != 1f) drawContext.transform.scale(sc, sc, center)
+                if (rot != 0f) drawContext.transform.rotate(rot, center)
                 drawContent()
                 if (la > 0f && ed.landId == b.id) {
                     val cr = CornerRadius(12.dp.toPx())
