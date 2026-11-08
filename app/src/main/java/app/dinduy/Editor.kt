@@ -1497,6 +1497,23 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     private val sW = Spr()
     private val sO = Spr()
     private val sF = Spr()
+    private val sLx = Spr()
+    private val sLy = Spr()
+    private val sSc = Spr()
+    private val sRt = Spr()
+    var liftSX by mutableStateOf(0f)        // posisi seret yang dihaluskan (genggaman lentur: mengikuti jari dengan pegas)
+    var liftSY by mutableStateOf(0f)
+    var liftSc by mutableStateOf(1f)        // skala terangkat (membal sedikit saat diangkat)
+    var liftRot by mutableStateOf(0f)       // miring tipis menurut kecepatan geser horizontal
+    var flipSc = 1f
+    var flipRot = 0f
+    var mvOrphan = false                    // node asal gestur terlepas dari komposisi: BlockSlot melanjutkan seretan
+    private var lastGap = 0
+    private var wTo = -1
+    private var wAl = ""
+    private var pvPend = ""
+    private var pvT = 0f
+    private var swapT = 0L
 
     /** Daftar blok yang dipakai keputusan sasaran: asli (tanpa pratinjau) untuk blok tunggal, daftar hidup untuk anggota kolase. */
     private fun src(): List<Blk> = if (mv?.row == false) ob else blocks
@@ -1506,9 +1523,9 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     /** Translasi seretan (px) relatif terhadap posisi slot di tata letak pratinjau: jari tetap memegang objek yang sama walau slotnya pindah. */
     fun liftY(): Float {
         val m = mv ?: return 0f
-        return if (m.row) mvY else m.top + mvY - mvLayTop
+        return if (m.row) mvY else m.top + liftSY - mvLayTop
     }
-    fun liftX(): Float = mvX + (if (mv?.row == true) 0f else mvAdjX)
+    fun liftX(): Float = if (mv?.row == true) mvX else liftSX + mvAdjX
 
     /** Ukuran objek yang diseret: [x kiri, lebar, tinggi] dalam px bila diletakkan dengan perataan [al]. */
     private fun mvBox(m: Mv, b: Blk, q: FloatArray?, al: String): FloatArray {
@@ -1552,24 +1569,44 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         return l
     }
 
-    /** Pasang pratinjau ke daftar blok bila sasaran / letak berubah. Blok lain meluncur halus dari posisi lamanya. */
-    private fun pvApply() {
+    /** Catat sasaran yang diinginkan; pratinjau baru dipasang bila sasaran bertahan sebentar (lihat fxStep), supaya tidak gelisah. */
+    private fun pvWantSet() {
         val m = mv ?: return
         if (m.row) return
         val i = ob.indexOfFirst { it.id == m.bid }
         if (i < 0) return
         val oal = curAl(ob[i])
-        val to = if (mergeT != null) -1 else dropAt
-        val al = if (mergeT != null) oal else mvAl
-        val key = "$to|$al"
-        if (key == pvKey) return
-        pvKey = key
+        wTo = if (mergeT != null) -1 else dropAt
+        wAl = if (mergeT != null) oal else mvAl
+    }
+
+    /** Pasang pratinjau ke daftar blok. Blok lain meluncur halus dari posisi lamanya. */
+    private fun pvApplyNow() {
+        val m = mv ?: return
+        if (m.row) return
+        val i = ob.indexOfFirst { it.id == m.bid }
+        if (i < 0) return
+        val oal = curAl(ob[i])
+        val to = wTo
+        val al = wAl
+        val prevAl = pvKey.substringAfter('|')
+        pvKey = "$to|$al"
+        pvPend = ""
+        pvT = 0f
         gPulse = 1f
+        if ((prevAl == "c") != (al == "c")) swapT = System.nanoTime()   // komposisi blok berganti (tengah <-> samping)
         if (!mvInk) flipCapture()   // catat posisi tampil sekarang SEBELUM tata letak berubah
         val l = if (to < 0 && al == oal) ob else mvBuild(ob, i, to, al)
         blocks = l
         val nb = l.firstOrNull { it.id == m.bid } ?: return
         mvAdjX = mvX0 - mvBox(m, nb, null, curAl(nb))[0]
+    }
+
+    /** Akhir gestur dari node asal. Bila node itu lepas dari komposisi karena perataan berganti, seretan dilanjutkan oleh BlockSlot. */
+    fun mvEndInner(ok: Boolean) {
+        val recent = System.nanoTime() - swapT < 1_500_000_000L
+        if (!ok && recent && mv != null && mv?.row == false) { mvOrphan = true; return }
+        mvEnd(ok)
     }
 
     /** Catat posisi tampil (termasuk sisa luncuran) semua slot; layout baru kemudian menarik mereka ke posisi barunya. */
@@ -1623,6 +1660,19 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
                 }
                 gAdj = false
             } else {
+                // genggaman lentur: objek mengikuti jari dengan pegas + miring tipis menurut kecepatan
+                val px = sLx.x
+                liftSX = sLx.step(mvX, dt, 900f, .8f)
+                liftSY = sLy.step(mvY, dt, 800f, .8f)
+                liftSc = sSc.step(1.025f, dt, 420f, .62f)
+                val vx = (sLx.x - px) / dt
+                liftRot = sRt.step((vx / (dens * 1100f)).coerceIn(-1f, 1f) * 2f, dt, 260f, .55f)
+                // pratinjau baru dipasang bila sasaran bertahan ~160 ms dan jari sudah bergeser cukup jauh: tidak "ke-drop" saat baru diangkat
+                val key = "$wTo|$wAl"
+                if (key != pvKey) {
+                    if (key != pvPend) { pvPend = key; pvT = 0f } else pvT += dt
+                    if (pvT >= .16f && kotlin.math.hypot(mvX, mvY) > 26f * dens) pvApplyNow()
+                } else { pvPend = ""; pvT = 0f }
                 // bingkai sasaran = "lubang" yang benar-benar ditempati blok ini di tata letak pratinjau
                 val i = idx(m.bid)
                 val b = if (i >= 0) blocks[i] else null
@@ -1648,7 +1698,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         gT += dt
         if (gPulse > 0f) gPulse = (gPulse - dt * 3f).coerceAtLeast(0f)
         if (flipP != 0f) {
-            val f = sF.step(0f, dt, 300f, .9f)
+            val f = sF.step(0f, dt, 230f, .92f)
             if (kotlin.math.abs(f) < .002f && kotlin.math.abs(sF.v) < .05f) { flipP = 0f; sF.snap(0f); flipFrom.clear(); flipId = "" }
             else flipP = f
         }
@@ -1665,8 +1715,10 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         flipId = ""
         flipDx = 0f
         if (!m.row) {
-            flipFrom[m.bid] = m.top + mvY
-            flipDx = mvX + (if (keep) mvAdjX else 0f)
+            flipFrom[m.bid] = m.top + liftSY
+            flipDx = liftSX + (if (keep) mvAdjX else 0f)
+            flipSc = liftSc
+            flipRot = liftRot
             flipId = m.bid
         }
     }
@@ -1699,7 +1751,11 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         ob = blocks
         bp0.clear()
         for ((k, v) in bpos) bp0[k] = v.copyOf()
-        mvLayTop = p[0]; mvAdjX = 0f; pvKey = ""
+        mvLayTop = p[0]; mvAdjX = 0f; pvKey = "-1|" + curAl(b)
+        wTo = -1; wAl = curAl(b); pvPend = ""; pvT = 0f; mvOrphan = false; swapT = 0L
+        lastGap = idx(bid)
+        sLx.snap(0f); sLy.snap(0f); sSc.snap(1f); sRt.snap(0f)
+        liftSX = 0f; liftSY = 0f; liftSc = 1f; liftRot = 0f
         mvX0 = if (b.im.size > 1) 0f else mvBox(mv!!, b, null, curAl(b))[0]
         sY.snap(p[0]); sH.snap(p[1]); sX.snap(0f); sW.snap(widthDp * dens); sO.snap(0f); sF.snap(0f)
         gOn = 0f; gPulse = 0f; gAdj = false; edgeRaw = 0f; edgeV = 0f
@@ -1779,11 +1835,15 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         // blok yang sangat tinggi (tabel panjang): acuan = dekat bagian atasnya, bukan pusatnya yang jauh di luar layar
         val cy = mvRef(m)
         var gap = sl.size
+        val hy = 14f * dens   // histeresis: sasaran baru dipilih setelah jari benar-benar melewati pusat blok, bukan sekadar menyentuh
         for ((j, b) in sl.withIndex()) {
             if (j == i) continue
             val q = bp0[b.id] ?: continue
-            if (q[0] + minOf(q[1] / 2f, viewH * .3f) >= cy) { gap = j; break }
+            val c = q[0] + minOf(q[1] / 2f, viewH * .3f)
+            val below = if (lastGap > j) c - hy >= cy else c + hy >= cy
+            if (below) { gap = j; break }
         }
+        lastGap = gap
         val nd = if (mergeT != null || gap == i || gap == i + 1) -1 else gap
         if (nd != dropAt) { dropAt = nd; if (nd >= 0) buzz?.invoke() }
         val b = sl[i]
@@ -1808,13 +1868,14 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             val al = if (wp >= w * .98f) mi.al else if (cx < w / 3f) "l" else if (cx > w * 2f / 3f) "r" else "c"
             if (al != mvAl) { mvAl = al; buzz?.invoke() }
         }
-        pvApply()
+        pvWantSet()
     }
 
     fun mvEnd(apply: Boolean) {
         val m = mv ?: return
         autoJob?.cancel()
         edgeRaw = 0f
+        mvOrphan = false
         val to = dropAt
         val al = mvAl
         val mt = mergeT
