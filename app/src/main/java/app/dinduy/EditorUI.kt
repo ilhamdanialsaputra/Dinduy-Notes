@@ -1851,26 +1851,80 @@ fun CapDiv() {
     Box(Modifier.padding(horizontal = 3.dp).width(1.dp).height(24.dp).background(pal.ol.copy(alpha = .5f)))
 }
 
-/** Kapsul alat objek sisipan (tabel / kutipan / kode / garis): rata kiri / tengah / kanan, hapus, selesai. Tampilan sama dengan kapsul alat Ink. */
+/** Muncul bertahap: tiap tombol kapsul membesar dari kecil + naik sedikit dengan jeda berurutan (efek "pop" beruntun). */
 @Composable
-fun ObjCapsule(ed: Ed, ob: Blk) {
+fun CapPop(i: Int, content: @Composable () -> Unit) {
+    val p = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { delay(50L + i * 38L); p.animateTo(1f, spring(.52f, 420f)) }
+    Box(
+        Modifier.graphicsLayer {
+            val s = .35f + .65f * p.value
+            scaleX = s; scaleY = s
+            alpha = (p.value * 1.4f).coerceIn(0f, 1f)
+            translationY = (1f - p.value) * 12.dp.toPx()
+        }
+    ) { content() }
+}
+
+/** Tombol bulat kapsul dengan warna sendiri (hapus = merah tonal, selesai = primer). Bentuk menyusut + badan mengecil saat ditekan. */
+@Composable
+private fun CapAct(bg: Color, onClick: () -> Unit, content: @Composable () -> Unit) {
+    val src = remember { MutableInteractionSource() }
+    val pr by src.collectIsPressedAsState()
+    val r by animateDpAsState(if (pr) 13.dp else 23.dp, spring(.6f, 600f), label = "ar")
+    val sc by animateFloatAsState(if (pr) .86f else 1f, spring(.5f, 600f), label = "as")
+    Box(
+        Modifier.size(46.dp).graphicsLayer { scaleX = sc; scaleY = sc }.clip(RoundedCornerShape(r)).background(bg)
+            .clickable(interactionSource = src, indication = LocalIndication.current, onClick = onClick),
+        Alignment.Center
+    ) { content() }
+}
+
+/**
+ * Kapsul alat objek sisipan (tabel / kutipan / kode / garis): rata kiri / tengah / kanan, hapus, selesai.
+ * - tiga tombol rata ada di dalam "jalur" tonal; penanda aktifnya SATU pil yang meluncur (pegas) ke posisi baru, bukan menyala-mati
+ * - tombol muncul beruntun saat kapsul masuk; lebar kapsul bergerak halus saat tombol "selesai" datang / pergi
+ * - [showOk] = true memaksa tombol selesai tetap ada (dipakai bilah datar, supaya tidak berkedip saat kapsul keluar)
+ */
+@Composable
+fun ObjCapsule(ed: Ed, ob: Blk, showOk: Boolean = ed.selObj != null) {
     val pal = LocalPal.current
     val al = ob.alOf()
     val cap = RoundedCornerShape(30.dp)
+    val idx = when (al) { "l" -> 0; "c" -> 1; "r" -> 2; else -> -1 }
+    val pillX by animateDpAsState(48.dp * idx.coerceAtLeast(0), spring(.7f, 520f), label = "pillX")
+    val pillA by animateFloatAsState(if (idx >= 0) 1f else 0f, tween(160), label = "pillA")
+    val ring = if (pal.dark) pal.ol.copy(alpha = .35f) else pal.ol.copy(alpha = .22f)
     Box(Modifier.fillMaxWidth(), Alignment.Center) {
         Row(
-            Modifier.shadow(if (pal.dark) 6.dp else 2.dp, cap).clip(cap).background(pal.c3).padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            Modifier.animateContentSize(spring(.82f, 520f))
+                .shadow(if (pal.dark) 8.dp else 3.dp, cap).clip(cap).background(pal.c3).border(1.dp, ring, cap)
+                .padding(horizontal = 8.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Tbn({ AlignArrow(0, it) }, al == "l", true) { ed.objAlign(ob.id, "l") }
-            Tbn({ AlignArrow(1, it) }, al == "c", true) { ed.objAlign(ob.id, "c") }
-            Tbn({ AlignArrow(2, it) }, al == "r", true) { ed.objAlign(ob.id, "r") }
-            CapDiv()
-            Tbn({ Ic("del", it) }, false, true) { ed.objDelete(ob.id) }
-            if (ed.selObj != null) {
-                CapDiv()
-                Tbn({ Ic("ok", it) }, false, true) { ed.selObj = null }
+            CapPop(0) {
+                Box(Modifier.clip(RoundedCornerShape(26.dp)).background(pal.c4).padding(3.dp)) {
+                    Box(
+                        Modifier.offset(x = pillX).size(46.dp).graphicsLayer { alpha = pillA }
+                            .clip(RoundedCornerShape(23.dp)).background(pal.p)
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        // latar tombol transparan: penandanya pil yang meluncur di belakang
+                        Tbn({ AlignArrow(0, if (idx == 0) pal.op else pal.os) }, false, true) { ed.objAlign(ob.id, "l") }
+                        Tbn({ AlignArrow(1, if (idx == 1) pal.op else pal.os) }, false, true) { ed.objAlign(ob.id, "c") }
+                        Tbn({ AlignArrow(2, if (idx == 2) pal.op else pal.os) }, false, true) { ed.objAlign(ob.id, "r") }
+                    }
+                }
+            }
+            Box(Modifier.padding(start = 6.dp)) { CapPop(1) { CapAct(pal.ec, { ed.objDelete(ob.id) }) { Ic("del", pal.oec) } } }
+            AnimatedVisibility(
+                visible = showOk,
+                enter = fadeIn(tween(160)) + expandHorizontally(spring(.8f, 480f), expandFrom = Alignment.Start) +
+                    scaleIn(spring(.6f, 420f), .5f),
+                exit = fadeOut(tween(120)) + shrinkHorizontally(tween(200, easing = Emph), shrinkTowards = Alignment.Start) +
+                    scaleOut(tween(160), .5f)
+            ) {
+                Box(Modifier.padding(start = 6.dp)) { CapPop(2) { CapAct(pal.p, { ed.selObj = null }) { Ic("ok", pal.op) } } }
             }
         }
     }
