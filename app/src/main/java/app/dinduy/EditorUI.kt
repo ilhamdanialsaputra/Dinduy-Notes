@@ -66,6 +66,7 @@ import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.ViewConfiguration
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.rememberCoroutineScope
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import androidx.compose.foundation.LocalIndication
@@ -1478,8 +1479,8 @@ private fun boxHeightEst(ed: Ed, b: Blk, dm: Dm, pal: Pal, tm: TextMeasurer, dn:
  * Paragraf yang melewati dasar gambar dipotong barisnya (baris atas sempit, sisanya selebar penuh).
  * Judul / poin yang melewati dasar gambar tetap sempit seluruhnya.
  */
-private fun planFloat(ed: Ed, i: Int, dm: Dm, pal: Pal, tm: TextMeasurer, dn: Density): FloatPlan {
-    val b = ed.blocks[i]
+private fun planFloat(ed: Ed, bl: List<Blk>, i: Int, dm: Dm, pal: Pal, tm: TextMeasurer, dn: Density): FloatPlan {
+    val b = bl[i]
     val d = dn.density
     val fs = dm.fs
     val left: Boolean
@@ -1505,8 +1506,8 @@ private fun planFloat(ed: Ed, i: Int, dm: Dm, pal: Pal, tm: TextMeasurer, dn: De
     var rem = (imgH + (if (b.ty == "hr") 0f else fs * 1.1f)) * d
     val out = ArrayList<Pair<Blk, FSpec>>()
     var j = i + 1
-    while (j < ed.blocks.size && rem > 0f) {
-        val x = ed.blocks[j]
+    while (j < bl.size && rem > 0f) {
+        val x = bl[j]
         val bm = blockBM(x, pal, dm) ?: break
         val top = bm.top * d
         if (top >= rem) break
@@ -1566,12 +1567,11 @@ private fun planFloat(ed: Ed, i: Int, dm: Dm, pal: Pal, tm: TextMeasurer, dn: De
 
 /** Rencana untuk semua gambar mengambang (kiri/kanan dan cukup ruang) di catatan ini. */
 @Composable
-fun floatPlans(ed: Ed, dm: Dm): Map<String, FloatPlan> {
+fun floatPlans(ed: Ed, dm: Dm, bl: List<Blk> = ed.blocks): Map<String, FloatPlan> {
     val pal = LocalPal.current
     val tm = rememberTextMeasurer()
     val dn = LocalDensity.current
     var out: HashMap<String, FloatPlan>? = null
-    val bl = ed.blocks
     for ((i, b) in bl.withIndex()) {
         // semua gambar tunggal rata kiri/kanan selalu lewat FloatGroup, walau tak ada teks di sampingnya,
         // supaya komponen gambar tidak berganti (dan gestur ubah ukuran tidak putus) saat teks samping habis
@@ -1579,18 +1579,18 @@ fun floatPlans(ed: Ed, dm: Dm): Map<String, FloatPlan> {
             // semua tabel lewat TblFloatGroup (komposisi tidak berganti saat lebar kolom diseret melewati batas);
             // teks hanya mengalir di sampingnya bila tabel cukup sempit
             if (out == null) out = HashMap()
-            out[b.id] = if (ed.tblSideOk(b)) planFloat(ed, i, dm, pal, tm, dn) else FloatPlan(emptyList())
+            out[b.id] = if (ed.tblSideOk(b)) planFloat(ed, bl, i, dm, pal, tm, dn) else FloatPlan(emptyList())
             continue
         }
         if (b.isBox) {
             // kutipan / kode / garis yang sudah menempel ke kiri / kanan selalu lewat BoxFloatGroup (komposisi tidak berganti saat lebar diseret)
             if (b.alOf() == "c") continue
             if (out == null) out = HashMap()
-            out[b.id] = if (ed.boxSideOk(b)) planFloat(ed, i, dm, pal, tm, dn) else FloatPlan(emptyList())
+            out[b.id] = if (ed.boxSideOk(b)) planFloat(ed, bl, i, dm, pal, tm, dn) else FloatPlan(emptyList())
             continue
         }
         if (b.ty != "img" || b.im.size != 1 || b.im[0].al == "c") continue
-        val p = if (ed.sideOk(b)) planFloat(ed, i, dm, pal, tm, dn) else FloatPlan(emptyList())
+        val p = if (ed.sideOk(b)) planFloat(ed, bl, i, dm, pal, tm, dn) else FloatPlan(emptyList())
         if (out == null) out = HashMap()
         out[b.id] = p
     }
@@ -1617,7 +1617,7 @@ fun FloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<String, Int>,
                             .onGloballyPositioned { c ->
                                 val cc = ed.contentCoords
                                 if (cc != null && cc.isAttached && c.isAttached) {
-                                    ed.setPos(x.id, cc.localPositionOf(c, Offset.Zero).y, c.size.height.toFloat())
+                                    ed.posReport(x.id, cc.localPositionOf(c, Offset.Zero).y, c.size.height.toFloat())
                                 }
                             }
                     ) { BlockView(ed, vm, x, od[x.id] ?: 1, dm, sp.fold, sp.mk) }
@@ -1628,7 +1628,7 @@ fun FloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<String, Int>,
             Modifier.align(if (m.al == "r") Alignment.TopEnd else Alignment.TopStart)
                 .zIndex(if (lifted) 3f else 1f)
                 .graphicsLayer {
-                    if (lifted) { translationX = ed.mvX; translationY = ed.mvY; scaleX = 1.03f; scaleY = 1.03f; alpha = .94f }
+                    if (lifted) { translationX = ed.mvTx; translationY = ed.mvTy; scaleX = 1.03f; scaleY = 1.03f; alpha = .94f }
                 }
         ) { ImgCell(ed, vm, b, 0, Modifier.width(imgW).aspectRatio(ratio), sel == 0) }
     }
@@ -1650,7 +1650,7 @@ private fun TblFloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<St
                             .onGloballyPositioned { c ->
                                 val cc = ed.contentCoords
                                 if (cc != null && cc.isAttached && c.isAttached) {
-                                    ed.setPos(x.id, cc.localPositionOf(c, Offset.Zero).y, c.size.height.toFloat())
+                                    ed.posReport(x.id, cc.localPositionOf(c, Offset.Zero).y, c.size.height.toFloat())
                                 }
                             }
                     ) { BlockView(ed, vm, x, od[x.id] ?: 1, dm, sp.fold, sp.mk) }
@@ -1661,7 +1661,7 @@ private fun TblFloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<St
             Modifier.align(when (b.alOf()) { "r" -> Alignment.TopEnd; "c" -> Alignment.TopCenter; else -> Alignment.TopStart })
                 .zIndex(if (lifted) 3f else 1f)
                 .graphicsLayer {
-                    if (lifted) { translationX = ed.mvX; translationY = ed.mvY; scaleX = 1.03f; scaleY = 1.03f; alpha = .94f }
+                    if (lifted) { translationX = ed.mvTx; translationY = ed.mvTy; scaleX = 1.03f; scaleY = 1.03f; alpha = .94f }
                 }
         ) { TableView(ed, b, dm, pal, if (narrow || (b.alOf() != "l" && tw.value < ed.widthDp)) Modifier.width(tw) else Modifier.fillMaxWidth()) }
     }
@@ -1684,7 +1684,7 @@ private fun BoxFloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<St
                             .onGloballyPositioned { c ->
                                 val cc = ed.contentCoords
                                 if (cc != null && cc.isAttached && c.isAttached) {
-                                    ed.setPos(x.id, cc.localPositionOf(c, Offset.Zero).y, c.size.height.toFloat())
+                                    ed.posReport(x.id, cc.localPositionOf(c, Offset.Zero).y, c.size.height.toFloat())
                                 }
                             }
                     ) { BlockView(ed, vm, x, od[x.id] ?: 1, dm, sp.fold, sp.mk) }
@@ -1695,7 +1695,7 @@ private fun BoxFloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<St
             Modifier.align(if (b.alOf() == "r") Alignment.TopEnd else Alignment.TopStart)
                 .zIndex(if (lifted) 3f else 1f)
                 .graphicsLayer {
-                    if (lifted) { translationX = ed.mvX; translationY = ed.mvY; scaleX = 1.03f; scaleY = 1.03f; alpha = .94f }
+                    if (lifted) { translationX = ed.mvTx; translationY = ed.mvTy; scaleX = 1.03f; scaleY = 1.03f; alpha = .94f }
                 }
         ) { BoxCell(ed, b, dm, pal, Modifier.width(w)) }
     }
@@ -2159,7 +2159,7 @@ private fun BlockSlot(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan?, ordN: Int, od
             .onGloballyPositioned { c -> ed.setSlotPos(b.id, c.positionInParent().y, c.size.height.toFloat()) }
             .graphicsLayer {
                 if (lifted && plan == null) {
-                    translationX = ed.mvX; translationY = ed.mvY
+                    translationX = ed.mvTx; translationY = ed.mvTy
                     scaleX = 1.03f; scaleY = 1.03f; alpha = .94f
                 } else translationY = shift.value
             }
