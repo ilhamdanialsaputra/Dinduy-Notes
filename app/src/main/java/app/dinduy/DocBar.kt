@@ -254,7 +254,7 @@ fun DocBar(ed: Ed, act: Actions) {
     }
 
     // kapsul objek (kind 4) mengambang seperti kapsul Ink: bilah tanpa latar dan tanpa garis atas
-    val floatCap = kindNow == 4
+    val floatCap = kindNow == 4 || kindNow == 1
     val barBg by androidx.compose.animation.animateColorAsState(if (floatCap) Color.Transparent else pal.bar(), tween(220), label = "barbg")
     Column(Modifier.fillMaxWidth().background(barBg)) {
         // sub-bilah: perataan atau poin (mengembang di atas bilah utama)
@@ -299,9 +299,11 @@ fun DocBar(ed: Ed, act: Actions) {
                     if (s == null) Spacer(Modifier.height(54.dp)) else {
                         val b = ed.blocks.firstOrNull { it.id == s.first }
                         val inRow = (b?.im?.size ?: 1) > 1
+                        Box(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 10.dp).padding(horizontal = 10.dp), Alignment.Center) {
                         Row(
-                            Modifier.fillMaxWidth().height(54.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp),
-                            horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically
+                            Modifier.shadow(if (pal.dark) 6.dp else 2.dp, RoundedCornerShape(30.dp)).clip(RoundedCornerShape(30.dp))
+                                .background(pal.c3).horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically
                         ) {
                             // ganti isi bingkai dengan foto lain (galeri / kamera); ukuran bingkai tidak berubah
                             Tbn({ Ic("swap", it) }, false, true) {
@@ -313,7 +315,7 @@ fun DocBar(ed: Ed, act: Actions) {
                             // tambah gambar lain (disisipkan tepat sesudah gambar ini)
                             Tbn({ AddImgIcon(it) }, false, true) { ed.replT = null; act.pickImages() }
                             Tbn({ Ic("del", it) }, false, true) { ed.imgDelete() }
-                            Sep()
+                            CapDiv()
                             if (!inRow) {
                                 val al = b?.im?.getOrNull(s.second)?.al
                                 Tbn({ Ic("aL", it) }, al == "l", true) { ed.imgAlign("l") }
@@ -323,6 +325,7 @@ fun DocBar(ed: Ed, act: Actions) {
                             Tbn({ Ic(if (inRow) "rows" else "cols", it) }, false, true) { ed.toggleRow() }
                             Tbn({ Ic("aup", it) }, false, true) { ed.imgMove(-1) }
                             Tbn({ Ic("adn", it) }, false, true) { ed.imgMove(1) }
+                        }
                         }
                     }
                 }
