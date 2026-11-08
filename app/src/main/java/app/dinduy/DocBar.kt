@@ -324,35 +324,10 @@ fun DocBar(ed: Ed, act: Actions) {
                     }
                 }
                 4 -> {
-                    // objek sisipan (tabel / kode / kutipan / garis) terpilih tanpa keyboard: hapus + rata lewat tombol
+                    // objek sisipan (tabel / kode / kutipan / garis) terpilih tanpa keyboard: kapsul rata + hapus + selesai (sama seperti kapsul Ink)
                     val ob = ed.blocks.firstOrNull { it.id == (ed.selObj ?: objLast) }
-                    if (ob == null) Spacer(Modifier.height(54.dp)) else {
-                        val al = ob.alOf()
-                        Row(
-                            Modifier.fillMaxWidth().height(54.dp).padding(horizontal = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // kiri: selesai (netral, supaya hanya rata yang aktif yang berwarna)
-                            Box(Modifier.clip(RoundedCornerShape(23.dp)).background(pal.c4)) {
-                                Tbn({ Ic("ok", it) }, false, true) { ed.selObj = null }
-                            }
-                            // tengah: kontrol segmented rata kiri / tengah / kanan
-                            Box(Modifier.weight(1f), Alignment.Center) {
-                                Row(
-                                    Modifier.clip(RoundedCornerShape(26.dp)).background(pal.c4).padding(3.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Tbn({ AlignArrow(0, it) }, al == "l", true) { ed.objAlign(ob.id, "l") }
-                                    Tbn({ AlignArrow(1, it) }, al == "c", true) { ed.objAlign(ob.id, "c") }
-                                    Tbn({ AlignArrow(2, it) }, al == "r", true) { ed.objAlign(ob.id, "r") }
-                                }
-                            }
-                            // kanan: hapus (merah, terpisah dari rata supaya tidak kepencet)
-                            Box(Modifier.clip(RoundedCornerShape(23.dp)).background(pal.ec)) {
-                                Tbn({ Ic("del", pal.oec) }, false, true) { ed.objDelete(ob.id) }
-                            }
-                        }
-                    }
+                    if (ob == null) Spacer(Modifier.height(54.dp))
+                    else Box(Modifier.fillMaxWidth().padding(vertical = 6.dp).padding(horizontal = 10.dp)) { ObjCapsule(ed, ob) }
                 }
                 2 -> Row(
                     Modifier.fillMaxWidth().padding(vertical = 6.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
