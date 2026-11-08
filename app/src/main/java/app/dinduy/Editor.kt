@@ -1343,6 +1343,11 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     /** Catat posisi slot. Bila slot yang seluruhnya di atas layar berubah tinggi, gulir digeser sebesar selisihnya agar isi di layar tidak melompat. */
     fun setSlotPos(id: String, y: Float, h: Float) {
+        val mm = mv
+        if (mm != null && !mm.row && mm.bid == id && mvLayTop != y) {
+            mvLayTop = y   // slot yang diseret pindah di tata letak pratinjau: translasi seretan menyesuaikan di frame yang sama
+            androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        }
         val o = bpos[id]
         if (windowed && o != null && o[1] != h) {
             val sc = scroll
@@ -1438,28 +1443,34 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     private fun isEmptyP(x: Blk) = x.ty == "p" && x.r.t.isEmpty()
 
-    // ---------- penunjuk lepas (drop): ghost, ruang yang terbuka, landing ----------
-    // Saat objek diseret: tempat jatuhnya digambar sebagai "ghost" putus-putus seukuran objek (letak kiri/tengah/kanan ikut),
-    // blok di bawahnya bergeser membuka ruang (hanya visual), tepi layar menyala saat gulir otomatis, dan setelah dilepas
-    // semua blok meluncur ke tempat barunya (FLIP) lalu blok yang mendarat berkedip sebentar.
-    var gOn by mutableStateOf(0f)           // 0..1: ghost terlihat
-    var gy by mutableStateOf(0f)            // atas ghost (px, ruang konten)
-    var gHt by mutableStateOf(0f)           // tinggi ghost
-    var gS by mutableStateOf(0f)            // seberapa jauh blok di bawah ghost didorong
+    // ---------- pratinjau lepas (drop) yang akurat ----------
+    // Saat blok objek diseret, urutan + letaknya LANGSUNG dipasang ke daftar blok (pratinjau), jadi teks yang mengalir di
+    // sekitarnya dihitung oleh mesin tata letak yang sama dengan hasil akhir: apa yang terlihat sebelum lepas = hasil setelah lepas.
+    // Keputusan sasaran tetap memakai posisi SEBELUM pratinjau (bp0) supaya stabil, tidak saling memicu.
+    // Blok lain meluncur halus ke posisi barunya (FLIP); "lubang" tempat objek akan mendarat ditandai bingkai putus-putus.
+    var gOn by mutableStateOf(0f)           // 0..1: bingkai sasaran terlihat
+    var gy by mutableStateOf(0f)            // atas bingkai (px, ruang konten)
+    var gHt by mutableStateOf(0f)           // tinggi bingkai
     var gx by mutableStateOf(0f)
     var gw by mutableStateOf(0f)
-    var gPulse by mutableStateOf(0f)        // denyut singkat saat sasaran pindah
+    var gPulse by mutableStateOf(0f)        // denyut halus saat sasaran pindah
     var gT by mutableStateOf(0f)            // waktu berjalan (garis putus-putus bergerak, panah gulir)
     var gAdj by mutableStateOf(false)       // letak objek bisa diatur kiri / tengah / kanan
-    var gKind by mutableStateOf("")         // jenis blok yang diseret (ikon di ghost)
-    var gLine by mutableStateOf(false)      // mode garis (catatan bercoretan: blok tidak digeser)
+    var gKind by mutableStateOf("")         // jenis blok yang diseret (ikon di pil)
+    var gLine by mutableStateOf(false)      // mode garis (anggota kolase yang diseret keluar)
     var edgeV by mutableStateOf(0f)         // dorongan gulir otomatis: -1 atas .. 1 bawah (sudah dihaluskan)
-    var flipP by mutableStateOf(0f)         // 1 -> 0: blok meluncur dari tempat lama ke tempat baru setelah dilepas
+    var flipP by mutableStateOf(0f)         // 1 -> 0: blok meluncur dari tempat tampil lama ke tempat barunya
     var flipId by mutableStateOf("")
     var flipDx = 0f
     var landId by mutableStateOf("")
     var landA by mutableStateOf(0f)
+    var mvLayTop by mutableStateOf(0f)      // atas slot blok yang diseret di tata letak pratinjau (px)
+    var mvAdjX by mutableStateOf(0f)        // selisih letak kiri objek: tata letak asli - pratinjau
     val flipFrom = HashMap<String, Float>()
+    private var ob: List<Blk> = emptyList() // daftar blok asli saat seretan dimulai
+    private val bp0 = HashMap<String, FloatArray>()
+    private var mvX0 = 0f
+    private var pvKey = ""
     private var edgeRaw = 0f
     private var mvInk = false
     private var gKey = -2
@@ -1482,28 +1493,28 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     }
     private val sY = Spr()
     private val sH = Spr()
-    private val sS = Spr()
     private val sX = Spr()
     private val sW = Spr()
     private val sO = Spr()
     private val sF = Spr()
 
-    /** Seberapa jauh (px) slot [id] didorong ke bawah supaya ghost punya ruang. Dibaca di fase gambar, jadi tanpa recompose. */
-    fun slotShift(id: String): Float {
-        val s = gS
-        if (s <= .5f) return 0f
+    /** Daftar blok yang dipakai keputusan sasaran: asli (tanpa pratinjau) untuk blok tunggal, daftar hidup untuk anggota kolase. */
+    private fun src(): List<Blk> = if (mv?.row == false) ob else blocks
+
+    private fun curAl(b: Blk): String = if (b.im.size == 1) b.im[0].al else b.alOf()
+
+    /** Translasi seretan (px) relatif terhadap posisi slot di tata letak pratinjau: jari tetap memegang objek yang sama walau slotnya pindah. */
+    fun liftY(): Float {
         val m = mv ?: return 0f
-        if (m.bid == id) return 0f
-        val q = bpos[id] ?: return 0f
-        val t = ((gy - q[0]) / q[1].coerceAtLeast(1f)).coerceIn(0f, 1f)
-        return s * (1f - t)
+        return if (m.row) mvY else m.top + mvY - mvLayTop
     }
+    fun liftX(): Float = mvX + (if (mv?.row == true) 0f else mvAdjX)
 
     /** Ukuran objek yang diseret: [x kiri, lebar, tinggi] dalam px bila diletakkan dengan perataan [al]. */
-    private fun mvBox(m: Mv, b: Blk, q: FloatArray, al: String): FloatArray {
+    private fun mvBox(m: Mv, b: Blk, q: FloatArray?, al: String): FloatArray {
         val w = widthDp * dens
         var wp = w
-        var hp = q[1]
+        var hp = q?.get(1) ?: 0f
         if (m.row) {
             val r = imgRect(b, b.im.indexOfFirst { it.id == m.imgId })
             if (r != null) { wp = r.width; hp = r.height }
@@ -1515,13 +1526,64 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             hp = wp / mi.a.coerceIn(.2f, 5f)
         } else if (b.ty == "tbl") {
             wp = ((tblWidths(b, widthDp).sum() + 3f) * dens).coerceAtMost(w)
+            if (q != null) hp = minOf(q[1], m.h)
         } else if (b.isBox) {
             wp = w * b.bw.coerceIn(.2f, 1f)
             val oh = (objH[b.id] ?: 0f) * dens
-            if (oh > 0f) hp = minOf(hp, oh)
+            if (oh > 0f) hp = if (q != null) minOf(q[1], oh) else oh
         }
         val x = if (wp >= w * .98f) 0f else when (al) { "l" -> 0f; "r" -> w - wp; else -> (w - wp) / 2f }
         return floatArrayOf(x, wp, hp)
+    }
+
+    /** Hasil akhir bila blok [i] dilepas di celah [to] (-1 = tetap) dengan letak [al]. Dipakai pratinjau DAN pelepasan, jadi pasti sama. */
+    private fun mvBuild(srcL: List<Blk>, i: Int, to: Int, al: String): List<Blk> {
+        var b = srcL[i]
+        if (b.im.size == 1 && al != b.im[0].al) b = b.copy(im = listOf(b.im[0].copy(al = al)))   // lebar tidak diubah
+        if ((b.isBox || b.ty == "tbl") && al != b.alOf()) b = b.copy(ba = al)
+        val l = srcL.toMutableList()
+        if (to >= 0 && to != i && to != i + 1) {
+            val anchor = if (to < srcL.size) srcL[to].id else null
+            l.removeAt(i)
+            if (i > 0 && i < l.size && isEmptyP(l[i - 1]) && isEmptyP(l[i])) l.removeAt(i)
+            val at = if (anchor == null) l.size else l.indexOfFirst { it.id == anchor }.let { if (it < 0) l.size else it }
+            l.add(at, b)
+        } else l[i] = b
+        return l
+    }
+
+    /** Pasang pratinjau ke daftar blok bila sasaran / letak berubah. Blok lain meluncur halus dari posisi lamanya. */
+    private fun pvApply() {
+        val m = mv ?: return
+        if (m.row) return
+        val i = ob.indexOfFirst { it.id == m.bid }
+        if (i < 0) return
+        val oal = curAl(ob[i])
+        val to = if (mergeT != null) -1 else dropAt
+        val al = if (mergeT != null) oal else mvAl
+        val key = "$to|$al"
+        if (key == pvKey) return
+        pvKey = key
+        gPulse = 1f
+        if (!mvInk) flipCapture()   // catat posisi tampil sekarang SEBELUM tata letak berubah
+        val l = if (to < 0 && al == oal) ob else mvBuild(ob, i, to, al)
+        blocks = l
+        val nb = l.firstOrNull { it.id == m.bid } ?: return
+        mvAdjX = mvX0 - mvBox(m, nb, null, curAl(nb))[0]
+    }
+
+    /** Catat posisi tampil (termasuk sisa luncuran) semua slot; layout baru kemudian menarik mereka ke posisi barunya. */
+    private fun flipCapture() {
+        val fp = flipP
+        val old = HashMap<String, Float>(flipFrom)
+        flipFrom.clear()
+        for ((id, q) in bpos) {
+            val f = old[id]
+            flipFrom[id] = if (fp != 0f && f != null) q[0] + (f - q[0]) * fp else q[0]
+        }
+        sF.snap(1f)
+        flipP = 1f
+        fxStart()
     }
 
     private fun fxStart() {
@@ -1540,86 +1602,73 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     private fun fxStep(dt: Float) {
         val m = mv
-        var ty = sY.x
         var th = sH.x
-        var ts = 0f
         var tx = sX.x
         var tw = sW.x
         var to = 0f
         var sig = -2
+        val full = widthDp * dens
         if (m != null) {
-            val i = idx(m.bid)
-            val b = if (i >= 0) blocks[i] else null
-            val q = bpos[m.bid]
-            if (b != null && q != null) {
-                val bx = mvBox(m, b, q, mvAl)
+            if (m.row) {
+                // anggota kolase diseret keluar: garis tipis di celah tujuan
                 val at = dropAt
-                val full = widthDp * dens
-                if (mergeT != null) sig = -3
-                else if (at >= 0) {
-                    val top = if (at < blocks.size) bpos[blocks[at].id]?.get(0) else blocks.lastOrNull()?.let { l -> bpos[l.id]?.let { it[0] + it[1] } }
+                if (at >= 0 && mergeT == null) {
+                    val top = if (at < blocks.size) bp0[blocks[at].id]?.get(0) else blocks.lastOrNull()?.let { l -> bp0[l.id]?.let { it[0] + it[1] } }
                     if (top != null) {
-                        sig = at
-                        to = 1f
-                        if (mvInk) { ty = top - 2.5f * dens; th = 5f * dens; tx = 0f; tw = full }
-                        else { ty = top; th = bx[2].coerceIn(44f * dens, 180f * dens); ts = th; tx = bx[0]; tw = bx[1] }
+                        val ty = top - 2f * dens
+                        if (sO.x < .03f) sY.snap(ty)
+                        gy = sY.step(ty, dt, 520f, .9f)
+                        th = 4f * dens; tx = 0f; tw = full; to = 1f; sig = at
                     }
-                } else if (!m.row && !mvInk) {
-                    sig = -1
-                    to = 1f
-                    ty = q[0]; th = bx[2]; tx = bx[0]; tw = bx[1]
                 }
-                val nAdj = !m.row && bx[1] < full * .98f
-                if (nAdj != gAdj) gAdj = nAdj
+                gAdj = false
+            } else {
+                // bingkai sasaran = "lubang" yang benar-benar ditempati blok ini di tata letak pratinjau
+                val i = idx(m.bid)
+                val b = if (i >= 0) blocks[i] else null
+                val q = bpos[m.bid]
+                if (b != null && q != null && mergeT == null) {
+                    val bx = mvBox(m, b, q, curAl(b))
+                    val f = flipFrom[m.bid]
+                    gy = if (flipP != 0f && f != null) q[0] + (f - q[0]) * flipP else q[0]
+                    th = bx[2]; tx = bx[0]; tw = bx[1]; to = 1f
+                    sig = pvKey.hashCode()
+                    gAdj = bx[1] < full * .98f
+                }
             }
         }
-        if (to > 0f && sO.x < .03f) { sY.snap(ty); sH.snap(th); sX.snap(tx); sW.snap(tw) }
-        if (sig != gKey) {
-            if (to > 0f && sO.x > .3f && sig != -2) gPulse = 1f
-            gKey = sig
-        }
-        val o = sO.step(to, dt, 900f, 1f)
+        if (gLine != (m?.row == true)) gLine = m?.row == true
+        if (to > 0f && sO.x < .03f) { sH.snap(th); sX.snap(tx); sW.snap(tw) }
+        if (sig != gKey) { gKey = sig }
+        val o = sO.step(to, dt, 700f, 1f)
         if (to == 0f && o < .01f) { sO.snap(0f); gOn = 0f } else gOn = o.coerceIn(0f, 1f)
-        gy = sY.step(ty, dt, 520f, .86f)
-        gHt = sH.step(th, dt, 520f, .86f).coerceAtLeast(0f)
-        gS = sS.step(ts, dt, 460f, .88f).coerceAtLeast(0f)
-        gx = sX.step(tx, dt, 600f, .9f)
-        gw = sW.step(tw, dt, 600f, .9f).coerceAtLeast(0f)
+        gHt = sH.step(th, dt, 480f, .9f).coerceAtLeast(0f)
+        gx = sX.step(tx, dt, 520f, .9f)
+        gw = sW.step(tw, dt, 520f, .9f).coerceAtLeast(0f)
         gT += dt
-        if (gPulse > 0f) gPulse = (gPulse - dt * 3.5f).coerceAtLeast(0f)
+        if (gPulse > 0f) gPulse = (gPulse - dt * 3f).coerceAtLeast(0f)
         if (flipP != 0f) {
-            val f = sF.step(0f, dt, 380f, .82f)
+            val f = sF.step(0f, dt, 300f, .9f)
             if (kotlin.math.abs(f) < .002f && kotlin.math.abs(sF.v) < .05f) { flipP = 0f; sF.snap(0f); flipFrom.clear(); flipId = "" }
             else flipP = f
         }
-        if (landA > 0f) landA = (landA - dt * 1.7f).coerceAtLeast(0f)
+        if (landA > 0f) landA = (landA - dt * 1.5f).coerceAtLeast(0f)
         val ev = edgeV + (edgeRaw - edgeV) * (dt * 12f).coerceAtMost(1f)
         edgeV = if (kotlin.math.abs(ev) < .004f && edgeRaw == 0f) 0f else ev
     }
 
-    /** Dipanggil tepat saat dilepas, SEBELUM blok diubah: catat posisi tampil semua blok supaya bisa meluncur ke tempat barunya. */
-    private fun flipBegin(m: Mv) {
-        flipFrom.clear()
+    /** Dipanggil tepat saat dilepas, SEBELUM daftar blok diubah: blok lain tidak bergerak (sudah di tempatnya); objek meluncur dari jari ke lubangnya. */
+    private fun flipBegin(m: Mv, keep: Boolean) {
+        sO.snap(0f); gOn = 0f
+        if (mvInk) { flipFrom.clear(); flipId = ""; flipDx = 0f; flipP = 0f; sF.snap(0f); fxStart(); return }
+        flipCapture()
         flipId = ""
         flipDx = 0f
-        if (mvInk) {   // catatan bercoretan: coretan tidak ikut meluncur, jadi tanpa luncuran
-            sO.snap(0f); sS.snap(0f); gOn = 0f; gS = 0f
-            flipP = 0f; sF.snap(0f); fxStart(); return
-        }
-        for ((id, q) in bpos) flipFrom[id] = q[0] + slotShift(id)   // harus dihitung SEBELUM dorongan ghost dimatikan
-        sO.snap(0f); sS.snap(0f); gOn = 0f; gS = 0f
-        val q0 = bpos[m.bid]
-        val i = idx(m.bid)
-        if (!m.row && q0 != null && i >= 0) {
-            val b = blocks[i]
-            flipFrom[m.bid] = q0[0] + mvY
-            val oldAl = if (b.im.size == 1) b.im[0].al else b.alOf()
-            flipDx = mvX + (mvBox(m, b, q0, oldAl)[0] - mvBox(m, b, q0, mvAl)[0])
+        if (!m.row) {
+            flipFrom[m.bid] = m.top + mvY
+            flipDx = mvX + (if (keep) mvAdjX else 0f)
             flipId = m.bid
         }
-        sF.snap(1f)
-        flipP = 1f
-        fxStart()
     }
 
     private fun landOn(id: String) {
@@ -1644,11 +1693,16 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         mvX = 0f; mvY = 0f; dropAt = -1; mvDir = 0; mergeT = null
         mvAl = b.im.firstOrNull()?.al ?: b.alOf()
         mvInk = blocks.any { it.ik.isNotEmpty() }
-        gLine = mvInk
+        gLine = b.im.size > 1
         gKind = b.ty
         gKey = -2
-        sY.snap(p[0]); sH.snap(p[1]); sX.snap(0f); sW.snap(widthDp * dens); sS.snap(0f); sO.snap(0f); sF.snap(0f)
-        gOn = 0f; gS = 0f; gPulse = 0f; gAdj = false; edgeRaw = 0f; edgeV = 0f
+        ob = blocks
+        bp0.clear()
+        for ((k, v) in bpos) bp0[k] = v.copyOf()
+        mvLayTop = p[0]; mvAdjX = 0f; pvKey = ""
+        mvX0 = if (b.im.size > 1) 0f else mvBox(mv!!, b, null, curAl(b))[0]
+        sY.snap(p[0]); sH.snap(p[1]); sX.snap(0f); sW.snap(widthDp * dens); sO.snap(0f); sF.snap(0f)
+        gOn = 0f; gPulse = 0f; gAdj = false; edgeRaw = 0f; edgeV = 0f
         flipP = 0f; flipId = ""; flipFrom.clear(); landId = ""; landA = 0f
         fxStart()
         buzz?.invoke()
@@ -1717,21 +1771,22 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     private fun mvRecalc() {
         val m = mv ?: return
-        val i = idx(m.bid)
+        val sl = src()
+        val i = sl.indexOfFirst { it.id == m.bid }
         if (i < 0) return
         mergeCheck()
         if (m.row) { rowOut(m); return }
         // blok yang sangat tinggi (tabel panjang): acuan = dekat bagian atasnya, bukan pusatnya yang jauh di luar layar
         val cy = mvRef(m)
-        var gap = blocks.size
-        for ((j, b) in blocks.withIndex()) {
+        var gap = sl.size
+        for ((j, b) in sl.withIndex()) {
             if (j == i) continue
-            val q = bpos[b.id] ?: continue
+            val q = bp0[b.id] ?: continue
             if (q[0] + minOf(q[1] / 2f, viewH * .3f) >= cy) { gap = j; break }
         }
         val nd = if (mergeT != null || gap == i || gap == i + 1) -1 else gap
         if (nd != dropAt) { dropAt = nd; if (nd >= 0) buzz?.invoke() }
-        val b = blocks[i]
+        val b = sl[i]
         if (b.isBox || b.ty == "tbl") {
             val w = widthDp * dens
             val wp = if (b.ty == "tbl") (tblWidths(b, widthDp).sum() + 3f) * dens else w * b.bw.coerceIn(.2f, 1f)
@@ -1753,49 +1808,54 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             val al = if (wp >= w * .98f) mi.al else if (cx < w / 3f) "l" else if (cx > w * 2f / 3f) "r" else "c"
             if (al != mvAl) { mvAl = al; buzz?.invoke() }
         }
+        pvApply()
     }
 
     fun mvEnd(apply: Boolean) {
         val m = mv ?: return
         autoJob?.cancel()
         edgeRaw = 0f
-        flipBegin(m)
-        val i = idx(m.bid)
         val to = dropAt
         val al = mvAl
-        val anchor = if (to in 0 until blocks.size) blocks[to].id else null
         val mt = mergeT
+        flipBegin(m, apply && mt == null)
         mv = null; mvX = 0f; mvY = 0f; dropAt = -1; mergeT = null
-        if (!apply || i < 0) return
-        if (mt != null) { landOn(mt.bid); mergeImg(m.bid, m.imgId, mt); return }   // dilepas di atas gambar lain: otomatis jadi kolase
-        if (m.row && to >= 0) { extractImg(m.bid, m.imgId, anchor); return }   // kolase diseret keluar barisnya: jadi gambar sendiri
-        var b = blocks[i]
-        if (!m.row && b.im.size == 1 && al != b.im[0].al) {
-            val mi = b.im[0]
-            b = b.copy(im = listOf(mi.copy(al = al)))   // lebar tidak diubah
+        if (m.row) {
+            val i = idx(m.bid)
+            if (!apply || i < 0) return
+            val anchor = if (to in 0 until blocks.size) blocks[to].id else null
+            if (mt != null) { landOn(mt.bid); mergeImg(m.bid, m.imgId, mt); return }   // dilepas di atas gambar lain: otomatis jadi kolase
+            if (to >= 0) { extractImg(m.bid, m.imgId, anchor); return }   // kolase diseret keluar barisnya: jadi gambar sendiri
+            val rb = blocks[i]
+            releaseSide(rb.id)
+            selImg = if (rb.ty == "img") rb.id to maxOf(0, rb.im.indexOfFirst { it.id == m.imgId }) else null
+            norm(); afterStructural()
+            return
         }
-        if (!m.row && (b.isBox || b.ty == "tbl") && al != b.alOf()) {
-            // dilepas di sepertiga kiri / tengah / kanan: letak mengikuti, lebar tidak diubah (teks mengitari bila lebarnya memang cukup sempit)
-            b = b.copy(ba = al)
+        val i = ob.indexOfFirst { it.id == m.bid }
+        val keepPv = pvKey
+        pvKey = ""
+        if (i < 0) return
+        if (!apply) { if (blocks != ob) blocks = ob; return }            // dibatalkan: kembali ke susunan asli
+        if (mt != null) {                                                  // dilepas di atas gambar lain: otomatis jadi kolase
+            if (blocks != ob) blocks = ob
+            landOn(mt.bid); mergeImg(m.bid, m.imgId, mt)
+            return
         }
-        val l = blocks.toMutableList()
-        if (!m.row && to >= 0 && to != i && to != i + 1) {
-            l.removeAt(i)
-            if (i > 0 && i < l.size && isEmptyP(l[i - 1]) && isEmptyP(l[i])) l.removeAt(i)
-            val at = if (anchor == null) l.size else l.indexOfFirst { it.id == anchor }.let { if (it < 0) l.size else it }
-            l.add(at, b)
-        } else l[i] = b
-        blocks = l
-        releaseSide(b.id)
-        landOn(b.id)
-        selImg = if (b.ty == "img") b.id to maxOf(0, b.im.indexOfFirst { it.id == m.imgId }) else null
+        // pratinjau sudah terpasang dengan fungsi yang sama (mvBuild): hasil akhir identik, tidak ada yang berubah mendadak
+        val l = mvBuild(ob, i, to, al)
+        if (blocks != l) blocks = l
+        val fb = l.first { it.id == m.bid }
+        releaseSide(fb.id)
+        landOn(fb.id)
+        selImg = if (fb.ty == "img") fb.id to maxOf(0, fb.im.indexOfFirst { it.id == m.imgId }) else null
         norm(); afterStructural()
     }
 
     // ---------- gambar: kolase otomatis saat dijatuhkan di atas gambar lain ----------
     /** Kotak gambar ke-[ix] di blok [b] pada ruang konten (px). Dihitung dari model + posisi blok, jadi tidak ikut bergeser oleh gestur angkat. */
     private fun imgRect(b: Blk, ix: Int): Rect? {
-        val top = bpos[b.id]?.get(0) ?: return null
+        val top = (if (mv != null) bp0[b.id] else bpos[b.id])?.get(0) ?: return null
         val w = widthDp * dens
         if (w <= 0f || ix !in b.im.indices) return null
         val n = b.im.size
@@ -1816,7 +1876,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     /** Titik tengah gambar yang sedang diseret di ruang konten (px). */
     private fun mvCenter(m: Mv): Offset? {
-        val b = blocks.firstOrNull { it.id == m.bid } ?: return null
+        val b = src().firstOrNull { it.id == m.bid } ?: return null
         val ix = b.im.indexOfFirst { it.id == m.imgId }
         val r = imgRect(b, ix) ?: return null
         return Offset(r.center.x + mvX, r.center.y + mvY)
@@ -1829,7 +1889,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val c = if (m == null) null else mvCenter(m)
         if (m != null && c != null) {
             val pad = 10f * dens
-            loop@ for (b in blocks) {
+            loop@ for (b in src()) {
                 if (b.ty != "img" || b.id == m.bid || b.im.isEmpty() || b.im.size >= 3) continue
                 for (j in b.im.indices) {
                     val r = imgRect(b, j) ?: continue
@@ -1860,7 +1920,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (mergeT == null && (c.y < r.top - pad || c.y > r.bottom + pad)) {
             var gap = blocks.size
             for ((j, x) in blocks.withIndex()) {
-                val q = bpos[x.id] ?: continue
+                val q = bp0[x.id] ?: continue
                 if (q[0] + q[1] / 2f >= c.y) { gap = j; break }
             }
             nd = gap
