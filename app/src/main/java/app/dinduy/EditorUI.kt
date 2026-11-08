@@ -2161,6 +2161,103 @@ private fun BlockSlot(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan?, ordN: Int, od
     }
 }
 
+private class DropHold { var frac = 1f; var label = ""; var icon = "img"; var shown = false; var hPx = 0f }
+
+/**
+ * Indikator tempat jatuh saat objek sisipan diseret: "slot bayangan" bergaris putus (semut berbaris) di celah tujuan.
+ * - Lebar bayangan = lebar objek yang diseret, dan rata kiri / tengah / kanan sesuai tempat jari berada (meluncur mulus).
+ * - Garis tipis selebar halaman dengan titik di ujung menandai bahwa objek masuk ANTARA dua blok.
+ * - Label + ikon jenis objek ("Photo", "Table", ...) supaya jelas apa yang akan diletakkan.
+ * - Meluncur dengan pegas antar celah, muncul / hilang dengan fade + skala. Tidak menggeser tata letak catatan.
+ */
+@Composable
+fun DropSlot(ed: Ed) {
+    val pal = LocalPal.current
+    val dn = LocalDensity.current
+    val hold = remember { DropHold() }
+    val mv = ed.mv
+    val at = ed.dropAt
+    val on = mv != null && at >= 0 && ed.mergeT == null
+    if (mv != null) {
+        val b = ed.blocks.firstOrNull { it.id == mv.bid }
+        if (b != null) {
+            hold.frac = when {
+                mv.row -> .6f
+                b.ty == "img" -> b.im.firstOrNull()?.w?.coerceIn(.2f, 1f) ?: 1f
+                b.ty == "tbl" -> ((tblWidths(b, ed.widthDp).sum() + 3f) / ed.widthDp.coerceAtLeast(1f)).coerceIn(.2f, 1f)
+                b.isBox -> b.bw.coerceIn(.2f, 1f)
+                else -> 1f
+            }
+            val (lb, ic) = when (b.ty) {
+                "tbl" -> "Table" to "table"
+                "q" -> "Quote" to "quote"
+                "code" -> "Code" to "pre"
+                "hr" -> "Divider" to "hr"
+                else -> "Photo" to "img"
+            }
+            hold.label = lb; hold.icon = ic
+            hold.hPx = mv.h
+        }
+    }
+    val vis by animateFloatAsState(if (on) 1f else 0f, spring(.75f, 520f), label = "dsv")
+    val xf by animateFloatAsState(
+        when (ed.mvAl) { "l" -> 0f; "r" -> 1f; else -> .5f }, spring(.8f, 480f), label = "dsx"
+    )
+    val gh = hold.hPx.coerceIn(48f * dn.density, 72f * dn.density)
+    val yA = remember { Animatable(0f) }
+    LaunchedEffect(at, on) {
+        if (!on) { hold.shown = false; return@LaunchedEffect }
+        val bl = ed.blocks
+        val edge = 8f * dn.density
+        val c = if (at < bl.size) (ed.bpos[bl[at].id]?.get(0) ?: return@LaunchedEffect) - edge
+        else bl.lastOrNull()?.let { l -> ed.bpos[l.id]?.let { it[0] + it[1] + edge } } ?: return@LaunchedEffect
+        val y = (c - gh / 2f).coerceAtLeast(0f)
+        if (!hold.shown) { yA.snapTo(y); hold.shown = true } else yA.animateTo(y, spring(.8f, 520f))
+    }
+    if (vis <= .01f) return
+    val ph by androidx.compose.animation.core.rememberInfiniteTransition(label = "dsp").animateFloat(
+        0f, 1f,
+        androidx.compose.animation.core.infiniteRepeatable(tween(900, easing = androidx.compose.animation.core.LinearEasing)),
+        label = "dsph"
+    )
+    BoxWithConstraints(
+        Modifier.fillMaxWidth().height(with(dn) { gh.toDp() })
+            .offset { IntOffset(0, yA.value.roundToInt()) }
+            .graphicsLayer { alpha = vis; scaleY = .85f + .15f * vis }
+            .drawBehind {
+                // garis sisip selebar halaman + titik ujung
+                val cy = size.height / 2f
+                val dot = 4.dp.toPx()
+                drawLine(pal.p.copy(alpha = .55f), Offset(dot, cy), Offset(size.width - dot, cy), 2.dp.toPx())
+                drawCircle(pal.p, dot, Offset(dot, cy))
+                drawCircle(pal.p, dot, Offset(size.width - dot, cy))
+            }
+    ) {
+        val wDp = maxWidth * hold.frac
+        val shape = RoundedCornerShape(16.dp)
+        Box(
+            Modifier.offset((maxWidth - wDp) * xf, 0.dp).width(wDp).fillMaxHeight()
+                .clip(shape).background(pal.s).background(pal.p.copy(alpha = .14f))
+                .drawBehind {
+                    val len = 10.dp.toPx()
+                    drawRoundRect(
+                        pal.p, cornerRadius = CornerRadius(16.dp.toPx()),
+                        style = Stroke(
+                            2.dp.toPx(),
+                            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(len, len * .7f), ph * len * 1.7f)
+                        )
+                    )
+                },
+            Alignment.Center
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Ic(hold.icon, pal.p, 22.dp)
+                if (wDp > 110.dp) T("Drop " + hold.label.lowercase() + " here", 14f, 800, pal.p, maxLines = 1)
+            }
+        }
+    }
+}
+
 // ---------- layar catatan ----------
 @Composable
 fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
@@ -2402,13 +2499,6 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                         )
                         .drawWithContent {
                             inkContent(ed.ink)
-                            val at = ed.dropAt
-                            if (at >= 0) {
-                                val th = 4.dp.toPx()
-                                val y = if (at < ed.blocks.size) (ed.bpos[ed.blocks[at].id]?.get(0) ?: -1f) - th
-                                else ed.blocks.lastOrNull()?.let { l -> ed.bpos[l.id]?.let { it[0] + it[1] } } ?: -100f
-                                if (y >= -th) drawRoundRect(pal.p, Offset(0f, y), Size(size.width, th), CornerRadius(th / 2f))
-                            }
                         }
                 ) {
                     Column(Modifier.fillMaxWidth()) {
@@ -2490,6 +2580,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                         )
                     }
                     InkLayers(ed, vm, scroll)
+                    DropSlot(ed)
                     if (ed.selOn) SelHandles(ed)
                     SelBubble(ed, vm, act, scroll.value)   // selalu ada di komposisi supaya bisa animasi keluar
                 }
