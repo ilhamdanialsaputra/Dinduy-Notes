@@ -1541,7 +1541,9 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             val wp = if (b.ty == "tbl") (tblWidths(b, widthDp).sum() + 3f) * dens else w * b.bw.coerceIn(.2f, 1f)
             val base = when (b.alOf()) { "l" -> wp / 2f; "r" -> w - wp / 2f; else -> w / 2f }
             val cx = base + mvX
-            val al = if (cx < w / 3f) "l" else if (cx > w * 2f / 3f) "r" else "c"
+            // selebar catatan (mentok kanan): letak kiri / kanan tidak terlihat, jadi tetap seperti semula kecuali sengaja digeser jauh ke sisi
+            val al = if (wp >= w * .98f) (if (mvX < -w / 6f) "l" else if (mvX > w / 6f) "r" else b.alOf())
+            else if (cx < w / 3f) "l" else if (cx > w * 2f / 3f) "r" else "c"
             if (al != mvAl) { mvAl = al; buzz?.invoke() }
         }
         if (b.im.size == 1) {
