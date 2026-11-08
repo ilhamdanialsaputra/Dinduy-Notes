@@ -48,6 +48,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.positionChanged
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.runtime.DisposableEffect
@@ -1601,6 +1602,86 @@ fun floatPlans(ed: Ed, dm: Dm): Map<String, FloatPlan> {
     return out ?: emptyMap()
 }
 
+/** Layer objek yang diseret / baru dilepas: terangkat mengikuti jari, lalu meluncur ke lubangnya (teks di sampingnya tetap di tempat). */
+private fun androidx.compose.ui.graphics.GraphicsLayerScope.liftLayer(ed: Ed, id: String, lifted: Boolean) {
+    if (lifted) {
+        translationX = ed.liftX(); translationY = ed.liftY()
+        scaleX = ed.liftSc; scaleY = ed.liftSc; rotationZ = ed.liftRot; alpha = .97f
+    } else {
+        val fp = ed.flipP
+        if (fp != 0f && ed.flipId == id) {
+            val now = ed.bpos[id]?.get(0)
+            val from = ed.flipFrom[id]
+            if (now != null && from != null) translationY = (from - now) * fp
+            translationX = ed.flipDx * fp
+            val sc = 1f + (ed.flipSc - 1f) * fp
+            scaleX = sc; scaleY = sc
+            rotationZ = ed.flipRot * fp
+        }
+    }
+}
+
+/**
+ * Inset (kiri / kanan / bawah, dp) yang berubah mulus: teks di sekitar objek bergeser dan lebar kolomnya berubah bertahap, bukan seketika.
+ * Dihitung di fase tata letak (tanpa recompose isi). Titik awal = inset terakhir paragraf ini (saat pindah antara kelompok dan baris biasa).
+ */
+@Composable
+private fun Modifier.smoothInset(ed: Ed, key: String, s: Float, e: Float, b: Float): Modifier {
+    val aS = remember(key) { Animatable(if (ed.animReflow) (ed.padMemo[key + "s"] ?: 0f) else s) }
+    val aE = remember(key) { Animatable(if (ed.animReflow) (ed.padMemo[key + "e"] ?: 0f) else e) }
+    val aB = remember(key) { Animatable(if (ed.animReflow) (ed.padMemo[key + "b"] ?: 0f) else b) }
+    SideEffect { ed.padMemo[key + "s"] = s; ed.padMemo[key + "e"] = e; ed.padMemo[key + "b"] = b }
+    LaunchedEffect(s) { if (aS.value != s) aS.animateTo(s, spring(.92f, 240f)) }
+    LaunchedEffect(e) { if (aE.value != e) aE.animateTo(e, spring(.92f, 240f)) }
+    LaunchedEffect(b) { if (aB.value != b) aB.animateTo(b, spring(.92f, 240f)) }
+    val d = LocalDensity.current.density
+    return this.layout { m, c ->
+        val ps = (aS.value * d).roundToInt().coerceAtLeast(0)
+        val pe = (aE.value * d).roundToInt().coerceAtLeast(0)
+        val pb = (aB.value * d).roundToInt().coerceAtLeast(0)
+        val cc = if (c.maxWidth == Constraints.Infinity) c
+        else c.copy(minWidth = (c.minWidth - ps - pe).coerceAtLeast(0), maxWidth = (c.maxWidth - ps - pe).coerceAtLeast(0))
+        val p = m.measure(cc)
+        layout(p.width + ps + pe, p.height + pb) { p.place(ps, 0) }
+    }
+}
+
+/** Satu paragraf yang mengalir di samping objek. Geseran kiri/kanan, lebar kolom, dan posisi vertikalnya berubah mulus saat objek dipindah. */
+@Composable
+private fun FloatPart(ed: Ed, vm: AppVM, headId: String, x: Blk, sp: FSpec, od: Map<String, Int>, dm: Dm) {
+    Box(
+        Modifier
+            .smoothInset(ed, x.id, sp.ps, sp.pe, sp.extra)
+            .onGloballyPositioned { c ->
+                val cc = ed.contentCoords
+                if (cc != null && cc.isAttached && c.isAttached) {
+                    ed.setPos(x.id, cc.localPositionOf(c, Offset.Zero).y, c.size.height.toFloat())
+                }
+            }
+            .drawWithContent {
+                // luncuran vertikal relatif terhadap kelompoknya (kelompok sendiri sudah meluncur lewat slotnya)
+                val fp = ed.flipP
+                var dy = 0f
+                if (fp != 0f) {
+                    val pn = ed.bpos[x.id]?.get(0)
+                    val pf = ed.flipFrom[x.id]
+                    if (pn != null && pf != null) dy = (pf - pn) * fp
+                    if (ed.mv?.bid != headId && ed.flipId != headId) {
+                        val hn = ed.bpos[headId]?.get(0)
+                        val hf = ed.flipFrom[headId]
+                        if (hn != null && hf != null) dy -= (hf - hn) * fp
+                    }
+                }
+                if (dy != 0f) {
+                    drawContext.canvas.save()
+                    drawContext.transform.translate(0f, dy)
+                    drawContent()
+                    drawContext.canvas.restore()
+                } else drawContent()
+            }
+    ) { BlockView(ed, vm, x, od[x.id] ?: 1, dm, sp.fold, sp.mk) }
+}
+
 /** Gambar di kiri/kanan dengan paragraf sesudahnya mengalir di sampingnya, lalu lanjut selebar penuh di bawahnya. */
 @Composable
 fun FloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<String, Int>, dm: Dm) {
@@ -1615,25 +1696,13 @@ fun FloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<String, Int>,
     Box(Modifier.fillMaxWidth().heightIn(min = imgW / ratio + bottom)) {
         Column(Modifier.fillMaxWidth()) {
             plan.parts.forEach { (x, sp) ->
-                key(x.id) {
-                    Box(
-                        Modifier.padding(start = sp.ps.dp, end = sp.pe.dp, bottom = sp.extra.dp)
-                            .onGloballyPositioned { c ->
-                                val cc = ed.contentCoords
-                                if (cc != null && cc.isAttached && c.isAttached) {
-                                    ed.setPos(x.id, cc.localPositionOf(c, Offset.Zero).y, c.size.height.toFloat())
-                                }
-                            }
-                    ) { BlockView(ed, vm, x, od[x.id] ?: 1, dm, sp.fold, sp.mk) }
-                }
+                key(x.id) { FloatPart(ed, vm, b.id, x, sp, od, dm) }
             }
         }
         Box(
             Modifier.align(when (m.al) { "r" -> Alignment.TopEnd; "c" -> Alignment.TopCenter; else -> Alignment.TopStart })
                 .zIndex(if (lifted) 3f else 1f)
-                .graphicsLayer {
-                    if (lifted) { translationX = ed.liftX(); translationY = ed.liftY(); scaleX = ed.liftSc; scaleY = ed.liftSc; rotationZ = ed.liftRot; alpha = .97f }
-                }
+                .graphicsLayer { liftLayer(ed, b.id, lifted) }
         ) { ImgCell(ed, vm, b, 0, Modifier.width(imgW).aspectRatio(ratio), sel == 0) }
     }
 }
@@ -1648,25 +1717,13 @@ private fun TblFloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<St
     Box(Modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth()) {
             plan.parts.forEach { (x, sp) ->
-                key(x.id) {
-                    Box(
-                        Modifier.padding(start = sp.ps.dp, end = sp.pe.dp, bottom = sp.extra.dp)
-                            .onGloballyPositioned { c ->
-                                val cc = ed.contentCoords
-                                if (cc != null && cc.isAttached && c.isAttached) {
-                                    ed.setPos(x.id, cc.localPositionOf(c, Offset.Zero).y, c.size.height.toFloat())
-                                }
-                            }
-                    ) { BlockView(ed, vm, x, od[x.id] ?: 1, dm, sp.fold, sp.mk) }
-                }
+                key(x.id) { FloatPart(ed, vm, b.id, x, sp, od, dm) }
             }
         }
         Box(
             Modifier.align(when (b.alOf()) { "r" -> Alignment.TopEnd; "c" -> Alignment.TopCenter; else -> Alignment.TopStart })
                 .zIndex(if (lifted) 3f else 1f)
-                .graphicsLayer {
-                    if (lifted) { translationX = ed.liftX(); translationY = ed.liftY(); scaleX = ed.liftSc; scaleY = ed.liftSc; rotationZ = ed.liftRot; alpha = .97f }
-                }
+                .graphicsLayer { liftLayer(ed, b.id, lifted) }
         ) { TableView(ed, b, dm, pal, if (narrow || (b.alOf() != "l" && tw.value < ed.widthDp)) Modifier.width(tw) else Modifier.fillMaxWidth()) }
     }
 }
@@ -1686,25 +1743,13 @@ private fun BoxFloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<St
     Box(Modifier.fillMaxWidth().heightIn(min = (hDp + bottom).dp)) {
         Column(Modifier.fillMaxWidth()) {
             plan.parts.forEach { (x, sp) ->
-                key(x.id) {
-                    Box(
-                        Modifier.padding(start = sp.ps.dp, end = sp.pe.dp, bottom = sp.extra.dp)
-                            .onGloballyPositioned { c ->
-                                val cc = ed.contentCoords
-                                if (cc != null && cc.isAttached && c.isAttached) {
-                                    ed.setPos(x.id, cc.localPositionOf(c, Offset.Zero).y, c.size.height.toFloat())
-                                }
-                            }
-                    ) { BlockView(ed, vm, x, od[x.id] ?: 1, dm, sp.fold, sp.mk) }
-                }
+                key(x.id) { FloatPart(ed, vm, b.id, x, sp, od, dm) }
             }
         }
         Box(
             Modifier.align(when (al) { "r" -> Alignment.TopEnd; "c" -> Alignment.TopCenter; else -> Alignment.TopStart })
                 .zIndex(if (lifted) 3f else 1f)
-                .graphicsLayer {
-                    if (lifted) { translationX = ed.liftX(); translationY = ed.liftY(); scaleX = ed.liftSc; scaleY = ed.liftSc; rotationZ = ed.liftRot; alpha = .97f }
-                }
+                .graphicsLayer { liftLayer(ed, b.id, lifted) }
                 .padding(start = il.dp, end = ir.dp, bottom = if (ctr) bottom.dp else 0.dp)
         ) { BoxCell(ed, b, dm, pal, if (ctr && full) Modifier.fillMaxWidth() else Modifier.width(w)) }
     }
@@ -2267,7 +2312,7 @@ private fun BlockSlot(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan?, ordN: Int, od
                 var sc = 1f
                 var rot = 0f
                 val fp = ed.flipP
-                if (fp != 0f && !(lifted && plan == null) && ed.mv?.bid != b.id) {
+                if (fp != 0f && !(lifted && plan == null) && ed.mv?.bid != b.id && !(plan != null && ed.flipId == b.id)) {
                     val now = ed.bpos[b.id]?.get(0)
                     val from = ed.flipFrom[b.id]
                     if (now != null && from != null) dy = (from - now) * fp
@@ -2286,6 +2331,7 @@ private fun BlockSlot(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan?, ordN: Int, od
                 }
                 drawContext.canvas.restore()
             }
+            .then(if (plan == null && ed.animReflow && (b.ty == "p" || b.ty == "li" || b.ty == "h")) Modifier.smoothInset(ed, b.id, 0f, 0f, 0f) else Modifier)
     ) {
         if (live) {
             val blks = plan?.parts?.map { it.first }?.let { listOf(b) + it } ?: listOf(b)
