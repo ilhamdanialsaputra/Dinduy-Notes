@@ -41,6 +41,8 @@ import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -1786,7 +1788,7 @@ private fun Modifier.selRing(on: Boolean, shape: Shape, color: Color): Modifier 
     val o = shape.createOutline(Size(size.width + 2 * g, size.height + 2 * g), layoutDirection, this)
     if (o is androidx.compose.ui.graphics.Outline.Rounded) {
         val p = androidx.compose.ui.graphics.Path().apply { addRoundRect(o.roundRect) }
-        androidx.compose.ui.graphics.drawscope.translate(-g, -g) { drawPath(p, color, style = Stroke(1.5.dp.toPx())) }
+        translate(-g, -g) { drawPath(p, color, style = Stroke(1.5.dp.toPx())) }
     }
 }
 
