@@ -1309,6 +1309,14 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
                 Modifier.align(if (mt.after) Alignment.CenterEnd else Alignment.CenterStart).padding(horizontal = 6.dp)
                     .size(7.dp, 64.dp).clip(CircleShape).background(pal.p)
             )
+            val pop = remember { Animatable(0f) }
+            LaunchedEffect(Unit) { pop.animateTo(1f, spring(.55f, 520f)) }
+            Row(
+                Modifier.align(Alignment.Center)
+                    .graphicsLayer { scaleX = pop.value; scaleY = pop.value; alpha = pop.value.coerceIn(0f, 1f) }
+                    .clip(CircleShape).background(pal.p).padding(horizontal = 12.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) { T("Side by side", 12f, 800, pal.op) }
         }
         if (ed.mv == null && bmp != null && !ed.reading) {
             // tombol perluas: buka menu foto (morph dari bingkai ini ke layar penuh)
@@ -1851,80 +1859,27 @@ fun CapDiv() {
     Box(Modifier.padding(horizontal = 3.dp).width(1.dp).height(24.dp).background(pal.ol.copy(alpha = .5f)))
 }
 
-/** Muncul bertahap: tiap tombol kapsul membesar dari kecil + naik sedikit dengan jeda berurutan (efek "pop" beruntun). */
+/** Kapsul alat objek sisipan (tabel / kutipan / kode / garis): rata kiri / tengah / kanan, hapus, selesai. Tampilan sama dengan kapsul alat Ink. */
 @Composable
-fun CapPop(i: Int, content: @Composable () -> Unit) {
-    val p = remember { Animatable(0f) }
-    LaunchedEffect(Unit) { delay(50L + i * 38L); p.animateTo(1f, spring(.52f, 420f)) }
-    Box(
-        Modifier.graphicsLayer {
-            val s = .35f + .65f * p.value
-            scaleX = s; scaleY = s
-            alpha = (p.value * 1.4f).coerceIn(0f, 1f)
-            translationY = (1f - p.value) * 12.dp.toPx()
-        }
-    ) { content() }
-}
-
-/** Tombol bulat kapsul dengan warna sendiri (hapus = merah tonal, selesai = primer). Bentuk menyusut + badan mengecil saat ditekan. */
-@Composable
-private fun CapAct(bg: Color, onClick: () -> Unit, content: @Composable () -> Unit) {
-    val src = remember { MutableInteractionSource() }
-    val pr by src.collectIsPressedAsState()
-    val r by animateDpAsState(if (pr) 13.dp else 23.dp, spring(.6f, 600f), label = "ar")
-    val sc by animateFloatAsState(if (pr) .86f else 1f, spring(.5f, 600f), label = "as")
-    Box(
-        Modifier.size(46.dp).graphicsLayer { scaleX = sc; scaleY = sc }.clip(RoundedCornerShape(r)).background(bg)
-            .clickable(interactionSource = src, indication = LocalIndication.current, onClick = onClick),
-        Alignment.Center
-    ) { content() }
-}
-
-/**
- * Kapsul alat objek sisipan (tabel / kutipan / kode / garis): rata kiri / tengah / kanan, hapus, selesai.
- * - tiga tombol rata ada di dalam "jalur" tonal; penanda aktifnya SATU pil yang meluncur (pegas) ke posisi baru, bukan menyala-mati
- * - tombol muncul beruntun saat kapsul masuk; lebar kapsul bergerak halus saat tombol "selesai" datang / pergi
- * - [showOk] = true memaksa tombol selesai tetap ada (dipakai bilah datar, supaya tidak berkedip saat kapsul keluar)
- */
-@Composable
-fun ObjCapsule(ed: Ed, ob: Blk, showOk: Boolean = ed.selObj != null) {
+fun ObjCapsule(ed: Ed, ob: Blk) {
     val pal = LocalPal.current
     val al = ob.alOf()
     val cap = RoundedCornerShape(30.dp)
-    val idx = when (al) { "l" -> 0; "c" -> 1; "r" -> 2; else -> -1 }
-    val pillX by animateDpAsState(48.dp * idx.coerceAtLeast(0), spring(.7f, 520f), label = "pillX")
-    val pillA by animateFloatAsState(if (idx >= 0) 1f else 0f, tween(160), label = "pillA")
-    val ring = if (pal.dark) pal.ol.copy(alpha = .35f) else pal.ol.copy(alpha = .22f)
     Box(Modifier.fillMaxWidth(), Alignment.Center) {
         Row(
-            Modifier.animateContentSize(spring(.82f, 520f))
-                .shadow(if (pal.dark) 8.dp else 3.dp, cap).clip(cap).background(pal.c3).border(1.dp, ring, cap)
-                .padding(horizontal = 8.dp, vertical = 7.dp),
-            verticalAlignment = Alignment.CenterVertically
+            Modifier.shadow(if (pal.dark) 6.dp else 2.dp, cap).clip(cap).background(pal.c3)
+                .animateContentSize(spring(.85f, 520f)).padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            CapPop(0) {
-                Box(Modifier.clip(RoundedCornerShape(26.dp)).background(pal.c4).padding(3.dp)) {
-                    Box(
-                        Modifier.offset(x = pillX).size(46.dp).graphicsLayer { alpha = pillA }
-                            .clip(RoundedCornerShape(23.dp)).background(pal.p)
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
-                        // latar tombol transparan: penandanya pil yang meluncur di belakang
-                        Tbn({ AlignArrow(0, if (idx == 0) pal.op else pal.os) }, false, true) { ed.objAlign(ob.id, "l") }
-                        Tbn({ AlignArrow(1, if (idx == 1) pal.op else pal.os) }, false, true) { ed.objAlign(ob.id, "c") }
-                        Tbn({ AlignArrow(2, if (idx == 2) pal.op else pal.os) }, false, true) { ed.objAlign(ob.id, "r") }
-                    }
-                }
-            }
-            Box(Modifier.padding(start = 6.dp)) { CapPop(1) { CapAct(pal.ec, { ed.objDelete(ob.id) }) { Ic("del", pal.oec) } } }
-            AnimatedVisibility(
-                visible = showOk,
-                enter = fadeIn(tween(160)) + expandHorizontally(spring(.8f, 480f), expandFrom = Alignment.Start) +
-                    scaleIn(spring(.6f, 420f), .5f),
-                exit = fadeOut(tween(120)) + shrinkHorizontally(tween(200, easing = Emph), shrinkTowards = Alignment.Start) +
-                    scaleOut(tween(160), .5f)
-            ) {
-                Box(Modifier.padding(start = 6.dp)) { CapPop(2) { CapAct(pal.p, { ed.selObj = null }) { Ic("ok", pal.op) } } }
+            Tbn({ AlignArrow(0, it) }, al == "l", true) { ed.objAlign(ob.id, "l") }
+            Tbn({ AlignArrow(1, it) }, al == "c", true) { ed.objAlign(ob.id, "c") }
+            Tbn({ AlignArrow(2, it) }, al == "r", true) { ed.objAlign(ob.id, "r") }
+            CapDiv()
+            Tbn({ Ic("del", it) }, false, true) { ed.objDelete(ob.id) }
+            if (ed.selObj != null) {
+                CapDiv()
+                Tbn({ Ic("ok", it) }, false, true) { ed.selObj = null }
             }
         }
     }
@@ -1958,10 +1913,12 @@ fun Tbn(content: @Composable (Color) -> Unit, on: Boolean, enabled: Boolean, onC
     val pr by src.collectIsPressedAsState()
     val r by animateDpAsState(if (pr) 14.dp else 23.dp, spring(.6f, 600f), label = "r")
     val sc by animateFloatAsState(if (pr) .88f else 1f, spring(.5f, 600f), label = "s")
-    val fg = if (on) pal.op else pal.os
+    // status aktif berpindah dengan pudar warna (bukan kedip): latar dan ikon beranimasi bersama
+    val fg by androidx.compose.animation.animateColorAsState(if (on) pal.op else pal.os, tween(190, easing = Emph), label = "tf")
+    val bgc by androidx.compose.animation.animateColorAsState(if (on) pal.p else pal.p.copy(alpha = 0f), tween(190, easing = Emph), label = "tb")
     Box(
         Modifier.size(46.dp).graphicsLayer { scaleX = sc; scaleY = sc; alpha = if (enabled) 1f else .28f }
-            .clip(RoundedCornerShape(r)).background(if (on) pal.p else Color.Transparent)
+            .clip(RoundedCornerShape(r)).background(bgc)
             .clickable(interactionSource = src, indication = LocalIndication.current, enabled = enabled, onClick = onClick),
         Alignment.Center
     ) { content(fg) }
@@ -2179,6 +2136,111 @@ fun Sep() {
     Box(Modifier.padding(horizontal = 4.dp).width(2.dp).height(24.dp).clip(RoundedCornerShape(1.dp)).background(pal.ol))
 }
 
+// ---------- penunjuk lepas (drop) ----------
+private fun ghostIc(ty: String): String = when (ty) {
+    "tbl" -> "table"
+    "q" -> "quote"
+    "code" -> "pre"
+    "hr" -> "hr"
+    else -> "img"
+}
+
+/**
+ * Penunjuk tempat jatuh objek yang sedang diseret. Bukan sekadar garis: sebuah "ghost" putus-putus seukuran objek
+ * (lebar dan letak kiri / tengah / kanan ikut berubah), diberi pil "Drop here" + ikon jenis objek + panah letak.
+ * Ghost meluncur mulus (spring) antar sasaran, berdenyut saat sasaran pindah; blok di sekitarnya bergeser membuka ruang.
+ * Catatan yang punya coretan: blok tidak digeser, ghost berubah menjadi garis bercahaya dengan pil di atasnya.
+ */
+@Composable
+fun androidx.compose.foundation.layout.BoxScope.DropGhost(ed: Ed) {
+    val alive by remember { androidx.compose.runtime.derivedStateOf { ed.mv != null || ed.gOn > 0f } }
+    if (!alive) return
+    val pal = LocalPal.current
+    val dn = LocalDensity.current.density
+    val wide by remember { androidx.compose.runtime.derivedStateOf { ed.gw > 124f * dn } }
+    val line = ed.gLine
+    Box(
+        Modifier.matchParentSize().drawBehind {
+            val a = ed.gOn
+            if (a > .004f) {
+                val x = ed.gx
+                val y = ed.gy
+                val w = ed.gw
+                val h = ed.gHt
+                val pu = ed.gPulse
+                if (line) {
+                    val r = h / 2f
+                    drawRoundRect(pal.p.copy(alpha = .20f * a), Offset(x - 6.dp.toPx(), y - 5.dp.toPx()), Size(w + 12.dp.toPx(), h + 10.dp.toPx()), CornerRadius(r + 5.dp.toPx()))
+                    drawRoundRect(pal.p.copy(alpha = a), Offset(x, y), Size(w, h), CornerRadius(r))
+                    drawCircle(pal.p.copy(alpha = a), 6.dp.toPx(), Offset(x + 6.dp.toPx(), y + h / 2f))
+                    drawCircle(pal.p.copy(alpha = a), 6.dp.toPx(), Offset(x + w - 6.dp.toPx(), y + h / 2f))
+                } else {
+                    val g = 3.dp.toPx() * pu
+                    val tl = Offset(x - g, y - g)
+                    val sz = Size(w + 2f * g, h + 2f * g)
+                    val cr = CornerRadius(minOf(18.dp.toPx(), sz.height / 2f))
+                    drawRoundRect(pal.p.copy(alpha = (.09f + .07f * pu) * a), tl, sz, cr)
+                    drawRoundRect(pal.p.copy(alpha = .14f * a), tl, sz, cr, style = Stroke(6.dp.toPx()))
+                    drawRoundRect(
+                        pal.p.copy(alpha = .95f * a), tl, sz, cr,
+                        style = Stroke(
+                            2.dp.toPx(),
+                            cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10.dp.toPx(), 7.dp.toPx()), -ed.gT * 24.dp.toPx())
+                        )
+                    )
+                }
+            }
+        }
+    ) {
+        Row(
+            Modifier
+                .graphicsLayer {
+                    val sc = 1f + .06f * ed.gPulse
+                    translationX = ed.gx + ed.gw / 2f - size.width / 2f
+                    translationY = if (line) ed.gy - size.height - 12f * density else ed.gy + ed.gHt / 2f - size.height / 2f
+                    scaleX = sc; scaleY = sc
+                    alpha = ed.gOn
+                }
+                .shadow(4.dp, CircleShape).background(pal.p)
+                .padding(horizontal = 12.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Ic(ghostIc(ed.gKind), pal.op, 18.dp)
+            if (wide) T("Drop here", 13f, 800, pal.op)
+            if (ed.gAdj) AlignArrow(when (ed.mvAl) { "l" -> 0; "r" -> 2; else -> 1 }, pal.op)
+        }
+    }
+}
+
+/** Cahaya + panah di tepi atas / bawah area catatan saat seretan berada di zona gulir otomatis. */
+@Composable
+fun EdgeGlow(ed: Ed) {
+    val alive by remember { androidx.compose.runtime.derivedStateOf { ed.mv != null || ed.edgeV != 0f } }
+    if (!alive) return
+    val pal = LocalPal.current
+    Box(Modifier.fillMaxSize()) {
+        for (top in listOf(true, false)) {
+            Box(
+                Modifier.align(if (top) Alignment.TopCenter else Alignment.BottomCenter).fillMaxWidth().height(72.dp)
+                    .graphicsLayer { alpha = (if (top) -ed.edgeV else ed.edgeV).coerceIn(0f, 1f) }
+                    .background(
+                        androidx.compose.ui.graphics.Brush.verticalGradient(
+                            if (top) listOf(pal.p.copy(alpha = .30f), Color.Transparent) else listOf(Color.Transparent, pal.p.copy(alpha = .30f))
+                        )
+                    ),
+                contentAlignment = if (top) Alignment.TopCenter else Alignment.BottomCenter
+            ) {
+                Box(
+                    Modifier.padding(vertical = 10.dp)
+                        .graphicsLayer { translationY = (if (top) -1f else 1f) * kotlin.math.sin(ed.gT * 9f) * 3f * density }
+                ) { Ic(if (top) "aup" else "adn", pal.p, 26.dp) }
+            }
+        }
+    }
+}
+
 // ---------- slot blok (komposisi berjendela) ----------
 private val NO_OD: Map<String, Int> = emptyMap()
 
@@ -2188,17 +2250,46 @@ private val NO_OD: Map<String, Int> = emptyMap()
  */
 @Composable
 private fun BlockSlot(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan?, ordN: Int, od: Map<String, Int>, dm: Dm, live: Boolean) {
+    val pal = LocalPal.current
     val lifted = ed.mv?.let { it.bid == b.id && !it.row } == true
     val dragging = ed.mv?.bid == b.id
+    val flying = ed.flipId == b.id
     val den = LocalDensity.current
     Box(
         Modifier
-            .zIndex(if (dragging) 3f else 0f)
+            .zIndex(if (dragging || flying) 3f else 0f)
             .onGloballyPositioned { c -> ed.setSlotPos(b.id, c.positionInParent().y, c.size.height.toFloat()) }
             .graphicsLayer {
                 if (lifted && plan == null) {
                     translationX = ed.mvX; translationY = ed.mvY
-                    scaleX = 1.03f; scaleY = 1.03f; alpha = .94f
+                    scaleX = 1.04f; scaleY = 1.04f; alpha = .95f
+                }
+            }
+            // Geser visual lewat gambar (bukan layer): posisi layout (bpos) tidak pernah berubah, jadi penentuan sasaran lepas tetap stabil.
+            .drawWithContent {
+                var dy = 0f
+                var dx = 0f
+                var sc = 1f
+                if (!(lifted && plan == null)) {
+                    val fp = ed.flipP
+                    if (fp != 0f) {
+                        // setelah dilepas: meluncur dari tempat tampil lama ke tempat barunya (FLIP)
+                        val now = ed.bpos[b.id]?.get(0)
+                        val from = ed.flipFrom[b.id]
+                        if (now != null && from != null) dy = (from - now) * fp
+                        if (ed.flipId == b.id) { dx = ed.flipDx * fp; sc = 1f + .04f * fp }
+                    } else {
+                        dy = ed.slotShift(b.id)   // saat diseret: blok didorong membuka ruang untuk ghost
+                    }
+                }
+                val la = ed.landA
+                androidx.compose.ui.graphics.drawscope.withTransform({ translate(dx, dy); scale(sc, sc) }) {
+                    this@drawWithContent.drawContent()
+                    if (la > 0f && ed.landId == b.id) {
+                        val cr = CornerRadius(14.dp.toPx())
+                        drawRoundRect(pal.p.copy(alpha = .10f * la), Offset.Zero, size, cr)
+                        drawRoundRect(pal.p.copy(alpha = .60f * la), Offset.Zero, size, cr, style = Stroke(2.5.dp.toPx()))
+                    }
                 }
             }
     ) {
@@ -2454,17 +2545,9 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                             onEnd = { ed.selEnd() },
                             lead = 70L
                         )
-                        .drawWithContent {
-                            inkContent(ed.ink)
-                            val at = ed.dropAt
-                            if (at >= 0) {
-                                val th = 4.dp.toPx()
-                                val y = if (at < ed.blocks.size) (ed.bpos[ed.blocks[at].id]?.get(0) ?: -1f) - th
-                                else ed.blocks.lastOrNull()?.let { l -> ed.bpos[l.id]?.let { it[0] + it[1] } } ?: -100f
-                                if (y >= -th) drawRoundRect(pal.p, Offset(0f, y), Size(size.width, th), CornerRadius(th / 2f))
-                            }
-                        }
+                        .drawWithContent { inkContent(ed.ink) }
                 ) {
+                    DropGhost(ed)
                     Column(Modifier.fillMaxWidth()) {
                         val firstText = { ed.blocks.firstOrNull { it.isText }?.let { ed.focusAt(it.id, 0) } }
                         // lencana label di atas judul; ketuk untuk membuka halaman label
@@ -2570,6 +2653,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                 }
             }
             }
+            EdgeGlow(ed)
             InkFrame(ed)
             BottomBars(ed, vm, act, (!ed.reading || ed.selEdit) && !ed.titleFocus && !ed.findOn && !ed.ink.on, imeOpen) { kbBox[0] }
             InkBar(ed, vm)
