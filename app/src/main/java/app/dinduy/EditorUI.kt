@@ -2162,7 +2162,7 @@ private fun BlockSlot(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan?, ordN: Int, od
     }
 }
 
-private class DropHold { var frac = 1f; var label = ""; var icon = "img"; var shown = false; var hPx = 0f }
+private class DropHold { var bid = ""; var frac = 1f; var label = ""; var icon = "img"; var shown = false; var hPx = 0f }
 
 /**
  * Indikator tempat jatuh saat objek sisipan diseret: "slot bayangan" bergaris putus (semut berbaris) di celah tujuan.
@@ -2178,8 +2178,11 @@ fun DropSlot(ed: Ed) {
     val hold = remember { DropHold() }
     val mv = ed.mv
     val at = ed.dropAt
-    val on = mv != null && at >= 0 && ed.mergeT == null
+    // own = tidak pindah urutan (celah sama): bayangan tampil di tempat objek sendiri supaya perubahan kiri / tengah / kanan tetap terlihat
+    val own = at < 0
+    val on = mv != null && ed.mergeT == null && (!own || !mv.row)
     if (mv != null) {
+        hold.bid = mv.bid
         val b = ed.blocks.firstOrNull { it.id == mv.bid }
         if (b != null) {
             hold.frac = when {
@@ -2204,13 +2207,15 @@ fun DropSlot(ed: Ed) {
     val xf by animateFloatAsState(
         when (ed.mvAl) { "l" -> 0f; "r" -> 1f; else -> .5f }, spring(.8f, 480f), label = "dsx"
     )
-    val gh = hold.hPx.coerceIn(48f * dn.density, 72f * dn.density)
+    val gh = if (own) (ed.bpos[hold.bid]?.get(1) ?: hold.hPx).coerceAtLeast(48f * dn.density)
+    else hold.hPx.coerceIn(48f * dn.density, 72f * dn.density)
     val yA = remember { Animatable(0f) }
     LaunchedEffect(at, on) {
         if (!on) { hold.shown = false; return@LaunchedEffect }
         val bl = ed.blocks
         val edge = 8f * dn.density
-        val c = if (at < bl.size) (ed.bpos[bl[at].id]?.get(0) ?: return@LaunchedEffect) - edge
+        val c = if (own) ed.bpos[hold.bid]?.let { it[0] + it[1] / 2f } ?: return@LaunchedEffect
+        else if (at < bl.size) (ed.bpos[bl[at].id]?.get(0) ?: return@LaunchedEffect) - edge
         else bl.lastOrNull()?.let { l -> ed.bpos[l.id]?.let { it[0] + it[1] + edge } } ?: return@LaunchedEffect
         val y = (c - gh / 2f).coerceAtLeast(0f)
         if (!hold.shown) { yA.snapTo(y); hold.shown = true } else yA.animateTo(y, spring(.8f, 520f))
@@ -2224,14 +2229,24 @@ fun DropSlot(ed: Ed) {
     BoxWithConstraints(
         Modifier.fillMaxWidth().height(with(dn) { gh.toDp() })
             .offset { IntOffset(0, yA.value.roundToInt()) }
-            .graphicsLayer { alpha = vis; scaleY = .85f + .15f * vis }
+            .graphicsLayer { alpha = if (hold.shown) vis else 0f; scaleY = .85f + .15f * vis }
             .drawBehind {
-                // garis sisip selebar halaman + titik ujung
-                val cy = size.height / 2f
-                val dot = 4.dp.toPx()
-                drawLine(pal.p.copy(alpha = .55f), Offset(dot, cy), Offset(size.width - dot, cy), 2.dp.toPx())
-                drawCircle(pal.p, dot, Offset(dot, cy))
-                drawCircle(pal.p, dot, Offset(size.width - dot, cy))
+                // objek lebih sempit dari halaman: sepertiga (kiri / tengah / kanan) yang akan ditempati disorot tipis
+                if (hold.frac < .98f) {
+                    val tw = size.width / 3f
+                    drawRoundRect(
+                        pal.p.copy(alpha = .09f), Offset(xf * 2f * tw, 0f), Size(tw, size.height), CornerRadius(16.dp.toPx())
+                    )
+                    for (k in 1..2) drawLine(pal.p.copy(alpha = .22f), Offset(tw * k, 8.dp.toPx()), Offset(tw * k, size.height - 8.dp.toPx()), 1.dp.toPx())
+                }
+                if (!own) {
+                    // garis sisip selebar halaman + titik ujung: objek masuk ANTARA dua blok
+                    val cy = size.height / 2f
+                    val dot = 4.dp.toPx()
+                    drawLine(pal.p.copy(alpha = .55f), Offset(dot, cy), Offset(size.width - dot, cy), 2.dp.toPx())
+                    drawCircle(pal.p, dot, Offset(dot, cy))
+                    drawCircle(pal.p, dot, Offset(size.width - dot, cy))
+                }
             }
     ) {
         val wDp = maxWidth * hold.frac
@@ -2253,7 +2268,10 @@ fun DropSlot(ed: Ed) {
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Ic(hold.icon, pal.p, 22.dp)
-                if (wDp > 110.dp) T("Drop " + hold.label.lowercase() + " here", 14f, 800, pal.p, maxLines = 1)
+                if (wDp > 110.dp) {
+                    val side = if (hold.frac < .98f && wDp > 200.dp) " · " + when (ed.mvAl) { "l" -> "Left"; "r" -> "Right"; else -> "Center" } else ""
+                    T((if (own) "Align " + hold.label.lowercase() else "Drop " + hold.label.lowercase() + " here") + side, 14f, 800, pal.p, maxLines = 1)
+                }
             }
         }
     }
