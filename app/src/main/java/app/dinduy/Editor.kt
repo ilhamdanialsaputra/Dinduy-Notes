@@ -1520,13 +1520,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     private fun curAl(b: Blk): String = if (b.im.size == 1) b.im[0].al else b.alOf()
 
-    /**
-     * Letak yang dipasang ke pratinjau. Foto / kutipan / kode / garis memakai komposisi berbeda untuk "tengah" dan "samping";
-     * mengganti komposisi di tengah seretan memutus gestur sentuh (objek langsung ke-drop). Jadi selama diseret, kelas
-     * tengah/samping dibekukan seperti saat diangkat; letak yang dituju tetap ditunjukkan bingkai sasaran dan dipakai saat dilepas.
-     * Tabel selalu satu komposisi, jadi pratinjau letaknya penuh.
-     */
-    private fun effAl(b: Blk, al: String): String = if (b.ty != "tbl" && (curAl(b) == "c") != (al == "c")) curAl(b) else al
+    /** Letak yang dipasang ke pratinjau = letak yang dituju (semua jenis blok satu jalur komposisi, jadi aman diganti saat diseret). */
+    private fun effAl(b: Blk, al: String): String = al
 
     /** Translasi seretan (px) relatif terhadap posisi slot di tata letak pratinjau: jari tetap memegang objek yang sama walau slotnya pindah. */
     fun liftY(): Float {
@@ -1597,12 +1592,10 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val oal = curAl(ob[i])
         val to = wTo
         val al = wAl
-        val prevAl = pvKey.substringAfter('|')
         pvKey = "$to|$al"
         pvPend = ""
         pvT = 0f
         gPulse = 1f
-        if ((prevAl == "c") != (al == "c")) swapT = System.nanoTime()   // komposisi blok berganti (tengah <-> samping)
         if (!mvInk) flipCapture()   // catat posisi tampil sekarang SEBELUM tata letak berubah
         val l = if (to < 0 && al == oal) ob else mvBuild(ob, i, to, al)
         blocks = l
