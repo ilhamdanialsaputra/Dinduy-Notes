@@ -1,26 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Pengingat: notifikasi (Android 13+), alarm tepat waktu, dan pasang ulang alarm setelah HP menyala -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
-    <!-- Voice note: rekam suara (diminta saat dipakai) dan unduh model transkripsi -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- Update dari dalam aplikasi: membuka installer sistem untuk APK yang diunduh -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
-    <!-- Kamera: foto langsung disisipkan ke catatan (izin diminta saat dipakai; kamera tidak wajib ada) -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 
-    <!-- Unduh model, rekam suara, dan transkripsi tetap jalan saat aplikasi diminimalkan -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
@@ -52,7 +47,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Muncul di daftar "Buka dengan" untuk berkas PDF (WhatsApp, Telegram, Files, browser, dll) -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -61,7 +55,6 @@
                 <data android:scheme="file" />
                 <data android:mimeType="application/pdf" />
             </intent-filter>
-            <!-- Berkas PDF tanpa tipe yang jelas (sebagian aplikasi mengirim octet-stream) tetapi berakhiran .pdf -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -72,7 +65,6 @@
                 <data android:pathPattern=".*\\.pdf" />
                 <data android:pathPattern=".*\\..*\\.pdf" />
             </intent-filter>
-            <!-- Berkas .dinduy (catatan yang dibagikan dari Dinduy, atau cadangan) -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -81,7 +73,6 @@
                 <data android:scheme="file" />
                 <data android:mimeType="application/x-dinduy" />
             </intent-filter>
-            <!-- Aplikasi yang mengirim .dinduy sebagai octet-stream: dikenali dari akhiran nama -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -99,7 +90,6 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/x-dinduy" />
             </intent-filter>
-            <!-- Menu Bagikan -> Dinduy -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -134,7 +124,6 @@
             </intent-filter>
         </receiver>
 
-        <!-- Widget homescreen -->
         <receiver
             android:name=".QuickNoteWidget"
             android:exported="false"
