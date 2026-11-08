@@ -2283,14 +2283,16 @@ private fun BlockSlot(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan?, ordN: Int, od
                     }
                 }
                 val la = ed.landA
-                withTransform({ translate(dx, dy); scale(sc, sc) }) {
-                    this@drawWithContent.drawContent()
-                    if (la > 0f && ed.landId == b.id) {
-                        val cr = CornerRadius(14.dp.toPx())
-                        drawRoundRect(pal.p.copy(alpha = .10f * la), Offset.Zero, size, cr)
-                        drawRoundRect(pal.p.copy(alpha = .60f * la), Offset.Zero, size, cr, style = Stroke(2.5.dp.toPx()))
-                    }
+                drawContext.canvas.save()
+                drawContext.transform.translate(dx, dy)
+                if (sc != 1f) drawContext.transform.scale(sc, sc, center)
+                drawContent()
+                if (la > 0f && ed.landId == b.id) {
+                    val cr = CornerRadius(14.dp.toPx())
+                    drawRoundRect(pal.p.copy(alpha = .10f * la), Offset.Zero, size, cr)
+                    drawRoundRect(pal.p.copy(alpha = .60f * la), Offset.Zero, size, cr, style = Stroke(2.5.dp.toPx()))
                 }
+                drawContext.canvas.restore()
             }
     ) {
         if (live) {
