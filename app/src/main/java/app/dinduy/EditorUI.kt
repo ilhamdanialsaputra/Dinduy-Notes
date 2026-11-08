@@ -715,6 +715,7 @@ fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier = Modifier) {
     val lifted = ed.mv?.let { it.bid == b.id } == true
     val active = (fk != null || ed.selObj == b.id) && !ed.reading && ed.mv == null
     val showH = (active || dragC >= 0) && !lifted
+    var headH by remember { mutableStateOf(0) }
 
     // Lebar kolom dihitung MUTLAK dari posisi jari di layar (bukan dari selisih per-frame): pegangan ikut bergeser saat kolom
     // melebar, jadi pendekatan selisih membuat lebar loncat-loncat. Dengan titik awal tetap, tepi kolom selalu mengikuti jari.
@@ -753,12 +754,31 @@ fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier = Modifier) {
     }
 
     Column(modifier.fillMaxWidth().padding(bottom = (dm.fs * 1.1f).dp)) {
-        // tab pegangan di pojok kiri atas: tekan sebentar lalu geser = angkat dan pindahkan seluruh tabel (seperti foto)
-        if (!ed.reading) TableTab(ed, b, active, lifted, pal)
+        // tanpa pegangan: tekan-tahan di mana pun pada tabel = angkat dan pindahkan seluruh tabel (seperti foto), juga di mode baca.
+        // Saat sebuah sel sedang diedit, tekan-tahan tepat di atas huruf tetap untuk seleksi teks; pegangan lebar kolom tidak ikut terangkat.
         HBox(
             Modifier.clip(RoundedCornerShape(4.dp)).background(pal.c2)
                 .border(1.5.dp, if (active) pal.p.copy(alpha = .75f) else pal.osv.copy(alpha = .75f), RoundedCornerShape(4.dp))   // garis luar jelas di tema terang maupun gelap
                 .onGloballyPositioned { viewW = it.size.width; dw[8] = it.positionInRoot().x + it.size.width }
+                .objLift(
+                    ed, b.id, fk != null,
+                    textKeys = { bS.tb.flatMapIndexed { r, row -> row.indices.map { c -> "${bS.id}:$r:$c" } } },
+                    skip = { pos ->
+                        if (!showH || pos.y > headH) false
+                        else {
+                            val x = pos.x + hs.value
+                            var e = 0f
+                            var hit = false
+                            val n = wsS.size
+                            for (c in 0 until n) {
+                                e += wsS[c] * dens
+                                val half = if (c == n - 1) 32f * dens else 22f * dens
+                                if (if (c == n - 1) x > e - half else kotlin.math.abs(x - e) < half) { hit = true; break }
+                            }
+                            hit
+                        }
+                    }
+                )
                 .horizontalScroll(hs)
         ) {
             Box(
@@ -772,7 +792,7 @@ fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier = Modifier) {
                     val head = r == 0
                     val fc = if (fRC != null && fRC.first == r) fRC.second else -1
                     // satu baris = satu Layout sendiri (satu kali ukur, tanpa IntrinsicSize): tinggi baris = sel tertinggi
-                    TRow(ws.map { it.dp }, head, r > 0, fc, if (head) dragC else -1, pal) {
+                    TRow(ws.map { it.dp }, head, r > 0, fc, if (head) dragC else -1, pal, if (head) Modifier.onSizeChanged { headH = it.height } else Modifier) {
                         row.forEachIndexed { c, _ ->
                             val k = "${b.id}:$r:$c"
                             val focused = fc == c
@@ -821,33 +841,6 @@ fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier = Modifier) {
             if (!ed.reading && !ed.ink.on && !active && !lifted) {
                 Box(Modifier.matchParentSize().pointerInput(b.id) { detectTapGestures(onTap = { ed.selectObj(bS.id) }) })
             }
-            }
-        }
-    }
-}
-
-/** Tab pegangan tabel (pojok kiri atas, seperti tab map): area sentuh lebar, tekan sebentar lalu geser untuk memindahkan tabel. */
-@Composable
-private fun TableTab(ed: Ed, b: Blk, active: Boolean, lifted: Boolean, pal: Pal) {
-    val sc by animateFloatAsState(if (lifted) 1.12f else 1f, spring(.6f, 500f), label = "tab")
-    val dots = if (active || lifted) pal.op else pal.osv
-    Box(
-        Modifier.size(64.dp, 28.dp).graphicsLayer { scaleX = sc; scaleY = sc; transformOrigin = TransformOrigin(0f, 1f) }
-            .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
-            .background(if (active || lifted) pal.p else pal.c4)
-            .holdDrag(
-                true,
-                onStart = { pos -> if (ed.ink.on) false else { ed.mvBegin(b.id, "", pos.y); true } },   // pos.y = letak jari di tab: acuan gulir-tepi
-                onMove = { _, d -> ed.mvDrag(d.x, d.y) },
-                onEnd = { ok -> ed.mvEnd(ok) },
-                lead = 300L   // tekan ~0,1 detik saja: cukup untuk membedakan dari gulir halaman
-            ),
-        Alignment.Center
-    ) {
-        Canvas(Modifier.size(24.dp, 12.dp)) {
-            val r = 1.8.dp.toPx()
-            for (i in 0 until 4) for (j in 0 until 2) {
-                drawCircle(dots, r, Offset(size.width * (i + .5f) / 4f, size.height * (j + .5f) / 2f))
             }
         }
     }
@@ -904,10 +897,10 @@ private fun ColHandle(
  * Anak pertama sampai ke-n = sel; sisanya (kalau ada) = pegangan lebar kolom, ditaruh di tepi kanan tiap kolom.
  */
 @Composable
-private fun TRow(ws: List<Dp>, head: Boolean, topLine: Boolean, fc: Int, dc: Int, pal: Pal, content: @Composable () -> Unit) {
+private fun TRow(ws: List<Dp>, head: Boolean, topLine: Boolean, fc: Int, dc: Int, pal: Pal, extra: Modifier = Modifier, content: @Composable () -> Unit) {
     androidx.compose.ui.layout.Layout(
         content = content,
-        modifier = Modifier.drawBehind {
+        modifier = extra.drawBehind {
             var x = 0f
             ws.forEachIndexed { c, wd ->
                 val w = wd.toPx()
@@ -968,8 +961,10 @@ fun Modifier.holdDrag(
     onStart: (Offset) -> Boolean,
     onMove: (Offset, Offset) -> Unit,
     onEnd: (Boolean) -> Unit,
-    lead: Long = 0L
+    lead: Long = 0L,
+    accept: (Offset) -> Boolean = { true }
 ): Modifier {
+    val acc by rememberUpdatedState(accept)
     val st by rememberUpdatedState(onStart)
     val mo by rememberUpdatedState(onMove)
     val en by rememberUpdatedState(onEnd)
@@ -977,6 +972,7 @@ fun Modifier.holdDrag(
     return pointerInput(Unit) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            if (!acc(down.position)) return@awaitEachGesture   // sentuhan di tempat yang bukan milik gestur ini (mis. di atas huruf): lewatkan
             val slop = viewConfiguration.touchSlop
             val early = withTimeoutOrNull((viewConfiguration.longPressTimeoutMillis - lead).coerceAtLeast(100L)) {
                 var done = false
@@ -1007,6 +1003,49 @@ fun Modifier.holdDrag(
             }
         }
     }
+}
+
+/**
+ * Tekan-tahan di mana pun pada bentuk objek (tabel / kutipan / kode / garis) = angkat lalu pindahkan, seperti foto. Tanpa pegangan khusus.
+ * Berlaku juga di mode baca (langsung masuk mode edit lalu terangkat). Saat teks objek sedang diedit ([guardText]), tekan-tahan tepat di atas
+ * huruf tetap milik seleksi teks; di luar huruf (bantalan, label, ruang kosong) tetap mengangkat. [skip] = area yang dipakai gestur lain (pegangan lebar).
+ */
+@Composable
+fun Modifier.objLift(
+    ed: Ed, bid: String, guardText: Boolean, textKeys: () -> List<String>, skip: (Offset) -> Boolean = { false }
+): Modifier {
+    val co = remember { arrayOfNulls<androidx.compose.ui.layout.LayoutCoordinates>(1) }
+    val id by rememberUpdatedState(bid)
+    val guard by rememberUpdatedState(guardText)
+    val keys by rememberUpdatedState(textKeys)
+    val sk by rememberUpdatedState(skip)
+    return this
+        .onGloballyPositioned { co[0] = it }
+        .holdDrag(
+            !ed.ink.on,
+            onStart = { pos ->
+                if (ed.reading) { if (ed.ink.on) return@holdDrag false; ed.exitReading() }
+                ed.mvBegin(id, "", pos.y)   // pos.y = letak jari di dalam objek: acuan gulir-tepi
+                true
+            },
+            onMove = { _, d -> ed.mvDrag(d.x, d.y) },
+            onEnd = { ok -> ed.mvEnd(ok) },
+            lead = 150L,   // sama dengan foto: terangkat cepat, tapi tetap beda dari gulir halaman
+            accept = { pos ->
+                if (sk(pos)) false
+                else if (!guard) true
+                else {
+                    val cc = ed.contentCoords
+                    val c = co[0]
+                    if (cc == null || !cc.isAttached || c == null || !c.isAttached) true
+                    else {
+                        val p = cc.localPositionOf(c, pos)
+                        val m = 8f * ed.dens
+                        keys().none { k -> ed.glyphRect(k)?.inflate(m)?.contains(p) == true }
+                    }
+                }
+            }
+        )
 }
 
 /** Pegangan seret: area sentuh besar (44dp+), gagang kecil di dekat tepi. kind: 0 gagang tegak, 1 gagang datar, 2 titik sudut. */
@@ -1670,8 +1709,9 @@ private fun BoxBlock(ed: Ed, b: Blk, dm: Dm, pal: Pal) {
 }
 
 /**
- * Satu kutipan / kode / garis lengkap dengan pegangan. Ketuk pertama = objek terpilih (mode atur: tab di atas untuk memindah, gagang tepi untuk
- * lebar; teks belum terbuka). Ketuk kedua di teksnya = mulai mengedit. Garis pemisah diangkat langsung dari barnya.
+ * Satu kutipan / kode / garis lengkap. Tanpa pegangan khusus: tekan-tahan di mana pun pada bentuknya = angkat dan pindahkan (seperti foto),
+ * juga di mode baca. Ketuk pertama = objek terpilih (gagang tepi untuk lebar; teks belum terbuka). Ketuk kedua di teksnya = mulai mengedit;
+ * selama teks diedit, tekan-tahan tepat di atas huruf tetap seleksi teks dan di luar huruf tetap mengangkat.
  */
 @Composable
 private fun BoxCell(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
@@ -1686,82 +1726,55 @@ private fun BoxCell(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
     val al = b.alOf()
     val armed = ed.selObj == b.id || focusedHere
     val rs = remember { floatArrayOf(0f, 0f) }
-    Box(modifier.onSizeChanged { ed.setObjH(bS.id, with(dn) { it.height.toDp().value }) }) {
-        Column(Modifier.fillMaxWidth()) {
-            // tab pegangan DI LUAR isi (seperti tab tabel): tidak menimpa teks, selalu bisa dipakai, juga saat sedang mengetik
-            if (!hr && edit) BoxTab(ed, b, pal, armed, lifted, Modifier.align(if (al == "r") Alignment.End else Alignment.Start))
-            Box(Modifier.fillMaxWidth()) {
-                BoxBody(
-                    ed, b, dm, pal,
-                    Modifier.fillMaxWidth().then(
-                        if (hr && edit) Modifier
-                            .pointerInput(Unit) { detectTapGestures(onTap = { ed.selectObj(bS.id) }) }
-                            .holdDrag(
-                                true,
-                                onStart = { pos -> ed.mvBegin(bS.id, "", pos.y); true },
-                                onMove = { _, d -> ed.mvDrag(d.x, d.y) },
-                                onEnd = { ok -> ed.mvEnd(ok) },
-                                lead = 150L
-                            ) else if (ed.reading) Modifier.pointerInput(true) {
-                            detectTapGestures(onTap = { if (!ed.ink.on) ed.tapObj(bS.id) })   // mode baca: seluruh blok bisa diketuk
-                        } else Modifier
-                    )
-                )
-                // belum terpilih: lapisan ketuk menahan sentuhan supaya tidak langsung masuk ke teks (gulir tetap lewat)
-                if (!hr && edit && !armed && !lifted) {
-                    Box(Modifier.matchParentSize().pointerInput(b.id) { detectTapGestures(onTap = { ed.selectObj(bS.id) }) })
-                }
-                if (edit && !lifted && armed) {
-                    val right = al != "r"
-                    val gx = if (right) 1f else -1f
-                    val kk = if (al == "c") 2f else 1f
-                    Grip(
-                        Modifier.align(if (right) Alignment.CenterEnd else Alignment.CenterStart)
-                            .width(32.dp).fillMaxHeight().heightIn(max = 96.dp),
-                        0, if (right) Alignment.CenterEnd else Alignment.CenterStart,
-                        onStart = { ed.commit(); rs[0] = ed.widthDp * dn.density * bS.bw.coerceIn(.2f, 1f); rs[1] = 0f },
-                        onDrag = { dx, _ ->
-                            rs[1] += dx * gx * kk
-                            val cw = ed.widthDp * dn.density
-                            val minF = if (bS.ty == "hr") .2f else (150f / ed.widthDp.coerceAtLeast(150f)).coerceIn(.3f, .6f)
-                            var f = ((rs[0] + rs[1]) / cw).coerceIn(minF, 1f)
-                            if (f > .94f) f = 1f
-                            ed.boxLive(bS.id, f)
-                        },
-                        onEnd = { ed.commit() }
-                    )
-                }
-            }
-        }
-    }
-}
-
-/** Tab pegangan kutipan / kode (di atas isi, seperti tab tabel): tekan sebentar lalu geser = angkat dan pindahkan; area sentuh 64x28dp. */
-@Composable
-private fun BoxTab(ed: Ed, b: Blk, pal: Pal, active: Boolean, lifted: Boolean, modifier: Modifier) {
-    val sc by animateFloatAsState(if (lifted) 1.12f else 1f, spring(.6f, 500f), label = "bt")
-    val on = active || lifted
-    val dots = if (on) pal.op else pal.osv
-    val bid by rememberUpdatedState(b.id)
+    var box by remember { mutableStateOf(IntSize.Zero) }
     Box(
-        modifier.size(64.dp, 28.dp).graphicsLayer { scaleX = sc; scaleY = sc; transformOrigin = TransformOrigin(0f, 1f) }
-            .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
-            .background(if (on) pal.p else pal.c4)
-            .pointerInput(Unit) { detectTapGestures(onTap = { ed.selectObj(bid) }) }
-            .holdDrag(
-                true,
-                onStart = { pos -> if (ed.ink.on) false else { ed.mvBegin(bid, "", pos.y); true } },
-                onMove = { _, d -> ed.mvDrag(d.x, d.y) },
-                onEnd = { ok -> ed.mvEnd(ok) },
-                lead = 300L
-            ),
-        Alignment.Center
+        modifier.onSizeChanged { box = it; ed.setObjH(bS.id, with(dn) { it.height.toDp().value }) }
+            .objLift(
+                ed, b.id, focusedHere && !hr, textKeys = { listOf(bS.id) },
+                skip = { pos ->
+                    // gagang lebar (tepi, tengah vertikal) tampil hanya saat terpilih: sentuhan di sana milik gagang, bukan angkat
+                    if (!(edit && armed && !lifted)) false
+                    else {
+                        val right = bS.alOf() != "r"
+                        val gw = 32f * dn.density
+                        val inX = if (right) pos.x > box.width - gw else pos.x < gw
+                        inX && kotlin.math.abs(pos.y - box.height / 2f) < minOf(box.height / 2f, 48f * dn.density)
+                    }
+                }
+            )
     ) {
-        Canvas(Modifier.size(24.dp, 12.dp)) {
-            val r = 1.8.dp.toPx()
-            for (i in 0 until 4) for (j in 0 until 2) {
-                drawCircle(dots, r, Offset(size.width * (i + .5f) / 4f, size.height * (j + .5f) / 2f))
-            }
+        BoxBody(
+            ed, b, dm, pal,
+            Modifier.fillMaxWidth().then(
+                if (hr && edit) Modifier.pointerInput(Unit) { detectTapGestures(onTap = { ed.selectObj(bS.id) }) }
+                else if (ed.reading) Modifier.pointerInput(true) {
+                    detectTapGestures(onTap = { if (!ed.ink.on) ed.tapObj(bS.id) })   // mode baca: seluruh blok bisa diketuk
+                } else Modifier
+            )
+        )
+        // belum terpilih: lapisan ketuk menahan sentuhan supaya tidak langsung masuk ke teks (gulir tetap lewat)
+        if (!hr && edit && !armed && !lifted) {
+            Box(Modifier.matchParentSize().pointerInput(b.id) { detectTapGestures(onTap = { ed.selectObj(bS.id) }) })
+        }
+        if (edit && !lifted && armed) {
+            val right = al != "r"
+            val gx = if (right) 1f else -1f
+            val kk = if (al == "c") 2f else 1f
+            Grip(
+                Modifier.align(if (right) Alignment.CenterEnd else Alignment.CenterStart)
+                    .width(32.dp).fillMaxHeight().heightIn(max = 96.dp),
+                0, if (right) Alignment.CenterEnd else Alignment.CenterStart,
+                onStart = { ed.commit(); rs[0] = ed.widthDp * dn.density * bS.bw.coerceIn(.2f, 1f); rs[1] = 0f },
+                onDrag = { dx, _ ->
+                    rs[1] += dx * gx * kk
+                    val cw = ed.widthDp * dn.density
+                    val minF = if (bS.ty == "hr") .2f else (150f / ed.widthDp.coerceAtLeast(150f)).coerceIn(.3f, .6f)
+                    var f = ((rs[0] + rs[1]) / cw).coerceIn(minF, 1f)
+                    if (f > .94f) f = 1f
+                    ed.boxLive(bS.id, f)
+                },
+                onEnd = { ed.commit() }
+            )
         }
     }
 }
@@ -1814,6 +1827,31 @@ private fun BoxBody(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
             }
         }
         else -> Box(modifier.padding(vertical = (fs * .9f).dp).height(8.dp).clip(RoundedCornerShape(4.dp)).background(pal.sc))
+    }
+}
+
+/** Kapsul alat objek sisipan (tabel / kutipan / kode / garis): rata kiri / tengah / kanan, hapus, selesai. Tampilan sama dengan kapsul alat Ink. */
+@Composable
+fun ObjCapsule(ed: Ed, ob: Blk) {
+    val pal = LocalPal.current
+    val al = ob.alOf()
+    val cap = RoundedCornerShape(30.dp)
+    Box(Modifier.fillMaxWidth(), Alignment.Center) {
+        Row(
+            Modifier.shadow(if (pal.dark) 6.dp else 2.dp, cap).clip(cap).background(pal.c3).padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Tbn({ AlignArrow(0, it) }, al == "l", true) { ed.objAlign(ob.id, "l") }
+            Tbn({ AlignArrow(1, it) }, al == "c", true) { ed.objAlign(ob.id, "c") }
+            Tbn({ AlignArrow(2, it) }, al == "r", true) { ed.objAlign(ob.id, "r") }
+            Box(Modifier.padding(horizontal = 3.dp).width(1.dp).height(24.dp).background(pal.ol.copy(alpha = .5f)))
+            Tbn({ Ic("del", it) }, false, true) { ed.objDelete(ob.id) }
+            if (ed.selObj != null) {
+                Box(Modifier.padding(horizontal = 3.dp).width(1.dp).height(24.dp).background(pal.ol.copy(alpha = .5f)))
+                Tbn({ Ic("ok", it) }, false, true) { ed.selObj = null }
+            }
+        }
     }
 }
 
@@ -1945,21 +1983,7 @@ fun EdBar(ed: Ed, act: Actions, imeOpen: Boolean) {
                     4 -> {
                         val oid = objNow ?: objLast
                         val ob = ed.blocks.firstOrNull { it.id == oid }
-                        if (ob != null) {
-                            val al = ob.alOf()
-                            Row(
-                                Modifier.fillMaxWidth().shadow(if (pal.dark) 6.dp else 1.dp, RoundedCornerShape(28.dp)).clip(RoundedCornerShape(28.dp))
-                                    .background(pal.c3).horizontalScroll(rememberScrollState()).padding(6.dp),
-                                horizontalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                if (ed.selObj != null) { Tbn({ Ic("ok", it) }, true, true) { ed.selObj = null }; Sep() }
-                                Tbn({ AlignArrow(0, it) }, al == "l", true) { ed.objAlign(ob.id, "l") }
-                                Tbn({ AlignArrow(1, it) }, al == "c", true) { ed.objAlign(ob.id, "c") }
-                                Tbn({ AlignArrow(2, it) }, al == "r", true) { ed.objAlign(ob.id, "r") }
-                                Sep()
-                                Tbn({ Ic("del", it) }, false, true) { ed.objDelete(ob.id) }
-                            }
-                        }
+                        if (ob != null) ObjCapsule(ed, ob)
                     }
                     3 -> Row(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(pal.c3)
