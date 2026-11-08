@@ -31,7 +31,6 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.ByteOrder
 
-/** Lokasi berkas suara & model. Tidak ada berkas biner di repository: semuanya dibuat saat aplikasi berjalan. */
 object AudioFiles {
     fun dir(ctx: Context) = File(ctx.filesDir, "audio")
     fun file(ctx: Context, id: String) = File(dir(ctx), "$id.m4a")
@@ -46,9 +45,6 @@ fun fmtTime(ms: Long): String {
     else "$m:${r.toString().padStart(2, '0')}"
 }
 
-// =====================================================================================================
-// Perekam: m4a (AAC, mono) ke filesDir/audio/<id>.m4a
-// =====================================================================================================
 class Rec(private val ctx: Context, private val scope: CoroutineScope) {
     var noteId by mutableStateOf<String?>(null)
         private set
@@ -115,7 +111,6 @@ class Rec(private val ctx: Context, private val scope: CoroutineScope) {
         return true
     }
 
-    /** Hentikan dan simpan. Null bila rekaman gagal / terlalu singkat. */
     fun finish(): Aud? {
         val r = mr ?: return null
         job?.cancel()
@@ -134,7 +129,6 @@ class Rec(private val ctx: Context, private val scope: CoroutineScope) {
         return Aud(id = nid, du = dur, at = System.currentTimeMillis())
     }
 
-    /** Pindahkan rekaman yang sedang berjalan ke catatan lain tanpa menghentikannya (voice note cepat <-> catatan). */
     fun rebind(note: String) {
         if (mr != null) noteId = note
     }
@@ -150,9 +144,6 @@ class Rec(private val ctx: Context, private val scope: CoroutineScope) {
     }
 }
 
-// =====================================================================================================
-// Pemutar: satu suara pada satu waktu
-// =====================================================================================================
 class Player(private val ctx: Context, private val scope: CoroutineScope) {
     var id by mutableStateOf<String?>(null)
         private set
@@ -239,7 +230,6 @@ class Player(private val ctx: Context, private val scope: CoroutineScope) {
         }
     }
 
-    /** Hentikan dan lepaskan pemutar (dipanggil saat keluar dari catatan). */
     fun stop() {
         job?.cancel()
         val p = mp
@@ -256,9 +246,6 @@ class Player(private val ctx: Context, private val scope: CoroutineScope) {
     }
 }
 
-// =====================================================================================================
-// m4a -> WAV 16 kHz mono 16-bit (berkas sementara untuk Whisper)
-// =====================================================================================================
 object WavDecoder {
     private class Mono16k(private val out: OutputStream) {
         var rate = 44100
@@ -311,7 +298,6 @@ object WavDecoder {
         return b.array()
     }
 
-    /** [check] dipanggil berkala; boleh melempar CancellationException untuk membatalkan. */
     fun decode(src: File, dst: File, check: () -> Unit) {
         val ex = MediaExtractor()
         var codec: MediaCodec? = null
@@ -412,13 +398,10 @@ object WavDecoder {
     }
 }
 
-// =====================================================================================================
-// Model transkripsi (whisper.cpp ggml) - diunduh pengguna, TIDAK ada di APK / repository
-// =====================================================================================================
 class MInfo(val key: String, val file: String, val name: String, val size: String, val bytes: Long, val desc: String)
 
 class MS(val info: MInfo) {
-    var status by mutableStateOf(0)       // 0 belum diunduh, 1 mengunduh, 2 siap
+    var status by mutableStateOf(0)
     var got by mutableStateOf(0L)
     var total by mutableStateOf(0L)
     var err by mutableStateOf<String?>(null)
@@ -471,7 +454,6 @@ class Models(
 
     fun refreshAll() { list.forEach { refresh(it) } }
 
-    /** Berkas model yang siap dipakai: pilihan pengguna dulu, kalau tidak siap pakai yang lain. */
     fun readyFile(prefKey: String): File? {
         val order = list.sortedBy { if (it.info.key == prefKey) 0 else 1 }
         val m = order.firstOrNull { it.status == 2 } ?: return null
