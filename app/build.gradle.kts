@@ -5,11 +5,8 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
-// Keystore opsional dari GitHub Secrets. Tanpa ini, APK ditandatangani kunci debug
-// (yang berubah tiap build, jadi update-an harus uninstall dulu).
 val ksFile: String? = System.getenv("KS_FILE")
 
-// Aturan R8 tambahan untuk pembaca teks PDF (PDFBox-Android) dibuat otomatis saat build, jadi proguard-rules.pro tidak perlu disentuh.
 val extraRules = layout.buildDirectory.file("generated/extra-rules.pro").get().asFile.also {
     it.parentFile.mkdirs()
     it.writeText(
@@ -24,8 +21,6 @@ val extraRules = layout.buildDirectory.file("generated/extra-rules.pro").get().a
     )
 }
 
-// Font (Roboto Flex & Tinos/"Times New Roman") diunduh otomatis saat build ke folder build/, TIDAK disimpan di repository.
-// Kalau unduhan gagal, build tetap jalan dan aplikasi memakai font sistem sebagai cadangan.
 val fontAssets = layout.buildDirectory.dir("generated/font-assets")
 val fetchFonts by tasks.registering {
     val root = fontAssets.get().asFile
@@ -64,7 +59,6 @@ android {
         targetSdk = 36
         versionCode = 5
         versionName = "1.4"
-        // whisper-android (versi gratis) hanya menyertakan arm64-v8a
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
@@ -81,7 +75,7 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = true      // R8: kode lebih kecil & lebih cepat dimuat
+            isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro", extraRules)
             signingConfig = if (ksFile != null) signingConfigs.getByName("ci") else signingConfigs.getByName("debug")
@@ -102,13 +96,11 @@ android {
 }
 
 dependencies {
-    // BOM 2025.09.00 = Compose 1.9 + Material3 terbaru
     implementation(platform("androidx.compose:compose-bom:2025.09.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
-    // Font Google Fonts yang diunduh saat dipakai (Reenie Beanie); versinya diatur BOM di atas
     implementation("androidx.compose.ui:ui-text-google-fonts")
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.core:core-ktx:1.16.0")
@@ -117,14 +109,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.jsoup:jsoup:1.18.1")
-    // Pembaca teks PDF (pencarian kata di PDF): murni Java, offline, dari Maven Central
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
-    // Efek balik halaman 3D (melengkung) untuk mode Pages di PDF: Compose murni, Maven Central
     implementation("io.github.oleksandrbalan:pagecurl:1.5.1")
-    // OCR foto offline (model Latin ikut di dalam aplikasi, tanpa Play Services dan tanpa unduhan): dari Google Maven
     implementation("com.google.mlkit:text-recognition:16.0.1")
-    // Transkripsi suara ke teks offline (whisper.cpp), Maven Central
     implementation("dev.ffmpegkit-maintained:whisper-android:1.0.0")
-    // memasang baseline profile bawaan Compose/AndroidX saat instal: startup & scroll jauh lebih cepat di HP lama
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
 }
