@@ -971,14 +971,13 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         selectObj(bid)
     }
 
-    /** Rata kiri / tengah / kanan objek sisipan lewat tombol (alternatif seret). Lebar yang terlalu besar dikecilkan supaya teks bisa mengalir di sampingnya. */
+    /** Rata kiri / tengah / kanan objek sisipan lewat tombol (alternatif seret). Hanya letak yang berubah, lebar tidak diubah. */
     fun objAlign(bid: String, al: String) {
         val i = idx(bid)
         if (i < 0) return
         commit()
         val b = blocks[i]
-        val tooWide = b.isBox && al != "c" && b.bw > maxSideW()
-        setBlock(i, b.copy(ba = al, bw = if (tooWide) minOf(SIDE_W, maxSideW()) else b.bw))
+        setBlock(i, b.copy(ba = al))   // hanya letak yang berubah; lebar tidak pernah ikut diubah (objek penuh tetap penuh, hanya gagangnya pindah sisi)
         releaseSide(bid)
         dirty(); norm(); afterStructural()
     }
