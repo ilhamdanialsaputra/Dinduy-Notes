@@ -1750,7 +1750,8 @@ private fun BoxCell(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
                 else if (ed.reading) Modifier.pointerInput(true) {
                     detectTapGestures(onTap = { if (!ed.ink.on) ed.tapObj(bS.id) })   // mode baca: seluruh blok bisa diketuk
                 } else Modifier
-            )
+            ),
+            sel = edit && armed
         )
         // belum terpilih: lapisan ketuk menahan sentuhan supaya tidak langsung masuk ke teks (gulir tetap lewat)
         if (!hr && edit && !armed && !lifted) {
@@ -1779,15 +1780,26 @@ private fun BoxCell(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
     }
 }
 
+/** Cincin tipis di luar bentuk objek yang sedang dipilih (kutipan / kode / garis), setara garis luar tabel yang aktif. */
+private fun Modifier.selRing(on: Boolean, shape: Shape, color: Color): Modifier = if (!on) this else drawBehind {
+    val g = 3.dp.toPx()
+    val o = shape.createOutline(Size(size.width + 2 * g, size.height + 2 * g), layoutDirection, this)
+    if (o is androidx.compose.ui.graphics.Outline.Rounded) {
+        val p = androidx.compose.ui.graphics.Path().apply { addRoundRect(o.roundRect) }
+        androidx.compose.ui.graphics.drawscope.translate(-g, -g) { drawPath(p, color, style = Stroke(1.5.dp.toPx())) }
+    }
+}
+
 /** Isi kutipan / kode / garis tanpa letak dan pegangan. Lebarnya ditentukan pemanggil lewat [modifier]. */
 @Composable
-private fun BoxBody(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
+private fun BoxBody(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier, sel: Boolean = false) {
     val fs = dm.fs
+    val ring = pal.p.copy(alpha = .75f)
     when (b.ty) {
         "q" -> {
             val q = qs(b.k, pal)
             Box(
-                modifier.clip(q.shape).background(q.bg)
+                modifier.selRing(sel, q.shape, ring).clip(q.shape).background(q.bg)
                     .then(if (q.border) Modifier.border(3.dp, pal.p, q.shape) else Modifier)
                     .drawBehind { if (q.bar) drawRect(pal.owc, size = Size(7.dp.toPx(), size.height)) }
                     .padding(horizontal = 22.dp, vertical = 18.dp)
@@ -1804,7 +1816,7 @@ private fun BoxBody(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
             }
         }
         "code" -> {
-            Box(modifier.clip(RoundedCornerShape(28.dp)).background(pal.c3).padding(20.dp)) {
+            Box(modifier.selRing(sel, RoundedCornerShape(28.dp), ring).clip(RoundedCornerShape(28.dp)).background(pal.c3).padding(20.dp)) {
                 Column {
                     if (b.l.isNotEmpty()) {
                         T(
@@ -1826,7 +1838,7 @@ private fun BoxBody(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
                 }
             }
         }
-        else -> Box(modifier.padding(vertical = (fs * .9f).dp).height(8.dp).clip(RoundedCornerShape(4.dp)).background(pal.sc))
+        else -> Box(modifier.padding(vertical = (fs * .9f).dp).height(8.dp).selRing(sel, RoundedCornerShape(4.dp), ring).clip(RoundedCornerShape(4.dp)).background(pal.sc))
     }
 }
 
