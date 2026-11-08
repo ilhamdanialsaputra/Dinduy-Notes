@@ -436,7 +436,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             }
             if (nb == null) {
                 m = RX_QT.find(tx)
-                if (m != null && c == 2) { nb = Blk(id = b.id, ik = b.ik, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi, ty = "q", k = "quote"); len = 2 }
+                if (m != null && c == 2) { nb = Blk(id = b.id, ik = b.ik, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi, ty = "q", k = "quote", ba = "l"); len = 2 }
             }
             if (nb == null) {
                 m = RX_HD.find(tx)
@@ -724,7 +724,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     }
 
     fun setQuote(k: String) = convertFocused { b ->
-        if (b.ty == "q" && b.k == k) b.copy(ty = "p") else b.copy(ty = "q", k = k)
+        if (b.ty == "q" && b.k == k) b.copy(ty = "p") else b.copy(ty = "q", k = k, ba = b.ba.ifEmpty { "l" })   // sisipan baru: rata kiri
     }
 
     fun setPlain() = convertFocused { b -> b.copy(ty = "p") }
@@ -751,7 +751,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     }
 
     fun setCode() = convertFocused { b ->
-        if (b.ty == "code") b.copy(ty = "p") else b.copy(ty = "code", r = Rt(b.r.t))
+        if (b.ty == "code") b.copy(ty = "p") else b.copy(ty = "code", r = Rt(b.r.t), ba = b.ba.ifEmpty { "l" })   // sisipan baru: rata kiri
     }
 
     fun indent(dir: Int) {
@@ -795,8 +795,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         afterStructural()
     }
 
-    fun insTable(r: Int = 3, c: Int = 3) = insertObjs(listOf(Blk(ty = "tbl", tb = grid(c, r), ca = List(c) { "left" })))
-    fun insHr() = insertObjs(listOf(Blk(ty = "hr")))
+    fun insTable(r: Int = 3, c: Int = 3) = insertObjs(listOf(Blk(ty = "tbl", tb = grid(c, r), ca = List(c) { "left" }, ba = "l")))
+    fun insHr() = insertObjs(listOf(Blk(ty = "hr", ba = "l")))
     fun addImages(imgs: List<Img>) {
         if (imgs.isEmpty()) return
         val list = imgs.map { Blk(ty = "img", im = listOf(it)) }
@@ -1765,6 +1765,16 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     var selDrag by mutableStateOf(false)
     val lays = mutableStateMapOf<String, TextLayoutResult>()
     val kpos = mutableStateMapOf<String, Offset>()
+    /** Kotak huruf sebuah kolom teks di ruang konten (px): hanya selebar baris yang benar-benar berisi huruf, bukan seluruh kolom. */
+    fun glyphRect(key: String): Rect? {
+        val lay = lays[key] ?: return null
+        val kp = kpos[key] ?: return null
+        var l = Float.MAX_VALUE
+        var r = 0f
+        for (i in 0 until lay.lineCount) { l = minOf(l, lay.getLineLeft(i)); r = maxOf(r, lay.getLineRight(i)) }
+        if (l > r) { l = 0f; r = 0f }
+        return Rect(kp.x + l, kp.y, kp.x + r, kp.y + lay.size.height)
+    }
     val layLen = HashMap<String, Int>()       // panjang teks kolom edit saat layout di lays dibuat (deteksi layout basi)
     val lsh = HashMap<String, Int>()          // 1 bila layout berasal dari kolom edit (ada awalan Z di indeks 0)
     val ipos = HashMap<String, Rect>()        // kotak tiap gambar di ruang konten
