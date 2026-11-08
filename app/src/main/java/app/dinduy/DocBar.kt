@@ -253,7 +253,10 @@ fun DocBar(ed: Ed, act: Actions) {
         if (ed.sub != 0) subShown = ed.sub
     }
 
-    Column(Modifier.fillMaxWidth().background(pal.bar())) {
+    // kapsul objek (kind 4) mengambang seperti kapsul Ink: bilah tanpa latar dan tanpa garis atas
+    val floatCap = kindNow == 4
+    val barBg by androidx.compose.animation.animateColorAsState(if (floatCap) Color.Transparent else pal.bar(), tween(220), label = "barbg")
+    Column(Modifier.fillMaxWidth().background(barBg)) {
         // sub-bilah: perataan atau poin (mengembang di atas bilah utama)
         AnimatedVisibility(
             visible = ed.sub != 0 && kindNow == 0,
@@ -284,7 +287,7 @@ fun DocBar(ed: Ed, act: Actions) {
                 }
             }
         }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(pal.ol.copy(alpha = .35f)))
+        if (!floatCap) Box(Modifier.fillMaxWidth().height(1.dp).background(pal.ol.copy(alpha = .35f)))
         AnimatedContent(
             targetState = kindNow,
             transitionSpec = { (fadeIn(tween(220, easing = Emph)) + slideInVertically(tween(260, easing = Emph)) { it / 3 }).togetherWith(fadeOut(tween(120))) },
@@ -327,7 +330,7 @@ fun DocBar(ed: Ed, act: Actions) {
                     // objek sisipan (tabel / kode / kutipan / garis) terpilih tanpa keyboard: kapsul rata + hapus + selesai (sama seperti kapsul Ink)
                     val ob = ed.blocks.firstOrNull { it.id == (ed.selObj ?: objLast) }
                     if (ob == null) Spacer(Modifier.height(54.dp))
-                    else Box(Modifier.fillMaxWidth().padding(vertical = 6.dp).padding(horizontal = 10.dp)) { ObjCapsule(ed, ob) }
+                    else Box(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 10.dp).padding(horizontal = 10.dp)) { ObjCapsule(ed, ob) }
                 }
                 2 -> Row(
                     Modifier.fillMaxWidth().padding(vertical = 6.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
