@@ -2283,7 +2283,7 @@ private fun BlockSlot(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan?, ordN: Int, od
                     }
                 }
                 val la = ed.landA
-                androidx.compose.ui.graphics.drawscope.withTransform({ translate(dx, dy); scale(sc, sc) }) {
+                withTransform({ translate(dx, dy); scale(sc, sc) }) {
                     this@drawWithContent.drawContent()
                     if (la > 0f && ed.landId == b.id) {
                         val cr = CornerRadius(14.dp.toPx())
