@@ -100,7 +100,7 @@ class Fold(val cuts: IntArray, val pn: IntArray, val pl: FloatArray, val cutR: F
 data class Pt(val key: String, val off: Int)
 
 /** Gambar yang sedang diangkat (tekan-tahan lalu geser). */
-class Mv(val bid: String, val imgId: String, val row: Boolean, val top: Float, val h: Float, val g: Float = -1f, val al0: String = "c")
+class Mv(val bid: String, val imgId: String, val row: Boolean, val top: Float, val h: Float, val g: Float = -1f)
 
 class Req(val key: String, val pos: Int, val n: Int, val sel: TextRange? = null)
 
@@ -1213,12 +1213,6 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     var mvY by mutableStateOf(0f)
     var mvAl by mutableStateOf("c")
     var dropAt by mutableStateOf(-1)
-    var mvTopNow by mutableStateOf(0f)   // atas & tinggi slot objek seretan pada tata letak PRATINJAU (posisi lain dibekukan di bpos)
-    var mvHNow by mutableStateOf(0f)
-    val slotY = HashMap<String, Float>()
-    private val pend = HashMap<String, FloatArray>()
-    var flipUntil = 0L
-    var mvSnap = false   // true = seretan dilepas & diterapkan: pergeseran pratinjau harus langsung nol (tata letak sudah berpindah)
     var mergeT by mutableStateOf<MergeT?>(null)   // gambar yang sedang diseret berada di atas gambar lain: lepas = jadi kolase
     var replT: Pair<String, Int>? = null          // gambar yang akan diganti (dicatat saat tombol Ganti diketuk)
     var dens = 1f
@@ -1245,7 +1239,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     }
 
     /** Blok (atau kelompok gambar-apung) beserta rencananya, urutan sama dengan yang digambar di NoteScreen. */
-    fun slotsOf(plans: Map<String, FloatPlan>, bl: List<Blk> = blocks): List<Pair<Blk, FloatPlan?>> {
+    fun slotsOf(plans: Map<String, FloatPlan>): List<Pair<Blk, FloatPlan?>> {
+        val bl = blocks
         val out = ArrayList<Pair<Blk, FloatPlan?>>(bl.size)
         var i = 0
         while (i < bl.size) {
@@ -1308,7 +1303,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     }
 
     /** Himpunan id slot yang harus tersusun. Membaca state (dipakai di dalam snapshotFlow), jadi berlangganan semua yang relevan. */
-    fun computeLive(scrollV: Int, plans: Map<String, FloatPlan>, fs: Float, lh: Float, bl: List<Blk> = blocks): Set<String> {
+    fun computeLive(scrollV: Int, plans: Map<String, FloatPlan>, fs: Float, lh: Float): Set<String> {
         val vh = if (viewH > 0f) viewH else 1600f
         val top = scrollV.toFloat()
         val bot = top + vh
@@ -1332,7 +1327,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (findOn) curHit()?.let { if (it.key != "@t") forced.add(keyBlock(it.key)) }
         val out = HashSet<String>()
         var y = 0f
-        for ((b, p) in slotsOf(plans, bl)) {
+        for ((b, p) in slotsOf(plans)) {
             val pos = bpos[b.id]
             val t = pos?.get(0) ?: y
             val h = pos?.get(1) ?: estimateSlot(b, p, fs, lh)
@@ -1347,19 +1342,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     }
 
     /** Catat posisi slot. Bila slot yang seluruhnya di atas layar berubah tinggi, gulir digeser sebesar selisihnya agar isi di layar tidak melompat. */
-    /** Laporan posisi blok peserta aliran teks. Saat seretan aktif, bpos dibekukan (keputusan celah memakai tata letak asli); laporan ditunda. */
-    fun posReport(id: String, y: Float, h: Float) {
-        if (mv != null) { pend[id] = floatArrayOf(y, h); return }
-        setPos(id, y, h)
-    }
-
     fun setSlotPos(id: String, y: Float, h: Float) {
-        val mm = mv
-        if (mm != null) {
-            if (id == mm.bid) { mvTopNow = y; mvHNow = h }
-            pend[id] = floatArrayOf(y, h)
-            return
-        }
         val o = bpos[id]
         if (windowed && o != null && o[1] != h) {
             val sc = scroll
@@ -1467,9 +1450,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             val m0 = b.im[0]
             widthDp * m0.w.coerceIn(.2f, 1f) / m0.a.coerceIn(.2f, 5f) * dens
         } else p[1]
-        mv = Mv(bid, imgId, b.im.size > 1, p[0], hh, grab, b.im.firstOrNull()?.al ?: b.alOf())
-        mvTopNow = p[0]; mvHNow = p[1]; pend.clear()
-        mvX = 0f; mvY = 0f; dropAt = -1; mvDir = 0; mergeT = null; mvSnap = false
+        mv = Mv(bid, imgId, b.im.size > 1, p[0], hh, grab)
+        mvX = 0f; mvY = 0f; dropAt = -1; mvDir = 0; mergeT = null
         mvAl = b.im.firstOrNull()?.al ?: b.alOf()
         buzz?.invoke()
         autoJob?.cancel()
@@ -1573,137 +1555,6 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         }
     }
 
-    // ---------- pratinjau tempat jatuh: blok lain bergeser membuka celah, kotak hantu menandai tujuan ----------
-    private fun mvGap(i: Int): Float {
-        if (i <= 0 || i >= blocks.size) return 0f
-        val p = bpos[blocks[i].id] ?: return 0f
-        val q = bpos[blocks[i - 1].id] ?: return 0f
-        return (p[0] - (q[0] + q[1])).coerceAtLeast(0f)
-    }
-
-    private fun mvRowH(m: Mv): Float {
-        val b = blocks.getOrNull(idx(m.bid)) ?: return m.h
-        val a = b.im.firstOrNull { it.id == m.imgId }?.a?.coerceIn(.2f, 5f) ?: 1.5f
-        val lo = 80f * dens
-        return (widthDp * dens * .6f / a).coerceIn(lo, maxOf(lo, viewH * .5f))
-    }
-
-    /** Ruang (px) yang dibutuhkan objek yang diseret, termasuk jarak antarblok. */
-    private fun mvSlot(m: Mv): Float {
-        if (m.row) return mvRowH(m) + 12f * dens
-        val i = idx(m.bid)
-        val p = bpos[m.bid]
-        if (i < 0 || p == null) return m.h
-        for (j in i + 1 until blocks.size) {
-            val q = bpos[blocks[j].id] ?: continue
-            return maxOf(q[0] - p[0], p[1])
-        }
-        return p[1] + mvGap(i)
-    }
-
-    /** Pergeseran vertikal (px) slot [bid] agar hasil akhir terlihat sebelum dilepas. Nol bila tidak terpengaruh. */
-    fun mvShift(bid: String): Float {
-        val m = mv ?: return 0f
-        val to = dropAt
-        if (to < 0 || mergeT != null || bid == m.bid) return 0f
-        val j = idx(bid)
-        if (j < 0) return 0f
-        val s = mvSlot(m)
-        if (m.row) return if (j >= to) s else 0f
-        return 0f   // objek non-kolase: pratinjau memakai tata letak asli (previewBlocks), bukan pergeseran
-    }
-
-    // ---------- pratinjau tata letak asli ----------
-    private fun mvWp(b: Blk, w: Float): Float {
-        var wp = w
-        if (b.ty == "tbl") wp = (tblWidths(b, widthDp).sum() + 3f) * dens
-        else if (b.isBox) wp = w * b.bw.coerceIn(.2f, 1f)
-        else if (b.im.size == 1) wp = w * b.im[0].w.coerceIn(.2f, 1f)
-        return wp.coerceAtMost(w)
-    }
-    private fun alX(wp: Float, w: Float, al: String): Float =
-        if (wp >= w * .98f) 0f else when (al) { "l" -> 0f; "r" -> w - wp; else -> (w - wp) / 2f }
-
-    /** Selisih letak-x objek seretan antara tata letak awal dan pratinjau (agar objek tetap di bawah jari). */
-    private fun mvDx(): Float {
-        val m = mv ?: return 0f
-        if (m.row) return 0f
-        val b = blocks.getOrNull(idx(m.bid)) ?: return 0f
-        val w = widthDp * dens
-        val wp = mvWp(b, w)
-        return alX(wp, w, m.al0) - alX(wp, w, mvAl)
-    }
-    val mvTx: Float get() = mvX + mvDx()
-    val mvTy: Float get() = mvY + ((mv?.top ?: 0f) - mvTopNow)
-
-    /** Daftar blok andaikan objek seretan dilepas sekarang (urutan + letak kiri/tengah/kanan) -> teks mengalir persis seperti hasil akhir. */
-    fun previewBlocks(): List<Blk> {
-        val m = mv ?: return blocks
-        if (m.row || mergeT != null) return blocks
-        val i = idx(m.bid)
-        if (i < 0) return blocks
-        var b = blocks[i]
-        val al = mvAl
-        if (b.im.size == 1 && al != b.im[0].al) b = b.copy(im = listOf(b.im[0].copy(al = al)))
-        if ((b.isBox || b.ty == "tbl") && al != b.alOf()) b = b.copy(ba = al)
-        val to = dropAt
-        val l = blocks.toMutableList()
-        if (to >= 0 && to != i && to != i + 1) {
-            val anchor = if (to < blocks.size) blocks[to].id else null
-            l.removeAt(i)
-            if (i > 0 && i < l.size && isEmptyP(l[i - 1]) && isEmptyP(l[i])) l.removeAt(i)
-            val at = if (anchor == null) l.size else l.indexOfFirst { it.id == anchor }.let { if (it < 0) l.size else it }
-            l.add(at, b)
-        } else l[i] = b
-        return l
-    }
-
-    /** Kotak hantu [x, y, lebar, tinggi] = tempat objek mendarat pada tata letak pratinjau. */
-    fun mvGhost(): FloatArray? {
-        val m = mv ?: return null
-        if (m.row) return mvGhostRow()
-        if (mergeT != null) return null
-        val b = blocks.getOrNull(idx(m.bid)) ?: return null
-        val w = widthDp * dens
-        if (w <= 0f) return null
-        val wp = mvWp(b, w)
-        return floatArrayOf(alX(wp, w, mvAl), mvTopNow, wp, maxOf(mvHNow, 12f * dens))
-    }
-
-    // (versi kolase)
-    private fun mvGhostRow(): FloatArray? {
-        val m = mv ?: return null
-        if (mergeT != null) return null
-        val to = dropAt
-        if (m.row && to < 0) return null
-        val i = idx(m.bid)
-        if (i < 0) return null
-        val b = blocks[i]
-        val p = bpos[m.bid] ?: return null
-        val w = widthDp * dens
-        if (w <= 0f) return null
-        val s = mvSlot(m)
-        val h = if (m.row) mvRowH(m) else p[1]
-        fun topOf(k: Int): Float? =
-            if (k < blocks.size) bpos[blocks[k].id]?.get(0)
-            else blocks.lastOrNull()?.let { l -> bpos[l.id]?.let { it[0] + it[1] + mvGap(blocks.size - 1) } }
-        val y = when {
-            m.row -> topOf(to)
-            to < 0 -> p[0]
-            to > i -> topOf(to)?.minus(s)
-            else -> topOf(to)
-        } ?: return null
-        var wp = w
-        if (!m.row) {
-            if (b.ty == "tbl") wp = (tblWidths(b, widthDp).sum() + 3f) * dens
-            else if (b.isBox) wp = w * b.bw.coerceIn(.2f, 1f)
-            else if (b.im.size == 1) wp = w * b.im[0].w.coerceIn(.2f, 1f)
-        }
-        wp = wp.coerceAtMost(w)
-        val x = if (wp >= w * .98f) 0f else when (mvAl) { "l" -> 0f; "r" -> w - wp; else -> (w - wp) / 2f }
-        return floatArrayOf(x, y, wp, maxOf(h, 12f * dens))
-    }
-
     fun mvEnd(apply: Boolean) {
         val m = mv ?: return
         autoJob?.cancel()
@@ -1712,10 +1563,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val al = mvAl
         val anchor = if (to in 0 until blocks.size) blocks[to].id else null
         val mt = mergeT
-        mvSnap = apply
         mv = null; mvX = 0f; mvY = 0f; dropAt = -1; mergeT = null
-        val pd = HashMap(pend); pend.clear()
-        if (apply) pd.forEach { (k, v) -> setPos(k, v[0], v[1]) } else flipUntil = System.nanoTime() + 450_000_000L
         if (!apply || i < 0) return
         if (mt != null) { mergeImg(m.bid, m.imgId, mt); return }   // dilepas di atas gambar lain: otomatis jadi kolase
         if (m.row && to >= 0) { extractImg(m.bid, m.imgId, anchor); return }   // kolase diseret keluar barisnya: jadi gambar sendiri
