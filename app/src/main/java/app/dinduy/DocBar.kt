@@ -2,6 +2,7 @@ package app.dinduy
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.ui.graphics.TransformOrigin
@@ -259,13 +260,15 @@ fun DocBar(ed: Ed, act: Actions) {
 
     // kapsul objek (kind 4) mengambang seperti kapsul Ink: bilah tanpa latar dan tanpa garis atas
     val floatCap = kindNow == 4 || kindNow == 1
-    val barBg by androidx.compose.animation.animateColorAsState(if (floatCap) Color.Transparent else pal.bar(), tween(260, easing = Emph), label = "barbg")
+    val barBg by androidx.compose.animation.animateColorAsState(if (floatCap) Color.Transparent else pal.bar(), tween(220), label = "barbg")
     Column(Modifier.fillMaxWidth().background(barBg)) {
         // sub-bilah: perataan atau poin (mengembang di atas bilah utama)
         AnimatedVisibility(
             visible = ed.sub != 0 && kindNow == 0,
-            enter = fadeIn(tween(200)) + expandVertically(tween(260, easing = Emph)),
-            exit = fadeOut(tween(120)) + shrinkVertically(tween(200, easing = Emph))
+            enter = fadeIn(tween(200, 40, Emph)) + expandVertically(spring(.88f, 520f)) +
+                scaleIn(tween(260, easing = Emph), .9f, TransformOrigin(.5f, 1f)),
+            exit = fadeOut(tween(110)) + shrinkVertically(tween(210, easing = Emph)) +
+                scaleOut(tween(190, easing = Emph), .92f, TransformOrigin(.5f, 1f))
         ) {
             Box(Modifier.fillMaxWidth().padding(vertical = 6.dp), Alignment.Center) {
                 Row(
@@ -291,38 +294,24 @@ fun DocBar(ed: Ed, act: Actions) {
                 }
             }
         }
-        // garis atas bilah memudar halus (bukan hilang mendadak) saat bilah berubah jadi kapsul mengambang
-        val lineA by animateFloatAsState(if (floatCap) 0f else 1f, tween(240), label = "line")
+        val lineA by animateFloatAsState(if (floatCap) 0f else 1f, tween(220, easing = Emph), label = "barline")
         Box(Modifier.fillMaxWidth().height(1.dp).graphicsLayer { alpha = lineA }.background(pal.ol.copy(alpha = .35f)))
         AnimatedContent(
             targetState = kindNow,
-            contentAlignment = Alignment.BottomCenter,
             transitionSpec = {
-                val capIn = targetState == 1 || targetState == 4
-                val capOut = initialState == 1 || initialState == 4
-                val bottom = TransformOrigin(.5f, 1f)
-                when {
-                    // bilah utama -> kapsul: bilah menciut ke bawah, kapsul melesat naik + membesar dengan pegas sedikit membal
-                    capIn && initialState == 0 ->
-                        (fadeIn(tween(170, 80, easing = Emph)) + scaleIn(spring(.68f, 380f), .72f, bottom) +
-                            slideInVertically(spring(.78f, 400f)) { it / 2 })
-                            .togetherWith(fadeOut(tween(100)) + scaleOut(tween(190, easing = Emph), .9f, bottom) +
-                                slideOutVertically(tween(190, easing = Emph)) { it / 4 })
-                    // kapsul -> bilah utama: kapsul menciut ke bawah, bilah utama naik dari bawah ke tempatnya
-                    capOut && targetState == 0 ->
-                        (fadeIn(tween(200, 90, easing = EmphDecel)) + scaleIn(tween(300, easing = EmphDecel), .94f, bottom) +
-                            slideInVertically(tween(300, easing = EmphDecel)) { it / 3 })
-                            .togetherWith(fadeOut(tween(90)) + scaleOut(tween(210, easing = Emph), .7f, bottom) +
-                                slideOutVertically(tween(210, easing = Emph)) { it / 2 })
-                    // kapsul <-> kapsul lain (gambar <-> objek): tukar dengan geser kecil + skala, tanpa lompatan tinggi
-                    capIn && capOut ->
-                        (fadeIn(tween(180, 60)) + scaleIn(spring(.8f, 460f), .9f, bottom) + slideInVertically(tween(260, easing = EmphDecel)) { it / 5 })
-                            .togetherWith(fadeOut(tween(110)) + scaleOut(tween(150), .92f, bottom))
-                    // baris chip (tabel / gaya kutipan)
-                    else ->
-                        (fadeIn(tween(220, easing = Emph)) + slideInVertically(tween(280, easing = Emph)) { it / 3 })
-                            .togetherWith(fadeOut(tween(120)) + slideOutVertically(tween(180, easing = Emph)) { it / 4 })
-                }.using(SizeTransform(clip = false) { _, _ -> spring(.86f, 520f) })
+                // bilah utama -> kapsul: kapsul tumbuh naik dari dasar (spring, sedikit membesar);
+                // kapsul -> bilah utama: bilah turun halus; kapsul -> kapsul: fade-through. Ukuran mengalir dengan spring.
+                val toBase = targetState == 0
+                val fromBase = initialState == 0
+                val enter = if (toBase)
+                    fadeIn(tween(210, 90, Emph)) + scaleIn(tween(320, 90, Emph), .94f, TransformOrigin(.5f, 1f)) +
+                        slideInVertically(tween(320, 60, Emph)) { it / 6 }
+                else
+                    fadeIn(tween(180, 70, Emph)) + scaleIn(spring(.78f, 460f), .84f, TransformOrigin(.5f, 1f)) +
+                        slideInVertically(tween(340, 40, Emph)) { it / 2 }
+                val exit = fadeOut(tween(100)) +
+                    scaleOut(tween(180, easing = Emph), if (fromBase) .96f else .9f, TransformOrigin(.5f, 1f))
+                (enter togetherWith exit).using(SizeTransform(clip = false) { _, _ -> spring<androidx.compose.ui.unit.IntSize>(.9f, 520f) })
             },
             label = "docbar"
         ) { kind ->
@@ -332,10 +321,11 @@ fun DocBar(ed: Ed, act: Actions) {
                     if (s == null) Spacer(Modifier.height(54.dp)) else {
                         val b = ed.blocks.firstOrNull { it.id == s.first }
                         val inRow = (b?.im?.size ?: 1) > 1
-                        Box(Modifier.fillMaxWidth().padding(top = 3.dp, bottom = 10.dp).padding(horizontal = 10.dp), Alignment.Center) {
+                        Box(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 10.dp).padding(horizontal = 10.dp), Alignment.Center) {
                         Row(
                             Modifier.shadow(if (pal.dark) 6.dp else 2.dp, RoundedCornerShape(30.dp)).clip(RoundedCornerShape(30.dp))
-                                .background(pal.c3).horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 8.dp),
+                                .background(pal.c3).animateContentSize(spring(.85f, 520f)).horizontalScroll(rememberScrollState())
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
                             horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically
                         ) {
                             // ganti isi bingkai dengan foto lain (galeri / kamera); ukuran bingkai tidak berubah
@@ -366,7 +356,7 @@ fun DocBar(ed: Ed, act: Actions) {
                     // objek sisipan (tabel / kode / kutipan / garis) terpilih tanpa keyboard: kapsul rata + hapus + selesai (sama seperti kapsul Ink)
                     val ob = ed.blocks.firstOrNull { it.id == (ed.selObj ?: objLast) }
                     if (ob == null) Spacer(Modifier.height(54.dp))
-                    else Box(Modifier.fillMaxWidth().padding(top = 3.dp, bottom = 10.dp).padding(horizontal = 10.dp)) { ObjCapsule(ed, ob, showOk = true) }
+                    else Box(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 10.dp).padding(horizontal = 10.dp)) { ObjCapsule(ed, ob) }
                 }
                 2 -> Row(
                     Modifier.fillMaxWidth().padding(vertical = 6.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
@@ -592,7 +582,16 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM, holdH: Int = 0) {
             val page = if (shown == 2) 2 else if (ed.sheetPage == 1) 1 else 0     // 0 Sisipkan, 1 Tabel, 2 Format
             AnimatedContent(
                 targetState = page,
-                transitionSpec = { fadeIn(tween(180, 60)).togetherWith(fadeOut(tween(100))) },
+                transitionSpec = {
+                    // Insert -> Table maju (masuk dari kanan), Table -> Insert mundur (masuk dari kiri); Format: fade-through
+                    if (initialState == 2 || targetState == 2) fadeIn(tween(200, 60, Emph)).togetherWith(fadeOut(tween(100)))
+                    else if (targetState > initialState)
+                        (fadeIn(tween(230, 80, Emph)) + slideInHorizontally(tween(340, easing = Emph)) { it / 5 })
+                            .togetherWith(fadeOut(tween(90)) + slideOutHorizontally(tween(260, easing = Emph)) { -it / 6 })
+                    else
+                        (fadeIn(tween(230, 80, Emph)) + slideInHorizontally(tween(340, easing = Emph)) { -it / 5 })
+                            .togetherWith(fadeOut(tween(90)) + slideOutHorizontally(tween(260, easing = Emph)) { it / 6 })
+                },
                 label = "sheetpage"
             ) { pg ->
                 Column(Modifier.fillMaxWidth()) {
