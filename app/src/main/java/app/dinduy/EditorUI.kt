@@ -26,10 +26,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.runtime.snapshotFlow
-import kotlinx.coroutines.coroutineScope
-import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.foundation.ExperimentalFoundationApi
 import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.foundation.gestures.BringIntoViewSpec
@@ -66,7 +62,6 @@ import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.ViewConfiguration
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.rememberCoroutineScope
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import androidx.compose.foundation.LocalIndication
@@ -1479,8 +1474,8 @@ private fun boxHeightEst(ed: Ed, b: Blk, dm: Dm, pal: Pal, tm: TextMeasurer, dn:
  * Paragraf yang melewati dasar gambar dipotong barisnya (baris atas sempit, sisanya selebar penuh).
  * Judul / poin yang melewati dasar gambar tetap sempit seluruhnya.
  */
-private fun planFloat(ed: Ed, bl: List<Blk>, i: Int, dm: Dm, pal: Pal, tm: TextMeasurer, dn: Density): FloatPlan {
-    val b = bl[i]
+private fun planFloat(ed: Ed, i: Int, dm: Dm, pal: Pal, tm: TextMeasurer, dn: Density): FloatPlan {
+    val b = ed.blocks[i]
     val d = dn.density
     val fs = dm.fs
     val left: Boolean
@@ -1506,8 +1501,8 @@ private fun planFloat(ed: Ed, bl: List<Blk>, i: Int, dm: Dm, pal: Pal, tm: TextM
     var rem = (imgH + (if (b.ty == "hr") 0f else fs * 1.1f)) * d
     val out = ArrayList<Pair<Blk, FSpec>>()
     var j = i + 1
-    while (j < bl.size && rem > 0f) {
-        val x = bl[j]
+    while (j < ed.blocks.size && rem > 0f) {
+        val x = ed.blocks[j]
         val bm = blockBM(x, pal, dm) ?: break
         val top = bm.top * d
         if (top >= rem) break
@@ -1567,11 +1562,12 @@ private fun planFloat(ed: Ed, bl: List<Blk>, i: Int, dm: Dm, pal: Pal, tm: TextM
 
 /** Rencana untuk semua gambar mengambang (kiri/kanan dan cukup ruang) di catatan ini. */
 @Composable
-fun floatPlans(ed: Ed, dm: Dm, bl: List<Blk> = ed.blocks): Map<String, FloatPlan> {
+fun floatPlans(ed: Ed, dm: Dm): Map<String, FloatPlan> {
     val pal = LocalPal.current
     val tm = rememberTextMeasurer()
     val dn = LocalDensity.current
     var out: HashMap<String, FloatPlan>? = null
+    val bl = ed.blocks
     for ((i, b) in bl.withIndex()) {
         // semua gambar tunggal rata kiri/kanan selalu lewat FloatGroup, walau tak ada teks di sampingnya,
         // supaya komponen gambar tidak berganti (dan gestur ubah ukuran tidak putus) saat teks samping habis
@@ -1579,18 +1575,18 @@ fun floatPlans(ed: Ed, dm: Dm, bl: List<Blk> = ed.blocks): Map<String, FloatPlan
             // semua tabel lewat TblFloatGroup (komposisi tidak berganti saat lebar kolom diseret melewati batas);
             // teks hanya mengalir di sampingnya bila tabel cukup sempit
             if (out == null) out = HashMap()
-            out[b.id] = if (ed.tblSideOk(b)) planFloat(ed, bl, i, dm, pal, tm, dn) else FloatPlan(emptyList())
+            out[b.id] = if (ed.tblSideOk(b)) planFloat(ed, i, dm, pal, tm, dn) else FloatPlan(emptyList())
             continue
         }
         if (b.isBox) {
             // kutipan / kode / garis yang sudah menempel ke kiri / kanan selalu lewat BoxFloatGroup (komposisi tidak berganti saat lebar diseret)
             if (b.alOf() == "c") continue
             if (out == null) out = HashMap()
-            out[b.id] = if (ed.boxSideOk(b)) planFloat(ed, bl, i, dm, pal, tm, dn) else FloatPlan(emptyList())
+            out[b.id] = if (ed.boxSideOk(b)) planFloat(ed, i, dm, pal, tm, dn) else FloatPlan(emptyList())
             continue
         }
         if (b.ty != "img" || b.im.size != 1 || b.im[0].al == "c") continue
-        val p = if (ed.sideOk(b)) planFloat(ed, bl, i, dm, pal, tm, dn) else FloatPlan(emptyList())
+        val p = if (ed.sideOk(b)) planFloat(ed, i, dm, pal, tm, dn) else FloatPlan(emptyList())
         if (out == null) out = HashMap()
         out[b.id] = p
     }
@@ -1617,7 +1613,7 @@ fun FloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<String, Int>,
                             .onGloballyPositioned { c ->
                                 val cc = ed.contentCoords
                                 if (cc != null && cc.isAttached && c.isAttached) {
-                                    ed.posReport(x.id, cc.localPositionOf(c, Offset.Zero).y, c.size.height.toFloat())
+                                    ed.setPos(x.id, cc.localPositionOf(c, Offset.Zero).y, c.size.height.toFloat())
                                 }
                             }
                     ) { BlockView(ed, vm, x, od[x.id] ?: 1, dm, sp.fold, sp.mk) }
@@ -1628,7 +1624,7 @@ fun FloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<String, Int>,
             Modifier.align(if (m.al == "r") Alignment.TopEnd else Alignment.TopStart)
                 .zIndex(if (lifted) 3f else 1f)
                 .graphicsLayer {
-                    if (lifted) { translationX = ed.mvTx; translationY = ed.mvTy; scaleX = 1.03f; scaleY = 1.03f; alpha = .94f }
+                    if (lifted) { translationX = ed.mvX; translationY = ed.mvY; scaleX = 1.03f; scaleY = 1.03f; alpha = .94f }
                 }
         ) { ImgCell(ed, vm, b, 0, Modifier.width(imgW).aspectRatio(ratio), sel == 0) }
     }
@@ -1650,7 +1646,7 @@ private fun TblFloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<St
                             .onGloballyPositioned { c ->
                                 val cc = ed.contentCoords
                                 if (cc != null && cc.isAttached && c.isAttached) {
-                                    ed.posReport(x.id, cc.localPositionOf(c, Offset.Zero).y, c.size.height.toFloat())
+                                    ed.setPos(x.id, cc.localPositionOf(c, Offset.Zero).y, c.size.height.toFloat())
                                 }
                             }
                     ) { BlockView(ed, vm, x, od[x.id] ?: 1, dm, sp.fold, sp.mk) }
@@ -1661,7 +1657,7 @@ private fun TblFloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<St
             Modifier.align(when (b.alOf()) { "r" -> Alignment.TopEnd; "c" -> Alignment.TopCenter; else -> Alignment.TopStart })
                 .zIndex(if (lifted) 3f else 1f)
                 .graphicsLayer {
-                    if (lifted) { translationX = ed.mvTx; translationY = ed.mvTy; scaleX = 1.03f; scaleY = 1.03f; alpha = .94f }
+                    if (lifted) { translationX = ed.mvX; translationY = ed.mvY; scaleX = 1.03f; scaleY = 1.03f; alpha = .94f }
                 }
         ) { TableView(ed, b, dm, pal, if (narrow || (b.alOf() != "l" && tw.value < ed.widthDp)) Modifier.width(tw) else Modifier.fillMaxWidth()) }
     }
@@ -1684,7 +1680,7 @@ private fun BoxFloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<St
                             .onGloballyPositioned { c ->
                                 val cc = ed.contentCoords
                                 if (cc != null && cc.isAttached && c.isAttached) {
-                                    ed.posReport(x.id, cc.localPositionOf(c, Offset.Zero).y, c.size.height.toFloat())
+                                    ed.setPos(x.id, cc.localPositionOf(c, Offset.Zero).y, c.size.height.toFloat())
                                 }
                             }
                     ) { BlockView(ed, vm, x, od[x.id] ?: 1, dm, sp.fold, sp.mk) }
@@ -1695,7 +1691,7 @@ private fun BoxFloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<St
             Modifier.align(if (b.alOf() == "r") Alignment.TopEnd else Alignment.TopStart)
                 .zIndex(if (lifted) 3f else 1f)
                 .graphicsLayer {
-                    if (lifted) { translationX = ed.mvTx; translationY = ed.mvTy; scaleX = 1.03f; scaleY = 1.03f; alpha = .94f }
+                    if (lifted) { translationX = ed.mvX; translationY = ed.mvY; scaleX = 1.03f; scaleY = 1.03f; alpha = .94f }
                 }
         ) { BoxCell(ed, b, dm, pal, Modifier.width(w)) }
     }
@@ -2129,11 +2125,6 @@ fun Sep() {
     Box(Modifier.padding(horizontal = 4.dp).width(2.dp).height(24.dp).clip(RoundedCornerShape(1.dp)).background(pal.ol))
 }
 
-private class GhostAnim {
-    val a = Animatable(0f); val x = Animatable(0f); val y = Animatable(0f)
-    val w = Animatable(0f); val h = Animatable(0f); val ph = Animatable(0f)
-}
-
 // ---------- slot blok (komposisi berjendela) ----------
 private val NO_OD: Map<String, Int> = emptyMap()
 
@@ -2146,22 +2137,15 @@ private fun BlockSlot(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan?, ordN: Int, od
     val lifted = ed.mv?.let { it.bid == b.id && !it.row } == true
     val dragging = ed.mv?.bid == b.id
     val den = LocalDensity.current
-    // pratinjau tempat jatuh: slot ini bergeser mulus membuka celah. Dibaca di fase gambar -> tanpa recompose per frame.
-    val shift = remember { Animatable(0f) }
-    LaunchedEffect(b.id) {
-        snapshotFlow { ed.mvShift(b.id) }.collectLatest { t ->
-            if (t == 0f && ed.mvSnap) shift.snapTo(0f) else shift.animateTo(t, spring(.82f, 380f))
-        }
-    }
     Box(
         Modifier
             .zIndex(if (dragging) 3f else 0f)
             .onGloballyPositioned { c -> ed.setSlotPos(b.id, c.positionInParent().y, c.size.height.toFloat()) }
             .graphicsLayer {
                 if (lifted && plan == null) {
-                    translationX = ed.mvTx; translationY = ed.mvTy
+                    translationX = ed.mvX; translationY = ed.mvY
                     scaleX = 1.03f; scaleY = 1.03f; alpha = .94f
-                } else translationY = shift.value
+                }
             }
     ) {
         if (live) {
@@ -2186,26 +2170,6 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     val dm = remember(nfs, ffNow) { Dm(nfs.toFloat(), LH, ffNow) }   // instance stabil: blok tidak recompose tanpa sebab
     val scroll = rememberScrollState()
     InkSetup(ed)
-    val gh = remember { GhostAnim() }
-    LaunchedEffect(Unit) {
-        snapshotFlow { ed.mvGhost() }.collectLatest { g ->
-            if (g == null) {
-                if (ed.mvSnap) gh.a.snapTo(0f) else gh.a.animateTo(0f, tween(110))
-            } else coroutineScope {
-                val sp = spring<Float>(.82f, 420f)
-                if (gh.a.value < .02f) { gh.x.snapTo(g[0]); gh.y.snapTo(g[1]); gh.w.snapTo(g[2]); gh.h.snapTo(g[3]) }
-                else {
-                    launch { gh.x.animateTo(g[0], sp) }; launch { gh.y.animateTo(g[1], sp) }
-                    launch { gh.w.animateTo(g[2], sp) }; launch { gh.h.animateTo(g[3], sp) }
-                }
-                launch { gh.a.animateTo(1f, tween(140)) }
-            }
-        }
-    }
-    val dragOn = ed.mv != null
-    LaunchedEffect(dragOn) {   // semut berjalan di tepi kotak hantu; hanya hidup selama menyeret
-        while (dragOn) { gh.ph.snapTo(0f); gh.ph.animateTo(1f, tween(1100, easing = LinearEasing)) }
-    }
     // Tombol back Android: tutup yang paling atas dulu. Mode ketik -> mode baca (tampilan penuh) -> baru keluar catatan.
     BackHandler(true) {
         when {
@@ -2437,27 +2401,14 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                             lead = 70L
                         )
                         .drawWithContent {
-                            // kotak hantu di belakang blok: tempat objek akan mendarat (blok lain sudah bergeser memberi ruang)
-                            val ga = gh.a.value
-                            if (ga > .01f) {
-                                val gx = gh.x.value; val gy = gh.y.value; val gw = gh.w.value; val gHt = gh.h.value
-                                val cr = CornerRadius(14.dp.toPx())
-                                val tl = Offset(gx, gy); val sz = Size(gw, gHt)
-                                drawRoundRect(pal.p.copy(alpha = .10f * ga), tl, sz, cr)
-                                val dash = 9.dp.toPx(); val gap = 6.dp.toPx()
-                                drawRoundRect(
-                                    pal.p.copy(alpha = .8f * ga), tl, sz, cr,
-                                    style = Stroke(2.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(dash, gap), gh.ph.value * (dash + gap)))
-                                )
-                                if (gHt >= 44.dp.toPx() && gw >= 64.dp.toPx()) {   // tanda "+" di tengah
-                                    val c = Offset(gx + gw / 2f, gy + gHt / 2f); val rr = 15.dp.toPx(); val arm = 6.dp.toPx()
-                                    drawCircle(pal.p.copy(alpha = .20f * ga), rr, c)
-                                    val sw = 2.2f.dp.toPx(); val col = pal.p.copy(alpha = ga)
-                                    drawLine(col, Offset(c.x - arm, c.y), Offset(c.x + arm, c.y), sw, androidx.compose.ui.graphics.StrokeCap.Round)
-                                    drawLine(col, Offset(c.x, c.y - arm), Offset(c.x, c.y + arm), sw, androidx.compose.ui.graphics.StrokeCap.Round)
-                                }
-                            }
                             inkContent(ed.ink)
+                            val at = ed.dropAt
+                            if (at >= 0) {
+                                val th = 4.dp.toPx()
+                                val y = if (at < ed.blocks.size) (ed.bpos[ed.blocks[at].id]?.get(0) ?: -1f) - th
+                                else ed.blocks.lastOrNull()?.let { l -> ed.bpos[l.id]?.let { it[0] + it[1] } } ?: -100f
+                                if (y >= -th) drawRoundRect(pal.p, Offset(0f, y), Size(size.width, th), CornerRadius(th / 2f))
+                            }
                         }
                 ) {
                     Column(Modifier.fillMaxWidth()) {
