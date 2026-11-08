@@ -976,6 +976,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val i = idx(bid)
         if (i < 0) return
         commit()
+        animNext()
         val b = blocks[i]
         setBlock(i, b.copy(ba = al))   // hanya letak yang berubah; lebar tidak pernah ikut diubah (objek penuh tetap penuh, hanya gagangnya pindah sisi)
         releaseSide(bid)
@@ -1057,6 +1058,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     fun imgAlign(al: String) {
         val s = selImg ?: return
         commit()
+        animNext()
         imgSet(s.first, s.second) { it.copy(al = al) }   // hanya letak yang berubah; lebar tidak pernah ikut diubah
         releaseSide(s.first)
         dirty(); commit()
@@ -1506,6 +1508,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     var liftSc by mutableStateOf(1f)        // skala terangkat (membal sedikit saat diangkat)
     var liftRot by mutableStateOf(0f)       // miring tipis menurut kecepatan geser horizontal
     var flipSc = 1f
+    var animReflow = false                  // true selama seretan + luncuran: teks di sekitar objek bergeser mulus (bukan seketika)
+    val padMemo = HashMap<String, Float>()  // inset terakhir tiap paragraf: titik awal animasi saat paragraf pindah antara kelompok dan baris biasa
     var flipRot = 0f
     var mvOrphan = false                    // node asal gestur terlepas dari komposisi: BlockSlot melanjutkan seretan
     private var lastGap = 0
@@ -1704,6 +1708,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             else flipP = f
         }
         if (landA > 0f) landA = (landA - dt * 1.5f).coerceAtLeast(0f)
+        if (mv == null && flipP == 0f) animReflow = false
         val ev = edgeV + (edgeRaw - edgeV) * (dt * 12f).coerceAtMost(1f)
         edgeV = if (kotlin.math.abs(ev) < .004f && edgeRaw == 0f) 0f else ev
     }
@@ -1724,6 +1729,14 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             flipRot = liftRot
             flipId = m.bid
         }
+    }
+
+    /** Perubahan tata letak non-seret (tombol rata kiri / tengah / kanan): blok yang bergeser meluncur mulus, teks di samping objek ikut bergeser. */
+    fun animNext() {
+        if (mv != null || blocks.any { it.ik.isNotEmpty() }) return
+        flipId = ""
+        animReflow = true
+        flipCapture()
     }
 
     private fun landOn(id: String) {
@@ -1763,6 +1776,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         sY.snap(p[0]); sH.snap(p[1]); sX.snap(0f); sW.snap(widthDp * dens); sO.snap(0f); sF.snap(0f)
         gOn = 0f; gPulse = 0f; gAdj = false; edgeRaw = 0f; edgeV = 0f
         flipP = 0f; flipId = ""; flipFrom.clear(); landId = ""; landA = 0f
+        animReflow = !mvInk
         fxStart()
         buzz?.invoke()
         autoJob?.cancel()
