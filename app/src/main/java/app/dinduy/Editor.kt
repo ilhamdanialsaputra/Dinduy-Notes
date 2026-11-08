@@ -799,7 +799,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     fun insHr() = insertObjs(listOf(Blk(ty = "hr", ba = "l")))
     fun addImages(imgs: List<Img>) {
         if (imgs.isEmpty()) return
-        val list = imgs.map { Blk(ty = "img", im = listOf(it)) }
+        val list = imgs.map { Blk(ty = "img", im = listOf(it.copy(al = "l"))) }   // sisipan baru: rata kiri
         insertObjs(list)
         revealMedia(list.first().id)
     }
@@ -1057,10 +1057,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     fun imgAlign(al: String) {
         val s = selImg ?: return
         commit()
-        imgSet(s.first, s.second) {
-            val w = if (al != "c" && it.w > maxSideW()) minOf(SIDE_W, maxSideW()) else it.w
-            it.copy(al = al, w = w)
-        }
+        imgSet(s.first, s.second) { it.copy(al = al) }   // hanya letak yang berubah; lebar tidak pernah ikut diubah
         releaseSide(s.first)
         dirty(); commit()
     }
@@ -1136,7 +1133,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             // teks di sisi gambar tidak ikut hilang: jadi paragraf biasa
             if (b.r.t.isNotEmpty()) setBlock(i, Blk(id = b.id, ik = b.ik, ta = b.ta, il = b.il, ir = b.ir, fi = b.fi, ty = "p", r = b.r))
             else blocks = blocks.filterIndexed { j, _ -> j != i }
-        } else if (rest.size == 1) setBlock(i, b.copy(im = listOf(rest[0].copy(a = rest[0].o, w = 0.6f, al = "c"))))
+        } else if (rest.size == 1) setBlock(i, b.copy(im = listOf(rest[0].copy(a = rest[0].o, w = 0.6f, al = "l"))))
         else setBlock(i, b.copy(im = rest))
         selImg = null; selObj = null
         norm(); afterStructural()
@@ -1166,9 +1163,9 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             val sum = b.im.sumOf { it.a.toDouble() }.toFloat()
             fun share(m: Img) = (m.a / sum * (1f - (n - 1) * GAP)).coerceIn(0.2f, 1f)
             val m = b.im[s.second]
-            val solo = Blk(ty = "img", im = listOf(m.copy(a = m.o, w = share(m), al = "c")))
+            val solo = Blk(ty = "img", im = listOf(m.copy(a = m.o, w = share(m), al = "l")))
             val rest = b.im.filterIndexed { j, _ -> j != s.second }
-            val restB = if (rest.size == 1) b.copy(im = listOf(rest[0].copy(a = rest[0].o, w = share(rest[0]), al = "c")))
+            val restB = if (rest.size == 1) b.copy(im = listOf(rest[0].copy(a = rest[0].o, w = share(rest[0]), al = "l")))
             else b.copy(im = rest)
             val l = blocks.toMutableList()
             l.removeAt(i)
@@ -1552,7 +1549,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             val wp = w * mi.w.coerceIn(.2f, 1f)
             val base = when (mi.al) { "l" -> wp / 2f; "r" -> w - wp / 2f; else -> w / 2f }
             val cx = base + mvX
-            val al = if (cx < w / 3f) "l" else if (cx > w * 2f / 3f) "r" else "c"
+            // selebar catatan: hanya pindah urutan, letak tidak berubah; yang lebih sempit: letak mengikuti tempat dilepas
+            val al = if (wp >= w * .98f) mi.al else if (cx < w / 3f) "l" else if (cx > w * 2f / 3f) "r" else "c"
             if (al != mvAl) { mvAl = al; buzz?.invoke() }
         }
     }
@@ -1572,8 +1570,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         var b = blocks[i]
         if (!m.row && b.im.size == 1 && al != b.im[0].al) {
             val mi = b.im[0]
-            val w = if (al != "c" && mi.w > maxSideW()) minOf(SIDE_W, maxSideW()) else mi.w
-            b = b.copy(im = listOf(mi.copy(al = al, w = w)))
+            b = b.copy(im = listOf(mi.copy(al = al)))   // lebar tidak diubah
         }
         if (!m.row && (b.isBox || b.ty == "tbl") && al != b.alOf()) {
             // dilepas di sepertiga kiri / tengah / kanan: letak mengikuti, lebar tidak diubah (teks mengitari bila lebarnya memang cukup sempit)
@@ -1679,9 +1676,9 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val sum = src.im.sumOf { it.a.toDouble() }.toFloat().coerceAtLeast(.1f)
         fun share(x: Img) = (x.a / sum * (1f - (n - 1) * GAP)).coerceIn(.2f, 1f)   // lebar tampil lama, jadi tinggi gambar tidak berubah
         val rest = src.im.filter { it.id != imgId }
-        val solo = Blk(ty = "img", im = listOf(mi.copy(w = share(mi), al = "c")))
+        val solo = Blk(ty = "img", im = listOf(mi.copy(w = share(mi), al = "l")))
         val l = blocks.toMutableList()
-        l[i] = if (rest.size == 1) src.copy(im = listOf(rest[0].copy(w = share(rest[0]), al = "c"))) else src.copy(im = rest)
+        l[i] = if (rest.size == 1) src.copy(im = listOf(rest[0].copy(w = share(rest[0]), al = "l"))) else src.copy(im = rest)
         val at = if (anchor == null) l.size else l.indexOfFirst { it.id == anchor }.let { if (it < 0) l.size else it }
         l.add(at, solo)
         blocks = l
@@ -1723,7 +1720,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             val rest = src.im.filter { it.id != imgId }
             l[si] = if (rest.size == 1) {
                 val r0 = rest[0]
-                src.copy(im = listOf(r0.copy(w = (r0.a / sum * (1f - (n - 1) * GAP)).coerceIn(.2f, 1f), al = "c")))
+                src.copy(im = listOf(r0.copy(w = (r0.a / sum * (1f - (n - 1) * GAP)).coerceIn(.2f, 1f), al = "l")))
             } else src.copy(im = rest)
         } else {
             l.removeAt(si)
