@@ -1541,8 +1541,9 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             val wp = if (b.ty == "tbl") (tblWidths(b, widthDp).sum() + 3f) * dens else w * b.bw.coerceIn(.2f, 1f)
             val base = when (b.alOf()) { "l" -> wp / 2f; "r" -> w - wp / 2f; else -> w / 2f }
             val cx = base + mvX
-            // selebar catatan (mentok kanan): letak kiri / kanan tidak terlihat, jadi tetap seperti semula kecuali sengaja digeser jauh ke sisi
-            val al = if (wp >= w * .98f) (if (mvX < -w / 6f) "l" else if (mvX > w / 6f) "r" else b.alOf())
+            // selebar catatan: tidak ada ruang geser ke samping, jadi hanya pindah urutan; letak dan lebar tidak berubah.
+            // Yang lebih sempit: letak mengikuti tempat dilepas (sepertiga kiri / tengah / kanan), lebar tidak berubah.
+            val al = if (wp >= w * .98f) b.alOf()
             else if (cx < w / 3f) "l" else if (cx > w * 2f / 3f) "r" else "c"
             if (al != mvAl) { mvAl = al; buzz?.invoke() }
         }
@@ -1576,9 +1577,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             b = b.copy(im = listOf(mi.copy(al = al, w = w)))
         }
         if (!m.row && (b.isBox || b.ty == "tbl") && al != b.alOf()) {
-            // dilepas di sepertiga kiri / kanan: menempel ke sisi itu dan teks mengelilinginya; di tengah: sebaris penuh seperti foto
-            val tooWide = b.isBox && al != "c" && b.bw > maxSideW()
-            b = b.copy(ba = al, bw = if (tooWide) minOf(SIDE_W, maxSideW()) else b.bw)
+            // dilepas di sepertiga kiri / tengah / kanan: letak mengikuti, lebar tidak diubah (teks mengitari bila lebarnya memang cukup sempit)
+            b = b.copy(ba = al)
         }
         val l = blocks.toMutableList()
         if (!m.row && to >= 0 && to != i && to != i + 1) {
