@@ -1310,13 +1310,13 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
                     .size(7.dp, 64.dp).clip(CircleShape).background(pal.p)
             )
             val pop = remember { Animatable(0f) }
-            LaunchedEffect(Unit) { pop.animateTo(1f, spring(.55f, 520f)) }
+            LaunchedEffect(Unit) { pop.animateTo(1f, spring(.7f, 520f)) }
             Row(
                 Modifier.align(Alignment.Center)
                     .graphicsLayer { scaleX = pop.value; scaleY = pop.value; alpha = pop.value.coerceIn(0f, 1f) }
-                    .clip(CircleShape).background(pal.p).padding(horizontal = 12.dp, vertical = 7.dp),
+                    .clip(CircleShape).background(pal.p).padding(horizontal = 10.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically
-            ) { T("Side by side", 12f, 800, pal.op) }
+            ) { T("Side by side", 11f, 800, pal.op) }
         }
         if (ed.mv == null && bmp != null && !ed.reading) {
             // tombol perluas: buka menu foto (morph dari bingkai ini ke layar penuh)
@@ -1632,7 +1632,7 @@ fun FloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<String, Int>,
             Modifier.align(if (m.al == "r") Alignment.TopEnd else Alignment.TopStart)
                 .zIndex(if (lifted) 3f else 1f)
                 .graphicsLayer {
-                    if (lifted) { translationX = ed.mvX; translationY = ed.mvY; scaleX = 1.03f; scaleY = 1.03f; alpha = .94f }
+                    if (lifted) { translationX = ed.liftX(); translationY = ed.liftY(); scaleX = 1.02f; scaleY = 1.02f; alpha = .96f }
                 }
         ) { ImgCell(ed, vm, b, 0, Modifier.width(imgW).aspectRatio(ratio), sel == 0) }
     }
@@ -1665,7 +1665,7 @@ private fun TblFloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<St
             Modifier.align(when (b.alOf()) { "r" -> Alignment.TopEnd; "c" -> Alignment.TopCenter; else -> Alignment.TopStart })
                 .zIndex(if (lifted) 3f else 1f)
                 .graphicsLayer {
-                    if (lifted) { translationX = ed.mvX; translationY = ed.mvY; scaleX = 1.03f; scaleY = 1.03f; alpha = .94f }
+                    if (lifted) { translationX = ed.liftX(); translationY = ed.liftY(); scaleX = 1.02f; scaleY = 1.02f; alpha = .96f }
                 }
         ) { TableView(ed, b, dm, pal, if (narrow || (b.alOf() != "l" && tw.value < ed.widthDp)) Modifier.width(tw) else Modifier.fillMaxWidth()) }
     }
@@ -1699,7 +1699,7 @@ private fun BoxFloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<St
             Modifier.align(if (b.alOf() == "r") Alignment.TopEnd else Alignment.TopStart)
                 .zIndex(if (lifted) 3f else 1f)
                 .graphicsLayer {
-                    if (lifted) { translationX = ed.mvX; translationY = ed.mvY; scaleX = 1.03f; scaleY = 1.03f; alpha = .94f }
+                    if (lifted) { translationX = ed.liftX(); translationY = ed.liftY(); scaleX = 1.02f; scaleY = 1.02f; alpha = .96f }
                 }
         ) { BoxCell(ed, b, dm, pal, Modifier.width(w)) }
     }
@@ -2146,10 +2146,10 @@ private fun ghostIc(ty: String): String = when (ty) {
 }
 
 /**
- * Penunjuk tempat jatuh objek yang sedang diseret. Bukan sekadar garis: sebuah "ghost" putus-putus seukuran objek
- * (lebar dan letak kiri / tengah / kanan ikut berubah), diberi pil "Drop here" + ikon jenis objek + panah letak.
- * Ghost meluncur mulus (spring) antar sasaran, berdenyut saat sasaran pindah; blok di sekitarnya bergeser membuka ruang.
- * Catatan yang punya coretan: blok tidak digeser, ghost berubah menjadi garis bercahaya dengan pil di atasnya.
+ * Bingkai tempat objek yang diseret AKAN mendarat. Tata letak di sekelilingnya (urutan, teks yang mengalir di samping objek)
+ * sudah memakai hasil akhir yang sebenarnya, jadi bingkai ini menandai "lubang" yang benar-benar akan terisi: seukuran objek,
+ * di letak kiri / tengah / kanan yang akan dipakai. Tampilannya sengaja tenang: isi tipis + garis putus-putus halus + pil kecil.
+ * Anggota kolase yang diseret keluar: garis tipis di celah tujuan.
  */
 @Composable
 fun androidx.compose.foundation.layout.BoxScope.DropGhost(ed: Ed) {
@@ -2157,7 +2157,7 @@ fun androidx.compose.foundation.layout.BoxScope.DropGhost(ed: Ed) {
     if (!alive) return
     val pal = LocalPal.current
     val dn = LocalDensity.current.density
-    val wide by remember { androidx.compose.runtime.derivedStateOf { ed.gw > 124f * dn } }
+    val wide by remember { androidx.compose.runtime.derivedStateOf { ed.gw > 120f * dn } }
     val line = ed.gLine
     Box(
         Modifier.matchParentSize().drawBehind {
@@ -2169,52 +2169,42 @@ fun androidx.compose.foundation.layout.BoxScope.DropGhost(ed: Ed) {
                 val h = ed.gHt
                 val pu = ed.gPulse
                 if (line) {
-                    val r = h / 2f
-                    drawRoundRect(pal.p.copy(alpha = .20f * a), Offset(x - 6.dp.toPx(), y - 5.dp.toPx()), Size(w + 12.dp.toPx(), h + 10.dp.toPx()), CornerRadius(r + 5.dp.toPx()))
-                    drawRoundRect(pal.p.copy(alpha = a), Offset(x, y), Size(w, h), CornerRadius(r))
-                    drawCircle(pal.p.copy(alpha = a), 6.dp.toPx(), Offset(x + 6.dp.toPx(), y + h / 2f))
-                    drawCircle(pal.p.copy(alpha = a), 6.dp.toPx(), Offset(x + w - 6.dp.toPx(), y + h / 2f))
+                    drawRoundRect(pal.p.copy(alpha = .85f * a), Offset(x, y), Size(w, h), CornerRadius(h / 2f))
                 } else {
-                    val g = 3.dp.toPx() * pu
-                    val tl = Offset(x - g, y - g)
-                    val sz = Size(w + 2f * g, h + 2f * g)
-                    val cr = CornerRadius(minOf(18.dp.toPx(), sz.height / 2f))
-                    drawRoundRect(pal.p.copy(alpha = (.09f + .07f * pu) * a), tl, sz, cr)
-                    drawRoundRect(pal.p.copy(alpha = .14f * a), tl, sz, cr, style = Stroke(6.dp.toPx()))
+                    val cr = CornerRadius(minOf(14.dp.toPx(), h / 2f))
+                    drawRoundRect(pal.p.copy(alpha = .06f * a), Offset(x, y), Size(w, h), cr)
                     drawRoundRect(
-                        pal.p.copy(alpha = .95f * a), tl, sz, cr,
+                        pal.p.copy(alpha = (.70f + .2f * pu) * a), Offset(x, y), Size(w, h), cr,
                         style = Stroke(
-                            2.dp.toPx(),
+                            1.5.dp.toPx(),
                             cap = androidx.compose.ui.graphics.StrokeCap.Round,
-                            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10.dp.toPx(), 7.dp.toPx()), -ed.gT * 24.dp.toPx())
+                            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(9.dp.toPx(), 7.dp.toPx()), -ed.gT * 14.dp.toPx())
                         )
                     )
                 }
             }
         }
     ) {
-        Row(
+        if (!line) Row(
             Modifier
                 .graphicsLayer {
-                    val sc = 1f + .06f * ed.gPulse
                     translationX = ed.gx + ed.gw / 2f - size.width / 2f
-                    translationY = if (line) ed.gy - size.height - 12f * density else ed.gy + ed.gHt / 2f - size.height / 2f
-                    scaleX = sc; scaleY = sc
-                    alpha = ed.gOn
+                    translationY = ed.gy + ed.gHt / 2f - size.height / 2f
+                    alpha = ed.gOn * .96f
                 }
-                .shadow(4.dp, CircleShape).background(pal.p)
-                .padding(horizontal = 12.dp, vertical = 7.dp),
+                .clip(CircleShape).background(pal.p)
+                .padding(horizontal = 10.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
         ) {
-            Ic(ghostIc(ed.gKind), pal.op, 18.dp)
-            if (wide) T("Drop here", 13f, 800, pal.op)
+            Ic(ghostIc(ed.gKind), pal.op, 16.dp)
+            if (wide) T("Drop here", 12f, 800, pal.op)
             if (ed.gAdj) AlignArrow(when (ed.mvAl) { "l" -> 0; "r" -> 2; else -> 1 }, pal.op)
         }
     }
 }
 
-/** Cahaya + panah di tepi atas / bawah area catatan saat seretan berada di zona gulir otomatis. */
+/** Cahaya tipis + panah di tepi atas / bawah area catatan saat seretan berada di zona gulir otomatis. */
 @Composable
 fun EdgeGlow(ed: Ed) {
     val alive by remember { androidx.compose.runtime.derivedStateOf { ed.mv != null || ed.edgeV != 0f } }
@@ -2223,19 +2213,19 @@ fun EdgeGlow(ed: Ed) {
     Box(Modifier.fillMaxSize()) {
         for (top in listOf(true, false)) {
             Box(
-                Modifier.align(if (top) Alignment.TopCenter else Alignment.BottomCenter).fillMaxWidth().height(72.dp)
+                Modifier.align(if (top) Alignment.TopCenter else Alignment.BottomCenter).fillMaxWidth().height(56.dp)
                     .graphicsLayer { alpha = (if (top) -ed.edgeV else ed.edgeV).coerceIn(0f, 1f) }
                     .background(
                         androidx.compose.ui.graphics.Brush.verticalGradient(
-                            if (top) listOf(pal.p.copy(alpha = .30f), Color.Transparent) else listOf(Color.Transparent, pal.p.copy(alpha = .30f))
+                            if (top) listOf(pal.p.copy(alpha = .13f), Color.Transparent) else listOf(Color.Transparent, pal.p.copy(alpha = .13f))
                         )
                     ),
                 contentAlignment = if (top) Alignment.TopCenter else Alignment.BottomCenter
             ) {
                 Box(
-                    Modifier.padding(vertical = 10.dp)
-                        .graphicsLayer { translationY = (if (top) -1f else 1f) * kotlin.math.sin(ed.gT * 9f) * 3f * density }
-                ) { Ic(if (top) "aup" else "adn", pal.p, 26.dp) }
+                    Modifier.padding(vertical = 8.dp)
+                        .graphicsLayer { translationY = (if (top) -1f else 1f) * kotlin.math.sin(ed.gT * 8f) * 2f * density }
+                ) { Ic(if (top) "aup" else "adn", pal.p.copy(alpha = .8f), 22.dp) }
             }
         }
     }
@@ -2261,26 +2251,21 @@ private fun BlockSlot(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan?, ordN: Int, od
             .onGloballyPositioned { c -> ed.setSlotPos(b.id, c.positionInParent().y, c.size.height.toFloat()) }
             .graphicsLayer {
                 if (lifted && plan == null) {
-                    translationX = ed.mvX; translationY = ed.mvY
-                    scaleX = 1.04f; scaleY = 1.04f; alpha = .95f
+                    translationX = ed.liftX(); translationY = ed.liftY()
+                    scaleX = 1.02f; scaleY = 1.02f; alpha = .96f
                 }
             }
-            // Geser visual lewat gambar (bukan layer): posisi layout (bpos) tidak pernah berubah, jadi penentuan sasaran lepas tetap stabil.
+            // Luncuran halus lewat gambar (bukan layer): posisi layout (bpos) tidak pernah tercemar, jadi penentuan sasaran tetap stabil.
             .drawWithContent {
                 var dy = 0f
                 var dx = 0f
                 var sc = 1f
-                if (!(lifted && plan == null)) {
-                    val fp = ed.flipP
-                    if (fp != 0f) {
-                        // setelah dilepas: meluncur dari tempat tampil lama ke tempat barunya (FLIP)
-                        val now = ed.bpos[b.id]?.get(0)
-                        val from = ed.flipFrom[b.id]
-                        if (now != null && from != null) dy = (from - now) * fp
-                        if (ed.flipId == b.id) { dx = ed.flipDx * fp; sc = 1f + .04f * fp }
-                    } else {
-                        dy = ed.slotShift(b.id)   // saat diseret: blok didorong membuka ruang untuk ghost
-                    }
+                val fp = ed.flipP
+                if (fp != 0f && !(lifted && plan == null) && ed.mv?.bid != b.id) {
+                    val now = ed.bpos[b.id]?.get(0)
+                    val from = ed.flipFrom[b.id]
+                    if (now != null && from != null) dy = (from - now) * fp
+                    if (ed.flipId == b.id) { dx = ed.flipDx * fp; sc = 1f + .02f * fp }
                 }
                 val la = ed.landA
                 drawContext.canvas.save()
@@ -2288,9 +2273,9 @@ private fun BlockSlot(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan?, ordN: Int, od
                 if (sc != 1f) drawContext.transform.scale(sc, sc, center)
                 drawContent()
                 if (la > 0f && ed.landId == b.id) {
-                    val cr = CornerRadius(14.dp.toPx())
-                    drawRoundRect(pal.p.copy(alpha = .10f * la), Offset.Zero, size, cr)
-                    drawRoundRect(pal.p.copy(alpha = .60f * la), Offset.Zero, size, cr, style = Stroke(2.5.dp.toPx()))
+                    val cr = CornerRadius(12.dp.toPx())
+                    drawRoundRect(pal.p.copy(alpha = .05f * la), Offset.Zero, size, cr)
+                    drawRoundRect(pal.p.copy(alpha = .38f * la), Offset.Zero, size, cr, style = Stroke(1.5.dp.toPx()))
                 }
                 drawContext.canvas.restore()
             }
