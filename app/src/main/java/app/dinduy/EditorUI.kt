@@ -1844,6 +1844,13 @@ private fun BoxBody(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier, sel: B
     }
 }
 
+/** Pemisah tipis antar kelompok tombol di dalam kapsul (sama dengan kapsul Ink). */
+@Composable
+fun CapDiv() {
+    val pal = LocalPal.current
+    Box(Modifier.padding(horizontal = 3.dp).width(1.dp).height(24.dp).background(pal.ol.copy(alpha = .5f)))
+}
+
 /** Kapsul alat objek sisipan (tabel / kutipan / kode / garis): rata kiri / tengah / kanan, hapus, selesai. Tampilan sama dengan kapsul alat Ink. */
 @Composable
 fun ObjCapsule(ed: Ed, ob: Blk) {
@@ -1859,10 +1866,10 @@ fun ObjCapsule(ed: Ed, ob: Blk) {
             Tbn({ AlignArrow(0, it) }, al == "l", true) { ed.objAlign(ob.id, "l") }
             Tbn({ AlignArrow(1, it) }, al == "c", true) { ed.objAlign(ob.id, "c") }
             Tbn({ AlignArrow(2, it) }, al == "r", true) { ed.objAlign(ob.id, "r") }
-            Box(Modifier.padding(horizontal = 3.dp).width(1.dp).height(24.dp).background(pal.ol.copy(alpha = .5f)))
+            CapDiv()
             Tbn({ Ic("del", it) }, false, true) { ed.objDelete(ob.id) }
             if (ed.selObj != null) {
-                Box(Modifier.padding(horizontal = 3.dp).width(1.dp).height(24.dp).background(pal.ol.copy(alpha = .5f)))
+                CapDiv()
                 Tbn({ Ic("ok", it) }, false, true) { ed.selObj = null }
             }
         }
@@ -1963,23 +1970,29 @@ fun EdBar(ed: Ed, act: Actions, imeOpen: Boolean) {
                         if (s != null) {
                             val b = ed.blocks.firstOrNull { it.id == s.first }
                             val inRow = (b?.im?.size ?: 1) > 1
-                            Row(
-                                Modifier.fillMaxWidth().shadow(if (pal.dark) 6.dp else 1.dp, RoundedCornerShape(28.dp)).clip(RoundedCornerShape(28.dp))
-                                    .background(pal.c3).horizontalScroll(rememberScrollState()).padding(6.dp),
-                                horizontalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                Tbn({ Ic("ok", it) }, true, true) { ed.closeImg() }
-                                Sep()
-                                if (!inRow) {
-                                    val al = b?.im?.getOrNull(s.second)?.al
-                                    Tbn({ Ic("aL", it) }, al == "l", true) { ed.imgAlign("l") }
-                                    Tbn({ Ic("aC", it) }, al == "c", true) { ed.imgAlign("c") }
-                                    Tbn({ Ic("aR", it) }, al == "r", true) { ed.imgAlign("r") }
+                            // kapsul foto: tampilan sama dengan kapsul Ink / kapsul objek
+                            Box(Modifier.fillMaxWidth(), Alignment.Center) {
+                                Row(
+                                    Modifier.shadow(if (pal.dark) 6.dp else 2.dp, RoundedCornerShape(30.dp)).clip(RoundedCornerShape(30.dp))
+                                        .background(pal.c3).horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    if (!inRow) {
+                                        val al = b?.im?.getOrNull(s.second)?.al
+                                        Tbn({ Ic("aL", it) }, al == "l", true) { ed.imgAlign("l") }
+                                        Tbn({ Ic("aC", it) }, al == "c", true) { ed.imgAlign("c") }
+                                        Tbn({ Ic("aR", it) }, al == "r", true) { ed.imgAlign("r") }
+                                        CapDiv()
+                                    }
+                                    Tbn({ Ic(if (inRow) "rows" else "cols", it) }, false, true) { ed.toggleRow() }
+                                    Tbn({ Ic("aup", it) }, false, true) { ed.imgMove(-1) }
+                                    Tbn({ Ic("adn", it) }, false, true) { ed.imgMove(1) }
+                                    CapDiv()
+                                    Tbn({ Ic("del", it) }, false, true) { ed.imgDelete() }
+                                    CapDiv()
+                                    Tbn({ Ic("ok", it) }, false, true) { ed.closeImg() }
                                 }
-                                Tbn({ Ic(if (inRow) "rows" else "cols", it) }, false, true) { ed.toggleRow() }
-                                Tbn({ Ic("aup", it) }, false, true) { ed.imgMove(-1) }
-                                Tbn({ Ic("adn", it) }, false, true) { ed.imgMove(1) }
-                                Tbn({ Ic("del", it) }, false, true) { ed.imgDelete() }
                             }
                         }
                     }
