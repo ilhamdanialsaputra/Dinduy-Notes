@@ -1520,6 +1520,14 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     private fun curAl(b: Blk): String = if (b.im.size == 1) b.im[0].al else b.alOf()
 
+    /**
+     * Letak yang dipasang ke pratinjau. Foto / kutipan / kode / garis memakai komposisi berbeda untuk "tengah" dan "samping";
+     * mengganti komposisi di tengah seretan memutus gestur sentuh (objek langsung ke-drop). Jadi selama diseret, kelas
+     * tengah/samping dibekukan seperti saat diangkat; letak yang dituju tetap ditunjukkan bingkai sasaran dan dipakai saat dilepas.
+     * Tabel selalu satu komposisi, jadi pratinjau letaknya penuh.
+     */
+    private fun effAl(b: Blk, al: String): String = if (b.ty != "tbl" && (curAl(b) == "c") != (al == "c")) curAl(b) else al
+
     /** Translasi seretan (px) relatif terhadap posisi slot di tata letak pratinjau: jari tetap memegang objek yang sama walau slotnya pindah. */
     fun liftY(): Float {
         val m = mv ?: return 0f
@@ -1577,7 +1585,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (i < 0) return
         val oal = curAl(ob[i])
         wTo = if (mergeT != null) -1 else dropAt
-        wAl = if (mergeT != null) oal else mvAl
+        wAl = if (mergeT != null) oal else effAl(ob[i], mvAl)
     }
 
     /** Pasang pratinjau ke daftar blok. Blok lain meluncur halus dari posisi lamanya. */
@@ -1678,7 +1686,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
                 val b = if (i >= 0) blocks[i] else null
                 val q = bpos[m.bid]
                 if (b != null && q != null && mergeT == null) {
-                    val bx = mvBox(m, b, q, curAl(b))
+                    val bx = mvBox(m, b, q, mvAl)   // bingkai menunjukkan letak yang DITUJU (juga saat komposisi dibekukan)
                     val f = flipFrom[m.bid]
                     gy = if (flipP != 0f && f != null) q[0] + (f - q[0]) * flipP else q[0]
                     th = bx[2]; tx = bx[0]; tw = bx[1]; to = 1f
@@ -1708,7 +1716,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     }
 
     /** Dipanggil tepat saat dilepas, SEBELUM daftar blok diubah: blok lain tidak bergerak (sudah di tempatnya); objek meluncur dari jari ke lubangnya. */
-    private fun flipBegin(m: Mv, keep: Boolean) {
+    private fun flipBegin(m: Mv, keep: Boolean, finalAl: String) {
         sO.snap(0f); gOn = 0f
         if (mvInk) { flipFrom.clear(); flipId = ""; flipDx = 0f; flipP = 0f; sF.snap(0f); fxStart(); return }
         flipCapture()
@@ -1716,7 +1724,9 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         flipDx = 0f
         if (!m.row) {
             flipFrom[m.bid] = m.top + liftSY
-            flipDx = liftSX + (if (keep) mvAdjX else 0f)
+            val ib = ob.firstOrNull { it.id == m.bid }
+            val fx = if (keep && ib != null) mvBox(m, ib, null, finalAl)[0] else mvX0   // letak kiri objek di hasil akhir
+            flipDx = liftSX + mvX0 - fx
             flipSc = liftSc
             flipRot = liftRot
             flipId = m.bid
@@ -1879,7 +1889,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val to = dropAt
         val al = mvAl
         val mt = mergeT
-        flipBegin(m, apply && mt == null)
+        flipBegin(m, apply && mt == null, al)
         mv = null; mvX = 0f; mvY = 0f; dropAt = -1; mergeT = null
         if (m.row) {
             val i = idx(m.bid)
