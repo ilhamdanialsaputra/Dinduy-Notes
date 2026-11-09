@@ -334,7 +334,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val oldRt = rtOf(key)
         var v = v0
         if (!v.text.startsWith(Z)) {
-            if (v.text == oldRt.t && v.selection.collapsed && v.selection.start == 0 && !isCellKey(key)) {
+            // equals(ignoreCase): saat mode kapital keyboard aktif, IME bisa mengubah huruf pertama (auto-capitalize) bersamaan dengan menghapus Z
+            if (v.text.equals(oldRt.t, ignoreCase = true) && v.selection.collapsed && v.selection.start == 0 && !isCellKey(key)) {
                 tf[key] = TextFieldValue(Z + oldRt.t, TextRange(1))
                 backStart(key)
                 return
@@ -543,6 +544,17 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             focusAt(nb.id, 0)
         }
         afterStructural()
+    }
+
+    /** Backspace dari event tombol (bukan lewat IME): kursor di awal blok -> lompat ke blok sebelumnya. true = ditangani. */
+    fun backKey(key: String): Boolean {
+        if (isCellKey(key) || selOn) return false
+        val v = tf[key] ?: return false
+        if (!v.selection.collapsed || v.selection.start > 1) return false
+        if (idx(key) < 0) return false
+        tf[key] = TextFieldValue(Z + rtOf(key).t, TextRange(1))
+        backStart(key)
+        return true
     }
 
     private fun backStart(key: String) {
