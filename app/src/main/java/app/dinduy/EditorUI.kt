@@ -1241,7 +1241,6 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
             .graphicsLayer {
                 if (liftedRow) { translationX = ed.mvX; translationY = ed.mvY }
                 scaleX = lift; scaleY = lift
-                alpha = if (liftedRow) .94f else 1f
             }
             .onSizeChanged { box = it }
             .photoBounds { frame = it }
@@ -1331,7 +1330,7 @@ fun ImgCell(ed: Ed, vm: AppVM, b: Blk, ix: Int, modifier: Modifier, selected: Bo
             LaunchedEffect(Unit) { pop.animateTo(1f, spring(.7f, 520f)) }
             Row(
                 Modifier.align(Alignment.Center)
-                    .graphicsLayer { scaleX = pop.value; scaleY = pop.value; alpha = pop.value.coerceIn(0f, 1f) }
+                    .graphicsLayer { scaleX = pop.value; scaleY = pop.value }
                     .clip(CircleShape).background(pal.p).padding(horizontal = 10.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) { T("Side by side", 11f, 800, pal.op) }
@@ -1619,23 +1618,31 @@ fun floatPlans(ed: Ed, dm: Dm): Map<String, FloatPlan> {
     return out ?: emptyMap()
 }
 
+/** Membal tipis saat objek baru mendarat (a: sisa waktu pendaratan 1 -> 0). Mulai setelah luncuran masuk lubang, lalu mereda: +2,4% lalu -1% lalu diam. */
+private fun landPop(a: Float): Float {
+    val q = ((1f - a) - .3f).coerceAtLeast(0f) / .7f
+    return 1f + kotlin.math.sin(q * 7.5f) * (1f - q) * .03f
+}
+
 /** Layer objek yang diseret / baru dilepas: terangkat mengikuti jari, lalu meluncur ke lubangnya (teks di sampingnya tetap di tempat). */
 private fun androidx.compose.ui.graphics.GraphicsLayerScope.liftLayer(ed: Ed, id: String, lifted: Boolean, slideDp: Float) {
     if (lifted) {
         translationX = ed.liftX(); translationY = ed.liftY()
-        scaleX = ed.liftSc; scaleY = ed.liftSc; rotationZ = ed.liftRot; alpha = .97f
+        scaleX = ed.liftSc; scaleY = ed.liftSc; rotationZ = ed.liftRot
     } else {
         translationX = slideDp * density
+        var sc = 1f
         val fp = ed.flipP
         if (fp != 0f && ed.flipId == id) {
             val now = ed.bpos[id]?.get(0)
             val from = ed.flipFrom[id]
             if (now != null && from != null) translationY = (from - now) * fp
             translationX += ed.flipDx * fp
-            val sc = 1f + (ed.flipSc - 1f) * fp
-            scaleX = sc; scaleY = sc
+            sc = 1f + (ed.flipSc - 1f) * fp
             rotationZ = ed.flipRot * fp
         }
+        if (ed.landA > 0f && ed.landId == id) sc *= landPop(ed.landA)
+        if (sc != 1f) { scaleX = sc; scaleY = sc }
     }
 }
 
@@ -2324,18 +2331,14 @@ fun Sep() {
 }
 
 // ---------- penunjuk lepas (drop) ----------
-private fun ghostIc(ty: String): String = when (ty) {
-    "tbl" -> "table"
-    "q" -> "quote"
-    "code" -> "pre"
-    "hr" -> "hr"
-    else -> "img"
-}
-
 /**
  * Bingkai tempat objek yang diseret AKAN mendarat. Tata letak di sekelilingnya (urutan, teks yang mengalir di samping objek)
  * sudah memakai hasil akhir yang sebenarnya, jadi bingkai ini menandai "lubang" yang benar-benar akan terisi: seukuran objek,
- * di letak kiri / tengah / kanan yang akan dipakai. Tampilannya sengaja tenang: isi tipis + garis putus-putus halus + pil kecil.
+ * di letak kiri / tengah / kanan yang akan dipakai. Tanpa label, tanpa ikon: lubangnya sendiri sudah cukup jelas.
+ *
+ * Tidak ada fade sama sekali. Bingkai digambar di BELAKANG isi catatan, tepat di bawah objek sejak diangkat, jadi ia tersingkap
+ * saat objek digeser menjauh. Muncul / hilang (mis. saat objek sedang di atas gambar lain untuk kolase) lewat ukuran: tumbuh /
+ * menyusut dari pusatnya (gOn = skala 0..1). Pindah tempat = meluncur dengan pegas; denyut saat sasaran pindah = garis sesaat menebal.
  * Anggota kolase yang diseret keluar: garis tipis di celah tujuan.
  */
 @Composable
@@ -2343,55 +2346,35 @@ fun androidx.compose.foundation.layout.BoxScope.DropGhost(ed: Ed) {
     val alive by remember { androidx.compose.runtime.derivedStateOf { ed.mv != null || ed.gOn > 0f } }
     if (!alive) return
     val pal = LocalPal.current
-    val dn = LocalDensity.current.density
-    val wide by remember { androidx.compose.runtime.derivedStateOf { ed.gw > 120f * dn } }
     val line = ed.gLine
     Box(
         Modifier.matchParentSize().drawBehind {
-            val a = ed.gOn
-            if (a > .004f) {
-                val x = ed.gx
-                val y = ed.gy
-                val w = ed.gw
-                val h = ed.gHt
-                val pu = ed.gPulse
+            val k = ed.gOn
+            if (k > .004f) {
+                val w = ed.gw * k
+                val h = ed.gHt * k
+                val x = ed.gx + (ed.gw - w) / 2f
+                val y = ed.gy + (ed.gHt - h) / 2f
                 if (line) {
-                    drawRoundRect(pal.p.copy(alpha = .85f * a), Offset(x, y), Size(w, h), CornerRadius(h / 2f))
+                    drawRoundRect(pal.p, Offset(x, y), Size(w, h), CornerRadius(h / 2f))
                 } else {
                     val cr = CornerRadius(minOf(14.dp.toPx(), h / 2f))
-                    drawRoundRect(pal.p.copy(alpha = .06f * a), Offset(x, y), Size(w, h), cr)
+                    drawRoundRect(pal.p.copy(alpha = .07f), Offset(x, y), Size(w, h), cr)
                     drawRoundRect(
-                        pal.p.copy(alpha = (.70f + .2f * pu) * a), Offset(x, y), Size(w, h), cr,
+                        pal.p.copy(alpha = .8f), Offset(x, y), Size(w, h), cr,
                         style = Stroke(
-                            1.5.dp.toPx(),
+                            1.5.dp.toPx() + 1.5.dp.toPx() * ed.gPulse,
                             cap = androidx.compose.ui.graphics.StrokeCap.Round,
-                            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(9.dp.toPx(), 7.dp.toPx()), -ed.gT * 14.dp.toPx())
+                            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(9.dp.toPx(), 7.dp.toPx()), 0f)
                         )
                     )
                 }
             }
         }
-    ) {
-        if (!line) Row(
-            Modifier
-                .graphicsLayer {
-                    translationX = ed.gx + ed.gw / 2f - size.width / 2f
-                    translationY = ed.gy + ed.gHt / 2f - size.height / 2f
-                    alpha = ed.gOn * .96f
-                }
-                .clip(CircleShape).background(pal.p)
-                .padding(horizontal = 10.dp, vertical = 5.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp)
-        ) {
-            Ic(ghostIc(ed.gKind), pal.op, 16.dp)
-            if (wide) T("Drop here", 12f, 800, pal.op)
-            if (ed.gAdj) AlignArrow(when (ed.mvAl) { "l" -> 0; "r" -> 2; else -> 1 }, pal.op)
-        }
-    }
+    )
 }
 
-/** Cahaya tipis + panah di tepi atas / bawah area catatan saat seretan berada di zona gulir otomatis. */
+/** Panah di tepi atas / bawah area catatan saat seretan berada di zona gulir otomatis: ukurannya mengikuti seberapa dalam jari di zona (makin cepat gulir, makin besar). Tanpa pita pudar. */
 @Composable
 fun EdgeGlow(ed: Ed) {
     val alive by remember { androidx.compose.runtime.derivedStateOf { ed.mv != null || ed.edgeV != 0f } }
@@ -2400,20 +2383,13 @@ fun EdgeGlow(ed: Ed) {
     Box(Modifier.fillMaxSize()) {
         for (top in listOf(true, false)) {
             Box(
-                Modifier.align(if (top) Alignment.TopCenter else Alignment.BottomCenter).fillMaxWidth().height(56.dp)
-                    .graphicsLayer { alpha = (if (top) -ed.edgeV else ed.edgeV).coerceIn(0f, 1f) }
-                    .background(
-                        androidx.compose.ui.graphics.Brush.verticalGradient(
-                            if (top) listOf(pal.p.copy(alpha = .13f), Color.Transparent) else listOf(Color.Transparent, pal.p.copy(alpha = .13f))
-                        )
-                    ),
-                contentAlignment = if (top) Alignment.TopCenter else Alignment.BottomCenter
-            ) {
-                Box(
-                    Modifier.padding(vertical = 8.dp)
-                        .graphicsLayer { translationY = (if (top) -1f else 1f) * kotlin.math.sin(ed.gT * 8f) * 2f * density }
-                ) { Ic(if (top) "aup" else "adn", pal.p.copy(alpha = .8f), 22.dp) }
-            }
+                Modifier.align(if (top) Alignment.TopCenter else Alignment.BottomCenter).padding(vertical = 10.dp)
+                    .graphicsLayer {
+                        val d = (if (top) -ed.edgeV else ed.edgeV).coerceIn(0f, 1f)
+                        scaleX = d; scaleY = d
+                        translationY = (if (top) -1f else 1f) * kotlin.math.sin(ed.gT * 8f) * 2f * density
+                    }
+            ) { Ic(if (top) "aup" else "adn", pal.p, 28.dp) }
         }
     }
 }
@@ -2440,7 +2416,7 @@ private fun BlockSlot(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan?, ordN: Int, od
             .graphicsLayer {
                 if (lifted && plan == null) {
                     translationX = ed.liftX(); translationY = ed.liftY()
-                    scaleX = ed.liftSc; scaleY = ed.liftSc; rotationZ = ed.liftRot; alpha = .97f
+                    scaleX = ed.liftSc; scaleY = ed.liftSc; rotationZ = ed.liftRot
                 }
             }
             // Luncuran halus lewat gambar (bukan layer): posisi layout (bpos) tidak pernah tercemar, jadi penentuan sasaran tetap stabil.
@@ -2457,17 +2433,13 @@ private fun BlockSlot(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan?, ordN: Int, od
                     if (ed.flipId == b.id) { dx = ed.flipDx * fp; sc = 1f + (ed.flipSc - 1f) * fp; rot = ed.flipRot * fp }
                 }
                 val la = ed.landA
+                if (plan == null && la > 0f && ed.landId == b.id) sc *= landPop(la)   // mendarat: membal tipis, bukan cincin yang memudar
                 dx += (outSlide?.value ?: 0f) * den.density
                 drawContext.canvas.save()
                 drawContext.transform.translate(dx, dy)
                 if (sc != 1f) drawContext.transform.scale(sc, sc, center)
                 if (rot != 0f) drawContext.transform.rotate(rot, center)
                 drawContent()
-                if (la > 0f && ed.landId == b.id) {
-                    val cr = CornerRadius(12.dp.toPx())
-                    drawRoundRect(pal.p.copy(alpha = .05f * la), Offset.Zero, size, cr)
-                    drawRoundRect(pal.p.copy(alpha = .38f * la), Offset.Zero, size, cr, style = Stroke(1.5.dp.toPx()))
-                }
                 drawContext.canvas.restore()
             }
     ) {
