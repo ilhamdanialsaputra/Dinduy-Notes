@@ -57,7 +57,7 @@ fun InkDockContent(ed: Ed, vm: AppVM) {
     val density = LocalDensity.current.density
     val tool = ik.tool
 
-    Column(Modifier.width(304.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(Modifier.width(DockW), horizontalAlignment = Alignment.CenterHorizontally) {
         AnimatedVisibility(
             visible = ik.pop && tool <= 2,
             enter = expandVertically(M3E.spatial()),
