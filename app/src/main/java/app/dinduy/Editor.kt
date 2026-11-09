@@ -1888,9 +1888,15 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val cy = mvRef(m)
         var gap = sl.size
         val hy = 14f * dens   // histeresis: sasaran baru dipilih setelah jari benar-benar melewati pusat blok, bukan sekadar menyentuh
+        var groupEnd = -1f
         for ((j, b) in sl.withIndex()) {
             if (j == i) continue
             val q = bp0[b.id] ?: continue
+            // Paragraf / poin yang mengalir di samping gambar (atau tabel) berada DI DALAM slot objeknya: kelompok itu satu kesatuan.
+            // Dulu tiap paragraf kelompok dihitung sebagai celah sendiri, jadi melewati blok "gambar kiri + poin kanan" objek bisa
+            // mendarat di sela gambar dan teksnya (kelompok terbelah, tata letak melompat). Sekarang hanya ada dua celah: sebelum / sesudah kelompok.
+            if (q[0] < groupEnd - 2f * dens) continue
+            groupEnd = maxOf(groupEnd, q[0] + q[1])
             val c = q[0] + minOf(q[1] / 2f, viewH * .3f)
             val below = if (lastGap > j) c - hy >= cy else c + hy >= cy
             if (below) { gap = j; break }
@@ -2022,8 +2028,11 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         var nd = -1
         if (mergeT == null && (c.y < r.top - pad || c.y > r.bottom + pad)) {
             var gap = blocks.size
+            var groupEnd = -1f
             for ((j, x) in blocks.withIndex()) {
                 val q = bp0[x.id] ?: continue
+                if (q[0] < groupEnd - 2f * dens) continue   // paragraf di samping gambar = bagian kelompoknya, bukan celah
+                groupEnd = maxOf(groupEnd, q[0] + q[1])
                 if (q[0] + q[1] / 2f >= c.y) { gap = j; break }
             }
             nd = gap
