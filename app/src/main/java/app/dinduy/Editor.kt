@@ -1508,8 +1508,6 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     var liftSc by mutableStateOf(1f)        // skala terangkat (membal sedikit saat diangkat)
     var liftRot by mutableStateOf(0f)       // miring tipis menurut kecepatan geser horizontal
     var flipSc = 1f
-    var lineA by mutableStateOf(0f)         // 0..1: garis pemisah antar blok saat objek diangkat
-    var slotIds: List<String> = emptyList() // urutan slot yang sedang tampil (diisi NoteScreen) untuk garis pemisah
     var animReflow = false                  // true selama seretan + luncuran: teks di sekitar objek bergeser mulus (bukan seketika)
     val padMemo = HashMap<String, Float>()  // inset terakhir tiap paragraf: titik awal animasi saat paragraf pindah antara kelompok dan baris biasa
     var flipRot = 0f
@@ -1639,7 +1637,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
                 val dt = if (last == 0L) .016f else ((t - last) / 1_000_000_000f).coerceIn(.001f, .05f)
                 last = t
                 fxStep(dt)
-                if (mv == null && flipP == 0f && landA <= 0f && gOn <= 0f && gPulse <= 0f && edgeV == 0f && edgeRaw == 0f && lineA == 0f) break
+                if (mv == null && flipP == 0f && landA <= 0f && gOn <= 0f && gPulse <= 0f && edgeV == 0f && edgeRaw == 0f) break
             }
         }
     }
@@ -1711,8 +1709,6 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         }
         if (landA > 0f) landA = (landA - dt * 1.5f).coerceAtLeast(0f)
         if (mv == null && flipP == 0f) animReflow = false
-        val la = lineA + ((if (m != null) 1f else 0f) - lineA) * (dt * 9f).coerceAtMost(1f)
-        lineA = if (m == null && la < .02f) 0f else la
         val ev = edgeV + (edgeRaw - edgeV) * (dt * 12f).coerceAtMost(1f)
         edgeV = if (kotlin.math.abs(ev) < .004f && edgeRaw == 0f) 0f else ev
     }
@@ -1813,9 +1809,6 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
      * (dibatasi supaya blok yang sangat tinggi tidak punya acuan jauh di luar layar). Dulu tabel panjang memakai titik 30% layar di bawah jari,
      * sehingga seret ke atas tak pernah menyentuh zona gulir atas.
      */
-    /** Atas objek yang sedang terangkat, di ruang konten (tidak bergantung pada tata letak pratinjau). */
-    fun liftTop(): Float = (mv?.top ?: 0f) + liftSY
-
     private fun mvRef(m: Mv): Float = m.top + (if (m.g >= 0f) m.g else minOf(m.h / 2f, viewH * .3f)) + mvY
 
     fun mvDrag(dx: Float, dy: Float) {
