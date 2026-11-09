@@ -1485,6 +1485,9 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     private val bp0 = HashMap<String, FloatArray>()
     private var mvX0 = 0f
     private var pvKey = ""
+    private var mvSp = 0f                   // jarak jari sejak frame lalu (px)
+    private var spd = 0f                    // kecepatan jari yang dihaluskan (px/dtk): pratinjau tidak dipasang saat jari masih melesat
+    private var mgT = 0f                    // lama berturut-turut berada di atas gambar lain (kolase)
     private var pvHome = ""                 // kunci pratinjau "tetap di tempat" (celah -1 + letak asli)
     private var edgeRaw = 0f
     private var mvInk = false
@@ -1686,18 +1689,22 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
                 val vx = (sLx.x - px) / dt
                 liftRot = sRt.step((vx / (dens * 1100f)).coerceIn(-1f, 1f) * 2f, dt, 260f, .55f)
                 // pratinjau baru dipasang bila sasaran bertahan ~160 ms dan jari sudah bergeser cukup jauh: tidak "ke-drop" saat baru diangkat
+                spd += (mvSp / dt - spd) * (dt * 10f).coerceAtMost(1f)
+                mvSp = 0f
                 val key = "$wTo|$wAl"
                 if (key != pvKey) {
                     if (key != pvPend) { pvPend = key; pvT = 0f } else pvT += dt
                     // jarak minimal hanya berlaku untuk pratinjau PERTAMA (anti "ke-drop" saat baru diangkat). Setelah ada pratinjau,
                     // kembali ke posisi asal harus tetap mengembalikan susunan (dulu bila jari kembali dekat titik awal, pratinjau lama menempel).
-                    if (pvT >= .12f && (pvKey != pvHome || kotlin.math.hypot(mvX, mvY) > 26f * dens)) pvApplyNow()
+                    // dan hanya saat jari tidak sedang melesat: tata letak tidak berubah di tengah sapuan cepat (itu yang terasa "loncat / kedip")
+                    if (pvT >= .16f && spd < 420f * dens && (pvKey != pvHome || kotlin.math.hypot(mvX, mvY) > 26f * dens)) pvApplyNow()
                 } else { pvPend = ""; pvT = 0f }
                 // bingkai sasaran = "lubang" yang benar-benar ditempati blok ini di tata letak pratinjau
                 val i = idx(m.bid)
                 val b = if (i >= 0) blocks[i] else null
                 val q = bpos[m.bid]
-                if (b != null && q != null && mergeT == null) {
+                if (mergeT != null) mgT += dt else mgT = 0f
+                if (b != null && q != null && (mergeT == null || mgT < .14f)) {
                     val bx = mvBox(m, b, q, mvAl)   // bingkai menunjukkan letak yang DITUJU (juga saat komposisi dibekukan)
                     val f = flipFrom[m.bid]
                     gy = if (flipP != 0f && f != null) q[0] + (f - q[0]) * flipP else q[0]
@@ -1782,7 +1789,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         ob = blocks
         bp0.clear()
         for ((k, v) in bpos) bp0[k] = v.copyOf()
-        mvLayTop = p[0]; mvAdjX = 0f; pvKey = "-1|" + curAl(b); pvHome = pvKey
+        mvLayTop = p[0]; mvAdjX = 0f; pvKey = "-1|" + curAl(b); pvHome = pvKey; mvSp = 0f; spd = 0f; mgT = 0f
         wTo = -1; wAl = curAl(b); pvPend = ""; pvT = 0f; mvOrphan = false; swapT = 0L
         lastGap = idx(bid)
         sLx.snap(0f); sLy.snap(0f); sSc.snap(1f); sRt.snap(0f)
@@ -1842,6 +1849,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     fun mvDrag(dx: Float, dy: Float) {
         val m = mv ?: return
         mvX += dx; mvY += dy
+        mvSp += kotlin.math.hypot(dx, dy)
         if (dy > .5f) mvDir = 1 else if (dy < -.5f) mvDir = -1
         if (m.row) {
             if (mergeT == null && dropAt < 0) rowDragStep(m)   // di atas gambar lain / di luar baris: jangan tukar urutan di barisnya sendiri
