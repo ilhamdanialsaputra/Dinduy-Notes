@@ -1253,10 +1253,14 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     var dens = 1f
     var viewH by mutableStateOf(0f)
     var barHLive by mutableStateOf(0f)            // tinggi kapsul/sheet langsung (tanpa debounce), dipakai gulir kursor
-    // memakai tinggi kapsul yang sudah tenang (barH, debounce), BUKAN barHLive: saat fokus pindah judul<->isi kapsul beranimasi tiap frame,
-    // dan tinggi per-frame itu memicu gulir kursor berulang (layar turun sendiri tanpa henti)
-    /** Tinggi dock yang dipakai gulir kursor: langsung (per frame) sebentar setelah sub-bilah berubah, selain itu yang sudah tenang. */
-    fun barNow(): Float = if (android.os.SystemClock.uptimeMillis() < liveUntil) barHLive else barH
+    // Gulir kursor SELALU memakai tinggi dock langsung (barHLive), tiap frame, supaya layar ikut naik halus bersama animasi
+    // dock + keyboard. Dulu dipakai barH (debounce 80 ms setelah animasi tenang) di luar jendela liveUntil, dan flow gulir
+    // hanya berlangganan ke barH, bukan barHLive: hasilnya layar diam selama animasi lalu LONCAT sekali di akhir (= "kedut"),
+    // baik saat ketuk teks di mode baca (dock + keyboard muncul) maupun saat sub-bilah (butir / rata) dibuka.
+    // Aman dari gulir berulang: jalur non-paksa hanya menggulir bila kursor tadinya terlihat DAN kini tertutup, dan dock
+    // yang mengecil tidak pernah menggulir.
+    /** Tinggi dock yang dipakai gulir kursor: selalu langsung (per frame). */
+    fun barNow(): Float = barHLive
     fun cursorClear(): Float { val b = barNow(); return if (b > 0f) b + 12f * dens else 12f * dens }
     var scroll: ScrollState? = null
 
