@@ -221,15 +221,22 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
             CloseFx.err = null
             // dibuka dengan tarikan jari dari FAB: progres dikendalikan jari, bukan animasi
             if (FabFx.drag) return@LaunchedEffect
+            // komposisi + ukur isi catatan (apalagi yang panjang) memakan beberapa frame. Kalau animasi sudah jalan saat itu,
+            // jam animasi "loncat" dan terasa nyendat. Jadi tunggu sampai ritme frame tenang, baru gerak.
+            settleFrames()
             // spring cepat (kaku) dengan sedikit lentur: terasa snappy tapi tetap punya gerak
             vm.openP.animateTo(1f, spring(.8f, 620f))
         } else {
             val follow = vm.closing
             val job = if (follow) launch { followCard(vm) } else null
-            vm.openP.animateTo(0f, if (follow) spring(.9f, 640f) else spring(.95f, 760f))
-            job?.cancel()
-            CloseFx.err = null
-            vm.closing = false
+            try {
+                vm.openP.animateTo(0f, if (follow) spring(.9f, 640f) else spring(.95f, 760f))
+            } finally {
+                // finally: kalau animasi tutup dibatalkan di tengah (mis. catatan dibuka lagi), sisa state tidak boleh tertinggal
+                job?.cancel()
+                CloseFx.err = null
+                vm.closing = false
+            }
         }
     }
     val t0 = vm.openP.value
@@ -301,6 +308,10 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
                 val tt = vm.openP.value.coerceIn(0f, 1f)
                 vm.morphTick
                 val mm = effMorph(vm)
+                // selama morph, isi dirender sekali ke tekstur lalu hanya ditransformasi (skala / geser / pudar) oleh GPU;
+                // tanpa ini seluruh blok catatan panjang digambar ulang tiap frame. Setelah selesai kembali normal (teks tajam, tanpa buffer ekstra).
+                compositingStrategy = if (tt < .999f) androidx.compose.ui.graphics.CompositingStrategy.Offscreen
+                    else androidx.compose.ui.graphics.CompositingStrategy.Auto
                 val x = ((vm.openP.value - .08f) / .4f).coerceIn(0f, 1f)
                 val a = x * x * (3f - 2f * x)
                 // morph dari kartu: NoteScreen memudarkan latar + isi sendiri (noteFade) supaya sampulnya tetap buram penuh
@@ -334,9 +345,9 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
         if (morph != null && g != null && gn != null) {
             Box(
                 Modifier.layout { meas, c ->
-                        vm.morphTick
-                        val mm = effMorph(vm) ?: morph
-                        val wpx = (mm.r - mm.l).roundToInt().coerceAtLeast(1)
+                        // lebar = lebar kartu asal (tetap). Dulu mengikuti lebar wadah yang tumbuh, jadi teks kartu disusun ulang
+                        // (dan ikut membungkus ulang) di SETIAP frame morph.
+                        val wpx = (morph.r - morph.l).roundToInt().coerceAtLeast(1)
                         val pl = meas.measure(c.copy(minWidth = wpx, maxWidth = wpx, minHeight = 0, maxHeight = androidx.compose.ui.unit.Constraints.Infinity))
                         layout(wpx, pl.height) { pl.place(0, 0) }
                     }
@@ -354,6 +365,44 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
                         alpha = x * x * (3f - 2f * x)
                     }
             ) { GhostCard(gn, g) }
+        }
+        // morph dari / ke tombol Baru: isi tombolnya (ikon +, label) ikut berada di dalam wadah. Ia memudar sambil ikut ke pusat wadah
+        // yang membesar, sedangkan tombol aslinya sudah disembunyikan (lihat fabCovered), jadi tombol benar-benar "berubah" jadi halaman.
+        val fabg = morph?.fabg
+        if (morph != null && fabg != null) {
+            Box(
+                Modifier.layout { meas, c ->
+                    val pl = meas.measure(androidx.compose.ui.unit.Constraints())
+                    val sw = c.maxWidth.toFloat()
+                    val sh = c.maxHeight.toFloat()
+                    layout(c.maxWidth, c.maxHeight) {
+                        pl.placeWithLayer(0, 0) {
+                            val tt = vm.openP.value.coerceIn(0f, 1f)
+                            vm.morphTick
+                            val mm = effMorph(vm) ?: morph
+                            // pusat wadah saat ini (rumus sama dengan yang dipakai menggambar wadah di atas)
+                            val cx = (lerp(mm.l, 0f, tt) + lerp(mm.r, sw, tt)) / 2f
+                            val cy = (lerp(mm.t, 0f, tt) + lerp(mm.b, sh, tt)) / 2f
+                            val k = (tt / .26f).coerceIn(0f, 1f)
+                            val e = k * k * (3f - 2f * k)
+                            alpha = 1f - e
+                            val sc = 1f - .3f * e
+                            scaleX = sc; scaleY = sc
+                            translationX = cx - pl.width / 2f
+                            translationY = cy - pl.height / 2f
+                            transformOrigin = androidx.compose.ui.graphics.TransformOrigin(.5f, .5f)
+                        }
+                    }
+                }
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Ic("plus", fabg.fg, 36.dp)
+                    if (fabg.label) {
+                        androidx.compose.foundation.layout.Spacer(Modifier.width(14.dp))
+                        T("New", 22f, 900, fabg.fg, maxLines = 1)
+                    }
+                }
+            }
         }
         if (u > .001f) Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = (if (pal.dark) .16f else .05f) * u)))
     }
@@ -373,6 +422,27 @@ fun noteFade(vm: AppVM): Float {
 /** Keadaan gestur tombol FAB (tarik ke atas untuk membuka catatan baru). */
 object FabFx {
     var drag by mutableStateOf(false)
+}
+
+/**
+ * Wadah morph catatan sedang menggambar tombol Baru sendiri (morph berasal dari / menuju FAB), jadi tombol aslinya harus
+ * tak terlihat dan TANPA animasi apa pun (tidak mengecil / memudar di atas catatan, tidak muncul membesar lagi di akhir).
+ * Dibaca di fase gambar. Begitu wadah menyusut ke ukuran tombol (progres <= .01) tombol asli langsung terlihat penuh: bentuknya identik.
+ */
+fun fabCovered(vm: AppVM): Boolean =
+    vm.morph?.fabg != null && (vm.openP.value > .01f || vm.nav.stack.any { it is Scr.Note })
+
+/** Tunggu sampai ritme frame tenang (komposisi + ukur awal isi catatan selesai), maksimal ~14 frame. */
+suspend fun settleFrames() {
+    var last = withFrameNanos { it }
+    var n = 0
+    while (n < 14) {
+        val t = withFrameNanos { it }
+        val dt = (t - last) / 1_000_000L
+        last = t
+        n++
+        if (n >= 2 && dt < 24L) break
+    }
 }
 
 /** Catatan yang sedang terbuka belum berisi apa pun (syarat yang sama dengan dropIfEmpty). */
@@ -627,7 +697,9 @@ fun AppRoot(vm: AppVM, act: Actions) {
                             }
                             androidx.compose.runtime.DisposableEffect(ed) {
                                 ed.alive = true
-                                onDispose { ed.alive = false }
+                                // editor yang sudah ditutup tidak boleh tertinggal di vm.ed: ia membawa selImg / reading / dll. lama
+                                // yang ikut terbaca (BackHandler, noteBlank, dst.) begitu catatan lain dibuka
+                                onDispose { ed.alive = false; if (vm.ed === ed) vm.ed = null }
                             }
                             SideEffect { vm.ed = ed }
                             NoteScreen(vm, ed, act)
