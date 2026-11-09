@@ -2387,7 +2387,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     BackHandler(true) {
         when {
             ed.sheet != 0 && ed.sheetPage != 0 -> ed.sheetPage = 0
-            ed.sheet != 0 -> ed.sheet = 0
+            ed.sheet != 0 -> ed.closeSheet()
             ed.sub != 0 -> ed.sub = 0
             ed.ink.on -> ed.ink.toggle(ed)
             ed.findOn -> ed.closeFind()
@@ -2425,6 +2425,9 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     val tBold = titleNote?.tbo ?: true
     val tItal = titleNote?.tit ?: false
     val tColor = titleColor(titleNote?.tcl ?: 0)
+    val tAlign = titleNote?.tal ?: ""
+    val tTa = when (tAlign) { "c" -> androidx.compose.ui.text.style.TextAlign.Center; "r" -> androidx.compose.ui.text.style.TextAlign.End; else -> androidx.compose.ui.text.style.TextAlign.Start }
+    val tPh = when (tAlign) { "c" -> Alignment.TopCenter; "r" -> Alignment.TopEnd; else -> Alignment.TopStart }
     LaunchedEffect(ed.titleReq) {
         if (ed.titleReq > 0) {
             delay(380)
@@ -2480,17 +2483,37 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     // derivedStateOf: hanya berubah saat keyboard benar-benar buka/tutup, bukan tiap frame animasinya (dulu seluruh layar recompose per frame)
     val imeInsets = WindowInsets.ime
     val imeOpen by remember(density) { androidx.compose.runtime.derivedStateOf { imeInsets.getBottom(density) > 0 } }
-    // tinggi keyboard yang stabil (px). Bukan state: hanya dibaca saat sheet dibuka, jadi tidak membuat NoteScreen recompose tiap frame keyboard.
-    // Naik langsung mengikuti keyboard; turun baru diterapkan setelah tenang. Dibekukan selama sheet terbuka.
+    // Tinggi keyboard terakhir yang benar-benar terbuka (px, dihitung dari dasar layar, jadi sudah termasuk navbar). Bukan state.
+    // kbBox: nilai stabil saat ini (naik langsung, turun setelah tenang, dibekukan selama sheet terbuka).
+    // kbLast: keyboard terakhir yang terbuka penuh. Ukuran sheet = tinggi keyboard, jadi sheet persis menggantikan keyboard:
+    // area catatan tidak berubah ukuran saat keyboard <-> sheet berganti, dan kursor tidak pernah ikut bergeser.
     val kbBox = remember { intArrayOf(0) }
+    val kbLast = remember { intArrayOf(0) }
+    val minKb = with(density) { 120.dp.roundToPx() }
     LaunchedEffect(imeInsets, density) {
         androidx.compose.runtime.snapshotFlow { imeInsets.getBottom(density) to ed.sheet }.collectLatest { (v, sh) ->
             if (sh != 0) return@collectLatest
             if (v > kbBox[0]) kbBox[0] = v
             else { delay(250); if (ed.sheet == 0) kbBox[0] = v }
+            delay(250)
+            if (ed.sheet == 0 && v > minKb) kbLast[0] = v
         }
     }
-    // Sheet terbuka => area catatan TIDAK lagi mengikuti keyboard (sheet menggantikan tempat keyboard), jadi layar tidak loncat saat keyboard turun.
+    val navPx = WindowInsets.navigationBars.getBottom(density)
+    // tinggi sheet: tinggi keyboard yang sedang / terakhir terbuka; belum pernah ada keyboard: perkiraan wajar. Dibaca sekali saat sheet mulai dibuka.
+    val sheetPxOf: () -> Int = {
+        val cur = imeInsets.getBottom(density)
+        when {
+            cur > minKb -> maxOf(cur, kbBox[0])
+            kbBox[0] > minKb -> kbBox[0]
+            kbLast[0] > minKb -> kbLast[0]
+            else -> with(density) { 300.dp.roundToPx() } + navPx
+        }
+    }
+    val kbNow: () -> Boolean = { imeInsets.getBottom(density) > minKb || kbBox[0] > minKb }
+    SideEffect { ed.kbShow = { kb?.show() } }
+    // Area catatan berhenti tepat di atas keyboard / navbar ATAU di atas sheet (mana yang lebih tinggi). Sheet memesan tempat lewat
+    // ed.sheetReserve (dianimasikan oleh DocSheet), jadi saat sheet menggantikan keyboard bagian bawah area tetap di tempat yang sama.
     // Dibaca di fase ukur (bukan komposisi), jadi cukup re-layout, tidak recompose.
     val navInsets = WindowInsets.navigationBars
     val areaInsets = remember(imeInsets, navInsets, ed) {
@@ -2499,7 +2522,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
             override fun getLeft(density: androidx.compose.ui.unit.Density, layoutDirection: androidx.compose.ui.unit.LayoutDirection) = base.getLeft(density, layoutDirection)
             override fun getTop(density: androidx.compose.ui.unit.Density) = base.getTop(density)
             override fun getRight(density: androidx.compose.ui.unit.Density, layoutDirection: androidx.compose.ui.unit.LayoutDirection) = base.getRight(density, layoutDirection)
-            override fun getBottom(density: androidx.compose.ui.unit.Density) = if (ed.sheet != 0) 0 else base.getBottom(density)
+            override fun getBottom(density: androidx.compose.ui.unit.Density) = maxOf(base.getBottom(density), ed.sheetReserve.toInt())
         }
     }
     val haptic = LocalHapticFeedback.current
@@ -2646,7 +2669,9 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                         }
                         Box(Modifier.padding(top = 48.dp + coverInset, bottom = 20.dp)) {
                             if (ed.title.isEmpty()) {
-                                T("Title", 46f, if (tBold) 1000 else 400, pal.osv, alpha = .5f, ls = -.02f)
+                                Box(Modifier.fillMaxWidth(), tPh) {
+                                    T("Title", 46f, if (tBold) 1000 else 400, pal.osv, alpha = .5f, ls = -.02f)
+                                }
                             }
                             androidx.compose.foundation.text.BasicTextField(
                                 value = ed.title,
@@ -2656,7 +2681,8 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                                 textStyle = TextStyle(
                                     color = tColor, fontFamily = dm.ff, fontSize = 46.sp, fontWeight = FontWeight(if (tBold) 1000 else 400),
                                     fontStyle = if (tItal) FontStyle.Italic else FontStyle.Normal,
-                                    lineHeight = (46 * 1.1f).sp, letterSpacing = (-.02f).em
+                                    lineHeight = (46 * 1.1f).sp, letterSpacing = (-.02f).em,
+                                    textAlign = tTa
                                 ),
                                 cursorBrush = SolidColor(pal.p),
                                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
@@ -2724,10 +2750,12 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
             }
             EdgeGlow(ed)
             InkFrame(ed)
-            BottomBars(ed, vm, act, (!ed.reading || ed.selEdit) && !ed.titleFocus && !ed.findOn && !ed.ink.on, imeOpen) { kbBox[0] }
+            BottomBars(ed, vm, act, (!ed.reading || ed.selEdit) && !ed.titleFocus && !ed.findOn && !ed.ink.on, imeOpen)
             InkBar(ed, vm)
         }
     }
+    // sheet Sisipkan / Format: di luar area catatan, menempel di dasar layar dan setinggi keyboard
+    DocSheet(ed, act, vm, sheetPxOf, kbNow, Modifier.align(Alignment.BottomCenter))
     }
     }
 }
@@ -2998,10 +3026,10 @@ private fun handleShape(start: Boolean): Shape =
 
 /** Dipisah dari NoteScreen supaya tidak terjebak receiver ColumnScope milik Column di luarnya. */
 @Composable
-fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boolean, holdH: () -> Int) {
+fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boolean) {
     val recOn = ed.recActive
-    // judul sedang diketik: kapsul judul (tebal / miring / warna) menggantikan kapsul isi catatan
-    val titleBarOn = ed.titleFocus && !ed.reading && !ed.findOn && !ed.ink.on && ed.sheet == 0
+    // judul sedang diketik: toolbar judul (tebal / miring / rata / warna) menggantikan isi dock catatan (satu wadah yang berubah bentuk, lihat ToolDock)
+    val titleBarOn = ed.titleFocus && !ed.reading && !ed.findOn && !ed.ink.on
     SideEffect { ed.barOn = showBar || recOn || ed.sheet != 0 || titleBarOn }
     // Tinggi bilah berubah tiap frame saat bilah / sheet beranimasi. Kalau langsung ditulis ke ed.barH, SETIAP blok teks
     // ikut recompose + restart efek tiap frame (penyebab sheet "+" dan "A" lemot). Sekarang baru diterapkan setelah animasi tenang.
@@ -3010,7 +3038,7 @@ fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boole
         androidx.compose.runtime.snapshotFlow { rawBarH }.collectLatest { h -> delay(80); ed.barH = h }
     }
     Box(Modifier.fillMaxSize()) {
-        // kartu rekaman + dock + sheet dalam satu kolom yang diukur bersama (barH), jadi teks / kursor tidak pernah tertutup.
+        // kartu rekaman + dock dalam satu kolom yang diukur bersama (barH), jadi teks / kursor tidak pernah tertutup.
         // Saat coret aktif dock melayang di atas isi (seperti kapsul Ink dulu), jadi tidak ikut dihitung sebagai tinggi bilah.
         Column(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth().onSizeChanged {
@@ -3025,16 +3053,8 @@ fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boole
             ) {
                 RecordCard(vm)
             }
-            DocSheet(ed, act, vm, holdH())
             // dock: SATU wadah untuk ketik / gambar / tabel / kutipan / objek / coret. Morph antar toolbar ada di ToolDock (DocBar.kt)
             ToolDock(ed, vm, act, showBar)
-            AnimatedVisibility(
-                visible = titleBarOn,
-                enter = expandVertically(M3E.spatial(), expandFrom = Alignment.Top) + scaleIn(M3E.spatial(), .9f, TransformOrigin(.5f, 1f)),
-                exit = shrinkVertically(M3E.spatial(), shrinkTowards = Alignment.Top) + scaleOut(M3E.spatial(), .9f, TransformOrigin(.5f, 1f))
-            ) {
-                TitleBar(ed, vm)
-            }
         }
     }
 }
