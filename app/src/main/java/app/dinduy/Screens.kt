@@ -1386,7 +1386,10 @@ fun Fab(vm: AppVM, act: Actions, small: Boolean, hide: Boolean, lift: Dp) {
     val pr by src.collectIsPressedAsState()
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
-    val gone = hide || FabFx.drag
+    // morph dari tombol ini: wadah catatan menggambar tombolnya sendiri, jadi tombol asli tidak boleh mengecil / memudar
+    // sendiri di atas catatan (itu yang tampak sebagai kedip di bawah layar). Cukup disembunyikan di fase gambar (fabCovered).
+    val viaMorph = vm.morph?.fabg != null && (FabFx.drag || vm.nav.stack.any { it is Scr.Note })
+    val gone = (hide || FabFx.drag) && !viaMorph
     // bilah voice note cepat (QuickVoice) menggambar bentuk yang sama persis di atas tombol ini; selama ia aktif tombol asli
     // harus benar-benar hilang (tanpa animasi, tanpa skala) supaya tidak ada dua tombol bertumpuk. Dibaca di lambda gambar
     // agar tidak memicu rekomposisi tiap frame saat bilah ditarik.
@@ -1394,7 +1397,8 @@ fun Fab(vm: AppVM, act: Actions, small: Boolean, hide: Boolean, lift: Dp) {
     val al by animateFloatAsState(if (gone) 0f else 1f, tween(if (FabFx.drag) 80 else 250), label = "al")
     val r by animateDpAsState(if (pr) 22.dp else 32.dp, spring(.6f, 500f), label = "r")
     val ly by animateDpAsState(lift, spring(.7f, 400f), label = "ly")
-    if (hide && al <= .01f) return
+    // dilepas dari komposisi selama catatan terbuka: tombol tak terlihat TIDAK boleh tetap menangkap sentuhan di pojok kanan bawah
+    if (hide && (viaMorph || al <= .01f)) return
     val sab = sabDp()
     val dens = LocalDensity.current.density
     val shape = RoundedCornerShape(r)
@@ -1403,12 +1407,14 @@ fun Fab(vm: AppVM, act: Actions, small: Boolean, hide: Boolean, lift: Dp) {
             Modifier.offset(y = -ly)
                 .onGloballyPositioned { c ->
                     val b = c.boundsInWindow()
-                    if (!hide && b.width > 0f) vm.fabMorph = Morph(b.left, b.top, b.right, b.bottom, 32f * dens, pal.pc, card = true)
+                    if (!hide && b.width > 0f) vm.fabMorph = Morph(b.left, b.top, b.right, b.bottom, 32f * dens, pal.pc, card = true, fabg = FabGhost(!small, pal.opc))
                 }
                 .graphicsLayer {
                     val q = quickCoversFab(vm)
                     scaleX = if (q) 1f else sc; scaleY = if (q) 1f else sc
-                    alpha = if (q) 0f else al
+                    // catatan yang membuka (morph kartu) menutupi tombol secara bertahap mengikuti progresnya, tanpa animasi sendiri
+                    val kp = (1f - vm.openP.value.coerceIn(0f, 1f) / .5f).coerceIn(0f, 1f)
+                    alpha = if (q || fabCovered(vm)) 0f else al * kp * kp * (3f - 2f * kp)
                     transformOrigin = TransformOrigin(1f, 1f)
                 }
                 .shadow(
@@ -1472,6 +1478,7 @@ fun Fab(vm: AppVM, act: Actions, small: Boolean, hide: Boolean, lift: Dp) {
                                 val tracker = VelocityTracker()
                                 tracker.addPosition(down.uptimeMillis, down.position)
                                 var p = 0f
+                                var passed = false
                                 while (true) {
                                     val ev = awaitPointerEvent()
                                     val c = ev.changes.firstOrNull { it.id == down.id } ?: break
@@ -1481,7 +1488,11 @@ fun Fab(vm: AppVM, act: Actions, small: Boolean, hide: Boolean, lift: Dp) {
                                     if (up) break
                                     p = ((sy - c.position.y) / dist).coerceIn(0f, 1f)
                                     val v = p
-                                    scope.launch { vm.openP.snapTo(v) }
+                                    // progres mengejar jari lewat spring kaku (bukan loncat per sampel sentuh): gerak wadah mulus walau
+                                    // sampel sentuh tidak rata, dan kecepatannya berlanjut mulus ke animasi lepas jari di bawah
+                                    scope.launch { vm.openP.animateTo(v, spring(1f, 1400f)) }
+                                    val nowPassed = p > .3f
+                                    if (nowPassed != passed) { passed = nowPassed; haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
                                 }
                                 val vy = tracker.calculateVelocity().y
                                 val commit = p > .3f || vy < -1100f
