@@ -1485,6 +1485,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     private val bp0 = HashMap<String, FloatArray>()
     private var mvX0 = 0f
     private var pvKey = ""
+    private var pvHome = ""                 // kunci pratinjau "tetap di tempat" (celah -1 + letak asli)
     private var edgeRaw = 0f
     private var mvInk = false
     private var gKey = -2
@@ -1688,7 +1689,9 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
                 val key = "$wTo|$wAl"
                 if (key != pvKey) {
                     if (key != pvPend) { pvPend = key; pvT = 0f } else pvT += dt
-                    if (pvT >= .16f && kotlin.math.hypot(mvX, mvY) > 26f * dens) pvApplyNow()
+                    // jarak minimal hanya berlaku untuk pratinjau PERTAMA (anti "ke-drop" saat baru diangkat). Setelah ada pratinjau,
+                    // kembali ke posisi asal harus tetap mengembalikan susunan (dulu bila jari kembali dekat titik awal, pratinjau lama menempel).
+                    if (pvT >= .12f && (pvKey != pvHome || kotlin.math.hypot(mvX, mvY) > 26f * dens)) pvApplyNow()
                 } else { pvPend = ""; pvT = 0f }
                 // bingkai sasaran = "lubang" yang benar-benar ditempati blok ini di tata letak pratinjau
                 val i = idx(m.bid)
@@ -1779,7 +1782,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         ob = blocks
         bp0.clear()
         for ((k, v) in bpos) bp0[k] = v.copyOf()
-        mvLayTop = p[0]; mvAdjX = 0f; pvKey = "-1|" + curAl(b)
+        mvLayTop = p[0]; mvAdjX = 0f; pvKey = "-1|" + curAl(b); pvHome = pvKey
         wTo = -1; wAl = curAl(b); pvPend = ""; pvT = 0f; mvOrphan = false; swapT = 0L
         lastGap = idx(bid)
         sLx.snap(0f); sLy.snap(0f); sSc.snap(1f); sRt.snap(0f)
@@ -1810,9 +1813,11 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
                 if (m != null && sc != null && mvDir != 0 && viewH > 0f) {
                     val cy = mvRef(m) - sc.value
                     val z = viewH * .2f
+                    // zona bawah dimulai di atas kapsul / sheet yang melayang, supaya objek tidak harus masuk ke bawah kapsul dulu baru menggulir
+                    val zb = maxOf(z, if (barH > 0f) barH + 28f * dens else 0f).coerceAtMost(viewH * .4f)
                     val lin = when {
                         mvDir < 0 && cy < z -> -(z - cy) / z
-                        mvDir > 0 && cy > viewH - z -> (cy - (viewH - z)) / z
+                        mvDir > 0 && cy > viewH - zb -> (cy - (viewH - zb)) / zb
                         else -> 0f
                     }.coerceIn(-1f, 1f)
                     edgeRaw = lin
