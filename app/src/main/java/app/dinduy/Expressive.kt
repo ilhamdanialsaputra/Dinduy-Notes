@@ -77,6 +77,9 @@ object M3E {
 /** Tinggi tetap satu baris toolbar. Semua toolbar setinggi ini, jadi perpindahan hanya mengubah lebar (dan panel). */
 val DockH = 66.dp
 
+/** Lebar maksimum semua toolbar (seperti dock coret): ringkas di tengah, isi yang lebih panjang bisa digeser. */
+val DockW = 304.dp
+
 /** Warna ikon bawaan di dalam wadah tertentu (null = pakai pal.os). */
 val LocalDockFg = compositionLocalOf<Color?> { null }
 
