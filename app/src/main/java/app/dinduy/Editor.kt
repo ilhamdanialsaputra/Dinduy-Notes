@@ -20,8 +20,8 @@ import kotlinx.coroutines.launch
 
 /** Jarak antara gambar dan teks di sisinya (dp), dan lebar minimum kolom teks samping (dp). */
 /** Ambang komposisi berjendela (biaya blok: 1 per blok, tabel 1 + sel/2). Histeresis: nyala di WIN_ON, mati di bawah WIN_OFF. */
-const val WIN_ON = 140
-const val WIN_OFF = 100
+const val WIN_ON = 60
+const val WIN_OFF = 44
 const val SIDE_GAP = 14f
 const val SIDE_MIN = 110f
 const val SIDE_W = 0.5f
