@@ -1873,97 +1873,18 @@ private fun EyeIcon(tint: Color, slashed: Boolean) {
     }
 }
 
+/**
+ * Mode coret tidak lagi punya bilah sendiri: tampilannya ada di dock bersama (ToolDock di DocBar.kt, isinya [InkDockContent] di InkDock.kt),
+ * jadi berpindah ketik <-> coret adalah satu wadah yang berubah bentuk. Fungsi ini tinggal menjaga perilaku kembali-otomatis.
+ */
 @Composable
 fun BoxScope.InkBar(ed: Ed, vm: AppVM) {
-    val pal = LocalPal.current
     val ik = ed.ink
     val pr = vm.pr
-    val density = LocalDensity.current.density
-
     LaunchedEffect(ik.on, ik.stamp, pr.iat) {
         if (ik.on && pr.iat > 0) {
             delay(pr.iat * 1000L)
             if (!ik.busy) { ik.on = false; ik.pop = false }
-        }
-    }
-
-    AnimatedVisibility(
-        visible = ik.on,
-        modifier = Modifier.align(Alignment.BottomCenter),
-        enter = fadeIn(tween(220)) + slideInVertically(tween(300)) { it / 2 },
-        exit = fadeOut(tween(160)) + slideOutVertically(tween(240)) { it / 2 }
-    ) {
-        Column(
-            Modifier.padding(horizontal = 10.dp).padding(bottom = 40.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            val tool = ik.tool
-            AnimatedVisibility(ik.pop && tool <= 2, enter = fadeIn(tween(180)) + slideInVertically(tween(240)) { it / 3 }, exit = fadeOut(tween(120))) {
-                val shape = RoundedCornerShape(28.dp)
-                Column(
-                    Modifier.padding(bottom = 8.dp).widthIn(max = 320.dp).fillMaxWidth()
-                        .shadow(if (pal.dark) 6.dp else 2.dp, shape).clip(shape).background(pal.c3).padding(16.dp)
-                ) {
-                    if (tool != 2) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            for (i in 0..4) {
-                                val sel = pr.ic.getOrElse(tool) { 0 } == i
-                                Box(
-                                    Modifier.size(40.dp).clip(CircleShape)
-                                        .background(if (tool == 1 && i == 0) hsl(52f, 100f, 55f).let { c -> if (pal.mono) c.gray() else c } else inkColor(pal, i, false))
-                                        .then(if (sel) Modifier.border(3.dp, pal.p, CircleShape) else Modifier.border(1.dp, pal.ol, CircleShape))
-                                        .clickable {
-                                            vm.setPr(pr.copy(ic = pr.ic.toMutableList().also { l -> while (l.size < 3) l.add(0); l[tool] = i }))
-                                            ik.stamp = System.currentTimeMillis()
-                                        }
-                                )
-                            }
-                        }
-                    }
-                    val (lo, hi) = when (tool) { 0 -> 1f to 12f; 1 -> 8f to 32f; else -> 8f to 40f }
-                    val cur = pr.iw.getOrElse(tool) { 3f }.coerceIn(lo, hi)
-                    Row(Modifier.fillMaxWidth().padding(top = if (tool != 2) 14.dp else 0.dp), verticalAlignment = Alignment.CenterVertically) {
-                        // pratinjau ketebalan goresan
-                        Canvas(Modifier.size(width = 56.dp, height = 44.dp)) {
-                            val c = Offset(size.width / 2f, size.height / 2f)
-                            val col = if (tool == 2) pal.osv else inkColor(pal, pr.ic.getOrElse(tool) { 0 }, tool == 1)
-                            when (tool) {
-                                0 -> drawCircle(col, cur * density / 2f, c)
-                                1 -> drawRect(col, Offset(c.x - 22.dp.toPx(), c.y - cur * density / 2f), Size(44.dp.toPx(), cur * density))
-                                else -> drawCircle(col, (cur * density).coerceAtMost(21.dp.toPx()), c, style = Stroke(2f * density))
-                            }
-                        }
-                        Box(Modifier.weight(1f).padding(start = 8.dp)) {
-                            BigSlider(cur, lo, hi) { v ->
-                                vm.setPr(pr.copy(iw = pr.iw.toMutableList().also { l -> while (l.size < 3) l.add(3f); l[tool] = v }))
-                                ik.stamp = System.currentTimeMillis()
-                            }
-                        }
-                    }
-                }
-            }
-            val cap = RoundedCornerShape(30.dp)
-            Row(
-                Modifier.shadow(if (pal.dark) 6.dp else 2.dp, cap).clip(cap).background(pal.c3).padding(horizontal = 10.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                for (t in 0..3) {
-                    Box(contentAlignment = Alignment.BottomCenter) {
-                        Tbn({ InkToolIcon(t, it) }, tool == t, true) {
-                            ik.hide = false
-                            if (tool == t) { if (t <= 2) ik.pop = !ik.pop } else { ik.tool = t; ik.pop = false; ik.sel = emptySet(); ik.box = null }
-                            ik.stamp = System.currentTimeMillis()
-                        }
-                        if (t <= 1) Box(
-                            Modifier.padding(bottom = 3.dp).size(width = 14.dp, height = 3.dp).clip(CircleShape)
-                                .background(inkColor(pal, pr.ic.getOrElse(t) { 0 }, false))
-                        )
-                    }
-                }
-                Box(Modifier.padding(horizontal = 3.dp).width(1.dp).height(24.dp).background(pal.ol.copy(alpha = .5f)))
-                Tbn({ Ic("ok", it) }, false, true) { ik.toggle(ed) }
-            }
         }
     }
 }
