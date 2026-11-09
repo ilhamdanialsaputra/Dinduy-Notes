@@ -976,15 +976,11 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val i = idx(bid)
         if (i < 0) return
         commit()
-        animThen {
-            val j = idx(bid)
-            if (j >= 0) {
-                val b = blocks[j]
-                setBlock(j, b.copy(ba = al))   // hanya letak yang berubah; lebar tidak pernah ikut diubah (objek penuh tetap penuh, hanya gagangnya pindah sisi)
-                releaseSide(bid)
-                dirty(); norm(); afterStructural()
-            }
-        }
+        animNext()
+        val b = blocks[i]
+        setBlock(i, b.copy(ba = al))   // hanya letak yang berubah; lebar tidak pernah ikut diubah (objek penuh tetap penuh, hanya gagangnya pindah sisi)
+        releaseSide(bid)
+        dirty(); norm(); afterStructural()
     }
 
     /** Hapus kutipan / kode / garis / tabel. Tidak membuka keyboard. */
@@ -1062,11 +1058,10 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     fun imgAlign(al: String) {
         val s = selImg ?: return
         commit()
-        animThen {
-            imgSet(s.first, s.second) { it.copy(al = al) }   // hanya letak yang berubah; lebar tidak pernah ikut diubah
-            releaseSide(s.first)
-            dirty(); commit()
-        }
+        animNext()
+        imgSet(s.first, s.second) { it.copy(al = al) }   // hanya letak yang berubah; lebar tidak pernah ikut diubah
+        releaseSide(s.first)
+        dirty(); commit()
     }
 
     /** Ubah rasio tampil gambar terpilih (null = rasio asli). Di kolase, hanya gambar ini yang berubah; baris menyesuaikan. */
@@ -1513,28 +1508,6 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     var liftSc by mutableStateOf(1f)        // skala terangkat (membal sedikit saat diangkat)
     var liftRot by mutableStateOf(0f)       // miring tipis menurut kecepatan geser horizontal
     var flipSc = 1f
-    var recOn by mutableStateOf(false)      // true selama jendela animasi: teks merekam isinya supaya bisa memudar silang (crossfade) saat pembungkusan berubah
-    var xfP by mutableStateOf(1f)           // progres crossfade teks: 0 -> 1 (1 = selesai)
-    /** Dua layer rekaman per blok teks: isi lama (dibekukan saat ukurannya berubah) dan isi baru. Dipakai bersama oleh versi slot maupun versi kelompok. */
-    class Rf(val oldL: androidx.compose.ui.graphics.layer.GraphicsLayer, val newL: androidx.compose.ui.graphics.layer.GraphicsLayer) {
-        var w = 0f
-        var h = 0f
-        var fading = false
-    }
-    val rfMap = HashMap<String, Rf>()
-    var gctx: androidx.compose.ui.graphics.GraphicsContext? = null
-    private val sXf = Spr()
-    private var relT = 0f
-    fun rf(id: String): Rf? {
-        val g = gctx ?: return null
-        return rfMap.getOrPut(id) { Rf(g.createGraphicsLayer(), g.createGraphicsLayer()) }
-    }
-    private fun xfReset() {
-        if (mvInk) return
-        sXf.snap(0f)
-        xfP = 0f
-        fxStart()
-    }
     var animReflow = false                  // true selama seretan + luncuran: teks di sekitar objek bergeser mulus (bukan seketika)
     val padMemo = HashMap<String, Float>()  // inset terakhir tiap paragraf: titik awal animasi saat paragraf pindah antara kelompok dan baris biasa
     var flipRot = 0f
@@ -1627,7 +1600,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         pvPend = ""
         pvT = 0f
         gPulse = 1f
-        if (!mvInk) { flipCapture(); xfReset() }   // catat posisi tampil sekarang SEBELUM tata letak berubah; teks memudar silang ke pembungkusan barunya
+        if (!mvInk) flipCapture()   // catat posisi tampil sekarang SEBELUM tata letak berubah
         val l = if (to < 0 && al == oal) ob else mvBuild(ob, i, to, al)
         blocks = l
         val nb = l.firstOrNull { it.id == m.bid } ?: return
@@ -1664,7 +1637,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
                 val dt = if (last == 0L) .016f else ((t - last) / 1_000_000_000f).coerceIn(.001f, .05f)
                 last = t
                 fxStep(dt)
-                if (mv == null && flipP == 0f && landA <= 0f && gOn <= 0f && gPulse <= 0f && edgeV == 0f && edgeRaw == 0f && xfP >= 1f && relT <= 0f && !recOn) break
+                if (mv == null && flipP == 0f && landA <= 0f && gOn <= 0f && gPulse <= 0f && edgeV == 0f && edgeRaw == 0f) break
             }
         }
     }
@@ -1735,23 +1708,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             else flipP = f
         }
         if (landA > 0f) landA = (landA - dt * 1.5f).coerceAtLeast(0f)
-        if (xfP < 1f) {
-            val v = sXf.step(1f, dt, 190f, 1f)
-            xfP = if (v >= .995f) 1f else v.coerceAtLeast(0f)
-        }
-        if (mv == null && flipP == 0f && xfP >= 1f) {
-            animReflow = false
-            if (recOn) { recOn = false; relT = .8f }
-        }
-        if (relT > 0f) {
-            relT -= dt
-            if (relT <= 0f) {
-                val g = gctx
-                if (g != null) for (r in rfMap.values) { g.releaseGraphicsLayer(r.oldL); g.releaseGraphicsLayer(r.newL) }
-                rfMap.clear()
-                relT = 0f
-            }
-        }
+        if (mv == null && flipP == 0f) animReflow = false
         val ev = edgeV + (edgeRaw - edgeV) * (dt * 12f).coerceAtMost(1f)
         edgeV = if (kotlin.math.abs(ev) < .004f && edgeRaw == 0f) 0f else ev
     }
@@ -1774,24 +1731,12 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         }
     }
 
-    /**
-     * Perubahan tata letak non-seret (tombol rata kiri / tengah / kanan): teks merekam isi lamanya dulu (2 frame), lalu perubahan
-     * dipasang; blok yang bergeser meluncur, teks di samping objek bergeser dan memudar silang ke pembungkusan barunya.
-     */
-    fun animThen(change: () -> Unit) {
-        if (mv != null || gctx == null || blocks.any { it.ik.isNotEmpty() }) { change(); return }
+    /** Perubahan tata letak non-seret (tombol rata kiri / tengah / kanan): blok yang bergeser meluncur mulus, teks di samping objek ikut bergeser. */
+    fun animNext() {
+        if (mv != null || blocks.any { it.ik.isNotEmpty() }) return
         flipId = ""
         animReflow = true
-        recOn = true
-        relT = 0f
-        fxStart()
-        scope.launch {
-            androidx.compose.runtime.withFrameNanos { }
-            androidx.compose.runtime.withFrameNanos { }
-            flipCapture()
-            xfReset()
-            change()
-        }
+        flipCapture()
     }
 
     private fun landOn(id: String) {
@@ -1832,9 +1777,6 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         gOn = 0f; gPulse = 0f; gAdj = false; edgeRaw = 0f; edgeV = 0f
         flipP = 0f; flipId = ""; flipFrom.clear(); landId = ""; landA = 0f
         animReflow = !mvInk
-        recOn = !mvInk
-        relT = 0f
-        xfP = 1f
         fxStart()
         buzz?.invoke()
         autoJob?.cancel()
@@ -1972,9 +1914,9 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val keepPv = pvKey
         pvKey = ""
         if (i < 0) return
-        if (!apply) { if (blocks != ob) { xfReset(); blocks = ob }; return }            // dibatalkan: kembali ke susunan asli
+        if (!apply) { if (blocks != ob) blocks = ob; return }            // dibatalkan: kembali ke susunan asli
         if (mt != null) {                                                  // dilepas di atas gambar lain: otomatis jadi kolase
-            if (blocks != ob) { xfReset(); blocks = ob }
+            if (blocks != ob) blocks = ob
             landOn(mt.bid); mergeImg(m.bid, m.imgId, mt)
             return
         }
