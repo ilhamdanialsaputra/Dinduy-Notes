@@ -81,7 +81,8 @@ object PdfExport {
     private class Cx(
         val dir: File, val pal: Pal, val fonts: Fonts,
         val cw: Float, val r: Float, val fs: Float, val lh: Float, val u: Float, val h: Float,
-        val ords: Map<String, Int>
+        val ords: Map<String, Int>,
+        val lastLi: Set<String> = emptySet()
     ) {
         val recycle = ArrayList<Bitmap>()
     }
@@ -94,6 +95,13 @@ object PdfExport {
     private class Ind(val l: Float, val r: Float, val first: Float, val rest: Float)
 
     private val NO_IND = Ind(0f, 0f, 0f, 0f)
+
+    /** Id butir daftar yang terakhir dalam kelompoknya (blok sesudahnya bukan butir). Jarak bawahnya sama dengan paragraf biasa, seperti di editor. */
+    private fun lastLiIds(bl: List<Blk>): Set<String> {
+        val s = HashSet<String>()
+        for (i in bl.indices) if (bl[i].ty == "li" && (i == bl.lastIndex || bl[i + 1].ty != "li")) s.add(bl[i].id)
+        return s
+    }
 
     /** sp = true untuk paragraf / judul / poin (baris pertama dan menggantung berlaku); kutipan hanya kiri + kanan. */
     private fun indOf(cx: Cx, b: Blk, sp: Boolean): Ind {
@@ -395,8 +403,11 @@ object PdfExport {
         return JL(builder.build(), ta == "j", p, wi.toFloat(), lm)
     }
 
+    /** Batas halaman di dalam paragraf hanya boleh jatuh bila tiap sisi minimal dua baris (tidak ada baris tunggal terpisah di ujung halaman). */
     private fun lineCuts(f: Flow, lay: JL, top: Float) {
-        for (i in 1 until lay.lineCount) f.cuts.add(top + lay.getLineTop(i))
+        val n = lay.lineCount
+        if (n < 4) return
+        for (i in 2..n - 2) f.cuts.add(top + lay.getLineTop(i))
     }
 
     // ------------------------------------------------------------------ paragraf, judul, poin
@@ -497,7 +508,7 @@ object PdfExport {
                     lay.draw(c)
                     c.restore()
                 })
-                f.y = y0 + lay.height + fs * .5f
+                f.y = y0 + lay.height + (if (b.id in cx.lastLi) fs * 1.1f else fs * .5f)   // sama dengan editor: butir terakhir berjarak seperti paragraf
                 Em(f.y - y0, lay.height.toFloat())
             }
             else -> {
@@ -582,7 +593,8 @@ object PdfExport {
         val y0 = f.y
         f.cuts.add(y0)
         f.texts[b.id] = TL(lay, bx + padX, y0 + padY + labelH)
-        for (i in 1 until lay.lineCount) f.cuts.add(y0 + padY + labelH + lay.getLineTop(i))
+        if (boxH <= cx.h * .92f) f.zones.add(floatArrayOf(y0, y0 + boxH + .5f))   // kotak utuh di satu halaman, tidak terpotong di tengah
+        else for (i in 1 until lay.lineCount) f.cuts.add(y0 + padY + labelH + lay.getLineTop(i))
         val rs = radii(q.r, u, boxW, boxH)
         val w = boxW
         f.pieces.add(Piece(y0, boxH, bx, { c ->
@@ -644,7 +656,8 @@ object PdfExport {
         val y0 = f.y
         f.cuts.add(y0)
         f.texts[b.id] = TL(lay, bx + pad, y0 + pad + chipH)
-        for (i in 1 until lay.lineCount) f.cuts.add(y0 + pad + chipH + lay.getLineTop(i))
+        if (boxH <= cx.h * .92f) f.zones.add(floatArrayOf(y0, y0 + boxH + .5f))
+        else for (i in 1 until lay.lineCount) f.cuts.add(y0 + pad + chipH + lay.getLineTop(i))
         val rs = radii(floatArrayOf(28f, 28f, 28f, 28f), u, boxW, boxH)
         val w = boxW
         f.pieces.add(Piece(y0, boxH, bx, { c ->
@@ -705,11 +718,12 @@ object PdfExport {
         var acc = 0f
         for (h in hts) { tops.add(acc); acc += h }
         val total = acc
-        for (ri in 2 until rows.size) f.cuts.add(y0 + tops[ri])
+        if (total <= cx.h * .92f) f.zones.add(floatArrayOf(y0, y0 + total + .5f))   // tabel yang muat di satu halaman tidak dipecah
+        else for (ri in 2 until rows.size) f.cuts.add(y0 + tops[ri])
         val cw = colWs.sum()
         val bx = when (b.alOf()) { "r" -> cx.cw - cw; "c" -> (cx.cw - cw) / 2f; else -> 0f }
         f.objW = cw
-        val rr = (4f * cx.u).coerceIn(1f, 4f)   // sudut hampir kotak, sama seperti tabel di editor
+        val rr = (4f * cx.u).coerceAtLeast(1f)   // 4dp seperti tabel di editor, ikut skala
         val bw = (1.5f * cx.u).coerceIn(.8f, 1.5f)
         f.pieces.add(Piece(y0, total, bx, { c ->
             val path = Path()
@@ -815,7 +829,7 @@ object PdfExport {
     }
 
     private fun drawCell(c: Canvas, cx: Cx, bmp: Bitmap?, x: Float, w: Float, h: Float) {
-        val rad = min(22f * cx.u, min(w, h) / 2f)
+        val rad = min(8f * cx.u, min(w, h) / 2f)   // 8dp seperti ImgCell di editor, ikut skala
         val path = Path()
         path.addRoundRect(RectF(x, 0f, x + w, h), rad, rad, Path.Direction.CW)
         c.save()
@@ -1163,7 +1177,7 @@ object PdfExport {
         val r = CW / widthDp.coerceAtLeast(120f)
         val fs = bodyPt.coerceIn(5f, 80f)
         val k = fs / (pr.fs * r)
-        val cx = Cx(imgDir, pal, fonts, CW, r, fs, LH, r * k, CH, ords(note.bl))
+        val cx = Cx(imgDir, pal, fonts, CW, r, fs, LH, r * k, CH, ords(note.bl), lastLiIds(note.bl))
         val dir = File(app.cacheDir, "pdfx")
         dir.mkdirs()
         val out = File(dir, "p" + seq.incrementAndGet() + ".pdf")
