@@ -101,6 +101,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -606,29 +607,60 @@ private fun Modifier.selHandleTouch(
         val pc = hit.coords
         val s0 = ui.sel ?: return@awaitEachGesture
         val an = if (hit.start) s0.b else s0.a
-        val W = pc.size.width.toFloat().coerceAtLeast(1f)
         val grab = down.position - hc.localPositionOf(pc, Offset(hit.tip.x, hit.tip.y - 5f * dens))
         down.consume()
         ui.drawing = true
         ui.selGrab = true
         hap.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        var finger = down.position
+        // Hitung ulang seleksi dari posisi jari sekarang. Halaman acuan dipilih dari halaman yang sedang tampil (halaman asal bisa saja
+        // sudah tergulir keluar dan dibuang), lalu posAtPage berjalan turun / naik ke halaman yang benar.
+        fun refresh() {
+            val ref = ui.pageCoords.entries.filter { it.value.isAttached }.minByOrNull { abs(it.key - hit.page) } ?: return
+            val rc = ref.value
+            val local = rc.localPositionOf(hc, finger - grab)
+            val f = posAtPage(ui, ref.key, rc.size.width.toFloat().coerceAtLeast(1f), local, dens) { p -> scope.launch { ui.txt?.page(p) } } ?: return
+            val ns = if (f < an) PSel(f, an) else if (f > an) PSel(an, f) else null
+            val cs = ui.sel
+            if (ns != null && (cs == null || cs.a != ns.a || cs.b != ns.b)) {
+                hap.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                ui.sel = ns
+            }
+        }
+        // Gulir otomatis (mode gulir): jari di dekat tepi atas / bawah layar menggulir daftar terus-menerus, makin dekat tepi makin cepat,
+        // walau jari diam (tidak ada event sentuhan), jadi dijalankan sebagai coroutine terpisah per frame.
+        val auto = if (ui.scrollBy != null) scope.launch {
+            var last = withFrameNanos { it }
+            while (true) {
+                val now = withFrameNanos { it }
+                val dt = ((now - last) / 1_000_000_000f).coerceAtMost(.05f)
+                last = now
+                val hh = hc.size.height.toFloat()
+                val topZ = 130f * dens
+                val botZ = 150f * dens
+                val y = finger.y
+                val k = when {
+                    y > hh - botZ -> ((y - (hh - botZ)) / botZ).coerceIn(0f, 1.2f)
+                    y < topZ -> -((topZ - y) / topZ).coerceIn(0f, 1.2f)
+                    else -> 0f
+                }
+                if (k != 0f) {
+                    val moved = ui.scrollBy?.invoke(k * 900f * dens * dt) ?: 0f
+                    if (moved != 0f) refresh()
+                }
+            }
+        } else null
         try {
             while (true) {
                 val ev = awaitPointerEvent(PointerEventPass.Initial)
                 if (ev.changes.count { it.pressed } >= 2) break
                 val c = ev.changes.firstOrNull { it.id == down.id } ?: break
                 c.consume()
-                if (c.changedToUp() || !pc.isAttached || !hc.isAttached) break
-                val local = pc.localPositionOf(hc, c.position - grab)
-                val f = posAtPage(ui, hit.page, W, local, dens) { p -> scope.launch { ui.txt?.page(p) } } ?: continue
-                val ns = if (f < an) PSel(f, an) else if (f > an) PSel(an, f) else null
-                val cs = ui.sel
-                if (ns != null && (cs == null || cs.a != ns.a || cs.b != ns.b)) {
-                    hap.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    ui.sel = ns
-                }
+                if (c.changedToUp() || !hc.isAttached) break
+                finger = c.position
+                refresh()
             }
-        } finally { ui.drawing = false; ui.selGrab = false }
+        } finally { auto?.cancel(); ui.drawing = false; ui.selGrab = false }
     }
 }
 
@@ -747,6 +779,7 @@ class PdfUi(val doc: PdfDoc, val ink: PInkState, val fid: String) {
     var cur by mutableIntStateOf(-1)
     var drawing by mutableStateOf(false)
     val pageCoords = HashMap<Int, LayoutCoordinates>()   // koordinat tiap halaman yang sedang tampil (dipakai pemegang gagang di induk)
+    var scrollBy: ((Float) -> Float)? = null   // hanya terisi di mode gulir: menggulir daftar sebesar px, mengembalikan yang benar-benar terpakai
     var selGrab by mutableStateOf(false)   // jari sedang memegang gagang seleksi / menyeret seleksi: gestur halaman (pager / curl / ketukan) harus minggir
     var pulse: androidx.compose.runtime.State<Float> = mutableFloatStateOf(.6f)
     var txt: PdfText? = null
@@ -1387,9 +1420,11 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
         val botPad = sab + 96.dp
 
         val vwPx = vwDp.value * dens
+        SideEffect { ui.scrollBy = null }   // mode lain tidak punya gulir otomatis; mode gulir mengisinya lagi tepat di bawah
         if (mode == 0) {
             // ---------------- mode gulir (menerus) ----------------
             val list = rememberLazyListState(initialFirstVisibleItemIndex = startPage)
+            SideEffect { ui.scrollBy = { d -> list.dispatchRawDelta(d) } }
             var zoom by remember { mutableFloatStateOf(1f) }
             var hx by remember { mutableFloatStateOf(0f) }   // geseran horizontal (px) saat diperbesar
             fun clampX(x: Float, z: Float) = x.coerceIn(0f, max(0f, vwPx * (z - 1f)))
