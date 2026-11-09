@@ -27,6 +27,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -42,6 +43,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -527,10 +529,32 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
             ) {
                 val hw by animateDpAsState(if (open) 36.dp else 56.dp, spring(.55f, 500f), label = "hdl")
                 Box(
-                    Modifier.fillMaxWidth().height(36.dp).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        open = !open
-                    },
+                    Modifier.fillMaxWidth().height(44.dp)
+                        .pointerInput(Unit) {
+                            // geser ke atas = buka, ke bawah = lipat (langsung bereaksi begitu jari melewati ambang)
+                            var acc = 0f
+                            var fired = false
+                            detectVerticalDragGestures(
+                                onDragStart = { acc = 0f; fired = false },
+                                onDragEnd = { acc = 0f; fired = false },
+                                onDragCancel = { acc = 0f; fired = false }
+                            ) { change, dy ->
+                                change.consume()
+                                acc += dy
+                                if (!fired && abs(acc) > 18.dp.toPx()) {
+                                    fired = true
+                                    val want = acc < 0f
+                                    if (want != open) {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        open = want
+                                    }
+                                }
+                            }
+                        }
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            open = !open
+                        },
                     Alignment.Center
                 ) {
                     Box(Modifier.size(hw, 5.dp).clip(CircleShape).background(pal.osv.copy(alpha = .5f)))
@@ -550,11 +574,13 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
                                 Spacer(Modifier.width(8.dp))
                             }
                         }
+                        val ptTxt = fmtPt(pt)
+                        val pillTarget = 32.dp + 24.dp + (9.5f * ptTxt.count { it != '.' } + 4.5f * ptTxt.count { it == '.' }).dp
+                        val pillW by animateDpAsState(pillTarget, spring(.7f, 520f), label = "ptw")
                         Box(
-                            Modifier.animateContentSize(spring(.8f, 500f)).height(40.dp).clip(CircleShape).background(pal.p)
-                                .padding(horizontal = 16.dp),
+                            Modifier.width(pillW).height(40.dp).clip(CircleShape).background(pal.p),
                             Alignment.Center
-                        ) { T(fmtPt(pt) + " pt", 16f, 700, pal.op, maxLines = 1) }
+                        ) { T("$ptTxt pt", 16f, 700, pal.op, Modifier.wrapContentWidth(Alignment.CenterHorizontally, unbounded = true), maxLines = 1) }
                     }
 
                     if (open) {
