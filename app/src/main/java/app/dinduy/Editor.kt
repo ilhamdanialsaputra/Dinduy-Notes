@@ -171,7 +171,28 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     var barOn by mutableStateOf(false)    // kapsul alat sedang tampil
     val ink = InkCtl()                    // keadaan mode coret (lihat Ink.kt)
     var sheet by mutableStateOf(0)        // sheet bawah: 0 tutup, 1 Sisipkan, 2 Format
-    var sub by mutableStateOf(0)          // sub-bilah toolbar: 0 tutup, 1 perataan, 2 poin
+    private var subV by mutableStateOf(0)
+    /** Sub-bilah toolbar: 0 tutup, 1 perataan, 2 poin. Saat berubah, gulir kursor mengikuti tinggi dock per frame (lihat [barNow]) supaya layar tidak "kedut". */
+    var sub: Int
+        get() = subV
+        set(v) {
+            if (v != subV) { liveUntil = android.os.SystemClock.uptimeMillis() + 800L; subV = v }
+        }
+    /** Sampai kapan (uptimeMillis) gulir kursor memakai tinggi dock langsung, bukan yang sudah tenang. */
+    var liveUntil = 0L
+    /** Ruang (px) yang dipesan sheet di bawah area catatan: area berhenti di atasnya persis seperti di atas keyboard. */
+    var sheetReserve by mutableStateOf(0f)
+    /** Sheet dibuka saat keyboard terbuka (sheet menggantikan tempat keyboard). */
+    var sheetFromKb = false
+    /** Sheet ditutup pengguna: keyboard dimunculkan lagi di tempat yang sama. Dibaca DocSheet saat animasi tutup dimulai. */
+    var kbBack = false
+    var kbShow: (() -> Unit)? = null
+    /** Tutup sheet. [restoreKb] true: bila sheet tadinya menggantikan keyboard, keyboard muncul lagi dan area catatan tidak bergerak sama sekali. */
+    fun closeSheet(restoreKb: Boolean = true) {
+        if (sheet == 0) return
+        kbBack = restoreKb && sheetFromKb && focus != null && !titleFocus && !reading && !selOn
+        sheet = 0
+    }
     var sheetPage by mutableStateOf(0)    // halaman dalam sheet Sisipkan: 0 daftar, 1 pengaturan tabel
     var tbR by mutableStateOf(3)          // jumlah baris tabel yang akan disisipkan
     var tbC by mutableStateOf(3)          // jumlah kolom
@@ -1234,7 +1255,9 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     var barHLive by mutableStateOf(0f)            // tinggi kapsul/sheet langsung (tanpa debounce), dipakai gulir kursor
     // memakai tinggi kapsul yang sudah tenang (barH, debounce), BUKAN barHLive: saat fokus pindah judul<->isi kapsul beranimasi tiap frame,
     // dan tinggi per-frame itu memicu gulir kursor berulang (layar turun sendiri tanpa henti)
-    fun cursorClear(): Float = if (barH > 0f) barH + 12f * dens else 12f * dens
+    /** Tinggi dock yang dipakai gulir kursor: langsung (per frame) sebentar setelah sub-bilah berubah, selain itu yang sudah tenang. */
+    fun barNow(): Float = if (android.os.SystemClock.uptimeMillis() < liveUntil) barHLive else barH
+    fun cursorClear(): Float { val b = barNow(); return if (b > 0f) b + 12f * dens else 12f * dens }
     var scroll: ScrollState? = null
 
     // ---- komposisi berjendela (catatan sangat panjang) ----
@@ -1419,7 +1442,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val v = tf[key] ?: return 0f
         if (!v.selection.collapsed || viewH <= 0f) return 0f
         if (csBump < 0) return 0f   // hanya untuk berlangganan (dipakai coba-ulang)
-        val sig = CsSig(key, v.selection.start, v.text.length, viewH, barH)
+        val sig = CsSig(key, v.selection.start, v.text.length, viewH, barNow())
         val old = csSig
         if (sig != old) {
             csSig = sig
