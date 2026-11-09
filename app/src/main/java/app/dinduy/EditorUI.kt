@@ -163,6 +163,9 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.platform.LocalTextToolbar
+import androidx.compose.ui.platform.TextToolbar
+import androidx.compose.ui.platform.TextToolbarStatus
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
@@ -347,6 +350,17 @@ private fun Modifier.wordTap(onTap: () -> Unit, onDouble: (Offset) -> Unit): Mod
     }
 }
 
+/** Toolbar teks bawaan Android dimatikan: editor punya bubble seleksi sendiri (SelBubble), jadi bawaan hanya bikin dobel. */
+private object NoTextToolbar : TextToolbar {
+    override val status: TextToolbarStatus get() = TextToolbarStatus.Hidden
+    override fun hide() {}
+    override fun showMenu(
+        rect: androidx.compose.ui.geometry.Rect,
+        onCopyRequested: (() -> Unit)?, onPasteRequested: (() -> Unit)?,
+        onCutRequested: (() -> Unit)?, onSelectAllRequested: (() -> Unit)?
+    ) {}
+}
+
 /** Satu kolom teks: BasicTextField saat mengedit, Text biasa saat mode baca. */
 @Composable
 fun TF(
@@ -473,6 +487,7 @@ fun TF(
         val cols = if (hideNative) androidx.compose.foundation.text.selection.TextSelectionColors(Color.Transparent, Color.Transparent) else selCols
         CompositionLocalProvider(
             LocalViewConfiguration provides vcNoLong,
+            LocalTextToolbar provides NoTextToolbar,
             androidx.compose.foundation.text.selection.LocalTextSelectionColors provides cols
         ) {
             BasicTextField(
@@ -506,6 +521,7 @@ fun TF(
                                     if (!s.isNullOrEmpty()) ed.selPaste(s)
                                     true
                                 } else false
+                            e.key == Key.Backspace && !ctrl && !e.isShiftPressed -> ed.backKey(key)
                             e.key == Key.MoveHome -> ed.jumpKey(key, false, ctrl, e.isShiftPressed)
                             e.key == Key.MoveEnd -> ed.jumpKey(key, true, ctrl, e.isShiftPressed)
                             e.key == Key.PageUp -> ed.selOn && ed.jumpKey(key, false, true, e.isShiftPressed)
