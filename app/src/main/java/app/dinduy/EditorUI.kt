@@ -2482,7 +2482,12 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
 
     // derivedStateOf: hanya berubah saat keyboard benar-benar buka/tutup, bukan tiap frame animasinya (dulu seluruh layar recompose per frame)
     val imeInsets = WindowInsets.ime
-    val imeOpen by remember(density) { androidx.compose.runtime.derivedStateOf { imeInsets.getBottom(density) > 0 } }
+    // Selama sheet menggantikan keyboard (dibuka dari keyboard), keyboard dianggap masih "terbuka" untuk toolbar: kalau tidak, ikon
+    // tombol kanan toolbar berganti chr <-> hide tiap sheet dibuka / ditutup (toolbar tampak kedip). Dibaca lewat derivedStateOf,
+    // jadi hanya berubah saat hasilnya berubah, bukan tiap frame animasi sheetReserve.
+    val imeOpen by remember(density) {
+        androidx.compose.runtime.derivedStateOf { imeInsets.getBottom(density) > 0 || (ed.sheetFromKb && ed.sheetReserve > 0f) }
+    }
     // Tinggi keyboard terakhir yang benar-benar terbuka (px, dihitung dari dasar layar, jadi sudah termasuk navbar). Bukan state.
     // kbBox: nilai stabil saat ini (naik langsung, turun setelah tenang, dibekukan selama sheet terbuka).
     // kbLast: keyboard terakhir yang terbuka penuh. Ukuran sheet = tinggi keyboard, jadi sheet persis menggantikan keyboard:
