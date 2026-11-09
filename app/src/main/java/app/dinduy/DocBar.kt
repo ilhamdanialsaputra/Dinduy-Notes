@@ -94,15 +94,21 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.unit.dp
 
 // =====================================================================================
-//  Toolbar gaya Google Docs.
-//  - Bilah atas (mode ketik): centang (masuk tampilan penuh), undo, redo, "+" (sheet Sisipkan).
-//  - Bilah bawah datar: "A" (sheet Format) | B  I  U  stabilo coret | mic  poin ▾ | perataan ▾  stabilo ketik.
-//  - Perataan dan poin membuka sub-bilah kecil di atas bilah utama (tombolnya tetap satu).
-//  - Gambar / tabel / kutipan: bilah bawah berganti jadi alatnya sendiri.
-//  - Sheet bawah tingginya dibatasi dan bisa digulir, jadi tidak memanjang kalau isinya bertambah.
+//  Toolbar Material 3 Expressive.
+//  - Bilah atas (mode ketik): centang (masuk tampilan penuh), undo, redo, "+" (sheet Sisipkan). "+" berputar jadi "×".
+//  - Dock bawah = SATU wadah mengambang (MorphDock) untuk toolbar ketik, gambar, tabel, kutipan, objek sisipan, dan coret.
+//    Berpindah toolbar = wadah itu mengubah bentuk (lebar / tinggi / posisi mengalir dengan pegas), isi lama menciut,
+//    isi baru melompat masuk. Tanpa fade.
+//  - Tombol dikelompokkan dalam grup tonal tersambung (bukan garis pemisah). Terpilih = squircle, ditekan = lebih kotak.
+//  - Perataan dan poin tumbuh ke atas di dalam wadah yang sama.
+//  - Sheet bawah (Sisipkan / Format): ubin besar, pergantian halaman memakai morph yang sama, tinggi dibatasi dan bisa digulir.
 // =====================================================================================
 
 fun taOf(b: Blk): TextAlign = when (b.ta) {
@@ -152,7 +158,7 @@ fun DocTopLeft(ed: Ed, act: Actions) {
     }
 }
 
-/** Undo, redo, "+": masing-masing membuka ruangnya dan "melompat" masuk dengan pegas, berurutan dari kanan. */
+/** Undo, redo, "+": tombol tonal yang "melompat" masuk berurutan dari kanan. "+" berputar jadi "×" dan berubah bentuk saat sheet terbuka. */
 @Composable
 fun DocTopActions(ed: Ed) {
     val pal = LocalPal.current
@@ -178,14 +184,16 @@ fun DocTopActions(ed: Ed) {
             ) { content() }
         }
     }
+    val plusOn = ed.sheet == 1
+    val rot by animateFloatAsState(if (plusOn) 1f else 0f, M3E.spatial(), label = "plusrot")
     Row {
-        Pop(2) { IconBtn("undo", pal.os, { ed.undo() }, enabled = ed.canUndo && !ed.selOn) }
-        Pop(1) { IconBtn("redo", pal.os, { ed.redo() }, enabled = ed.canRedo && !ed.selOn) }
+        Pop(2) { XBtn(rest = pal.c3, enabled = ed.canUndo && !ed.selOn, onClick = { ed.undo() }) { Ic("undo", it) } }
+        Pop(1) { XBtn(rest = pal.c3, enabled = ed.canRedo && !ed.selOn, onClick = { ed.redo() }) { Ic("redo", it) } }
         Pop(0) {
-            IconBtn("plus", if (ed.sheet == 1) pal.p else pal.os, {
+            XBtn(on = plusOn, rest = pal.c3, onClick = {
                 kb?.hide(); ed.sub = 0; ed.pickQuote = false; ed.sheetPage = 0
                 ed.sheet = if (ed.sheet == 1) 0 else 1
-            })
+            }) { Ic("plus", it, modifier = Modifier.graphicsLayer { rotationZ = 135f * rot }) }
         }
     }
 }
@@ -222,23 +230,73 @@ private fun AddImgIcon(c: Color) {
     }
 }
 
-/** Tombol dengan segitiga kecil di sudut: tanda bahwa ia mengembangkan sub-bilah. */
+/** Tombol dengan segitiga kecil di sudut: tanda bahwa ia mengembangkan sub-bilah. Segitiganya membesar saat sub-bilah terbuka. */
 @Composable
-private fun DropBtn(on: Boolean, open: Boolean, enabled: Boolean, onClick: () -> Unit, icon: @Composable (Color) -> Unit) {
+private fun DropBtn(on: Boolean, open: Boolean, enabled: Boolean, i: Int = -1, onClick: () -> Unit, icon: @Composable (Color) -> Unit) {
     val pal = LocalPal.current
     val hot = on || open
-    Box(contentAlignment = Alignment.BottomEnd) {
-        Tbn(icon, hot, enabled, onClick)
-        Canvas(Modifier.padding(end = 5.dp, bottom = 6.dp).size(7.dp)) {
+    val k by animateFloatAsState(if (open) 1.55f else 1f, M3E.spatialFast(), label = "dropk")
+    Box(Modifier.popIn(i), contentAlignment = Alignment.BottomEnd) {
+        XBtn(on = hot, enabled = enabled, onClick = onClick, content = icon)
+        Canvas(
+            Modifier.padding(end = 6.dp, bottom = 7.dp).size(7.dp)
+                .graphicsLayer { scaleX = k; scaleY = k; transformOrigin = TransformOrigin(1f, 1f) }
+        ) {
             val p = Path().apply { moveTo(size.width, 0f); lineTo(size.width, size.height); lineTo(0f, size.height); close() }
             drawPath(p, (if (hot) pal.op else pal.os).copy(alpha = .75f))
         }
     }
 }
 
-// ------------------------------------------------------------------ bilah bawah
+// ------------------------------------------------------------------ dock (wadah toolbar tunggal)
+private const val K_TYPE = 0
+private const val K_IMG = 1
+private const val K_TABLE = 2
+private const val K_QUOTE = 3
+private const val K_OBJ = 4
+private const val K_INK = 5
+
+/**
+ * SATU wadah untuk semua toolbar: ketik, gambar, tabel, kutipan, objek, dan coret. Berpindah toolbar = wadah ini mengubah bentuk
+ * (lebar / tinggi mengalir dengan pegas, naik sedikit saat coret), isi lama menciut ke arah tombol yang ditekan dan isi baru
+ * melompat masuk. Tidak ada fade. Wadah juga memuat panel Ink dan sub-bilah, jadi tinggi mengalir di dalam wadah yang sama.
+ */
 @Composable
-fun DocBar(ed: Ed, act: Actions) {
+private fun MorphDock(kind: Int, content: @Composable (Int) -> Unit) {
+    val pal = LocalPal.current
+    val lift by animateDpAsState(if (kind == K_INK) 30.dp else 8.dp, M3E.spatial(), label = "dklift")
+    val shape = RoundedCornerShape(34.dp)
+    Box(
+        Modifier.fillMaxWidth().padding(horizontal = 10.dp).padding(top = 6.dp, bottom = lift.nn()),
+        Alignment.BottomCenter
+    ) {
+        Box(Modifier.shadow(if (pal.dark) 10.dp else 6.dp, shape).clip(shape).background(pal.c3)) {
+            MorphSwap(kind, originX = { a, b -> if (a == K_INK || b == K_INK) .86f else .5f }, label = "dock") { k -> content(k) }
+        }
+    }
+}
+
+/** Isi dock objek sisipan (tabel / kode / kutipan / garis): rata kiri-tengah-kanan, hapus, selesai. */
+@Composable
+fun ObjBarContent(ed: Ed, ob: Blk) {
+    val al = ob.alOf()
+    Row(
+        Modifier.height(DockH).padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        SlideSeg(
+            count = 3, sel = when (al) { "l" -> 0; "c" -> 1; "r" -> 2; else -> -1 }, i = 0,
+            onPick = { ed.objAlign(ob.id, when (it) { 0 -> "l"; 1 -> "c"; else -> "r" }) }
+        ) { k, c -> AlignArrow(k, c) }
+        XBtn(tone = 1, i = 1, onClick = { ed.objDelete(ob.id) }) { Ic("del", it) }
+        if (ed.selObj != null) XBtn(tone = 2, i = 2, w = 68.dp, onClick = { ed.selObj = null }) { Ic("ok", it) }
+    }
+}
+
+// ------------------------------------------------------------------ dock bawah
+@Composable
+fun ToolDock(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean) {
     val pal = LocalPal.current
     val selMode = ed.selOn
     val key = if (selMode) null else ed.focus
@@ -252,7 +310,14 @@ fun DocBar(ed: Ed, act: Actions) {
     val isLi = ty == "li" && !cell
     val kb = LocalSoftwareKeyboardController.current
     val haptic = LocalHapticFeedback.current
-    val kindNow = if (ed.selImg != null) 1 else if (ed.selObj != null) 4 else if (cell) 2 else if (ed.pickQuote) 3 else 0
+    val kindNow = when {
+        ed.ink.on -> K_INK
+        ed.selImg != null -> K_IMG
+        ed.selObj != null -> K_OBJ
+        cell -> K_TABLE
+        ed.pickQuote -> K_QUOTE
+        else -> K_TYPE
+    }
     var objLast by remember { mutableStateOf<String?>(null) }
     var lastSel by remember { mutableStateOf<Pair<String, Int>?>(null) }
     var subShown by remember { mutableStateOf(1) }
@@ -261,200 +326,228 @@ fun DocBar(ed: Ed, act: Actions) {
         ed.selObj?.let { objLast = it }
         if (ed.sub != 0) subShown = ed.sub
     }
+    // dock ikut tampil saat coret aktif (bilah ketik disembunyikan oleh pemanggil, tapi wadahnya TETAP: isinya yang berubah bentuk)
+    val visible = ed.ink.on || (showBar && ed.sheet == 0)
+    var kindHeld by remember { mutableStateOf(K_TYPE) }
+    SideEffect { if (visible) kindHeld = kindNow }
+    val kind = if (visible) kindNow else kindHeld
 
-    // kapsul objek (kind 4) mengambang seperti kapsul Ink: bilah tanpa latar dan tanpa garis atas
-    val floatCap = kindNow == 4 || kindNow == 1
-    val barBg by androidx.compose.animation.animateColorAsState(if (floatCap) Color.Transparent else pal.bar(), tween(260, easing = Emph), label = "barbg")
-    Column(Modifier.fillMaxWidth().background(barBg)) {
-        // sub-bilah: perataan atau poin (mengembang di atas bilah utama)
-        AnimatedVisibility(
-            visible = ed.sub != 0 && kindNow == 0,
-            enter = fadeIn(tween(200, 40, Emph)) + expandVertically(spring(.88f, 520f)) +
-                scaleIn(tween(260, easing = Emph), .9f, TransformOrigin(.5f, 1f)),
-            exit = fadeOut(tween(110)) + shrinkVertically(tween(210, easing = Emph)) +
-                scaleOut(tween(190, easing = Emph), .92f, TransformOrigin(.5f, 1f))
-        ) {
-            Box(Modifier.fillMaxWidth().padding(vertical = 6.dp), Alignment.Center) {
-                Row(
-                    Modifier.clip(RoundedCornerShape(26.dp)).background(pal.bar2()).padding(4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (subShown == 1) {
-                        val cur = blk?.ta ?: ""
-                        listOf("" to "aL", "c" to "aC", "r" to "aR", "j" to "aJ").forEach { (a, ic) ->
-                            Tbn({ if (ic == "aJ") JustifyIcon(it) else Ic(ic, it) }, cur == a, !cell && ty != "code" && ty != "q" && ty != "hr" && ty != "tbl" && ty != "img") {
-                                ed.setAlign(a); ed.sub = 0
-                            }
-                        }
-                    } else {
-                        Tbn({ Ic("ul", it) }, isLi && blk?.lt == "b", !convOff) { ed.setList("b"); ed.sub = 0 }
-                        Tbn({ Ic("ol", it) }, isLi && blk?.lt == "o", !convOff) { ed.setList("o"); ed.sub = 0 }
-                        Tbn({ LetterListIcon(it) }, isLi && blk?.lt == "a", !convOff) { ed.setList("a"); ed.sub = 0 }
-                        Tbn({ Ic("chk", it) }, isLi && blk?.lt == "c", !convOff) { ed.setList("c"); ed.sub = 0 }
-                        Sep()
-                        Tbn({ Ic("out", it) }, false, isLi) { ed.indent(-1) }
-                        Tbn({ Ic("ind", it) }, false, isLi) { ed.indent(1) }
-                    }
-                }
-            }
-        }
-        val lineA by animateFloatAsState(if (floatCap) 0f else 1f, tween(220, easing = Emph), label = "barline")
-        Box(Modifier.fillMaxWidth().height(1.dp).graphicsLayer { alpha = lineA }.background(pal.ol.copy(alpha = .35f)))
-        AnimatedContent(
-            targetState = kindNow,
-            transitionSpec = {
-                // Gerak dikerjakan di dalam konten (lihat `pr` di bawah) supaya tiap sisi punya bahasa geraknya sendiri:
-                // bilah utama -> kapsul: bilah mengerut ke tengah, kapsul tumbuh naik dari dasar dengan pantulan, tombolnya memantul berurutan;
-                // kapsul -> bilah utama: kapsul menciut masuk kembali ke bilah, bilah membal kembali. Tinggi mengalir dengan pegas.
-                // Kapsul selalu di depan (zIndex) selama transisi.
-                (EnterTransition.None togetherWith ExitTransition.None)
-                    .using(SizeTransform(clip = false) { _, _ -> spring<androidx.compose.ui.unit.IntSize>(.82f, 420f) })
-                    .also { it.targetContentZIndex = if (targetState == 0) 0f else 1f }
-            },
-            label = "docbar"
-        ) { kind ->
-            // 0 -> 1 saat konten ini masuk, 1 -> 0 saat keluar. Masuk = pegas memantul (boleh melewati 1), keluar = cepat dan tegas
-            val pr by transition.animateFloat(
-                transitionSpec = { if (targetState == EnterExitState.Visible) spring(.66f, 400f) else tween(190, easing = Emph) },
-                label = "dbpr"
-            ) { if (it == EnterExitState.Visible) 1f else 0f }
-            val isBase = kind == 0
-            Box(
-                Modifier.graphicsLayer {
-                    val p = pr
-                    transformOrigin = TransformOrigin(.5f, 1f)
-                    if (isBase) {
-                        val s0 = .55f + .45f * p.coerceAtLeast(0f)
-                        scaleX = s0; scaleY = .88f + .12f * p.coerceAtLeast(0f)
-                        translationY = (1f - p.coerceIn(0f, 1f)) * 16.dp.toPx()
-                        alpha = ((p - .3f) / .7f).coerceIn(0f, 1f)
-                    } else {
-                        val s0 = .5f + .5f * p.coerceAtLeast(0f)
-                        scaleX = s0; scaleY = s0
-                        translationY = (1f - p.coerceIn(0f, 1f)) * 56.dp.toPx()
-                        alpha = (p * 3.5f).coerceIn(0f, 1f)
-                    }
-                }
-            ) {
-            when (kind) {
-                1 -> {
+    AnimatedVisibility(
+        visible = visible,
+        enter = expandVertically(M3E.spatial(), expandFrom = Alignment.Top) +
+            scaleIn(M3E.spatial(), .86f, TransformOrigin(.5f, 1f)),
+        // sheet membuka => dock hilang seketika, supaya tidak ada gerakan ganda di atas sheet
+        exit = if (ed.sheet != 0) ExitTransition.None
+        else shrinkVertically(M3E.spatial(), shrinkTowards = Alignment.Top) +
+            scaleOut(M3E.spatial(), .86f, TransformOrigin(.5f, 1f))
+    ) {
+        MorphDock(kind) { k ->
+            when (k) {
+                K_IMG -> {
                     val s = ed.selImg ?: lastSel
-                    if (s == null) Spacer(Modifier.height(54.dp)) else {
+                    if (s == null) Spacer(Modifier.height(DockH).width(1.dp)) else {
                         val b = ed.blocks.firstOrNull { it.id == s.first }
                         val inRow = (b?.im?.size ?: 1) > 1
-                        Box(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 10.dp).padding(horizontal = 10.dp), Alignment.Center) {
-                            CapShell(scroll = true) {
+                        Row(
+                            Modifier.height(DockH).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            XGroup(i = 0) {
                                 // ganti isi bingkai dengan foto lain (galeri / kamera); ukuran bingkai tidak berubah
-                                CapBtn(0, onClick = {
+                                XBtn(onClick = {
                                     val tgt = ed.selImg ?: lastSel
                                     ed.replT = tgt
                                     if (tgt != null) act.replaceImage(ed.noteId, tgt.first, tgt.second)
                                 }) { Ic("swap", it) }
-                                CapBtn(1, onClick = { ed.replT = ed.selImg ?: lastSel; act.takePhoto(true) }) { Ic("cam", it) }
+                                XBtn(onClick = { ed.replT = ed.selImg ?: lastSel; act.takePhoto(true) }) { Ic("cam", it) }
                                 // tambah gambar lain (disisipkan tepat sesudah gambar ini)
-                                CapBtn(2, onClick = { ed.replT = null; act.pickImages() }) { AddImgIcon(it) }
-                                CapBtn(3, tone = 1, onClick = { ed.imgDelete() }) { Ic("del", it) }
-                                CapDiv()
-                                if (!inRow) {
-                                    val al = b?.im?.getOrNull(s.second)?.al
-                                    AlignSeg(
-                                        4, when (al) { "l" -> 0; "c" -> 1; "r" -> 2; else -> -1 },
-                                        listOf<@Composable (Color) -> Unit>({ Ic("aL", it) }, { Ic("aC", it) }, { Ic("aR", it) })
-                                    ) { ed.imgAlign(when (it) { 0 -> "l"; 1 -> "c"; else -> "r" }) }
-                                }
-                                CapBtn(5, onClick = { ed.toggleRow() }) { Ic(if (inRow) "rows" else "cols", it) }
-                                CapBtn(6, onClick = { ed.imgMove(-1) }) { Ic("aup", it) }
-                                CapBtn(7, onClick = { ed.imgMove(1) }) { Ic("adn", it) }
+                                XBtn(onClick = { ed.replT = null; act.pickImages() }) { AddImgIcon(it) }
                             }
+                            if (!inRow) {
+                                val al = b?.im?.getOrNull(s.second)?.al
+                                SlideSeg(
+                                    count = 3, sel = when (al) { "l" -> 0; "c" -> 1; "r" -> 2; else -> -1 }, i = 1,
+                                    onPick = { ed.imgAlign(when (it) { 0 -> "l"; 1 -> "c"; else -> "r" }) }
+                                ) { n, c -> Ic(when (n) { 0 -> "aL"; 1 -> "aC"; else -> "aR" }, c) }
+                            }
+                            XGroup(i = 2) {
+                                XBtn(onClick = { ed.toggleRow() }) { Ic(if (inRow) "rows" else "cols", it) }
+                                XBtn(onClick = { ed.imgMove(-1) }) { Ic("aup", it) }
+                                XBtn(onClick = { ed.imgMove(1) }) { Ic("adn", it) }
+                            }
+                            // hapus dijauhkan dari tombol yang sering dipakai (ramah jempol: tidak salah ketuk)
+                            XBtn(tone = 1, i = 3, onClick = { ed.imgDelete() }) { Ic("del", it) }
                         }
                     }
                 }
-                4 -> {
-                    // objek sisipan (tabel / kode / kutipan / garis) terpilih tanpa keyboard: kapsul rata + hapus + selesai
+                K_OBJ -> {
+                    // objek sisipan (tabel / kode / kutipan / garis) terpilih tanpa keyboard
                     val ob = ed.blocks.firstOrNull { it.id == (ed.selObj ?: objLast) }
-                    if (ob == null) Spacer(Modifier.height(54.dp))
-                    else Box(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 10.dp).padding(horizontal = 10.dp)) { ObjCapsule(ed, ob) }
+                    if (ob == null) Spacer(Modifier.height(DockH).width(1.dp)) else ObjBarContent(ed, ob)
                 }
-                2 -> Row(
-                    Modifier.fillMaxWidth().padding(vertical = 6.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                K_TABLE -> Row(
+                    Modifier.height(DockH).horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    listOf("ar" to "+ Row", "ac" to "+ Column", "dr" to "− Row", "dc" to "− Column").forEachIndexed { n, (k, l) ->
-                        CapChip(n, l, pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.tOp(k) }
+                    listOf("ar" to "+ Row", "ac" to "+ Column", "dr" to "− Row", "dc" to "− Column").forEachIndexed { n, (op, l) ->
+                        CapChip(n, l, pal.c4, pal.os, RoundedCornerShape(24.dp)) { ed.tOp(op) }
                     }
                     var n2 = 4
-                    if (blk != null && blk.cw.isNotEmpty()) CapChip(n2++, "Reset widths", pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.tblResetCols(blk.id) }
-                    CapChip(n2, "Delete table", pal.ec, pal.oec, RoundedCornerShape(23.dp)) { ed.tOp("dt") }
+                    if (blk != null && blk.cw.isNotEmpty()) CapChip(n2++, "Reset widths", pal.c4, pal.os, RoundedCornerShape(24.dp)) { ed.tblResetCols(blk.id) }
+                    CapChip(n2, "Delete table", pal.ec, pal.oec, RoundedCornerShape(24.dp)) { ed.tOp("dt") }
                 }
-                3 -> Row(
-                    Modifier.fillMaxWidth().padding(vertical = 6.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                K_QUOTE -> Row(
+                    Modifier.height(DockH).horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    VARS.forEachIndexed { n, (k, l) ->
-                        val q = qs(k, pal)
-                        CapChip(n, l, if (k == "def") pal.c4 else q.bg, q.fg, q.shape, 52.dp, 104.dp) { ed.pickQuote = false; ed.setQuote(k) }
+                    VARS.forEachIndexed { n, (v, l) ->
+                        val q = qs(v, pal)
+                        CapChip(n, l, if (v == "def") pal.c4 else q.bg, q.fg, q.shape, 52.dp, 104.dp) { ed.pickQuote = false; ed.setQuote(v) }
                     }
-                    if (ty == "q") CapChip(VARS.size, "Plain text", pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.pickQuote = false; ed.setPlain() }
+                    if (ty == "q") CapChip(VARS.size, "Plain text", pal.c4, pal.os, RoundedCornerShape(24.dp)) { ed.pickQuote = false; ed.setPlain() }
                 }
-                else -> Row(Modifier.fillMaxWidth().height(54.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Tbn({ c -> T("A", 21f, 900, c) }, ed.sheet == 2, true) {
-                        kb?.hide(); ed.sub = 0
-                        ed.sheet = if (ed.sheet == 2) 0 else 2
-                    }
-                    Sep()
-                    Row(
-                        Modifier.weight(1f).fillMaxHeight().horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically
+                K_INK -> InkDockContent(ed, vm)
+                else -> Column(Modifier.fillMaxWidth()) {
+                    // sub-bilah (perataan / poin): tumbuh ke atas DI DALAM wadah yang sama, jadi wadahnya yang membesar
+                    AnimatedVisibility(
+                        visible = ed.sub != 0,
+                        enter = expandVertically(M3E.spatial()),
+                        exit = shrinkVertically(M3E.spatial())
                     ) {
-                        Tbn({ Ic("b", it) }, K.B in fl && !noB, !noB) { ed.sub = 0; ed.toggleFmt(K.B) }
-                        Tbn({ Ic("i", it) }, K.I in fl && !noI, !noI) { ed.sub = 0; ed.toggleFmt(K.I) }
-                        Tbn({ Ic("u", it) }, K.U in fl && !noI, !noI) { ed.sub = 0; ed.toggleFmt(K.U) }
-                        // stabilo coretan (alat Stabilo di mode coret) sekarang di posisi stabilo ketik
-                        Tbn({ InkToolIcon(1, it) }, ed.ink.on && ed.ink.tool == 1, true) {
-                            ed.sub = 0
-                            val ik = ed.ink
-                            if (!ik.on) ik.toggle(ed)
-                            ik.hide = false
-                            ik.tool = 1; ik.pop = false; ik.sel = emptySet(); ik.box = null
-                            ik.stamp = System.currentTimeMillis()
-                        }
-                        Sep()
-                        // voice note: di posisi tombol perataan ("lines") yang lama
-                        Tbn({ Ic("mic", it) }, ed.recActive, !ed.recActive && !selMode) {
-                            ed.sub = 0
-                            act.requestMic {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                ed.startVoice()
+                        Box(Modifier.fillMaxWidth().padding(top = 8.dp), Alignment.Center) {
+                            MorphSwap(subShown, label = "sub") { sub ->
+                                if (sub == 1) {
+                                    val cur = blk?.ta ?: ""
+                                    val alOk = !cell && ty != "code" && ty != "q" && ty != "hr" && ty != "tbl" && ty != "img"
+                                    XGroup {
+                                        listOf("" to "aL", "c" to "aC", "r" to "aR", "j" to "aJ").forEachIndexed { n, (a, ic) ->
+                                            XBtn(i = n, on = cur == a, enabled = alOk, onClick = { ed.setAlign(a); ed.sub = 0 }) {
+                                                if (ic == "aJ") JustifyIcon(it) else Ic(ic, it)
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        XGroup {
+                                            XBtn(i = 0, on = isLi && blk?.lt == "b", enabled = !convOff, onClick = { ed.setList("b"); ed.sub = 0 }) { Ic("ul", it) }
+                                            XBtn(i = 1, on = isLi && blk?.lt == "o", enabled = !convOff, onClick = { ed.setList("o"); ed.sub = 0 }) { Ic("ol", it) }
+                                            XBtn(i = 2, on = isLi && blk?.lt == "a", enabled = !convOff, onClick = { ed.setList("a"); ed.sub = 0 }) { LetterListIcon(it) }
+                                            XBtn(i = 3, on = isLi && blk?.lt == "c", enabled = !convOff, onClick = { ed.setList("c"); ed.sub = 0 }) { Ic("chk", it) }
+                                        }
+                                        XGroup {
+                                            XBtn(i = 4, enabled = isLi, onClick = { ed.indent(-1) }) { Ic("out", it) }
+                                            XBtn(i = 5, enabled = isLi, onClick = { ed.indent(1) }) { Ic("ind", it) }
+                                        }
+                                    }
+                                }
                             }
                         }
-                        DropBtn(isLi, ed.sub == 2, !convOff, { ed.sub = if (ed.sub == 2) 0 else 2 }) { Ic("ul", it) }
-                        Sep()
-                        // tombol yang tergeser tetap ada: perataan dan stabilo ketik pindah ke belakang
-                        val ta = blk?.ta ?: ""
-                        // tabel, kutipan, kode, garis, foto: letaknya diatur langsung dengan seret (kiri / tengah / kanan), jadi tombol perataan tidak ada
-                        if (!cell && ty != "code" && ty != "q" && ty != "hr" && ty != "tbl" && ty != "img") {
-                            DropBtn(false, ed.sub == 1, true, { ed.sub = if (ed.sub == 1) 0 else 1 }) { AlignIcon(ta, it) }
+                    }
+                    Row(
+                        Modifier.fillMaxWidth().height(DockH).padding(horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        XGroup(i = 0) {
+                            XBtn(on = ed.sheet == 2, onClick = {
+                                kb?.hide(); ed.sub = 0
+                                ed.sheet = if (ed.sheet == 2) 0 else 2
+                            }) { c -> T("A", 21f, 900, c) }
                         }
-                        Tbn({ Ic("mark", it) }, K.M in fl && !noI, !noI) { ed.sub = 0; ed.toggleFmt(K.M) }
+                        Spacer(Modifier.width(8.dp))
+                        Row(
+                            Modifier.weight(1f).fillMaxHeight().horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            XGroup(i = 1) {
+                                XBtn(on = K.B in fl && !noB, enabled = !noB, onClick = { ed.sub = 0; ed.toggleFmt(K.B) }) { Ic("b", it) }
+                                XBtn(on = K.I in fl && !noI, enabled = !noI, onClick = { ed.sub = 0; ed.toggleFmt(K.I) }) { Ic("i", it) }
+                                XBtn(on = K.U in fl && !noI, enabled = !noI, onClick = { ed.sub = 0; ed.toggleFmt(K.U) }) { Ic("u", it) }
+                                // stabilo coretan (alat Stabilo di mode coret)
+                                XBtn(on = ed.ink.on && ed.ink.tool == 1, onClick = {
+                                    ed.sub = 0
+                                    val ik = ed.ink
+                                    if (!ik.on) ik.toggle(ed)
+                                    ik.hide = false
+                                    ik.tool = 1; ik.pop = false; ik.sel = emptySet(); ik.box = null
+                                    ik.stamp = System.currentTimeMillis()
+                                }) { InkToolIcon(1, it) }
+                            }
+                            XGroup(i = 2) {
+                                XBtn(on = ed.recActive, enabled = !ed.recActive && !selMode, onClick = {
+                                    ed.sub = 0
+                                    act.requestMic {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        ed.startVoice()
+                                    }
+                                }) { Ic("mic", it) }
+                                DropBtn(isLi, ed.sub == 2, !convOff, onClick = { ed.sub = if (ed.sub == 2) 0 else 2 }) { Ic("ul", it) }
+                            }
+                            // tabel, kutipan, kode, garis, foto: letaknya diatur langsung dengan seret, jadi tombol perataan tidak ada
+                            val ta = blk?.ta ?: ""
+                            XGroup(i = 3) {
+                                if (!cell && ty != "code" && ty != "q" && ty != "hr" && ty != "tbl" && ty != "img") {
+                                    DropBtn(false, ed.sub == 1, true, onClick = { ed.sub = if (ed.sub == 1) 0 else 1 }) { AlignIcon(ta, it) }
+                                }
+                                XBtn(on = K.M in fl && !noI, enabled = !noI, onClick = { ed.sub = 0; ed.toggleFmt(K.M) }) { Ic("mark", it) }
+                            }
+                        }
                     }
                 }
-            }
             }
         }
     }
 }
 
 // ------------------------------------------------------------------ sheet bawah
+/** Satu ubin di sheet Sisipkan. */
+private class SheetTile(val label: String, val enabled: Boolean, val icon: @Composable (Color) -> Unit, val onClick: () -> Unit)
+
+/** Ubin besar (ramah jempol): squircle tonal, ikon di atas label. Ditekan = sudutnya mengecil jadi lebih kotak dan menyempit membal. */
+@Composable
+private fun SheetTileView(t: SheetTile, i: Int, modifier: Modifier) {
+    val pal = LocalPal.current
+    val haptic = LocalHapticFeedback.current
+    val src = remember { MutableInteractionSource() }
+    val pr by src.collectIsPressedAsState()
+    val r by animateDpAsState(if (pr) 14.dp else 30.dp, M3E.spatialFast(), label = "tr")
+    val sc by animateFloatAsState(if (pr) .93f else 1f, spring(.45f, 700f), label = "ts")
+    Column(
+        modifier.popIn(i, 40L)
+            .graphicsLayer { scaleX = sc; scaleY = sc; alpha = if (t.enabled) 1f else .32f }
+            .height(92.dp).clip(RoundedCornerShape(r.nn())).background(pal.c4)
+            .clickable(interactionSource = src, indication = LocalIndication.current, enabled = t.enabled) {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                t.onClick()
+            },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        t.icon(pal.os)
+        Spacer(Modifier.height(8.dp))
+        T(t.label, 12.5f, 700, pal.os)
+    }
+}
+
 @Composable
 private fun SRow(on: Boolean = false, enabled: Boolean = true, icon: @Composable () -> Unit, label: @Composable () -> Unit, onClick: () -> Unit) {
     val pal = LocalPal.current
+    val src = remember { MutableInteractionSource() }
+    val pr by src.collectIsPressedAsState()
+    val r by animateDpAsState(if (pr) 14.dp else 22.dp, M3E.spatialFast(), label = "srr")
+    val ir by animateDpAsState(if (on) 15.dp else 21.dp, M3E.spatialFast(), label = "sri")
+    val bg by animateColorAsState(if (on) pal.pc.copy(alpha = .6f) else pal.pc.copy(alpha = 0f), M3E.effects(), label = "srb")
+    val ibg by animateColorAsState(if (on) pal.p.copy(alpha = .16f) else pal.c4, M3E.effects(), label = "sribg")
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 1.dp).height(56.dp).clip(RoundedCornerShape(18.dp))
-            .background(if (on) pal.pc.copy(alpha = .6f) else Color.Transparent).alpha(if (enabled) 1f else .35f)
-            .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 10.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 1.dp).height(58.dp)
+            .clip(RoundedCornerShape(r.nn())).background(bg).alpha(if (enabled) 1f else .35f)
+            .clickable(interactionSource = src, indication = LocalIndication.current, enabled = enabled, onClick = onClick)
+            .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(Modifier.size(40.dp).clip(RoundedCornerShape(13.dp)).background(if (on) pal.p.copy(alpha = .16f) else pal.c4), Alignment.Center) { icon() }
+        Box(Modifier.size(42.dp).clip(RoundedCornerShape(ir.nn())).background(ibg), Alignment.Center) { icon() }
         Spacer(Modifier.width(16.dp))
         Box(Modifier.weight(1f)) { label() }
         if (on) Ic("ok", pal.p)
@@ -464,11 +557,13 @@ private fun SRow(on: Boolean = false, enabled: Boolean = true, icon: @Composable
 @Composable
 private fun Stepper(label: String, v: Int, lo: Int, hi: Int, onChange: (Int) -> Unit) {
     val pal = LocalPal.current
-    Row(Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().height(68.dp).padding(horizontal = 22.dp), verticalAlignment = Alignment.CenterVertically) {
         T(label, 17f, 500, pal.os, Modifier.weight(1f))
-        Chip("−", pal.c4, pal.os, CircleShape, 44.dp, 44.dp) { if (v > lo) onChange(v - 1) }
-        Box(Modifier.width(56.dp), Alignment.Center) { T("$v", 20f, 800, pal.os) }
-        Chip("+", pal.c4, pal.os, CircleShape, 44.dp, 44.dp) { if (v < hi) onChange(v + 1) }
+        XGroup {
+            XBtn(enabled = v > lo, onClick = { onChange(v - 1) }) { T("−", 24f, 700, it) }
+            Box(Modifier.width(52.dp), Alignment.Center) { T("$v", 20f, 800, pal.os) }
+            XBtn(enabled = v < hi, onClick = { onChange(v + 1) }) { T("+", 22f, 700, it) }
+        }
     }
 }
 
@@ -568,7 +663,8 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM, holdH: Int = 0) {
         // kotak penuh: tanpa sudut bundar, tanpa pegangan
         Column(
             Modifier.fillMaxWidth().graphicsLayer { translationY = drag.value }
-                .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)).background(pal.c3)
+                .shadow(if (pal.dark) 12.dp else 8.dp, RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp))
+                .clip(RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp)).background(pal.c3)
                 .then(if (fixed) Modifier.height(holdDp) else Modifier)
                 .windowInsetsPadding(WindowInsets.navigationBars)
         ) {
@@ -596,54 +692,41 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM, holdH: Int = 0) {
                 },
                 Alignment.Center
             ) {
-                Box(Modifier.padding(top = 4.dp).size(width = 36.dp, height = 4.dp).clip(CircleShape).background(pal.osv.copy(alpha = .38f)))
+                Box(Modifier.padding(top = 4.dp).size(width = 40.dp, height = 5.dp).clip(CircleShape).background(pal.osv.copy(alpha = .38f)))
             }
             val page = if (shown == 2) 2 else if (ed.sheetPage == 1) 1 else 0     // 0 Sisipkan, 1 Tabel, 2 Format
-            AnimatedContent(
-                targetState = page,
-                transitionSpec = {
-                    // Insert -> Table maju (masuk dari kanan), Table -> Insert mundur (masuk dari kiri); Format: fade-through
-                    if (initialState == 2 || targetState == 2) fadeIn(tween(200, 60, Emph)).togetherWith(fadeOut(tween(100)))
-                    else if (targetState > initialState)
-                        (fadeIn(tween(230, 80, Emph)) + slideInHorizontally(tween(340, easing = Emph)) { it / 5 })
-                            .togetherWith(fadeOut(tween(90)) + slideOutHorizontally(tween(260, easing = Emph)) { -it / 6 })
-                    else
-                        (fadeIn(tween(230, 80, Emph)) + slideInHorizontally(tween(340, easing = Emph)) { -it / 5 })
-                            .togetherWith(fadeOut(tween(90)) + slideOutHorizontally(tween(260, easing = Emph)) { it / 6 })
-                },
-                label = "sheetpage"
-            ) { pg ->
+            // pergantian halaman: wadah mengalir ke tinggi halaman baru, isi lama menciut, isi baru melompat masuk (tanpa fade)
+            MorphSwap(page, clip = true, label = "sheetpage") { pg ->
                 Column(Modifier.fillMaxWidth()) {
-                    Row(Modifier.fillMaxWidth().padding(start = if (pg == 1) 6.dp else 22.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        if (pg == 1) IconBtn("chl", pal.os, { ed.sheetPage = 0 })
-                        T(if (pg == 2) "Format" else if (pg == 1) "Table" else "Insert", 20f, 800, pal.os, Modifier.weight(1f).padding(vertical = 12.dp))
-                        IconBtn("x", pal.os, { ed.sheet = 0 })
+                    Row(
+                        Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 2.dp, bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (pg == 1) { XBtn(rest = pal.c4, i = 0, onClick = { ed.sheetPage = 0 }) { Ic("chl", it) }; Spacer(Modifier.width(10.dp)) }
+                        else Spacer(Modifier.width(12.dp))
+                        T(if (pg == 2) "Format" else if (pg == 1) "Table" else "Insert", 22f, 800, pal.os, Modifier.weight(1f))
+                        XBtn(rest = pal.c4, onClick = { ed.sheet = 0 }) { Ic("x", it) }
                     }
-                    Box(Modifier.fillMaxWidth().height(1.dp).background(pal.ol.copy(alpha = .35f)))
                     // tinggi dibatasi dan bisa digulir: daftar boleh bertambah tanpa membuat sheet memanjang
                     Column(Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState())) {
                         when (pg) {
                             0 -> {
-                                SRow(enabled = !blkOff, icon = { Ic("img", pal.os) }, label = { T("Image", 17f, 500, pal.os) }) {
-                                    ed.sheet = 0; act.pickImages()
-                                }
-                                SRow(enabled = !blkOff, icon = { Ic("cam", pal.os) }, label = { T("Camera", 17f, 500, pal.os) }) {
-                                    ed.sheet = 0; act.takePhoto(false)
-                                }
-                                SRow(enabled = !blkOff, icon = { Ic("table", pal.os) }, label = { T("Table", 17f, 500, pal.os) }) {
-                                    ed.sheetPage = 1                       // geser ke pengaturan baris dan kolom
-                                }
-                                SRow(icon = { InkToolIcon(4, pal.os) }, label = { T("Drawing", 17f, 500, pal.os) }) {
-                                    ed.sheet = 0; ed.ink.toggle(ed)
-                                }
-                                SRow(enabled = !convOff, icon = { Ic("quote", pal.os) }, label = { T("Quote", 17f, 500, pal.os) }) {
-                                    ed.sheet = 0; if (ed.focus != null) ed.pickQuote = true
-                                }
-                                SRow(enabled = !convOff, icon = { Ic("pre", pal.os) }, label = { T("Code", 17f, 500, pal.os) }) {
-                                    ed.sheet = 0; ed.setCode()
-                                }
-                                SRow(enabled = !blkOff, icon = { Ic("hr", pal.os) }, label = { T("Divider", 17f, 500, pal.os) }) {
-                                    ed.sheet = 0; ed.insHr()
+                                val tiles = listOf(
+                                    SheetTile("Image", !blkOff, { Ic("img", it) }) { ed.sheet = 0; act.pickImages() },
+                                    SheetTile("Camera", !blkOff, { Ic("cam", it) }) { ed.sheet = 0; act.takePhoto(false) },
+                                    SheetTile("Table", !blkOff, { Ic("table", it) }) { ed.sheetPage = 1 },     // geser ke pengaturan baris dan kolom
+                                    SheetTile("Drawing", true, { InkToolIcon(4, it) }) { ed.sheet = 0; ed.ink.toggle(ed) },
+                                    SheetTile("Quote", !convOff, { Ic("quote", it) }) { ed.sheet = 0; if (ed.focus != null) ed.pickQuote = true },
+                                    SheetTile("Code", !convOff, { Ic("pre", it) }) { ed.sheet = 0; ed.setCode() },
+                                    SheetTile("Divider", !blkOff, { Ic("hr", it) }) { ed.sheet = 0; ed.insHr() }
+                                )
+                                Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    tiles.chunked(4).forEachIndexed { r, row ->
+                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                            row.forEachIndexed { c, t -> SheetTileView(t, r * 4 + c, Modifier.weight(1f)) }
+                                            repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                                        }
+                                    }
                                 }
                             }
                             1 -> {
@@ -658,7 +741,7 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM, holdH: Int = 0) {
                                     }
                                 }
                                 Box(Modifier.fillMaxWidth().padding(vertical = 10.dp), Alignment.Center) {
-                                    Chip("Insert table", pal.p, pal.op, RoundedCornerShape(26.dp), 52.dp, 220.dp) {
+                                    Chip("Insert table", pal.p, pal.op, RoundedCornerShape(28.dp), 56.dp, 240.dp) {
                                         ed.sheet = 0; ed.insTable(ed.tbR, ed.tbC)
                                     }
                                 }
@@ -672,7 +755,7 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM, holdH: Int = 0) {
                                     }
                                     BigSlider(vm.noteFs(ed.noteId).toFloat(), 14f, 30f) { v -> vm.upd(ed.noteId) { it.copy(fs = v.toInt()) } }
                                 }
-                                Box(Modifier.fillMaxWidth().height(1.dp).padding(horizontal = 22.dp).background(pal.ol.copy(alpha = .35f)))
+                                Spacer(Modifier.height(8.dp))
                                 SRow(on = ty == "p", enabled = !convOff, icon = { T("T", 20f, 700, pal.os) }, label = { T("Plain text", 17f, 500, pal.os) }) {
                                     ed.setPlain()
                                 }
@@ -691,7 +774,7 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM, holdH: Int = 0) {
                                 // ---- inden paragraf: satu ketukan = satu inden, ketuk lagi = lepas ----
                                 val indLR = !blkOff && blk != null && (ty == "p" || ty == "h" || ty == "li" || ty == "q")
                                 val indSp = !blkOff && blk != null && (ty == "p" || ty == "h" || ty == "li")
-                                Box(Modifier.fillMaxWidth().height(1.dp).padding(horizontal = 22.dp).background(pal.ol.copy(alpha = .35f)))
+                                Spacer(Modifier.height(8.dp))
                                 T("Indent", 15f, 800, pal.p, Modifier.padding(start = 22.dp, top = 12.dp, bottom = 2.dp))
                                 val il = blk?.il ?: 0
                                 val ir = blk?.ir ?: 0
