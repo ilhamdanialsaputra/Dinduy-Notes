@@ -2697,7 +2697,8 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     // persis menimpa sampul kartu. Dulu seluruh isi (termasuk sampul) memudar sambil bayangan kartu juga memudar, dan dua lapisan
     // setengah-transparan yang identik itu bertumpuk menjadi ~75% sehingga sampul tampak pucat sesaat = "kedip".
     Box(Modifier.fillMaxSize()) {
-    Box(Modifier.fillMaxSize().graphicsLayer { alpha = noteFade(vm) }.background(pal.s))
+    // latar: alpha digambar langsung (tanpa layer offscreen layar penuh yang dibuat ulang tiap frame morph)
+    Box(Modifier.fillMaxSize().drawBehind { drawRect(pal.s, alpha = noteFade(vm)) })
     if (coverNote != null) EditorCover(vm, coverNote) { scroll.value }
     Box(Modifier.fillMaxSize().graphicsLayer { alpha = noteFade(vm) }) {
     Column(Modifier.fillMaxSize()) {
