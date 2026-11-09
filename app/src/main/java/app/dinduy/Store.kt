@@ -67,8 +67,12 @@ class Morph(
     val r4: FloatArray? = null,  // radius 4 sudut (kiri-atas, kanan-atas, kanan-bawah, kiri-bawah) dalam px
     val ghost: Ghost? = null,    // gaya teks kartu, supaya teks kartu bisa pudar-silang dengan isi catatan saat morph
     val up: Boolean = false,     // true = kartu "Tambah catatan" dari bawah layar (skala isi mengikuti tinggi, bukan lebar)
-    val card: Boolean = false    // true = asalnya kartu catatan / tombol Baru (wadah + isi mengecil ke dalamnya); false = kartu "Tambah catatan" atau posisi tengah
+    val card: Boolean = false,   // true = asalnya kartu catatan / tombol Baru (wadah + isi mengecil ke dalamnya); false = kartu "Tambah catatan" atau posisi tengah
+    val fabg: FabGhost? = null   // tidak null = asalnya tombol Baru: wadah ikut menggambar ikon + / label supaya morph-nya utuh (tombol asli disembunyikan)
 )
+
+/** Tampilan isi tombol Baru yang digambar di dalam wadah morph: ikon + (dan label "New" bila tombol sedang melebar). */
+class FabGhost(val label: Boolean, val fg: Color)
 
 class Ghost(
     val kind: String, val c2: Boolean, val fg: Color,
@@ -281,6 +285,9 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         saveJob?.cancel()
         saveJob = viewModelScope.launch {
             delay(200)
+            // pekerjaan simpan (alarm, encode JSON) jangan jatuh di tengah animasi buka/tutup catatan: tunggu sampai tenang (maks ~2 dtk)
+            var guard = 0
+            while ((openP.isRunning || FabFx.drag) && guard++ < 40) delay(50)
             syncReminders()
             val db = Db(pr, docs.toList(), labels.toList())
             withContext(Dispatchers.IO) { write(db) }
