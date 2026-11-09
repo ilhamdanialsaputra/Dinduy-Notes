@@ -1785,33 +1785,44 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         sLx.snap(0f); sLy.snap(0f); sSc.snap(1f); sRt.snap(0f)
         liftSX = 0f; liftSY = 0f; liftSc = 1f; liftRot = 0f
         mvX0 = if (b.im.size > 1) 0f else mvBox(mv!!, b, null, curAl(b))[0]
-        sY.snap(p[0]); sH.snap(p[1]); sX.snap(0f); sW.snap(widthDp * dens); sO.snap(0f); sF.snap(0f)
-        gOn = 0f; gPulse = 0f; gAdj = false; edgeRaw = 0f; edgeV = 0f
+        // Bingkai tujuan sudah ada sejak objek diangkat, persis di bawah objek (bentuk & letaknya sama), jadi tidak perlu muncul pelan:
+        // ia tersingkap sendiri saat objek digeser menjauh.
+        val b0 = if (b.im.size > 1) null else mvBox(mv!!, b, p, curAl(b))
+        sY.snap(p[0]); sF.snap(0f)
+        if (b0 != null) { sH.snap(b0[2]); sX.snap(b0[0]); sW.snap(b0[1]); sO.snap(1f); gy = p[0]; gHt = b0[2]; gx = b0[0]; gw = b0[1] }
+        else { sH.snap(p[1]); sX.snap(0f); sW.snap(widthDp * dens); sO.snap(0f) }
+        gOn = if (b0 != null) 1f else 0f; gPulse = 0f; gAdj = false; edgeRaw = 0f; edgeV = 0f
         flipP = 0f; flipId = ""; flipFrom.clear(); landId = ""; landA = 0f
         animReflow = !mvInk
         fxStart()
         buzz?.invoke()
         autoJob?.cancel()
         autoJob = scope.launch {
+            var last = 0L
             while (mv != null) {
+                // selaras dengan frame layar (bukan delay tetap) dan memakai waktu nyata: kecepatan gulir sama di layar 60 / 90 / 120 Hz
+                val t = androidx.compose.runtime.withFrameNanos { it }
+                val dt = if (last == 0L) .016f else ((t - last) / 1_000_000_000f).coerceIn(.001f, .05f)
+                last = t
                 val m = mv
                 val sc = scroll
                 edgeRaw = 0f
                 if (m != null && sc != null && mvDir != 0 && viewH > 0f) {
                     val cy = mvRef(m) - sc.value
                     val z = viewH * .2f
-                    val v = when {
+                    val lin = when {
                         mvDir < 0 && cy < z -> -(z - cy) / z
                         mvDir > 0 && cy > viewH - z -> (cy - (viewH - z)) / z
                         else -> 0f
-                    }
-                    edgeRaw = v.coerceIn(-1f, 1f)
+                    }.coerceIn(-1f, 1f)
+                    edgeRaw = lin
+                    // kurva kuadrat: di awal zona merambat pelan (mudah berhenti tepat di tempat), makin ke tepi makin cepat
+                    val v = lin * kotlin.math.abs(lin)
                     if (v != 0f) {
-                        val got = sc.scrollBy(v.coerceIn(-1f, 1f) * 16f * dens)
+                        val got = sc.scrollBy(v * 960f * dens * dt)
                         if (got != 0f) { mvY += got; mvRecalc() }
                     }
                 }
-                delay(16)
             }
         }
     }
@@ -1854,6 +1865,18 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         }
     }
 
+    /** Letak terdekat ("l" / "c" / "r") untuk objek yang tepi kirinya di [left] px, dengan ruang geser [slack] px. Pindah letak baru bila lebih dekat dari letak [cur] sejauh lebih dari [hy] (anti-gelisah). */
+    private fun pickAl(left: Float, slack: Float, cur: String, hy: Float): String {
+        fun ax(s: String): Float = when (s) { "l" -> 0f; "r" -> slack; else -> slack / 2f }
+        var best = cur
+        var bd = kotlin.math.abs(left - ax(cur)) - hy
+        for (s in arrayOf("l", "c", "r")) {
+            val d = kotlin.math.abs(left - ax(s))
+            if (d < bd) { best = s; bd = d }
+        }
+        return best
+    }
+
     private fun mvRecalc() {
         val m = mv ?: return
         val sl = src()
@@ -1876,26 +1899,16 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val nd = if (mergeT != null || gap == i || gap == i + 1) -1 else gap
         if (nd != dropAt) { dropAt = nd; if (nd >= 0) buzz?.invoke() }
         val b = sl[i]
-        if (b.isBox || b.ty == "tbl") {
+        if (b.isBox || b.ty == "tbl" || b.im.size == 1) {
+            // Letak dipilih dari posisi tepi kiri objek yang SEBENARNYA dibanding tiga posisi yang mungkin (kiri / tengah / kanan).
+            // Objek yang baru diangkat tidak pindah letak sebelum jari menggesernya ke samping (dulu objek lebar yang rata kiri/kanan
+            // langsung "melompat" ke tengah karena dibagi tiga bagian halaman), dan bingkai tujuan = posisi terdekat dari objek.
             val w = widthDp * dens
-            val wp = if (b.ty == "tbl") (tblWidths(b, widthDp).sum() + 3f) * dens else w * b.bw.coerceIn(.2f, 1f)
-            val base = when (b.alOf()) { "l" -> wp / 2f; "r" -> w - wp / 2f; else -> w / 2f }
-            val cx = base + mvX
-            // selebar catatan: tidak ada ruang geser ke samping, jadi hanya pindah urutan; letak dan lebar tidak berubah.
-            // Yang lebih sempit: letak mengikuti tempat dilepas (sepertiga kiri / tengah / kanan), lebar tidak berubah.
-            val al = if (wp >= w * .98f) b.alOf()
-            else if (cx < w / 3f) "l" else if (cx > w * 2f / 3f) "r" else "c"
-            if (al != mvAl) { mvAl = al; buzz?.invoke() }
-        }
-        if (b.im.size == 1) {
-            val w = widthDp * dens
-            val mi = b.im[0]
-            val wp = w * mi.w.coerceIn(.2f, 1f)
-            val base = when (mi.al) { "l" -> wp / 2f; "r" -> w - wp / 2f; else -> w / 2f }
-            val cx = base + mvX
-            // selebar catatan: hanya pindah urutan, letak tidak berubah; yang lebih sempit: letak mengikuti tempat dilepas
-            val al = if (wp >= w * .98f) mi.al else if (cx < w / 3f) "l" else if (cx > w * 2f / 3f) "r" else "c"
-            if (al != mvAl) { mvAl = al; buzz?.invoke() }
+            val wp = mvBox(m, b, null, curAl(b))[1]
+            if (wp < w * .98f) {
+                val al = pickAl(mvX0 + mvX, w - wp, mvAl, 10f * dens)
+                if (al != mvAl) { mvAl = al; buzz?.invoke() }
+            }
         }
         pvWantSet()
     }
