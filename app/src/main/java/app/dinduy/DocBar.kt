@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.graphics.drawscope.Stroke
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -56,6 +57,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.Constraints
@@ -646,6 +648,8 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM, sheetPxOf: () -> Int, kbNow: () ->
     val scope = rememberCoroutineScope()
     val drag = remember { Animatable(0f) }
     val dens = androidx.compose.ui.platform.LocalDensity.current.density
+    val imeIn = WindowInsets.ime
+    val dn = androidx.compose.ui.platform.LocalDensity.current
     val closeSheet by rememberUpdatedState({ ed.closeSheet() })
     LaunchedEffect(ed.sheet) {
         if (ed.sheet != 0) drag.snapTo(0f) else { delay(420); if (ed.sheet == 0) drag.snapTo(0f) }
@@ -672,6 +676,10 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM, sheetPxOf: () -> Int, kbNow: () ->
             px[0] = sheetPxOf(); fromKb[0] = kbNow()
         }
         ed.sheetFromKb = fromKb[0]
+        // Pesanan ruang dipasang SINKRON di komposisi yang sama dengan terbukanya sheet (dulu baru di LaunchedEffect, satu frame
+        // atau lebih kemudian). Selama celah itu keyboard sudah mulai turun, area catatan sempat membesar lalu ditarik lagi =
+        // toolbar dan layar kedut.
+        if (fromKb[0]) ed.sheetReserve = px[0].toFloat()
     }
     LaunchedEffect(open) {
         if (open) {
@@ -686,7 +694,15 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM, sheetPxOf: () -> Int, kbNow: () ->
             ed.kbBack = false
             if (keep) ed.kbShow?.invoke()                // keyboard naik menggantikan sheet; area catatan tidak bergerak
             prog.animateTo(0f, tween(230, easing = EmphAccel)) { if (!keep) ed.sheetReserve = value * total }
-            if (keep) delay(260)
+            // Pesanan ruang baru dilepas setelah keyboard BENAR-BENAR kembali setinggi semula. Dulu memakai delay(260) tetap: bila
+            // keyboard lambat muncul (sering, apalagi setelah disembunyikan), pesanan dilepas lebih dulu, area catatan turun,
+            // lalu naik lagi saat keyboard tiba = toolbar kedut. Batas waktu supaya tidak menggantung bila keyboard tak muncul.
+            if (keep) {
+                val need = (total * .9f).toInt()
+                kotlinx.coroutines.withTimeoutOrNull(1000L) {
+                    androidx.compose.runtime.snapshotFlow { imeIn.getBottom(dn) }.first { it >= need }
+                }
+            }
             ed.sheetReserve = 0f
             alive = false
         }
