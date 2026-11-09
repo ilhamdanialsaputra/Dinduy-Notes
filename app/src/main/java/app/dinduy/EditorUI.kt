@@ -49,6 +49,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.runtime.DisposableEffect
@@ -1602,6 +1603,43 @@ fun floatPlans(ed: Ed, dm: Dm): Map<String, FloatPlan> {
     return out ?: emptyMap()
 }
 
+/**
+ * Crossfade teks saat pembungkusannya berubah (ukuran kotaknya berubah di jendela animasi): isi lama dibekukan di satu layer rekaman dan
+ * memudar keluar, isi baru memudar masuk di layer lain; digambar bersama geseran/luncuran induknya. Layer dibagi per id blok lewat Ed,
+ * jadi tetap menyambung walau blok berpindah antara slot biasa dan kelompok pembungkus objek. Di luar jendela animasi: gambar langsung.
+ */
+private fun Modifier.reflowFade(ed: Ed, id: String): Modifier = this.drawWithContent {
+    val r = if (ed.recOn) ed.rf(id) else null
+    if (r == null) {
+        drawContent()
+    } else {
+        val xf = ed.xfP
+        val w = size.width
+        val h = size.height
+        if (!r.fading) {
+            if (r.w != 0f && (r.w != w || r.h != h) && xf < 1f) r.fading = true
+            else {
+                r.oldL.record { this@drawWithContent.drawContent() }
+                r.w = w; r.h = h
+            }
+        }
+        if (r.fading) {
+            if (xf >= 1f) {
+                r.fading = false; r.w = 0f
+                drawContent()
+            } else {
+                r.newL.record { this@drawWithContent.drawContent() }
+                r.oldL.alpha = 1f - xf
+                r.newL.alpha = xf
+                drawLayer(r.oldL)
+                drawLayer(r.newL)
+            }
+        } else {
+            drawLayer(r.oldL)
+        }
+    }
+}
+
 /** Layer objek yang diseret / baru dilepas: terangkat mengikuti jari, lalu meluncur ke lubangnya (teks di sampingnya tetap di tempat). */
 private fun androidx.compose.ui.graphics.GraphicsLayerScope.liftLayer(ed: Ed, id: String, lifted: Boolean, slideDp: Float) {
     if (lifted) {
@@ -1690,6 +1728,7 @@ private fun FloatPart(ed: Ed, vm: AppVM, headId: String, x: Blk, sp: FSpec, od: 
                     drawContext.canvas.restore()
                 } else drawContent()
             }
+            .reflowFade(ed, x.id)
     ) { BlockView(ed, vm, x, od[x.id] ?: 1, dm, sp.fold, sp.mk) }
 }
 
@@ -2347,6 +2386,7 @@ private fun BlockSlot(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan?, ordN: Int, od
                 }
                 drawContext.canvas.restore()
             }
+            .then(if (plan == null && (b.ty == "p" || b.ty == "li" || b.ty == "h")) Modifier.reflowFade(ed, b.id) else Modifier)
     ) {
         if (live) {
             val blks = plan?.parts?.map { it.first }?.let { listOf(b) + it } ?: listOf(b)
@@ -2604,6 +2644,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                 ) {
                     DropGhost(ed)
                     Column(Modifier.fillMaxWidth()) {
+                        ed.gctx = androidx.compose.ui.platform.LocalGraphicsContext.current
                         val firstText = { ed.blocks.firstOrNull { it.isText }?.let { ed.focusAt(it.id, 0) } }
                         // lencana label di atas judul; ketuk untuk membuka halaman label
                         val headNote = vm.note(ed.noteId)
