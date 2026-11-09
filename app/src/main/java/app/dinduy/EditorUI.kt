@@ -2806,7 +2806,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                     }
                     InkLayers(ed, vm, scroll)
                     if (ed.selOn) SelHandles(ed)
-                    SelBubble(ed, vm, act, scroll.value)   // selalu ada di komposisi supaya bisa animasi keluar
+                    SelBubble(ed, vm, act) { scroll.value }   // selalu ada di komposisi supaya bisa animasi keluar; scroll dibaca lewat lambda (fase layout)
                 }
                 // kartu suara + transkrip: selalu di bawah isi catatan (editor dan mode baca), di luar area seleksi teks
                 if (hasAu) {
@@ -2886,7 +2886,7 @@ fun SelBtn(enabled: Boolean, first: Boolean, last: Boolean, tone: Int, onClick: 
  * masuk/keluar dengan melebar-menyempit.
  */
 @Composable
-fun SelBubble(ed: Ed, vm: AppVM, act: Actions, scrollY: Int) {
+fun SelBubble(ed: Ed, vm: AppVM, act: Actions, scrollY: () -> Int) {
     val pal = LocalPal.current
     val dn = LocalDensity.current
     @Suppress("DEPRECATION")
@@ -2917,38 +2917,54 @@ fun SelBubble(ed: Ed, vm: AppVM, act: Actions, scrollY: Int) {
     val r1 = span?.let { ed.ptRect(it.second) }
     val live = ed.selOn && !ed.selDrag && span != null && r0 != null && r1 != null
     val measured = bs != IntSize.Zero
-    var x = hold.x
-    var y = hold.y
-    var mode = hold.mode
-    var has = hold.has
-    var edit = hold.edit
-    if (live && span != null && r0 != null && r1 != null) {
-        has = span.first != span.second
-        edit = ed.selEdit
+    // Posisi dihitung dari nilai scroll TERBARU. Fungsi ini dipanggil di fase layout (lambda offset di bawah), bukan di komposisi:
+    // sebelumnya scroll dibaca saat komposisi, jadi tiap scroll cepat posisi bubble selalu telat satu frame dari isi
+    // (bubble di ruang konten, harus digeser mengikuti scroll) dan terlihat bergetar / berkedip.
+    // Hasil: (x, y, mode). Mode punya histeresis: kalau sisi lama (atas / bawah) masih muat, tetap di situ, supaya tidak bolak-balik di ambang.
+    val calc: (Int) -> Triple<Float, Float, Int> = calc@{ s ->
+        if (r0 == null || r1 == null) return@calc Triple(hold.x, hold.y, hold.mode)
         val gap = with(dn) { 10.dp.toPx() }
-        // bubble selalu diusahakan tampil di area layar yang terlihat (di luar kapsul alat), mengikuti scroll
         val m = with(dn) { 8.dp.toPx() }
-        val visTop = scrollY + m
-        val visBot = scrollY + ed.viewH - (if (ed.barOn) ed.barH + with(dn) { 10.dp.toPx() } else 0f) - m
+        val visTop = s + m
+        val visBot = s + ed.viewH - (if (ed.barOn) ed.barH + with(dn) { 10.dp.toPx() } else 0f) - m
         val belowGap = with(dn) { 52.dp.toPx() }
         val aboveY = r0.top - bs.height - gap
         val belowY = r1.bottom + belowGap
         val canAbove = aboveY >= visTop && r0.top < visBot
         val canBelow = belowY + bs.height <= visBot && r1.bottom > visTop
-        val pinned = !canAbove && !canBelow
-        val yRaw = when {
-            canAbove -> aboveY
-            canBelow -> belowY
+        val md = when {
+            hold.mode == 0 && canAbove -> 0
+            hold.mode == 1 && canBelow -> 1
+            canAbove -> 0
+            canBelow -> 1
+            else -> 2
+        }
+        val yRaw = when (md) {
+            0 -> aboveY
+            1 -> belowY
             else -> visTop + (visBot - visTop - bs.height).coerceAtLeast(0f) * .35f   // seleksi menutupi layar: tempel di area terlihat
         }
-        y = yRaw.coerceIn(visTop, maxOf(visTop, visBot - bs.height))
+        val yy = yRaw.coerceIn(visTop, maxOf(visTop, visBot - bs.height))
         val maxX = ed.widthDp * dn.density
-        val cx = if (pinned) maxX / 2f else (r0.left + r1.left) / 2f
-        x = (cx - bs.width / 2f).coerceIn(0f, (maxX - bs.width).coerceAtLeast(0f))
-        mode = if (canAbove) 0 else if (canBelow) 1 else 2
+        val cx = if (md == 2) maxX / 2f else (r0.left + r1.left) / 2f
+        val xx = (cx - bs.width / 2f).coerceIn(0f, (maxX - bs.width).coerceAtLeast(0f))
+        Triple(xx, yy, md)
+    }
+    val calcNow by rememberUpdatedState(calc)
+    // hanya mode yang ikut komposisi (berubah jarang); x / y mengikuti scroll di fase layout tanpa recompose
+    val modeNow by remember { androidx.compose.runtime.derivedStateOf { calcNow(scrollY()).third } }
+    var has = hold.has
+    var edit = hold.edit
+    var mode = hold.mode
+    if (live && span != null && r0 != null && r1 != null) {
+        has = span.first != span.second
+        edit = ed.selEdit
+        mode = modeNow
         // pindah atas <-> bawah: geser mulus dari posisi lama, bukan melompat
-        val sx = if (measured && vis.value > .5f && hold.mode != -1 && hold.mode != mode) hold.x - x else 0f
-        val sy = if (measured && vis.value > .5f && hold.mode != -1 && hold.mode != mode) hold.y - y else 0f
+        val moved = measured && vis.value > .5f && hold.mode != -1 && hold.mode != mode
+        val tgt = if (moved) calc(androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { scrollY() }) else null
+        val sx = if (tgt != null) hold.x - tgt.first else 0f
+        val sy = if (tgt != null) hold.y - tgt.second else 0f
         LaunchedEffect(mode) {
             if (sx != 0f || sy != 0f) {
                 corrX.snapTo(sx); corrY.snapTo(sy)
@@ -2956,13 +2972,13 @@ fun SelBubble(ed: Ed, vm: AppVM, act: Actions, scrollY: Int) {
                 corrY.animateTo(0f, spring(.78f, 420f))
             }
         }
-        val fx = x; val fy = y; val fm = mode; val fh = has; val fe = edit
-        SideEffect { hold.x = fx; hold.y = fy; hold.mode = fm; hold.has = fh; hold.edit = fe }
+        val fm = mode; val fh = has; val fe = edit
+        SideEffect { hold.mode = fm; hold.has = fh; hold.edit = fe }
     }
     // muncul hanya setelah ukuran terukur (tidak ada frame di posisi salah = tidak berkedip); hilang pakai spring tanpa pantulan
     LaunchedEffect(live && measured) {
         if (live && measured) vis.animateTo(1f, spring(.62f, 520f))
-        else if (!live) vis.animateTo(0f, spring(1f, 800f))
+        else if (!live) { vis.animateTo(0f, spring(1f, 800f)); hold.mode = -1 }
     }
     if (!live && vis.value <= .001f) return
     val m0 = mode
@@ -2971,7 +2987,11 @@ fun SelBubble(ed: Ed, vm: AppVM, act: Actions, scrollY: Int) {
     val fi = flags.indexOfFirst { it }
     val li = flags.indexOfLast { it }
     Row(
-        Modifier.offset { IntOffset((x + corrX.value).roundToInt(), (y + corrY.value).roundToInt()) }
+        Modifier.offset {
+            // live: hitung dari scroll terbaru di fase layout; tidak live (animasi keluar): diam di posisi terakhir
+            if (live) { val (px, py, _) = calc(scrollY()); hold.x = px; hold.y = py }
+            IntOffset((hold.x + corrX.value).roundToInt(), (hold.y + corrY.value).roundToInt())
+        }
             .graphicsLayer {
                 val v = vis.value
                 // membesar dari sisi yang menghadap seleksi dengan pantulan; alpha hanya menutup frame awal, bukan efek pudar
