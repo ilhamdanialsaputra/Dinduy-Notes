@@ -1940,17 +1940,16 @@ private fun BoxBody(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier, sel: B
     }
 }
 
-/** Pemisah tipis antar kelompok tombol di dalam kapsul. */
+/** Titik pemisah kecil (bukan garis) antar kelompok tombol di kapsul lama. */
 @Composable
 fun CapDiv() {
     val pal = LocalPal.current
-    Box(Modifier.padding(horizontal = 3.dp).width(2.dp).height(22.dp).clip(CircleShape).background(pal.ol.copy(alpha = .45f)))
+    Box(Modifier.padding(horizontal = 5.dp).size(4.dp).clip(CircleShape).background(pal.ol.copy(alpha = .55f)))
 }
 
 /**
- * Wadah kapsul alat objek sisipan (gambar / tabel / kutipan / kode / garis), gaya M3 Expressive: pil penuh melayang di atas bilah,
- * lebarnya mengalir dengan pegas saat isinya berubah. Gerak masuk / keluarnya dikerjakan pemanggil (DocBar) lewat pegas;
- * tombol di dalamnya memantul masuk berurutan (lihat [CapBtn]).
+ * Wadah kapsul lama (dipakai EdBar yang tidak lagi tampil). Dock aktif memakai MorphDock di DocBar.kt.
+ * Gayanya sama: pil penuh, bayangan lembut, tanpa garis tepi, lebar mengalir dengan pegas.
  */
 @Composable
 fun CapShell(modifier: Modifier = Modifier, scroll: Boolean = false, content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
@@ -1958,9 +1957,8 @@ fun CapShell(modifier: Modifier = Modifier, scroll: Boolean = false, content: @C
     val cap = RoundedCornerShape(34.dp)
     val ss = rememberScrollState()
     Row(
-        modifier.shadow(if (pal.dark) 8.dp else 5.dp, cap).clip(cap).background(pal.c3)
-            .border(1.dp, pal.ol.copy(alpha = .22f), cap)
-            .animateContentSize(spring(.8f, 420f))
+        modifier.shadow(if (pal.dark) 10.dp else 6.dp, cap).clip(cap).background(pal.c3)
+            .animateContentSize(M3E.spatial())
             .then(if (scroll) Modifier.horizontalScroll(ss) else Modifier)
             .padding(horizontal = 8.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1969,113 +1967,46 @@ fun CapShell(modifier: Modifier = Modifier, scroll: Boolean = false, content: @C
     )
 }
 
-/**
- * Tombol kapsul (area sentuh 48dp, ramah jempol). Memantul masuk berurutan menurut [i]; saat ditekan menyempit lebih dari menipis
- * dan sudutnya membulat penuh, lepas = membal. tone: 0 biasa, 1 bahaya (hapus), 2 utama (selesai).
- */
+/** Tombol kapsul: sekarang hanya pembungkus [XBtn] (M3 Expressive). tone: 0 biasa, 1 bahaya (hapus), 2 utama (selesai). */
 @Composable
 fun CapBtn(
     i: Int, on: Boolean = false, tone: Int = 0, enabled: Boolean = true, wide: Boolean = false,
     onClick: () -> Unit, content: @Composable (Color) -> Unit
 ) {
-    val pal = LocalPal.current
-    val haptic = LocalHapticFeedback.current
-    val src = remember { MutableInteractionSource() }
-    val pr by src.collectIsPressedAsState()
-    val r by animateDpAsState(if (pr) 14.dp else 24.dp, spring(.5f, 700f), label = "cbr")
-    val sx by animateFloatAsState(if (pr) .84f else 1f, spring(.42f, 620f), label = "cbx")
-    val sy by animateFloatAsState(if (pr) .92f else 1f, spring(.42f, 620f), label = "cby")
-    val pop = remember { Animatable(0f) }
-    LaunchedEffect(Unit) { delay(50L + i * 34L); pop.animateTo(1f, spring(.5f, 520f)) }
-    val bgT = when (tone) { 1 -> pal.ec; 2 -> pal.p; else -> if (on) pal.p else pal.p.copy(alpha = 0f) }
-    val fgT = when (tone) { 1 -> pal.oec; 2 -> pal.op; else -> if (on) pal.op else pal.os }
-    val bg by androidx.compose.animation.animateColorAsState(bgT, tween(200, easing = Emph), label = "cbb")
-    val fg by androidx.compose.animation.animateColorAsState(fgT, tween(200, easing = Emph), label = "cbf")
-    Box(
-        Modifier.size(if (wide) 58.dp else 48.dp, 48.dp)
-            .graphicsLayer { val p = pop.value.coerceAtLeast(0f); scaleX = p * sx; scaleY = p * sy; alpha = if (enabled) 1f else .3f }
-            .clip(RoundedCornerShape(r)).background(bg)
-            .clickable(interactionSource = src, indication = LocalIndication.current, enabled = enabled) {
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                onClick()
-            },
-        Alignment.Center
-    ) { content(fg) }
+    XBtn(on = on, enabled = enabled, tone = tone, i = i, w = if (wide) 68.dp else 48.dp, onClick = onClick, content = content)
 }
 
-/**
- * Kelompok pilihan (mis. rata kiri / tengah / kanan): SATU penanda yang meluncur dan melar mengikuti pilihan dengan pegas memantul,
- * bukan tiap tombol berganti warna sendiri. sel = -1: tidak ada yang terpilih.
- */
+/** Kelompok pilihan dengan satu penanda yang meluncur dan melar: pembungkus [SlideSeg]. sel = -1: tidak ada yang terpilih. */
 @Composable
 fun AlignSeg(i0: Int, sel: Int, icons: List<@Composable (Color) -> Unit>, onPick: (Int) -> Unit) {
-    val pal = LocalPal.current
-    val haptic = LocalHapticFeedback.current
-    val cw = 48.dp
-    val chh = 44.dp
-    val x by animateFloatAsState(sel.toFloat(), spring(.58f, 380f), label = "segx")
-    val dist = if (sel < 0) 0f else abs(sel - x).coerceAtMost(1f)
-    val pop = remember { Animatable(0f) }
-    LaunchedEffect(Unit) { delay(50L + i0 * 34L); pop.animateTo(1f, spring(.55f, 480f)) }
-    Box(
-        Modifier.graphicsLayer { val p = pop.value.coerceAtLeast(0f); scaleX = p; scaleY = p }
-            .clip(CircleShape).background(pal.c4).padding(3.dp)
-    ) {
-        if (sel >= 0) Box(
-            Modifier.offset { IntOffset((x * cw.toPx() - cw.toPx() * .38f * dist / 2f).roundToInt(), 0) }
-                .width(cw * (1f + .38f * dist)).height(chh).clip(CircleShape).background(pal.p)
-        )
-        Row {
-            icons.forEachIndexed { k, ic ->
-                val fg by androidx.compose.animation.animateColorAsState(if (sel == k) pal.op else pal.os, tween(180, easing = Emph), label = "segc")
-                Box(
-                    Modifier.size(cw, chh).clip(CircleShape).clickable {
-                        if (sel != k) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onPick(k)
-                    },
-                    Alignment.Center
-                ) { ic(fg) }
-            }
-        }
-    }
+    SlideSeg(count = icons.size, sel = sel, i = i0, onPick = onPick) { k, c -> icons[k](c) }
 }
 
-/** Chip di bilah alat tabel / kutipan: memantul masuk berurutan menurut [i], menyempit membal saat ditekan. */
+/** Chip di bilah alat tabel / kutipan: melompat masuk berurutan menurut [i], menyempit membal saat ditekan. */
 @Composable
-fun CapChip(i: Int, text: String, bg: Color, fg: Color, shape: Shape, h: Dp = 46.dp, minW: Dp = 0.dp, onClick: () -> Unit) {
+fun CapChip(i: Int, text: String, bg: Color, fg: Color, shape: Shape, h: Dp = 48.dp, minW: Dp = 0.dp, onClick: () -> Unit) {
     val haptic = LocalHapticFeedback.current
     val src = remember { MutableInteractionSource() }
     val pr by src.collectIsPressedAsState()
     val sc by animateFloatAsState(if (pr) .9f else 1f, spring(.42f, 620f), label = "ccs")
-    val pop = remember { Animatable(0f) }
-    LaunchedEffect(Unit) { delay(40L + i * 38L); pop.animateTo(1f, spring(.52f, 500f)) }
     Box(
-        Modifier.height(h).widthIn(min = minW)
-            .graphicsLayer { val p = pop.value.coerceAtLeast(0f); scaleX = p * sc; scaleY = p * sc }
+        Modifier.popIn(i, 40L).height(h).widthIn(min = minW)
+            .graphicsLayer { scaleX = sc; scaleY = sc }
             .clip(shape).background(bg)
             .clickable(interactionSource = src, indication = LocalIndication.current) {
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 onClick()
             }
-            .padding(horizontal = 18.dp),
+            .padding(horizontal = 20.dp),
         Alignment.Center
     ) { T(text, 15f, 850, fg, ls = 0f) }
 }
 
-/** Kapsul alat objek sisipan (tabel / kutipan / kode / garis): rata kiri / tengah / kanan, hapus, selesai. */
+/** Kapsul alat objek sisipan versi lama (EdBar). Isinya sama dengan dock aktif: [ObjBarContent]. */
 @Composable
 fun ObjCapsule(ed: Ed, ob: Blk) {
-    val al = ob.alOf()
     Box(Modifier.fillMaxWidth(), Alignment.Center) {
-        CapShell {
-            AlignSeg(
-                0, when (al) { "l" -> 0; "c" -> 1; "r" -> 2; else -> -1 },
-                listOf<@Composable (Color) -> Unit>({ AlignArrow(0, it) }, { AlignArrow(1, it) }, { AlignArrow(2, it) })
-            ) { ed.objAlign(ob.id, when (it) { 0 -> "l"; 1 -> "c"; else -> "r" }) }
-            CapDiv()
-            CapBtn(3, tone = 1, onClick = { ed.objDelete(ob.id) }) { Ic("del", it) }
-            if (ed.selObj != null) CapBtn(4, tone = 2, wide = true, onClick = { ed.selObj = null }) { Ic("ok", it) }
-        }
+        CapShell { ObjBarContent(ed, ob) }
     }
 }
 
@@ -2102,20 +2033,7 @@ fun AlignArrow(kind: Int, c: Color) {
 // ---------- toolbar ----------
 @Composable
 fun Tbn(content: @Composable (Color) -> Unit, on: Boolean, enabled: Boolean, onClick: () -> Unit) {
-    val pal = LocalPal.current
-    val src = remember { MutableInteractionSource() }
-    val pr by src.collectIsPressedAsState()
-    val r by animateDpAsState(if (pr) 14.dp else 23.dp, spring(.6f, 600f), label = "r")
-    val sc by animateFloatAsState(if (pr) .88f else 1f, spring(.5f, 600f), label = "s")
-    // status aktif berpindah dengan pudar warna (bukan kedip): latar dan ikon beranimasi bersama
-    val fg by androidx.compose.animation.animateColorAsState(if (on) pal.op else pal.os, tween(190, easing = Emph), label = "tf")
-    val bgc by androidx.compose.animation.animateColorAsState(if (on) pal.p else pal.p.copy(alpha = 0f), tween(190, easing = Emph), label = "tb")
-    Box(
-        Modifier.size(46.dp).graphicsLayer { scaleX = sc; scaleY = sc; alpha = if (enabled) 1f else .28f }
-            .clip(RoundedCornerShape(r)).background(bgc)
-            .clickable(interactionSource = src, indication = LocalIndication.current, enabled = enabled, onClick = onClick),
-        Alignment.Center
-    ) { content(fg) }
+    XBtn(on = on, enabled = enabled, onClick = onClick, content = content)
 }
 
 @Composable
@@ -2327,7 +2245,7 @@ fun LetterListIcon(c: Color) {
 @Composable
 fun Sep() {
     val pal = LocalPal.current
-    Box(Modifier.padding(horizontal = 4.dp).width(2.dp).height(24.dp).clip(RoundedCornerShape(1.dp)).background(pal.ol))
+    Box(Modifier.padding(horizontal = 6.dp).size(4.dp).clip(CircleShape).background(pal.ol.copy(alpha = .55f)))
 }
 
 // ---------- penunjuk lepas (drop) ----------
@@ -3092,34 +3010,28 @@ fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boole
         androidx.compose.runtime.snapshotFlow { rawBarH }.collectLatest { h -> delay(80); ed.barH = h }
     }
     Box(Modifier.fillMaxSize()) {
-        // kartu rekaman + kapsul alat dalam satu kolom yang diukur bersama (barH), jadi teks / kursor tidak pernah tertutup
-        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().onSizeChanged { rawBarH = it.height.toFloat(); ed.barHLive = rawBarH }) {
+        // kartu rekaman + dock + sheet dalam satu kolom yang diukur bersama (barH), jadi teks / kursor tidak pernah tertutup.
+        // Saat coret aktif dock melayang di atas isi (seperti kapsul Ink dulu), jadi tidak ikut dihitung sebagai tinggi bilah.
+        Column(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().onSizeChanged {
+                val h = if (ed.ink.on) 0f else it.height.toFloat()
+                rawBarH = h; ed.barHLive = h
+            }
+        ) {
             AnimatedVisibility(
                 visible = recOn,
-                enter = fadeIn(tween(220, easing = Emph)) +
-                    scaleIn(spring(.8f, 380f), .86f, TransformOrigin(.9f, 1f)) +
-                    expandVertically(tween(300, easing = Emph)),
-                exit = fadeOut(tween(160)) +
-                    scaleOut(tween(220, easing = Emph), .9f, TransformOrigin(.9f, 1f)) +
-                    shrinkVertically(tween(260, easing = Emph))
+                enter = expandVertically(M3E.spatial()) + scaleIn(M3E.spatial(), .86f, TransformOrigin(.9f, 1f)),
+                exit = shrinkVertically(M3E.spatial()) + scaleOut(M3E.spatial(), .9f, TransformOrigin(.9f, 1f))
             ) {
                 RecordCard(vm)
             }
             DocSheet(ed, act, vm, holdH())
-            // bilah datar: gerak kecil + pudar, karena keyboard sudah ikut bergerak sendiri
-            AnimatedVisibility(
-                visible = showBar && ed.sheet == 0,
-                enter = fadeIn(tween(160, delayMillis = 140)) + expandVertically(tween(280, easing = EmphDecel), expandFrom = Alignment.Top),
-                // sheet membuka => kapsul hilang seketika (tanpa menyusut), supaya tidak ada gerakan ganda di atas sheet
-                exit = if (ed.sheet != 0) androidx.compose.animation.ExitTransition.None
-                else fadeOut(tween(140)) + shrinkVertically(tween(260, easing = Emph), shrinkTowards = Alignment.Top)
-            ) {
-                DocBar(ed, act)
-            }
+            // dock: SATU wadah untuk ketik / gambar / tabel / kutipan / objek / coret. Morph antar toolbar ada di ToolDock (DocBar.kt)
+            ToolDock(ed, vm, act, showBar)
             AnimatedVisibility(
                 visible = titleBarOn,
-                enter = fadeIn(tween(160, delayMillis = 140)) + expandVertically(tween(280, easing = EmphDecel), expandFrom = Alignment.Top),
-                exit = fadeOut(tween(140)) + shrinkVertically(tween(260, easing = Emph), shrinkTowards = Alignment.Top)
+                enter = expandVertically(M3E.spatial(), expandFrom = Alignment.Top) + scaleIn(M3E.spatial(), .9f, TransformOrigin(.5f, 1f)),
+                exit = shrinkVertically(M3E.spatial(), shrinkTowards = Alignment.Top) + scaleOut(M3E.spatial(), .9f, TransformOrigin(.5f, 1f))
             ) {
                 TitleBar(ed, vm)
             }
