@@ -125,6 +125,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.layout
 import eu.wewox.pagecurl.ExperimentalPageCurlApi
 import eu.wewox.pagecurl.config.PageCurlConfig
@@ -543,7 +545,92 @@ private const val HDL_R = 9f
 private const val HDL_GAP = 2f
 
 /** Jari-jari area sentuh gagang (dp), dihitung dari pusat tetesan. */
-private const val HDL_HIT = 40f
+private const val HDL_HIT = 36f
+
+/** Titik kursor terdekat dari posisi [pos] (px, ruang halaman [index] selebar [W]); bila melewati batas halaman (mode gulir) turun / naik ke halaman tetangga. */
+private fun posAtPage(ui: PdfUi, index: Int, W: Float, pos: Offset, dens: Float, miss: (Int) -> Unit = {}): PPos? {
+    var p = index; var y = pos.y
+    if (!ui.paged) {
+        val gap = 6f * dens
+        while (p < ui.doc.count - 1 && y > ui.doc.ratioOf(p) * W) { y -= ui.doc.ratioOf(p) * W + gap; p++ }
+        while (y < 0f && p > 0) { p--; y += ui.doc.ratioOf(p) * W + gap }
+    }
+    val h = (ui.doc.ratioOf(p) * W).coerceAtLeast(1f)
+    val t = ui.txt?.peek(p) ?: run { miss(p); return null }
+    val c = caretAt(t, (pos.x / W).coerceIn(0f, 1f), (y / h).coerceIn(0f, 1f), h / W)
+    return if (c < 0) null else PPos(p, c)
+}
+
+private class HdlHit(val page: Int, val start: Boolean, val coords: LayoutCoordinates, val tip: Offset)
+
+/** Gagang seleksi yang paling dekat dengan [p] (koordinat [host]) dan masih dalam jangkauan sentuh, atau null. */
+private fun hitHandle(ui: PdfUi, host: LayoutCoordinates, p: Offset, dens: Float): HdlHit? {
+    val s = ui.sel ?: return null
+    val rr = HDL_R * dens
+    val gx = HDL_GAP * dens
+    var best: HdlHit? = null
+    var bd = HDL_HIT * dens
+    for ((idx, pc) in ui.pageCoords) {
+        if (!pc.isAttached) continue
+        val t = ui.txt?.peek(idx) ?: continue
+        val g = rangeOn(s, idx, t) ?: continue
+        val w = pc.size.width.toFloat()
+        val h = pc.size.height.toFloat()
+        for (st in booleanArrayOf(true, false)) {
+            if (if (st) s.a.p != idx else s.b.p != idx) continue
+            val o = handleXY(t, g.first, g.second, st, w, h) ?: continue
+            // pusat tetesan di ruang halaman (sama persis dengan yang digambar), lalu ke ruang induk lewat transformasi layar yang sebenarnya
+            val c = Offset(o.x + (if (st) -(rr + gx) else rr + gx), o.y + rr)
+            val d = (host.localPositionOf(pc, c) - p).getDistance()
+            if (d <= bd) { bd = d; best = HdlHit(idx, st, pc, o) }
+        }
+    }
+    return best
+}
+
+/**
+ * Pemegang gagang seleksi, dipasang di induk PALING LUAR (pass Initial): induk selalu melihat sentuhan lebih dulu daripada
+ * pager / daftar gulir / PageCurl / ketukan halaman, jadi begitu jari mendarat di gagang, sentuhan itu langsung dimakan di sini
+ * dan tidak ada gestur lain yang sempat memakainya (tidak menghapus seleksi, tidak menggulir, tidak membalik halaman).
+ * Seleksi diseret di sini juga; mengikuti GERAKAN jari (bukan lokasi jari) sehingga jari tidak menutupi huruf dan seleksi tidak meloncat.
+ */
+private fun Modifier.selHandleTouch(
+    ui: PdfUi, host: () -> LayoutCoordinates?, scope: CoroutineScope, hap: androidx.compose.ui.hapticfeedback.HapticFeedback
+): Modifier = pointerInput(ui) {
+    val dens = density
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        if (ui.sel == null || ui.inkOn || down.type == PointerType.Stylus) return@awaitEachGesture
+        val hc = host()?.takeIf { it.isAttached } ?: return@awaitEachGesture
+        val hit = hitHandle(ui, hc, down.position, dens) ?: return@awaitEachGesture
+        val pc = hit.coords
+        val s0 = ui.sel ?: return@awaitEachGesture
+        val an = if (hit.start) s0.b else s0.a
+        val W = pc.size.width.toFloat().coerceAtLeast(1f)
+        val grab = down.position - hc.localPositionOf(pc, Offset(hit.tip.x, hit.tip.y - 5f * dens))
+        down.consume()
+        ui.drawing = true
+        ui.selGrab = true
+        hap.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        try {
+            while (true) {
+                val ev = awaitPointerEvent(PointerEventPass.Initial)
+                if (ev.changes.count { it.pressed } >= 2) break
+                val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                c.consume()
+                if (c.changedToUp() || !pc.isAttached || !hc.isAttached) break
+                val local = pc.localPositionOf(hc, c.position - grab)
+                val f = posAtPage(ui, hit.page, W, local, dens) { p -> scope.launch { ui.txt?.page(p) } } ?: continue
+                val ns = if (f < an) PSel(f, an) else if (f > an) PSel(an, f) else null
+                val cs = ui.sel
+                if (ns != null && (cs == null || cs.a != ns.a || cs.b != ns.b)) {
+                    hap.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    ui.sel = ns
+                }
+            }
+        } finally { ui.drawing = false; ui.selGrab = false }
+    }
+}
 
 // ---------------------------------------------------------------- coretan di PDF
 
@@ -659,6 +746,7 @@ class PdfUi(val doc: PdfDoc, val ink: PInkState, val fid: String) {
     var hits by mutableStateOf<List<PHit>>(emptyList())
     var cur by mutableIntStateOf(-1)
     var drawing by mutableStateOf(false)
+    val pageCoords = HashMap<Int, LayoutCoordinates>()   // koordinat tiap halaman yang sedang tampil (dipakai pemegang gagang di induk)
     var selGrab by mutableStateOf(false)   // jari sedang memegang gagang seleksi / menyeret seleksi: gestur halaman (pager / curl / ketukan) harus minggir
     var pulse: androidx.compose.runtime.State<Float> = mutableFloatStateOf(.6f)
     var txt: PdfText? = null
@@ -743,7 +831,7 @@ private fun Modifier.curlTouch(
             if (ev.changes.count { it.pressed } >= 2) multi = true
             if (multi) { if (ev.changes.none { it.pressed }) break else continue }   // cubitan ditangani pinch()
             val c = ev.changes.firstOrNull { it.id == down.id } ?: break
-            if (selBusy()) {
+            if (selBusy() || c.isConsumed) {   // dimakan pemegang gagang di induk (atau sedang memegang gagang): bukan ketukan / geseran halaman
                 c.consume()
                 if (c.changedToUp()) break else continue
             }
@@ -820,6 +908,7 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
     val hdlPop = remember { Animatable(0f) }
     LaunchedEffect(sel != null) { if (sel != null) { hdlPop.snapTo(0f); hdlPop.animateTo(1f, spring(.46f, 420f)) } else hdlPop.snapTo(0f) }
     val hdlGrow by animateFloatAsState(if (ui.drawing && sel != null) 1.3f else 1f, spring(.42f, 520f), label = "hdlg")
+    DisposableEffect(index, active) { onDispose { ui.pageCoords.remove(index) } }
     val marks = remember(ui.hits, index) { ui.hits.withIndex().filter { it.value.page == index } }
     var sizePx by remember { mutableStateOf(IntSize.Zero) }
     val paths = remember(strokes, sizePx) {
@@ -834,6 +923,7 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
     Box(
         modifier
             .onSizeChanged { sizePx = it }
+            .onGloballyPositioned { if (active) ui.pageCoords[index] = it }
             .background(if (ui.dark) Color.Black else Color.White)
             .then(if (!active) Modifier else Modifier.pointerInput(ui.inkOn, ui.tool, ui.ts, index) {
                 if (!ui.inkOn) return@pointerInput
@@ -900,35 +990,14 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     if (!PdfBus.hasText) return@awaitEachGesture
+                    if (down.isConsumed) return@awaitEachGesture   // sudah dimakan pemegang gagang di induk (atau penghenti fling)
                     val W = size.width.toFloat().coerceAtLeast(1f)
                     val H = size.height.toFloat().coerceAtLeast(1f)
                     val here = pt
-                    val s0 = ui.sel
                     var anchor: PPos? = null
-                    var grab = Offset.Zero   // jarak jari ke titik teks gagang: seleksi mengikuti GERAKAN jari, bukan lokasi jari (jari tidak menutupi / meloncat)
-                    // 1) sentuh pegangan (handle) awal / akhir yang sudah ada -> geser untuk mengubah seleksi
-                    if (s0 != null && here != null) {
-                        val g = rangeOn(s0, index, here)
-                        if (g != null) {
-                            val hs = if (s0.a.p == index) handleXY(here, g.first, g.second, true, W, H) else null
-                            val he = if (s0.b.p == index) handleXY(here, g.first, g.second, false, W, H) else null
-                            val rr = HDL_R * dens
-                            val gx = HDL_GAP * dens
-                            // pusat tetesan: awal di kiri-bawah titik, akhir di kanan-bawah (sama persis dengan yang digambar); area sentuh tetap lebar untuk jempol
-                            val ds = hs?.let { (down.position - Offset(it.x - rr - gx, it.y + rr + 4f * dens)).getDistance() } ?: Float.MAX_VALUE
-                            val de = he?.let { (down.position - Offset(it.x + rr + gx, it.y + rr + 4f * dens)).getDistance() } ?: Float.MAX_VALUE
-                            if (min(ds, de) <= HDL_HIT * dens) {
-                                val st = ds <= de
-                                val o = (if (st) hs else he)!!
-                                grab = down.position - Offset(o.x, o.y - 5f * dens)
-                                anchor = if (st) s0.b else s0.a
-                                ui.selGrab = true   // sebelum apa pun: induk langsung tahu sentuhan ini milik gagang
-                                hap.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                down.consume()
-                            }
-                        }
-                    }
-                    // 2) tekan lama di atas teks -> pilih satu kata; geser terus untuk memperluas
+                    var grab = Offset.Zero   // seleksi mengikuti GERAKAN jari, bukan lokasi jari (jari tidak menutupi / meloncat)
+                    // (menyentuh gagang yang sudah ada ditangani selHandleTouch di induk paling luar)
+                    // tekan lama di atas teks -> pilih satu kata; geser terus untuk memperluas
                     if (anchor == null) {
                         awaitLongPressOrCancellation(down.id) ?: return@awaitEachGesture
                         if (here == null) { scp.launch { pt = ui.txt?.page(index) }; return@awaitEachGesture }
@@ -950,18 +1019,7 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
                         anchor = PPos(index, a)
                     }
                     val an = anchor ?: return@awaitEachGesture
-                    fun posAt(pos: Offset): PPos? {
-                        var p = index; var y = pos.y
-                        if (!ui.paged) {
-                            val gap = 6f * dens
-                            while (p < ui.doc.count - 1 && y > ui.doc.ratioOf(p) * W) { y -= ui.doc.ratioOf(p) * W + gap; p++ }
-                            while (y < 0f && p > 0) { p--; y += ui.doc.ratioOf(p) * W + gap }
-                        }
-                        val h = (ui.doc.ratioOf(p) * W).coerceAtLeast(1f)
-                        val t = ui.txt?.peek(p) ?: return null
-                        val c = caretAt(t, (pos.x / W).coerceIn(0f, 1f), (y / h).coerceIn(0f, 1f), h / W)
-                        return if (c < 0) null else PPos(p, c)
-                    }
+                    fun posAt(pos: Offset): PPos? = posAtPage(ui, index, W, pos, dens) { p -> scp.launch { ui.txt?.page(p) } }
                     ui.drawing = true
                     ui.selGrab = true
                     try {
@@ -1318,7 +1376,11 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
         }
     }
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+    val hostRef = remember { arrayOfNulls<LayoutCoordinates>(1) }
+    val hapScr = LocalHapticFeedback.current
+    BoxWithConstraints(
+        Modifier.fillMaxSize().onGloballyPositioned { hostRef[0] = it }.selHandleTouch(ui, { hostRef[0] }, scope, hapScr)
+    ) {
         val vwDp = maxWidth
         val vhDp = maxHeight
         val topPad = sat + 64.dp
