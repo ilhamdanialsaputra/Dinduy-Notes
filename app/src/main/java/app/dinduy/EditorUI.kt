@@ -2217,7 +2217,7 @@ private fun ghostIc(ty: String): String = when (ty) {
  */
 @Composable
 fun androidx.compose.foundation.layout.BoxScope.DropGhost(ed: Ed) {
-    val alive by remember { androidx.compose.runtime.derivedStateOf { ed.mv != null || ed.gOn > 0f || ed.lineA > 0f } }
+    val alive by remember { androidx.compose.runtime.derivedStateOf { ed.mv != null || ed.gOn > 0f } }
     if (!alive) return
     val pal = LocalPal.current
     val dn = LocalDensity.current.density
@@ -2225,29 +2225,6 @@ fun androidx.compose.foundation.layout.BoxScope.DropGhost(ed: Ed) {
     val line = ed.gLine
     Box(
         Modifier.matchParentSize().drawBehind {
-            // garis pemisah antar blok: tipis & redup; makin dekat ke objek yang terangkat makin terang dan tebal (celah yang mungkin dituju)
-            val la = ed.lineA
-            val mvv = ed.mv
-            if (la > .01f && mvv != null) {
-                val ids = ed.slotIds
-                val fy = ed.liftTop() + minOf(ed.gHt / 2f, 64.dp.toPx())
-                val reach = 120.dp.toPx()
-                val x0 = 16.dp.toPx()
-                val x1 = size.width - 16.dp.toPx()
-                for (k in 1..ids.size) {
-                    if (ids.getOrNull(k)?.let { it == mvv.bid } == true || ids[k - 1] == mvv.bid) continue
-                    val y = if (k < ids.size) ed.bpos[ids[k]]?.get(0) else ed.bpos[ids[k - 1]]?.let { it[0] + it[1] }
-                    if (y == null) continue
-                    val pr = (1f - kotlin.math.abs(y - fy) / reach).coerceIn(0f, 1f)
-                    val al = la * (.10f + .65f * pr * pr)
-                    drawLine(pal.p.copy(alpha = al), Offset(x0, y), Offset(x1, y), (1.5f + 1.5f * pr).dp.toPx(), androidx.compose.ui.graphics.StrokeCap.Round)
-                    if (pr > .5f) {
-                        val dr = (2f + 1.5f * pr).dp.toPx()
-                        drawCircle(pal.p.copy(alpha = al), dr, Offset(x0, y))
-                        drawCircle(pal.p.copy(alpha = al), dr, Offset(x1, y))
-                    }
-                }
-            }
             val a = ed.gOn
             if (a > .004f) {
                 val x = ed.gx
@@ -2680,9 +2657,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                                     )
                             )
                         }
-                        val slotList = ed.slotsOf(plans)
-                        ed.slotIds = slotList.map { it.first.id }
-                        for ((sb, splan) in slotList) {
+                        for ((sb, splan) in ed.slotsOf(plans)) {
                             key(sb.id) {
                                 BlockSlot(
                                     ed, vm, sb, splan,
