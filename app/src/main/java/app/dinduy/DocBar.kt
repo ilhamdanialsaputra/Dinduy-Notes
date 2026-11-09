@@ -1,6 +1,10 @@
 package app.dinduy
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterExitState
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.scaleIn
@@ -260,7 +264,7 @@ fun DocBar(ed: Ed, act: Actions) {
 
     // kapsul objek (kind 4) mengambang seperti kapsul Ink: bilah tanpa latar dan tanpa garis atas
     val floatCap = kindNow == 4 || kindNow == 1
-    val barBg by androidx.compose.animation.animateColorAsState(if (floatCap) Color.Transparent else pal.bar(), tween(220), label = "barbg")
+    val barBg by androidx.compose.animation.animateColorAsState(if (floatCap) Color.Transparent else pal.bar(), tween(260, easing = Emph), label = "barbg")
     Column(Modifier.fillMaxWidth().background(barBg)) {
         // sub-bilah: perataan atau poin (mengembang di atas bilah utama)
         AnimatedVisibility(
@@ -299,22 +303,39 @@ fun DocBar(ed: Ed, act: Actions) {
         AnimatedContent(
             targetState = kindNow,
             transitionSpec = {
-                // bilah utama -> kapsul: kapsul tumbuh naik dari dasar (spring, sedikit membesar);
-                // kapsul -> bilah utama: bilah turun halus; kapsul -> kapsul: fade-through. Ukuran mengalir dengan spring.
-                val toBase = targetState == 0
-                val fromBase = initialState == 0
-                val enter = if (toBase)
-                    fadeIn(tween(210, 90, Emph)) + scaleIn(tween(320, 90, Emph), .94f, TransformOrigin(.5f, 1f)) +
-                        slideInVertically(tween(320, 60, Emph)) { it / 6 }
-                else
-                    fadeIn(tween(180, 70, Emph)) + scaleIn(spring(.78f, 460f), .84f, TransformOrigin(.5f, 1f)) +
-                        slideInVertically(tween(340, 40, Emph)) { it / 2 }
-                val exit = fadeOut(tween(100)) +
-                    scaleOut(tween(180, easing = Emph), if (fromBase) .96f else .9f, TransformOrigin(.5f, 1f))
-                (enter togetherWith exit).using(SizeTransform(clip = false) { _, _ -> spring<androidx.compose.ui.unit.IntSize>(.9f, 520f) })
+                // Gerak dikerjakan di dalam konten (lihat `pr` di bawah) supaya tiap sisi punya bahasa geraknya sendiri:
+                // bilah utama -> kapsul: bilah mengerut ke tengah, kapsul tumbuh naik dari dasar dengan pantulan, tombolnya memantul berurutan;
+                // kapsul -> bilah utama: kapsul menciut masuk kembali ke bilah, bilah membal kembali. Tinggi mengalir dengan pegas.
+                // Kapsul selalu di depan (zIndex) selama transisi.
+                (EnterTransition.None togetherWith ExitTransition.None)
+                    .using(SizeTransform(clip = false) { _, _ -> spring<androidx.compose.ui.unit.IntSize>(.82f, 420f) })
+                    .also { it.targetContentZIndex = if (targetState == 0) 0f else 1f }
             },
             label = "docbar"
         ) { kind ->
+            // 0 -> 1 saat konten ini masuk, 1 -> 0 saat keluar. Masuk = pegas memantul (boleh melewati 1), keluar = cepat dan tegas
+            val pr by transition.animateFloat(
+                transitionSpec = { if (targetState == EnterExitState.Visible) spring(.66f, 400f) else tween(190, easing = Emph) },
+                label = "dbpr"
+            ) { if (it == EnterExitState.Visible) 1f else 0f }
+            val isBase = kind == 0
+            Box(
+                Modifier.graphicsLayer {
+                    val p = pr
+                    transformOrigin = TransformOrigin(.5f, 1f)
+                    if (isBase) {
+                        val s0 = .55f + .45f * p.coerceAtLeast(0f)
+                        scaleX = s0; scaleY = .88f + .12f * p.coerceAtLeast(0f)
+                        translationY = (1f - p.coerceIn(0f, 1f)) * 16.dp.toPx()
+                        alpha = ((p - .3f) / .7f).coerceIn(0f, 1f)
+                    } else {
+                        val s0 = .5f + .5f * p.coerceAtLeast(0f)
+                        scaleX = s0; scaleY = s0
+                        translationY = (1f - p.coerceIn(0f, 1f)) * 56.dp.toPx()
+                        alpha = (p * 3.5f).coerceIn(0f, 1f)
+                    }
+                }
+            ) {
             when (kind) {
                 1 -> {
                     val s = ed.selImg ?: lastSel
@@ -322,38 +343,34 @@ fun DocBar(ed: Ed, act: Actions) {
                         val b = ed.blocks.firstOrNull { it.id == s.first }
                         val inRow = (b?.im?.size ?: 1) > 1
                         Box(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 10.dp).padding(horizontal = 10.dp), Alignment.Center) {
-                        Row(
-                            Modifier.shadow(if (pal.dark) 6.dp else 2.dp, RoundedCornerShape(30.dp)).clip(RoundedCornerShape(30.dp))
-                                .background(pal.c3).animateContentSize(spring(.85f, 520f)).horizontalScroll(rememberScrollState())
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // ganti isi bingkai dengan foto lain (galeri / kamera); ukuran bingkai tidak berubah
-                            Tbn({ Ic("swap", it) }, false, true) {
-                                val tgt = ed.selImg ?: lastSel
-                                ed.replT = tgt
-                                if (tgt != null) act.replaceImage(ed.noteId, tgt.first, tgt.second)
+                            CapShell(scroll = true) {
+                                // ganti isi bingkai dengan foto lain (galeri / kamera); ukuran bingkai tidak berubah
+                                CapBtn(0, onClick = {
+                                    val tgt = ed.selImg ?: lastSel
+                                    ed.replT = tgt
+                                    if (tgt != null) act.replaceImage(ed.noteId, tgt.first, tgt.second)
+                                }) { Ic("swap", it) }
+                                CapBtn(1, onClick = { ed.replT = ed.selImg ?: lastSel; act.takePhoto(true) }) { Ic("cam", it) }
+                                // tambah gambar lain (disisipkan tepat sesudah gambar ini)
+                                CapBtn(2, onClick = { ed.replT = null; act.pickImages() }) { AddImgIcon(it) }
+                                CapBtn(3, tone = 1, onClick = { ed.imgDelete() }) { Ic("del", it) }
+                                CapDiv()
+                                if (!inRow) {
+                                    val al = b?.im?.getOrNull(s.second)?.al
+                                    AlignSeg(
+                                        4, when (al) { "l" -> 0; "c" -> 1; "r" -> 2; else -> -1 },
+                                        listOf<@Composable (Color) -> Unit>({ Ic("aL", it) }, { Ic("aC", it) }, { Ic("aR", it) })
+                                    ) { ed.imgAlign(when (it) { 0 -> "l"; 1 -> "c"; else -> "r" }) }
+                                }
+                                CapBtn(5, onClick = { ed.toggleRow() }) { Ic(if (inRow) "rows" else "cols", it) }
+                                CapBtn(6, onClick = { ed.imgMove(-1) }) { Ic("aup", it) }
+                                CapBtn(7, onClick = { ed.imgMove(1) }) { Ic("adn", it) }
                             }
-                            Tbn({ Ic("cam", it) }, false, true) { ed.replT = ed.selImg ?: lastSel; act.takePhoto(true) }
-                            // tambah gambar lain (disisipkan tepat sesudah gambar ini)
-                            Tbn({ AddImgIcon(it) }, false, true) { ed.replT = null; act.pickImages() }
-                            Tbn({ Ic("del", it) }, false, true) { ed.imgDelete() }
-                            CapDiv()
-                            if (!inRow) {
-                                val al = b?.im?.getOrNull(s.second)?.al
-                                Tbn({ Ic("aL", it) }, al == "l", true) { ed.imgAlign("l") }
-                                Tbn({ Ic("aC", it) }, al == "c", true) { ed.imgAlign("c") }
-                                Tbn({ Ic("aR", it) }, al == "r", true) { ed.imgAlign("r") }
-                            }
-                            Tbn({ Ic(if (inRow) "rows" else "cols", it) }, false, true) { ed.toggleRow() }
-                            Tbn({ Ic("aup", it) }, false, true) { ed.imgMove(-1) }
-                            Tbn({ Ic("adn", it) }, false, true) { ed.imgMove(1) }
-                        }
                         }
                     }
                 }
                 4 -> {
-                    // objek sisipan (tabel / kode / kutipan / garis) terpilih tanpa keyboard: kapsul rata + hapus + selesai (sama seperti kapsul Ink)
+                    // objek sisipan (tabel / kode / kutipan / garis) terpilih tanpa keyboard: kapsul rata + hapus + selesai
                     val ob = ed.blocks.firstOrNull { it.id == (ed.selObj ?: objLast) }
                     if (ob == null) Spacer(Modifier.height(54.dp))
                     else Box(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 10.dp).padding(horizontal = 10.dp)) { ObjCapsule(ed, ob) }
@@ -362,21 +379,22 @@ fun DocBar(ed: Ed, act: Actions) {
                     Modifier.fillMaxWidth().padding(vertical = 6.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    listOf("ar" to "+ Row", "ac" to "+ Column", "dr" to "− Row", "dc" to "− Column").forEach { (k, l) ->
-                        Chip(l, pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.tOp(k) }
+                    listOf("ar" to "+ Row", "ac" to "+ Column", "dr" to "− Row", "dc" to "− Column").forEachIndexed { n, (k, l) ->
+                        CapChip(n, l, pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.tOp(k) }
                     }
-                    if (blk != null && blk.cw.isNotEmpty()) Chip("Reset widths", pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.tblResetCols(blk.id) }
-                    Chip("Delete table", pal.ec, pal.oec, RoundedCornerShape(23.dp)) { ed.tOp("dt") }
+                    var n2 = 4
+                    if (blk != null && blk.cw.isNotEmpty()) CapChip(n2++, "Reset widths", pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.tblResetCols(blk.id) }
+                    CapChip(n2, "Delete table", pal.ec, pal.oec, RoundedCornerShape(23.dp)) { ed.tOp("dt") }
                 }
                 3 -> Row(
                     Modifier.fillMaxWidth().padding(vertical = 6.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    VARS.forEach { (k, l) ->
+                    VARS.forEachIndexed { n, (k, l) ->
                         val q = qs(k, pal)
-                        Chip(l, if (k == "def") pal.c4 else q.bg, q.fg, q.shape, 52.dp, 104.dp) { ed.pickQuote = false; ed.setQuote(k) }
+                        CapChip(n, l, if (k == "def") pal.c4 else q.bg, q.fg, q.shape, 52.dp, 104.dp) { ed.pickQuote = false; ed.setQuote(k) }
                     }
-                    if (ty == "q") Chip("Plain text", pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.pickQuote = false; ed.setPlain() }
+                    if (ty == "q") CapChip(VARS.size, "Plain text", pal.c4, pal.os, RoundedCornerShape(23.dp)) { ed.pickQuote = false; ed.setPlain() }
                 }
                 else -> Row(Modifier.fillMaxWidth().height(54.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Tbn({ c -> T("A", 21f, 900, c) }, ed.sheet == 2, true) {
@@ -420,6 +438,7 @@ fun DocBar(ed: Ed, act: Actions) {
                         Tbn({ Ic("mark", it) }, K.M in fl && !noI, !noI) { ed.sub = 0; ed.toggleFmt(K.M) }
                     }
                 }
+            }
             }
         }
     }
