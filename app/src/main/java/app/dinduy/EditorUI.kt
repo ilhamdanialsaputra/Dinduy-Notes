@@ -2860,21 +2860,21 @@ fun SelBtn(enabled: Boolean, first: Boolean, last: Boolean, tone: Int, onClick: 
     val haptic = LocalHapticFeedback.current
     val src = remember { MutableInteractionSource() }
     val pr by src.collectIsPressedAsState()
-    val full = if (pr) 24.dp else 26.dp
-    val mid = if (pr) 24.dp else 7.dp
+    val full = 22.dp                          // ujung luar: bulat penuh (tinggi 44dp)
+    val mid = if (pr) 22.dp else 14.dp       // sambungan antar tombol: cukup membulat supaya tiap tombol terbaca sebagai chip sendiri
     val sC by animateDpAsState(if (first) full else mid, spring(.6f, 520f), label = "ssc")
     val eC by animateDpAsState(if (last) full else mid, spring(.6f, 520f), label = "sec")
     val sc by animateFloatAsState(if (pr) .92f else 1f, spring(.45f, 650f), label = "ssx")
     val bg = when (tone) { 2 -> pal.p; 1 -> pal.ec; else -> pal.sc }
     val fg = when (tone) { 2 -> pal.op; 1 -> pal.oec; else -> pal.osc }
     Box(
-        Modifier.height(46.dp).widthIn(min = 54.dp).graphicsLayer { scaleX = sc; scaleY = sc }
+        Modifier.height(44.dp).widthIn(min = 48.dp).graphicsLayer { scaleX = sc; scaleY = sc }
             .clip(RoundedCornerShape(topStart = sC, bottomStart = sC, topEnd = eC, bottomEnd = eC)).background(bg)
             .clickable(interactionSource = src, indication = LocalIndication.current, enabled = enabled) {
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 onClick()
             }
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = 13.dp),
         Alignment.Center
     ) { content(fg) }
 }
@@ -3002,8 +3002,8 @@ fun SelBubble(ed: Ed, vm: AppVM, act: Actions, scrollY: () -> Int) {
                 translationY = (1f - v) * (if (m0 == 0) 14f else if (m0 == 1) -14f else 0f) * density
             }
             .onSizeChanged { bs = it }
-            .shadow(if (pal.dark) 7.dp else 4.dp, RoundedCornerShape(30.dp)).clip(RoundedCornerShape(30.dp))
-            .background(pal.c3).padding(4.dp),
+            .shadow(if (pal.dark) 8.dp else 6.dp, RoundedCornerShape(28.dp)).clip(RoundedCornerShape(28.dp))
+            .background(pal.c3).padding(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         val enter = expandHorizontally(spring(.72f, 520f)) + scaleIn(spring(.6f, 520f), .5f)
@@ -3017,19 +3017,19 @@ fun SelBubble(ed: Ed, vm: AppVM, act: Actions, scrollY: () -> Int) {
         @Composable
         fun Item(k: Int, show: Boolean, tone: Int = 0, onClick: () -> Unit, content: @Composable (Color) -> Unit) {
             AnimatedVisibility(show, enter = enter, exit = exit) {
-                Box(Modifier.padding(horizontal = 1.dp).stag(k)) {
+                Box(Modifier.padding(horizontal = 3.dp).stag(k)) {   // jarak 6dp antar tombol
                     SelBtn(live, k == fi, k == li, tone, onClick, content)
                 }
             }
         }
-        Item(0, flags[0], onClick = { act.copyText(ed.selMd()); ed.selDelete() }) { T("Cut", 14f, 800, it, maxLines = 1) }
-        Item(1, flags[1], 2, onClick = { act.copyText(ed.selMd()); vm.show("Copied"); ed.clearSel() }) { T("Copy", 14f, 800, it, maxLines = 1) }
+        Item(0, flags[0], onClick = { act.copyText(ed.selMd()); ed.selDelete() }) { T("Cut", 14f, 700, it, maxLines = 1) }
+        Item(1, flags[1], 2, onClick = { act.copyText(ed.selMd()); vm.show("Copied"); ed.clearSel() }) { T("Copy", 14f, 700, it, maxLines = 1) }
         Item(2, flags[2], onClick = {
             val s = clip.getText()?.text
             if (!s.isNullOrEmpty()) ed.selPaste(s) else vm.show("Nothing to paste")
-        }) { T("Paste", 14f, 800, it, maxLines = 1) }
+        }) { T("Paste", 14f, 700, it, maxLines = 1) }
         Item(3, flags[3], 1, onClick = { ed.selDelete() }) { Ic("del", it, 22.dp) }
-        Item(4, true, onClick = { ed.selAll() }) { T("Select all", 14f, 800, it, maxLines = 1) }
+        Item(4, true, onClick = { ed.selAll() }) { T("Select all", 14f, 700, it, maxLines = 1) }
     }
 }
 
