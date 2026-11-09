@@ -13,6 +13,12 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
@@ -117,6 +123,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.layout
 import eu.wewox.pagecurl.ExperimentalPageCurlApi
@@ -529,6 +536,9 @@ private fun handleXY(pt: PgText, a: Int, b: Int, start: Boolean, w: Float, h: Fl
 
 private val SEL_COLOR = Color(0xFF4F8CFF)
 
+/** Jari-jari tetesan gagang seleksi (dp). Titik sudut lancipnya menempel di tepi teks. */
+private const val HDL_R = 12f
+
 // ---------------------------------------------------------------- coretan di PDF
 
 /** t: 0 pulpen, 1 stabilo. c: indeks warna 0..4. w: tebal sebagai pecahan lebar halaman. p: (x, y, k) tiga-tiga, x dan y dibagi lebar halaman. */
@@ -792,6 +802,10 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
     val selR = remember(rg, ptv) { if (rg != null && ptv != null) rectsOf(ptv, rg.first, rg.second) else emptyList() }
     val live = remember(index) { mutableStateOf<PLive?>(null) }
     var tick by remember(index) { mutableIntStateOf(0) }
+    // gagang seleksi: memantul keluar dari tepi teks saat seleksi muncul, membesar + berhalo saat diseret
+    val hdlPop = remember { Animatable(0f) }
+    LaunchedEffect(sel != null) { if (sel != null) { hdlPop.snapTo(0f); hdlPop.animateTo(1f, spring(.46f, 420f)) } else hdlPop.snapTo(0f) }
+    val hdlGrow by animateFloatAsState(if (ui.drawing && sel != null) 1.3f else 1f, spring(.42f, 520f), label = "hdlg")
     val marks = remember(ui.hits, index) { ui.hits.withIndex().filter { it.value.page == index } }
     var sizePx by remember { mutableStateOf(IntSize.Zero) }
     val paths = remember(strokes, sizePx) {
@@ -877,15 +891,25 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
                     val here = pt
                     val s0 = ui.sel
                     var anchor: PPos? = null
+                    var grab = Offset.Zero   // jarak jari ke titik teks gagang: seleksi mengikuti GERAKAN jari, bukan lokasi jari (jari tidak menutupi / meloncat)
                     // 1) sentuh pegangan (handle) awal / akhir yang sudah ada -> geser untuk mengubah seleksi
                     if (s0 != null && here != null) {
                         val g = rangeOn(s0, index, here)
                         if (g != null) {
                             val hs = if (s0.a.p == index) handleXY(here, g.first, g.second, true, W, H) else null
                             val he = if (s0.b.p == index) handleXY(here, g.first, g.second, false, W, H) else null
-                            val ds = hs?.let { (down.position - Offset(it.x, it.y + 9f * dens)).getDistance() } ?: Float.MAX_VALUE
-                            val de = he?.let { (down.position - Offset(it.x, it.y + 9f * dens)).getDistance() } ?: Float.MAX_VALUE
-                            if (min(ds, de) <= 36f * dens) { anchor = if (ds <= de) s0.b else s0.a; down.consume() }
+                            val rr = HDL_R * dens
+                            // pusat tetesan: awal di kiri-bawah titik, akhir di kanan-bawah; area sentuh lebar supaya mudah dikenai jempol
+                            val ds = hs?.let { (down.position - Offset(it.x - rr, it.y + rr + 4f * dens)).getDistance() } ?: Float.MAX_VALUE
+                            val de = he?.let { (down.position - Offset(it.x + rr, it.y + rr + 4f * dens)).getDistance() } ?: Float.MAX_VALUE
+                            if (min(ds, de) <= 48f * dens) {
+                                val st = ds <= de
+                                val o = (if (st) hs else he)!!
+                                grab = down.position - Offset(o.x, o.y - 5f * dens)
+                                anchor = if (st) s0.b else s0.a
+                                hap.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                down.consume()
+                            }
                         }
                     }
                     // 2) tekan lama di atas teks -> pilih satu kata; geser terus untuk memperluas
@@ -930,8 +954,13 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
                             val c = ev.changes.firstOrNull { it.id == down.id } ?: break
                             c.consume()
                             if (c.changedToUp()) break
-                            val f = posAt(c.position) ?: continue
-                            if (f < an) ui.sel = PSel(f, an) else if (f > an) ui.sel = PSel(an, f)
+                            val f = posAt(c.position - grab) ?: continue
+                            val ns = if (f < an) PSel(f, an) else if (f > an) PSel(an, f) else null
+                            val cs = ui.sel
+                            if (ns != null && (cs == null || cs.a != ns.a || cs.b != ns.b)) {
+                                hap.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                ui.sel = ns
+                            }
                         }
                     } finally { ui.drawing = false }
                 }
@@ -982,18 +1011,77 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
             }
         }
         if (sel != null && rg != null && ptv != null) Canvas(Modifier.fillMaxSize()) {
-            val rr = 9f * density
-            fun hdl(o: Offset) {
-                drawLine(SEL_COLOR, o, Offset(o.x, o.y + rr), strokeWidth = 2f * density)
-                drawCircle(SEL_COLOR, rr, Offset(o.x, o.y + rr))
+            val k = (hdlPop.value * hdlGrow).coerceAtLeast(0f)
+            val halo = ((hdlGrow - 1f) / .3f).coerceIn(0f, 1f)
+            val rr = HDL_R * density
+            // tetesan bergaya M3 Expressive: bulat penuh dengan satu sudut lancip yang menyentuh tepi teks
+            fun hdl(o: Offset, start: Boolean) {
+                if (k <= .001f) return
+                val l = if (start) o.x - 2f * rr else o.x
+                val full = CornerRadius(rr)
+                val tip = CornerRadius(3f * density)
+                val shape = androidx.compose.ui.graphics.Path().apply {
+                    addRoundRect(
+                        RoundRect(
+                            l, o.y, l + 2f * rr, o.y + 2f * rr,
+                            topLeftCornerRadius = if (start) full else tip, topRightCornerRadius = if (start) tip else full,
+                            bottomRightCornerRadius = full, bottomLeftCornerRadius = full
+                        )
+                    )
+                }
+                scale(k, k, pivot = o) {
+                    if (halo > 0f) drawCircle(SEL_COLOR.copy(alpha = .2f * halo), 2.3f * rr, Offset(l + rr, o.y + rr))
+                    translate(0f, 1.6f * density) { drawPath(shape, Color.Black.copy(alpha = .18f)) }
+                    drawPath(shape, SEL_COLOR)
+                }
             }
-            if (sel.a.p == index) handleXY(ptv, rg.first, rg.second, true, size.width, size.height)?.let { hdl(it) }
-            if (sel.b.p == index) handleXY(ptv, rg.first, rg.second, false, size.width, size.height)?.let { hdl(it) }
+            if (sel.a.p == index) handleXY(ptv, rg.first, rg.second, true, size.width, size.height)?.let { hdl(it, true) }
+            if (sel.b.p == index) handleXY(ptv, rg.first, rg.second, false, size.width, size.height)?.let { hdl(it, false) }
         }
         if (bmp == null) Box(Modifier.align(Alignment.Center)) { LoadingBlob(Modifier.size(36.dp)) }
     }
 }
 
+
+// ---------------------------------------------------------------- bilah seleksi (grup tombol tersambung M3 Expressive)
+
+@Composable
+private fun PdfSelBar(onCopy: () -> Unit, onAll: () -> Unit, onCancel: () -> Unit) {
+    val items = listOf<Pair<String, () -> Unit>>("Copy" to onCopy, "Select all" to onAll, "Cancel" to onCancel)
+    Row(
+        Modifier.shadow(8.dp, CircleShape).clip(CircleShape).background(Color(0xFF2A2A2D)).padding(5.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically
+    ) {
+        items.forEachIndexed { i, (label, f) -> PdfSelBtn(i, items.size, label, i == 0, f) }
+    }
+}
+
+/** Tombol bilah seleksi: ujung luar bulat penuh, sambungan antar tombol bersudut kecil; ditekan = semua sudut membulat + menyempit. Muncul memantul berurutan. */
+@Composable
+private fun PdfSelBtn(i: Int, n: Int, label: String, primary: Boolean, onClick: () -> Unit) {
+    val hap = LocalHapticFeedback.current
+    val src = remember { MutableInteractionSource() }
+    val pr by src.collectIsPressedAsState()
+    val outer by animateDpAsState(if (pr) 22.dp else 26.dp, spring(.55f, 700f), label = "pso")
+    val inner by animateDpAsState(if (pr) 22.dp else 7.dp, spring(.55f, 700f), label = "psi")
+    val sc by animateFloatAsState(if (pr) .92f else 1f, spring(.45f, 650f), label = "pss")
+    val pop = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { delay(70L + i * 45L); pop.animateTo(1f, spring(.5f, 480f)) }
+    val sC = if (i == 0) outer else inner
+    val eC = if (i == n - 1) outer else inner
+    Box(
+        Modifier.graphicsLayer { val p = pop.value.coerceAtLeast(0f); scaleX = p * sc; scaleY = p * sc }
+            .height(46.dp).widthIn(min = 64.dp)
+            .clip(RoundedCornerShape(topStart = sC, bottomStart = sC, topEnd = eC, bottomEnd = eC))
+            .background(if (primary) SEL_COLOR else Color(0xFF3B3B41))
+            .clickable(interactionSource = src, indication = LocalIndication.current) {
+                hap.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onClick()
+            }
+            .padding(horizontal = 18.dp),
+        Alignment.Center
+    ) { T(label, 14f, 800, Color.White.copy(alpha = if (label == "Cancel") .78f else 1f)) }
+}
 
 // ---------------------------------------------------------------- layar baca
 
@@ -1519,22 +1607,13 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
         // ---------------- bilah seleksi teks: Copy / Select all / Cancel ----------------
         AnimatedVisibility(
             ui.sel != null && !ui.inkOn, Modifier.align(Alignment.BottomCenter).padding(bottom = sab + 16.dp),
-            enter = fadeIn(spring(stiffness = 600f)) + androidx.compose.animation.scaleIn(spring(.7f, 420f), initialScale = .8f) +
-                androidx.compose.animation.slideInVertically(spring(.8f, 420f)) { it / 2 },
-            exit = fadeOut(spring(stiffness = 800f)) + androidx.compose.animation.scaleOut(spring(1f, 800f), targetScale = .85f)
+            // naik dari bawah sambil membesar dengan pantulan; keluar menciut cepat tanpa pantulan (tanpa pudar biasa)
+            enter = androidx.compose.animation.scaleIn(spring(.5f, 440f), initialScale = .6f, transformOrigin = TransformOrigin(.5f, 1f)) +
+                androidx.compose.animation.slideInVertically(spring(.68f, 420f)) { it },
+            exit = androidx.compose.animation.scaleOut(spring(1f, 900f), targetScale = .6f, transformOrigin = TransformOrigin(.5f, 1f)) +
+                androidx.compose.animation.slideOutVertically(spring(1f, 900f)) { it / 2 }
         ) {
-            Row(
-                Modifier.clip(CircleShape).background(Color(0xFF2A2A2D)).padding(horizontal = 6.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                for ((label, act1) in listOf<Pair<String, () -> Unit>>(
-                    "Copy" to { copySel() }, "Select all" to { selectAll() }, "Cancel" to { ui.sel = null }
-                )) {
-                    Box(Modifier.clip(CircleShape).clickable { act1() }.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                        T(label, 14f, 700, if (label == "Cancel") Color.White.copy(alpha = .65f) else Color.White)
-                    }
-                }
-            }
+            PdfSelBar({ copySel() }, { selectAll() }, { ui.sel = null })
         }
 
         // ---------------- alat coret: satu kapsul kecil (tumbuh dari tengah, isinya muncul satu per satu) ----------------
