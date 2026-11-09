@@ -1933,35 +1933,141 @@ private fun BoxBody(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier, sel: B
     }
 }
 
-/** Pemisah tipis antar kelompok tombol di dalam kapsul (sama dengan kapsul Ink). */
+/** Pemisah tipis antar kelompok tombol di dalam kapsul. */
 @Composable
 fun CapDiv() {
     val pal = LocalPal.current
-    Box(Modifier.padding(horizontal = 3.dp).width(1.dp).height(24.dp).background(pal.ol.copy(alpha = .5f)))
+    Box(Modifier.padding(horizontal = 3.dp).width(2.dp).height(22.dp).clip(CircleShape).background(pal.ol.copy(alpha = .45f)))
 }
 
-/** Kapsul alat objek sisipan (tabel / kutipan / kode / garis): rata kiri / tengah / kanan, hapus, selesai. Tampilan sama dengan kapsul alat Ink. */
+/**
+ * Wadah kapsul alat objek sisipan (gambar / tabel / kutipan / kode / garis), gaya M3 Expressive: pil penuh melayang di atas bilah,
+ * lebarnya mengalir dengan pegas saat isinya berubah. Gerak masuk / keluarnya dikerjakan pemanggil (DocBar) lewat pegas;
+ * tombol di dalamnya memantul masuk berurutan (lihat [CapBtn]).
+ */
+@Composable
+fun CapShell(modifier: Modifier = Modifier, scroll: Boolean = false, content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
+    val pal = LocalPal.current
+    val cap = RoundedCornerShape(34.dp)
+    val ss = rememberScrollState()
+    Row(
+        modifier.shadow(if (pal.dark) 8.dp else 5.dp, cap).clip(cap).background(pal.c3)
+            .border(1.dp, pal.ol.copy(alpha = .22f), cap)
+            .animateContentSize(spring(.8f, 420f))
+            .then(if (scroll) Modifier.horizontalScroll(ss) else Modifier)
+            .padding(horizontal = 8.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        content = content
+    )
+}
+
+/**
+ * Tombol kapsul (area sentuh 48dp, ramah jempol). Memantul masuk berurutan menurut [i]; saat ditekan menyempit lebih dari menipis
+ * dan sudutnya membulat penuh, lepas = membal. tone: 0 biasa, 1 bahaya (hapus), 2 utama (selesai).
+ */
+@Composable
+fun CapBtn(
+    i: Int, on: Boolean = false, tone: Int = 0, enabled: Boolean = true, wide: Boolean = false,
+    onClick: () -> Unit, content: @Composable (Color) -> Unit
+) {
+    val pal = LocalPal.current
+    val haptic = LocalHapticFeedback.current
+    val src = remember { MutableInteractionSource() }
+    val pr by src.collectIsPressedAsState()
+    val r by animateDpAsState(if (pr) 14.dp else 24.dp, spring(.5f, 700f), label = "cbr")
+    val sx by animateFloatAsState(if (pr) .84f else 1f, spring(.42f, 620f), label = "cbx")
+    val sy by animateFloatAsState(if (pr) .92f else 1f, spring(.42f, 620f), label = "cby")
+    val pop = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { delay(50L + i * 34L); pop.animateTo(1f, spring(.5f, 520f)) }
+    val bgT = when (tone) { 1 -> pal.ec; 2 -> pal.p; else -> if (on) pal.p else pal.p.copy(alpha = 0f) }
+    val fgT = when (tone) { 1 -> pal.oec; 2 -> pal.op; else -> if (on) pal.op else pal.os }
+    val bg by androidx.compose.animation.animateColorAsState(bgT, tween(200, easing = Emph), label = "cbb")
+    val fg by androidx.compose.animation.animateColorAsState(fgT, tween(200, easing = Emph), label = "cbf")
+    Box(
+        Modifier.size(if (wide) 58.dp else 48.dp, 48.dp)
+            .graphicsLayer { val p = pop.value.coerceAtLeast(0f); scaleX = p * sx; scaleY = p * sy; alpha = if (enabled) 1f else .3f }
+            .clip(RoundedCornerShape(r)).background(bg)
+            .clickable(interactionSource = src, indication = LocalIndication.current, enabled = enabled) {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onClick()
+            },
+        Alignment.Center
+    ) { content(fg) }
+}
+
+/**
+ * Kelompok pilihan (mis. rata kiri / tengah / kanan): SATU penanda yang meluncur dan melar mengikuti pilihan dengan pegas memantul,
+ * bukan tiap tombol berganti warna sendiri. sel = -1: tidak ada yang terpilih.
+ */
+@Composable
+fun AlignSeg(i0: Int, sel: Int, icons: List<@Composable (Color) -> Unit>, onPick: (Int) -> Unit) {
+    val pal = LocalPal.current
+    val haptic = LocalHapticFeedback.current
+    val cw = 48.dp
+    val chh = 44.dp
+    val x by animateFloatAsState(sel.toFloat(), spring(.58f, 380f), label = "segx")
+    val dist = if (sel < 0) 0f else abs(sel - x).coerceAtMost(1f)
+    val pop = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { delay(50L + i0 * 34L); pop.animateTo(1f, spring(.55f, 480f)) }
+    Box(
+        Modifier.graphicsLayer { val p = pop.value.coerceAtLeast(0f); scaleX = p; scaleY = p }
+            .clip(CircleShape).background(pal.c4).padding(3.dp)
+    ) {
+        if (sel >= 0) Box(
+            Modifier.offset { IntOffset((x * cw.toPx() - cw.toPx() * .38f * dist / 2f).roundToInt(), 0) }
+                .width(cw * (1f + .38f * dist)).height(chh).clip(CircleShape).background(pal.p)
+        )
+        Row {
+            icons.forEachIndexed { k, ic ->
+                val fg by androidx.compose.animation.animateColorAsState(if (sel == k) pal.op else pal.os, tween(180, easing = Emph), label = "segc")
+                Box(
+                    Modifier.size(cw, chh).clip(CircleShape).clickable {
+                        if (sel != k) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onPick(k)
+                    },
+                    Alignment.Center
+                ) { ic(fg) }
+            }
+        }
+    }
+}
+
+/** Chip di bilah alat tabel / kutipan: memantul masuk berurutan menurut [i], menyempit membal saat ditekan. */
+@Composable
+fun CapChip(i: Int, text: String, bg: Color, fg: Color, shape: Shape, h: Dp = 46.dp, minW: Dp = 0.dp, onClick: () -> Unit) {
+    val haptic = LocalHapticFeedback.current
+    val src = remember { MutableInteractionSource() }
+    val pr by src.collectIsPressedAsState()
+    val sc by animateFloatAsState(if (pr) .9f else 1f, spring(.42f, 620f), label = "ccs")
+    val pop = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { delay(40L + i * 38L); pop.animateTo(1f, spring(.52f, 500f)) }
+    Box(
+        Modifier.height(h).widthIn(min = minW)
+            .graphicsLayer { val p = pop.value.coerceAtLeast(0f); scaleX = p * sc; scaleY = p * sc }
+            .clip(shape).background(bg)
+            .clickable(interactionSource = src, indication = LocalIndication.current) {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onClick()
+            }
+            .padding(horizontal = 18.dp),
+        Alignment.Center
+    ) { T(text, 15f, 850, fg, ls = 0f) }
+}
+
+/** Kapsul alat objek sisipan (tabel / kutipan / kode / garis): rata kiri / tengah / kanan, hapus, selesai. */
 @Composable
 fun ObjCapsule(ed: Ed, ob: Blk) {
-    val pal = LocalPal.current
     val al = ob.alOf()
-    val cap = RoundedCornerShape(30.dp)
     Box(Modifier.fillMaxWidth(), Alignment.Center) {
-        Row(
-            Modifier.shadow(if (pal.dark) 6.dp else 2.dp, cap).clip(cap).background(pal.c3)
-                .animateContentSize(spring(.85f, 520f)).padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Tbn({ AlignArrow(0, it) }, al == "l", true) { ed.objAlign(ob.id, "l") }
-            Tbn({ AlignArrow(1, it) }, al == "c", true) { ed.objAlign(ob.id, "c") }
-            Tbn({ AlignArrow(2, it) }, al == "r", true) { ed.objAlign(ob.id, "r") }
+        CapShell {
+            AlignSeg(
+                0, when (al) { "l" -> 0; "c" -> 1; "r" -> 2; else -> -1 },
+                listOf<@Composable (Color) -> Unit>({ AlignArrow(0, it) }, { AlignArrow(1, it) }, { AlignArrow(2, it) })
+            ) { ed.objAlign(ob.id, when (it) { 0 -> "l"; 1 -> "c"; else -> "r" }) }
             CapDiv()
-            Tbn({ Ic("del", it) }, false, true) { ed.objDelete(ob.id) }
-            if (ed.selObj != null) {
-                CapDiv()
-                Tbn({ Ic("ok", it) }, false, true) { ed.selObj = null }
-            }
+            CapBtn(3, tone = 1, onClick = { ed.objDelete(ob.id) }) { Ic("del", it) }
+            if (ed.selObj != null) CapBtn(4, tone = 2, wide = true, onClick = { ed.selObj = null }) { Ic("ok", it) }
         }
     }
 }
@@ -2743,19 +2849,34 @@ private class BubbleHold {
     var edit = false
 }
 
-/** Tombol di gelembung seleksi: sudut menyempit + sedikit mengecil saat ditekan (M3 Expressive). */
+/**
+ * Tombol gelembung seleksi = anggota grup tombol tersambung (M3 Expressive): ujung luar bulat penuh, sambungan antar tombol bersudut kecil.
+ * Saat tetangga muncul / hilang, sudutnya ikut berubah bentuk dengan pegas. Ditekan = semua sudut membulat + menyempit membal.
+ * tone: 0 tonal, 1 bahaya, 2 utama.
+ */
 @Composable
-fun SelBtn(enabled: Boolean, padH: Dp, padV: Dp, onClick: () -> Unit, content: @Composable () -> Unit) {
+fun SelBtn(enabled: Boolean, first: Boolean, last: Boolean, tone: Int, onClick: () -> Unit, content: @Composable (Color) -> Unit) {
+    val pal = LocalPal.current
+    val haptic = LocalHapticFeedback.current
     val src = remember { MutableInteractionSource() }
     val pr by src.collectIsPressedAsState()
-    val r by animateDpAsState(if (pr) 8.dp else 16.dp, spring(.55f, 700f), label = "r")
-    val sc by animateFloatAsState(if (pr) .92f else 1f, spring(.5f, 700f), label = "sc")
+    val full = if (pr) 24.dp else 26.dp
+    val mid = if (pr) 24.dp else 7.dp
+    val sC by animateDpAsState(if (first) full else mid, spring(.6f, 520f), label = "ssc")
+    val eC by animateDpAsState(if (last) full else mid, spring(.6f, 520f), label = "sec")
+    val sc by animateFloatAsState(if (pr) .92f else 1f, spring(.45f, 650f), label = "ssx")
+    val bg = when (tone) { 2 -> pal.p; 1 -> pal.ec; else -> pal.sc }
+    val fg = when (tone) { 2 -> pal.op; 1 -> pal.oec; else -> pal.osc }
     Box(
-        Modifier.graphicsLayer { scaleX = sc; scaleY = sc }.clip(RoundedCornerShape(r))
-            .clickable(interactionSource = src, indication = LocalIndication.current, enabled = enabled, onClick = onClick)
-            .padding(horizontal = padH, vertical = padV),
+        Modifier.height(46.dp).widthIn(min = 54.dp).graphicsLayer { scaleX = sc; scaleY = sc }
+            .clip(RoundedCornerShape(topStart = sC, bottomStart = sC, topEnd = eC, bottomEnd = eC)).background(bg)
+            .clickable(interactionSource = src, indication = LocalIndication.current, enabled = enabled) {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onClick()
+            }
+            .padding(horizontal = 16.dp),
         Alignment.Center
-    ) { content() }
+    ) { content(fg) }
 }
 
 /**
@@ -2845,83 +2966,124 @@ fun SelBubble(ed: Ed, vm: AppVM, act: Actions, scrollY: Int) {
     }
     if (!live && vis.value <= .001f) return
     val m0 = mode
+    // tombol yang tampil, berurutan: Cut, Copy, Paste, Hapus, Select all. Bentuk sudut tiap tombol mengikuti posisinya di antara yang tampil.
+    val flags = booleanArrayOf(edit && has, has, edit, edit && has, true)
+    val fi = flags.indexOfFirst { it }
+    val li = flags.indexOfLast { it }
     Row(
         Modifier.offset { IntOffset((x + corrX.value).roundToInt(), (y + corrY.value).roundToInt()) }
             .graphicsLayer {
                 val v = vis.value
-                alpha = if (measured) (v * 1.5f).coerceIn(0f, 1f) else 0f
-                val sc = .55f + .45f * v
+                // membesar dari sisi yang menghadap seleksi dengan pantulan; alpha hanya menutup frame awal, bukan efek pudar
+                alpha = if (measured) (v * 4f).coerceIn(0f, 1f) else 0f
+                val sc = .5f + .5f * v
                 scaleX = sc; scaleY = sc
                 transformOrigin = TransformOrigin(.5f, if (m0 == 0) 1f else if (m0 == 1) 0f else .5f)
-                translationY = (1f - v) * (if (m0 == 0) 12f else if (m0 == 1) -12f else 0f) * density
+                translationY = (1f - v) * (if (m0 == 0) 14f else if (m0 == 1) -14f else 0f) * density
             }
             .onSizeChanged { bs = it }
-            .shadow(if (pal.dark) 6.dp else 3.dp, RoundedCornerShape(20.dp)).clip(RoundedCornerShape(20.dp))
-            .background(pal.bar2()).padding(horizontal = 3.dp, vertical = 2.dp),
+            .shadow(if (pal.dark) 7.dp else 4.dp, RoundedCornerShape(30.dp)).clip(RoundedCornerShape(30.dp))
+            .background(pal.c3).padding(4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        val enter = fadeIn(tween(180, 40)) + expandHorizontally(tween(260, easing = Emph))
-        val exit = fadeOut(tween(110)) + shrinkHorizontally(tween(220, easing = Emph))
+        val enter = expandHorizontally(spring(.72f, 520f)) + scaleIn(spring(.6f, 520f), .5f)
+        val exit = shrinkHorizontally(spring(1f, 700f)) + scaleOut(tween(130, easing = Emph), .5f)
+        // tiap tombol memantul masuk berurutan (stagger) mengikuti progres gelembung
+        fun Modifier.stag(k: Int): Modifier = graphicsLayer {
+            val p = ((vis.value - k * .06f) / .7f).coerceIn(0f, 1.12f)
+            val s2 = .5f + .5f * p
+            scaleX = s2; scaleY = s2
+        }
         @Composable
-        fun Act(label: String, f: () -> Unit) {
-            SelBtn(live, 10.dp, 9.dp, f) { T(label, 14f, 800, pal.os, maxLines = 1) }
-        }
-        AnimatedVisibility(edit && has, enter = enter, exit = exit) {
-            Act("Cut") { act.copyText(ed.selMd()); ed.selDelete() }
-        }
-        AnimatedVisibility(has, enter = enter, exit = exit) {
-            Act("Copy") { act.copyText(ed.selMd()); vm.show("Copied"); ed.clearSel() }
-        }
-        AnimatedVisibility(edit, enter = enter, exit = exit) {
-            Act("Paste") {
-                val s = clip.getText()?.text
-                if (!s.isNullOrEmpty()) ed.selPaste(s) else vm.show("Nothing to paste")
+        fun Item(k: Int, show: Boolean, tone: Int = 0, onClick: () -> Unit, content: @Composable (Color) -> Unit) {
+            AnimatedVisibility(show, enter = enter, exit = exit) {
+                Box(Modifier.padding(horizontal = 1.dp).stag(k)) {
+                    SelBtn(live, k == fi, k == li, tone, onClick, content)
+                }
             }
         }
-        AnimatedVisibility(edit && has, enter = enter, exit = exit) {
-            SelBtn(live, 9.dp, 7.dp, { ed.selDelete() }) { Ic("del", pal.os, 22.dp) }
-        }
-        Act("Select all") { ed.selAll() }
+        Item(0, flags[0], onClick = { act.copyText(ed.selMd()); ed.selDelete() }) { T("Cut", 14f, 800, it, maxLines = 1) }
+        Item(1, flags[1], 2, onClick = { act.copyText(ed.selMd()); vm.show("Copied"); ed.clearSel() }) { T("Copy", 14f, 800, it, maxLines = 1) }
+        Item(2, flags[2], onClick = {
+            val s = clip.getText()?.text
+            if (!s.isNullOrEmpty()) ed.selPaste(s) else vm.show("Nothing to paste")
+        }) { T("Paste", 14f, 800, it, maxLines = 1) }
+        Item(3, flags[3], 1, onClick = { ed.selDelete() }) { Ic("del", it, 22.dp) }
+        Item(4, true, onClick = { ed.selAll() }) { T("Select all", 14f, 800, it, maxLines = 1) }
     }
 }
 
-/** Pegangan awal/akhir seleksi, digambar di ruang konten dan bisa diseret melewati blok mana pun. */
+/**
+ * Pegangan awal/akhir seleksi, digambar di ruang konten dan bisa diseret melewati blok mana pun.
+ * Tetesan M3 Expressive (bulat penuh, satu sudut lancip menempel di tepi teks) 26dp, tapi area sentuhnya 60dp dan letaknya di BAWAH baris,
+ * jadi jempol tidak menutupi huruf; seleksi mengikuti gerakan relatif jari (tidak meloncat saat disentuh).
+ * Muncul memantul dari ujung lancipnya; saat diseret membesar, berhalo, dan menempel ke jari tanpa lag; saat tidak diseret
+ * (pilih semua, ganti kata, dll) meluncur halus ke posisi barunya.
+ */
 @Composable
 fun SelHandles(ed: Ed) {
     val a = ed.pa ?: return
     val f = ed.pf ?: return
     val pal = LocalPal.current
     val dn = LocalDensity.current
+    val haptic = LocalHapticFeedback.current
     val lo = ed.selSpan()?.first
     @Composable
     fun H(which: Int, pt: Pt) {
+        var dragging by remember(which) { mutableStateOf(false) }
+        val pop = remember(which) { Animatable(0f) }
+        LaunchedEffect(which) { pop.animateTo(1f, spring(.46f, 440f)) }
+        val grow by animateFloatAsState(if (dragging) 1.24f else 1f, spring(.42f, 520f), label = "hg")
+        val halo by animateFloatAsState(if (dragging) 1f else 0f, spring(.6f, 420f), label = "hh")
         val r = ed.ptRect(pt) ?: return
         val isStart = if (a == f) which == 1 else lo == pt
-        val h11 = with(dn) { 11.dp.toPx() }
-        val t24 = with(dn) { 24.dp.toPx() }
-        val cx = if (isStart) r.left - h11 else r.left + h11
-        val cy = r.bottom + h11
+        val d = with(dn) { 13.dp.toPx() }          // jari-jari tetesan
+        val hit = with(dn) { 60.dp.toPx() }
+        val cxT = if (isStart) r.left - d else r.left + d
+        val cyT = r.bottom + d
+        // saat diseret menempel ke jari (snap); selain itu meluncur dengan pegas
+        val ax by animateFloatAsState(cxT, if (ed.selDrag) androidx.compose.animation.core.snap() else spring(.8f, 520f), label = "hx")
+        val ay by animateFloatAsState(cyT, if (ed.selDrag) androidx.compose.animation.core.snap() else spring(.8f, 520f), label = "hy")
         Box(
-            Modifier.offset { IntOffset((cx - t24).roundToInt(), (cy - t24).roundToInt()) }.size(48.dp)
+            Modifier.offset { IntOffset((ax - hit / 2f).roundToInt(), (ay + with(dn) { 5.dp.toPx() } - hit / 2f).roundToInt()) }
+                .size(60.dp)
                 .pointerInput(which) {
                     detectDragGestures(
-                        onDragStart = { ed.selHandleStart(which) },
-                        onDragEnd = { ed.selEnd() },
-                        onDragCancel = { ed.selEnd() }
-                    ) { ch, d -> ch.consume(); ed.selNudge(Offset(d.x, d.y)) }
+                        onDragStart = { dragging = true; haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); ed.selHandleStart(which) },
+                        onDragEnd = { dragging = false; ed.selEnd() },
+                        onDragCancel = { dragging = false; ed.selEnd() }
+                    ) { ch, dd -> ch.consume(); ed.selNudge(Offset(dd.x, dd.y)) }
                 },
             Alignment.Center
         ) {
-            Box(
-                Modifier.size(22.dp).shadow(2.dp, CircleShape).clip(
-                    if (isStart) RoundedCornerShape(50, 0, 50, 50) else RoundedCornerShape(0, 50, 50, 50)
-                ).background(pal.p)
-            )
+            // pusat tetesan ada di (ax, ay); kotak sentuh digeser 5dp ke bawah, jadi tetesan digeser balik 5dp ke atas
+            Box(Modifier.offset(0.dp, (-5).dp), Alignment.Center) {
+                Box(
+                    Modifier.size(58.dp).graphicsLayer { scaleX = halo; scaleY = halo; alpha = halo }
+                        .clip(CircleShape).background(pal.p.copy(alpha = .16f))
+                )
+                Box(
+                    Modifier.size(26.dp)
+                        .graphicsLayer {
+                            val k = (pop.value * grow).coerceAtLeast(0f)
+                            scaleX = k; scaleY = k
+                            // tumbuh dari sudut lancip yang menyentuh teks
+                            transformOrigin = TransformOrigin(if (isStart) 1f else 0f, 0f)
+                        }
+                        .shadow(if (dragging) 6.dp else 2.dp, handleShape(isStart))
+                        .clip(handleShape(isStart)).background(pal.p)
+                        .border(1.5.dp, pal.s.copy(alpha = .85f), handleShape(isStart))
+                )
+            }
         }
     }
     H(1, a)
     H(2, f)
 }
+
+private fun handleShape(start: Boolean): Shape =
+    if (start) RoundedCornerShape(topStart = 13.dp, topEnd = 3.dp, bottomEnd = 13.dp, bottomStart = 13.dp)
+    else RoundedCornerShape(topStart = 3.dp, topEnd = 13.dp, bottomEnd = 13.dp, bottomStart = 13.dp)
 
 /** Dipisah dari NoteScreen supaya tidak terjebak receiver ColumnScope milik Column di luarnya. */
 @Composable
