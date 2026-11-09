@@ -280,6 +280,7 @@ data class Note(
     val tbo: Boolean = true,             // judul: tebal (bawaan tebal, seperti tampilan sebelum ada pilihan ini)
     val tit: Boolean = false,            // judul: miring
     val tcl: Int = 0,                    // judul: warna (0 utama, 1 sekunder, 2 tersier, 3 pekat, 4 hitam; lihat titleColor)
+    val tal: String = "",                // judul: perataan ("" kiri, c tengah, r kanan)
     val o: Long = 0L,                    // posisi manual hasil seret di beranda (kunci urut, besar = di atas); 0 = ikut waktu ubah / dibuat
     val pdf: String = "",                // dokumen PDF: id berkas (filesDir/pdf/<id>.pdf); "" = catatan biasa
     val pg: Int = 0,                     // PDF: halaman terakhir dibaca (mulai 0)
