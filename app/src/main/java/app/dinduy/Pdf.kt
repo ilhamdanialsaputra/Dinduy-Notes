@@ -537,7 +537,13 @@ private fun handleXY(pt: PgText, a: Int, b: Int, start: Boolean, w: Float, h: Fl
 private val SEL_COLOR = Color(0xFF4F8CFF)
 
 /** Jari-jari tetesan gagang seleksi (dp). Titik sudut lancipnya menempel di tepi teks. */
-private const val HDL_R = 12f
+private const val HDL_R = 9f
+
+/** Jarak tambahan (dp) gagang awal / akhir ke arah luar, supaya keduanya tidak dempet saat yang dipilih hanya satu kata. */
+private const val HDL_GAP = 2f
+
+/** Jari-jari area sentuh gagang (dp), dihitung dari pusat tetesan. */
+private const val HDL_HIT = 40f
 
 // ---------------------------------------------------------------- coretan di PDF
 
@@ -653,6 +659,7 @@ class PdfUi(val doc: PdfDoc, val ink: PInkState, val fid: String) {
     var hits by mutableStateOf<List<PHit>>(emptyList())
     var cur by mutableIntStateOf(-1)
     var drawing by mutableStateOf(false)
+    var selGrab by mutableStateOf(false)   // jari sedang memegang gagang seleksi / menyeret seleksi: gestur halaman (pager / curl / ketukan) harus minggir
     var pulse: androidx.compose.runtime.State<Float> = mutableFloatStateOf(.6f)
     var txt: PdfText? = null
     var sel by mutableStateOf<PSel?>(null)
@@ -715,7 +722,10 @@ private fun Modifier.curlTouch(
     // true = ketukan di zona tepi TIDAK dikonsumsi di sini: library PageCurl yang membalik halaman (tap bawaan library)
     edgeToLib: Boolean = false,
     // true = anak sedang memakai sentuhan ini (menyeret pegangan seleksi teks): jangan menggeser gambar yang diperbesar
-    busy: () -> Boolean = { false }
+    busy: () -> Boolean = { false },
+    // true = jari memegang gagang seleksi: semua perubahan sentuhan dimakan di pass Initial (pager / library tidak boleh ikut menggeser halaman),
+    // dan lepasnya jari tidak dihitung sebagai ketukan (tidak menghapus seleksi, tidak membalik halaman di zona tepi)
+    selBusy: () -> Boolean = { false }
 ): Modifier = pointerInput(enabled) {
     if (!enabled) return@pointerInput
     var lastT = 0L
@@ -733,6 +743,10 @@ private fun Modifier.curlTouch(
             if (ev.changes.count { it.pressed } >= 2) multi = true
             if (multi) { if (ev.changes.none { it.pressed }) break else continue }   // cubitan ditangani pinch()
             val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+            if (selBusy()) {
+                c.consume()
+                if (c.changedToUp()) break else continue
+            }
             if (c.changedToUp()) {
                 val quick = c.uptimeMillis - down.uptimeMillis < viewConfiguration.longPressTimeoutMillis
                 val ex = c.position.x
@@ -899,14 +913,16 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
                             val hs = if (s0.a.p == index) handleXY(here, g.first, g.second, true, W, H) else null
                             val he = if (s0.b.p == index) handleXY(here, g.first, g.second, false, W, H) else null
                             val rr = HDL_R * dens
-                            // pusat tetesan: awal di kiri-bawah titik, akhir di kanan-bawah; area sentuh lebar supaya mudah dikenai jempol
-                            val ds = hs?.let { (down.position - Offset(it.x - rr, it.y + rr + 4f * dens)).getDistance() } ?: Float.MAX_VALUE
-                            val de = he?.let { (down.position - Offset(it.x + rr, it.y + rr + 4f * dens)).getDistance() } ?: Float.MAX_VALUE
-                            if (min(ds, de) <= 48f * dens) {
+                            val gx = HDL_GAP * dens
+                            // pusat tetesan: awal di kiri-bawah titik, akhir di kanan-bawah (sama persis dengan yang digambar); area sentuh tetap lebar untuk jempol
+                            val ds = hs?.let { (down.position - Offset(it.x - rr - gx, it.y + rr + 4f * dens)).getDistance() } ?: Float.MAX_VALUE
+                            val de = he?.let { (down.position - Offset(it.x + rr + gx, it.y + rr + 4f * dens)).getDistance() } ?: Float.MAX_VALUE
+                            if (min(ds, de) <= HDL_HIT * dens) {
                                 val st = ds <= de
                                 val o = (if (st) hs else he)!!
                                 grab = down.position - Offset(o.x, o.y - 5f * dens)
                                 anchor = if (st) s0.b else s0.a
+                                ui.selGrab = true   // sebelum apa pun: induk langsung tahu sentuhan ini milik gagang
                                 hap.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 down.consume()
                             }
@@ -947,6 +963,7 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
                         return if (c < 0) null else PPos(p, c)
                     }
                     ui.drawing = true
+                    ui.selGrab = true
                     try {
                         while (true) {
                             val ev = awaitPointerEvent()
@@ -962,7 +979,7 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
                                 ui.sel = ns
                             }
                         }
-                    } finally { ui.drawing = false }
+                    } finally { ui.drawing = false; ui.selGrab = false }
                 }
             })
     ) {
@@ -1017,9 +1034,10 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
             // tetesan bergaya M3 Expressive: bulat penuh dengan satu sudut lancip yang menyentuh tepi teks
             fun hdl(o: Offset, start: Boolean) {
                 if (k <= .001f) return
-                val l = if (start) o.x - 2f * rr else o.x
+                val gx = HDL_GAP * density
+                val l = if (start) o.x - 2f * rr - gx else o.x + gx
                 val full = CornerRadius(rr)
-                val tip = CornerRadius(3f * density)
+                val tip = CornerRadius(2.5f * density)
                 val shape = androidx.compose.ui.graphics.Path().apply {
                     addRoundRect(
                         RoundRect(
@@ -1030,7 +1048,7 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
                     )
                 }
                 scale(k, k, pivot = o) {
-                    if (halo > 0f) drawCircle(SEL_COLOR.copy(alpha = .2f * halo), 2.3f * rr, Offset(l + rr, o.y + rr))
+                    if (halo > 0f) drawCircle(SEL_COLOR.copy(alpha = .2f * halo), 2.1f * rr, Offset(l + rr, o.y + rr))
                     translate(0f, 1.6f * density) { drawPath(shape, Color.Black.copy(alpha = .18f)) }
                     drawPath(shape, SEL_COLOR)
                 }
@@ -1446,7 +1464,8 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                             val z1 = if (z0 > 1.2f) 1f else 2.5f
                             scope.launch { animate(0f, 1f, animationSpec = spring(1f, 420f)) { v, _ -> cZoom(z0 + (z1 - z0) * v, p) } }
                         },
-                        busy = { ui.drawing }
+                        busy = { ui.drawing },
+                        selBusy = { ui.selGrab }
                     )
                     .padding(top = topPad, bottom = sab + 12.dp),
                 Alignment.Center
@@ -1512,7 +1531,8 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                             val z1 = if (z0 > 1.2f) 1f else 2.5f
                             scope.launch { animate(0f, 1f, animationSpec = spring(1f, 420f)) { v, _ -> zoomAt(z0 + (z1 - z0) * v, p) } }
                         },
-                        busy = { ui.drawing }
+                        busy = { ui.drawing },
+                        selBusy = { ui.selGrab }
                     )
             ) {
                 HorizontalPager(
