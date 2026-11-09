@@ -19,8 +19,6 @@ import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkHorizontally
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.LocalIndication
@@ -490,15 +488,19 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
 
                 // kapsul mengambang: nomor halaman + penanda "sedang menyusun ulang"
                 val pages = info?.pages ?: 0
-                AnimatedVisibility(
-                    visible = view != null && (busy || pages > 1),
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp),
-                    enter = scaleIn(spring(.6f, 520f), .6f) + slideInVertically(spring(.7f, 520f)) { it },
-                    exit = scaleOut(spring(1f, 700f), .6f) + slideOutVertically(spring(1f, 700f)) { it }
-                ) {
+                val pillOn = view != null && (busy || pages > 1)
+                val pv by animateFloatAsState(if (pillOn) 1f else 0f, spring(.6f, 520f), label = "pill")
+                if (pv > .01f) {
                     val cap = RoundedCornerShape(30.dp)
                     Row(
-                        Modifier.shadow(if (pal.dark) 8.dp else 5.dp, cap).clip(cap).background(pal.c3)
+                        Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp)
+                            .graphicsLayer {
+                                val sc = .6f + .4f * pv
+                                scaleX = sc
+                                scaleY = sc
+                                translationY = (1f - pv) * 80.dp.toPx()
+                            }
+                            .shadow(if (pal.dark) 8.dp else 5.dp, cap).clip(cap).background(pal.c3)
                             .border(1.dp, pal.ol.copy(alpha = .22f), cap)
                             .animateContentSize(spring(.8f, 420f))
                             .height(44.dp).padding(horizontal = 16.dp),
@@ -538,7 +540,7 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
                     Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(40.dp).clip(CircleShape).background(pal.pc), Alignment.Center) { Ic("txt", pal.opc, 22.dp) }
                         T("Text size", 16f, 600, pal.os, Modifier.padding(start = 12.dp).weight(1f))
-                        AnimatedVisibility(
+                        this@Row.AnimatedVisibility(
                             visible = pt != def,
                             enter = scaleIn(spring(.5f, 520f), .5f) + expandHorizontally(spring(.7f, 480f)),
                             exit = scaleOut(spring(1f, 700f), .5f) + shrinkHorizontally(spring(1f, 700f))
