@@ -406,10 +406,10 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) { try { Imgs.load(imgDir, id) } catch (e: Throwable) { } }
     }
 
-    fun setTitleStyle(id: String, bold: Boolean, italic: Boolean, color: Int) {
+    fun setTitleStyle(id: String, bold: Boolean, italic: Boolean, color: Int, align: String = "") {
         val n = note(id) ?: return
-        if (n.tbo == bold && n.tit == italic && n.tcl == color) return
-        upd(id) { it.copy(tbo = bold, tit = italic, tcl = color) }
+        if (n.tbo == bold && n.tit == italic && n.tcl == color && n.tal == align) return
+        upd(id) { it.copy(tbo = bold, tit = italic, tcl = color, tal = align) }
     }
 
     /** Tambah gambar di akhir catatan langsung ke data (dipakai bila editornya sudah tidak ada, mis. aplikasi sempat dimatikan sistem selama galeri terbuka). */
