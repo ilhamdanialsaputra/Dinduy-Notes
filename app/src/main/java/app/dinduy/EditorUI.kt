@@ -521,7 +521,7 @@ fun TF(
                                     if (!s.isNullOrEmpty()) ed.selPaste(s)
                                     true
                                 } else false
-                            e.key == Key.Backspace && !ctrl && !e.isShiftPressed -> ed.backKey(key)
+                            e.key == Key.Backspace && !ctrl && !e.isAltPressed -> ed.backKey(key)   // shift boleh aktif: Gboard mengirim Backspace dengan meta SHIFT saat mode kapital
                             e.key == Key.MoveHome -> ed.jumpKey(key, false, ctrl, e.isShiftPressed)
                             e.key == Key.MoveEnd -> ed.jumpKey(key, true, ctrl, e.isShiftPressed)
                             e.key == Key.PageUp -> ed.selOn && ed.jumpKey(key, false, true, e.isShiftPressed)
