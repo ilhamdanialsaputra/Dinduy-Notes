@@ -621,10 +621,9 @@ fun BlockView(ed: Ed, vm: AppVM, b: Blk, ordN: Int, dm: Dm, fold: Fold? = null, 
             val (il, ir) = fitInd(b.il, b.ir, ed.widthDp)
             TF(ed, b.id, st.aligned(b), Modifier.fillMaxWidth().padding(start = il.dp, end = ir.dp, top = (fs * .4f).dp, bottom = (fs * .5f).dp))
         }
-        "q", "code", "hr" -> BoxBlock(ed, b, dm, pal)
+        "q", "code", "hr", "lnk" -> BoxBlock(ed, b, dm, pal)
         "tbl" -> TableView(ed, b, dm, pal)
         "img" -> ImgView(ed, vm, b, dm)
-        "lnk" -> LinkCard(ed, b, dm)
     }
 }
 
@@ -1507,6 +1506,7 @@ private fun boxHeightEst(ed: Ed, b: Blk, dm: Dm, pal: Pal, tm: TextMeasurer, dn:
             val h = tm.measure(styled(b.r, b.r.t, 0, pal, fz), baseStyle(pal, dm, q.fg, fz, 500), constraints = Constraints(maxWidth = avail)).size.height / dn.density
             h + 36f + (if (q.label != null) fs * .7f * 1.05f * 1.4f + fs * .45f * .7f else 0f)
         }
+        "lnk" -> linkHeightEst(b, w, fs)
         else -> {
             val lines = b.r.t.count { it == '\n' } + 1
             lines * fs * .82f * 1.55f + 40f + (if (b.l.isNotEmpty()) 12f * 1.4f + 8f + 14f else 0f)
@@ -1836,6 +1836,8 @@ private fun BoxCell(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
     val dn = LocalDensity.current
     val bS by rememberUpdatedState(b)
     val hr = b.ty == "hr"
+    val lnk = b.ty == "lnk"
+    val uri = androidx.compose.ui.platform.LocalUriHandler.current
     val focusedHere by remember(b.id) {
         androidx.compose.runtime.derivedStateOf { val f = ed.focus; f != null && keyBlock(f) == b.id }
     }
@@ -1866,7 +1868,8 @@ private fun BoxCell(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
             Modifier.fillMaxWidth().then(
                 if (hr && edit) Modifier.pointerInput(Unit) { detectTapGestures(onTap = { ed.selectObj(bS.id) }) }
                 else if (ed.reading) Modifier.pointerInput(true) {
-                    detectTapGestures(onTap = { if (!ed.ink.on) ed.tapObj(bS.id) })   // mode baca: seluruh blok bisa diketuk
+                    // mode baca: seluruh blok bisa diketuk (kartu tautan: membuka tautannya; ketuk saat mode edit = memilih kartu)
+                    detectTapGestures(onTap = { if (!ed.ink.on) { if (lnk) openLink(uri, bS.l) else ed.tapObj(bS.id) } })
                 } else Modifier
             ),
             sel = edit && armed && !lifted   // saat diangkat tanpa bingkai pilihan: bingkai ikut terpangkas layer dan tampak jelek
@@ -1956,6 +1959,7 @@ private fun BoxBody(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier, sel: B
                 }
             }
         }
+        "lnk" -> LinkBody(ed, b, dm, pal, modifier.selRing(sel, LinkShape, ring))
         else -> Box(modifier.padding(vertical = (fs * .9f).dp).height(8.dp).selRing(sel, RoundedCornerShape(4.dp), ring).clip(RoundedCornerShape(4.dp)).background(pal.sc))
     }
 }
@@ -3087,6 +3091,7 @@ fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boole
             ) {
                 RecordCard(vm)
             }
+            LinkDialog(ed)
             // dock: SATU wadah untuk ketik / gambar / tabel / kutipan / objek / coret. Morph antar toolbar ada di ToolDock (DocBar.kt)
             ToolDock(ed, vm, act, showBar)
         }
