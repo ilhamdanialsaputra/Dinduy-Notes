@@ -844,6 +844,8 @@ class NoteDrag {
     var grab = Offset.Zero                          // titik sentuh relatif terhadap pojok kiri-atas kartu
     var dropping by mutableStateOf(false)
     var resid = Offset.Zero                         // jarak kartu dari tempat barunya saat dilepas
+    var touchId: String? = null                     // kartu yang baru saja tersentuh (dicatat oleh kartu itu sendiri, jadi pasti benar)
+    var touchT = -1L                                // waktu sentuhan tadi, untuk mencocokkan dengan gestur di grid
     val settle = Animatable(0f)                     // 1 -> 0: kartu meluncur ke tempatnya
 
     fun begin(key: String, g: Int, ord: List<String>, grabAt: Offset, at: Offset) {
@@ -1072,6 +1074,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         // tiap frame selama menyeret: gulir otomatis di tepi layar + cek kartu yang sedang ditindih
         LaunchedEffect(nd.id) {
             val id = nd.id ?: return@LaunchedEffect
+            var blocked: String? = null
             while (nd.id == id && !nd.dropping) {
                 withFrameNanos { }
                 val li = state.layoutInfo
@@ -1096,30 +1099,62 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                 val cx = nd.finger.x - nd.grab.x + me.size.width / 2f
                 val cy = nd.finger.y - nd.grab.y + me.size.height / 2f
                 var target = -1
-                for (it in vis) {
-                    val k = it.key as? String ?: continue
-                    if (k == id) continue
-                    val ti = grp.indexOf(k)
-                    if (ti < 0) continue
-                    val mx = it.size.width * .1f
-                    val my = it.size.height * .2f
-                    if (cx >= it.offset.x + mx && cx <= it.offset.x + it.size.width - mx &&
-                        cy >= it.offset.y + my && cy <= it.offset.y + it.size.height - my
-                    ) { target = ti; break }
-                }
-                if (target < 0) {
-                    // di luar semua kartu: ujung bawah / atas kolom berarti pindah ke akhir / awal kelompok
-                    val laneW = li.viewportSize.width / cols.toFloat()
-                    val lane = (cx / laneW).toInt().coerceIn(0, cols - 1)
-                    val mine = vis.filter { v -> (v.key as? String)?.let { k -> grp.indexOf(k) >= 0 } == true && v.lane == lane }
-                    if (mine.isNotEmpty()) {
-                        val bottom = mine.maxOf { it.offset.y + it.size.height }
-                        val topY = mine.minOf { it.offset.y }
-                        if (cy > bottom && vis.any { it.key == grp.last() }) target = grp.size - 1
-                        else if (cy < topY && vis.any { it.key == grp.first() }) target = 0
+                if (cols == 1) {
+                    // 1 kolom: titik sisip ditentukan oleh pusat kartu yang diseret dibanding pusat kartu LAIN, yang diukur seolah kartu
+                    // yang diseret tidak ada di daftar. Hasilnya tidak bergantung pada slot kartu yang diseret saat ini, jadi setelah
+                    // bertukar tidak ada tukar-balik (itulah penyebab kedip & loncat pada kartu yang tingginya berbeda).
+                    val gap = 8f * dens.density
+                    val dh = me.size.height + gap
+                    val hyst = 6f * dens.density
+                    var minVis = Int.MAX_VALUE
+                    for (v in vis) {
+                        val gi = grp.indexOf(v.key as? String ?: continue)
+                        if (gi in 0 until minVis) minVis = gi
+                    }
+                    var ins = 0
+                    for (gi in grp.indices) {
+                        val k = grp[gi]
+                        if (k == id) continue
+                        val v = vis.firstOrNull { it.key == k }
+                        val above = if (v == null) gi < minVis else {
+                            val c = v.offset.y + v.size.height / 2f - (if (gi > cur) dh else 0f)
+                            // sedikit penahan: kartu yang sudah di atas / bawah tidak berpindah hanya karena jari bergetar
+                            if (gi < cur) c < cy + hyst else c < cy - hyst
+                        }
+                        if (above) ins++ else break
+                    }
+                    target = ins.coerceIn(0, grp.size - 1)
+                } else {
+                    var overKey: String? = null
+                    for (it in vis) {
+                        val k = it.key as? String ?: continue
+                        if (k == id) continue
+                        val ti = grp.indexOf(k)
+                        if (ti < 0) continue
+                        val mx = it.size.width * .1f
+                        val my = it.size.height * .2f
+                        if (cx >= it.offset.x + mx && cx <= it.offset.x + it.size.width - mx &&
+                            cy >= it.offset.y + my && cy <= it.offset.y + it.size.height - my
+                        ) { target = ti; overKey = k; break }
+                    }
+                    // kartu yang baru saja bertukar tidak boleh bertukar balik sebelum pusat kartu seretan keluar dulu dari kartu itu
+                    if (overKey != null && overKey == blocked) target = -1
+                    else if (overKey != blocked) blocked = null
+                    if (target < 0) {
+                        // di luar semua kartu: ujung bawah / atas kolom berarti pindah ke akhir / awal kelompok
+                        val laneW = li.viewportSize.width / cols.toFloat()
+                        val lane = (cx / laneW).toInt().coerceIn(0, cols - 1)
+                        val mine = vis.filter { v -> (v.key as? String)?.let { k -> grp.indexOf(k) >= 0 } == true && v.lane == lane }
+                        if (mine.isNotEmpty()) {
+                            val bottom = mine.maxOf { it.offset.y + it.size.height }
+                            val topY = mine.minOf { it.offset.y }
+                            if (cy > bottom && vis.any { it.key == grp.last() }) target = grp.size - 1
+                            else if (cy < topY && vis.any { it.key == grp.first() }) target = 0
+                        }
                     }
                 }
                 if (target >= 0 && target != cur) {
+                    blocked = grp.getOrNull(target)
                     nd.order = grp.toMutableList().also { it.removeAt(cur); it.add(target, id) }
                     hapticDrag.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 }
@@ -1137,13 +1172,11 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                         // catatan sedang dibuka / menutup (morph berjalan): jangan mulai seret
                         if (vm.openP.value > .001f || vm.nav.stack.any { it is Scr.Note }) return@awaitEachGesture
+                        // kartu sebelumnya masih meluncur ke tempatnya: seretan baru menunggu, supaya reset-nya tidak menimpa seretan ini
+                        if (nd.id != null) return@awaitEachGesture
                         val (_, pin, oth) = dragCtx
-                        val hit = state.layoutInfo.visibleItemsInfo.firstOrNull { v ->
-                            val k = v.key as? String
-                            k != null && (k in pin || k in oth) &&
-                                down.position.x >= v.offset.x && down.position.x <= v.offset.x + v.size.width &&
-                                down.position.y >= v.offset.y && down.position.y <= v.offset.y + v.size.height
-                        } ?: return@awaitEachGesture
+                        // pilihan sebelum tekan lama: setelah kartu dilepas dari seretan, pilihan dikembalikan ke ini (keluar dari mode pilih)
+                        val selBefore = vm.sel.toList()
                         // tunggu tekan lama tanpa menyentuh kejadian: gulir dan ketuk biasa tetap jalan seperti semula.
                         // Batal bila jari terangkat atau bergeser melewati batas (itu gulir / geser arsip-hapus, bukan seret).
                         val slop = viewConfiguration.touchSlop
@@ -1158,23 +1191,32 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                         }
                         // held != null berarti loop berakhir sebelum waktunya (batal); null = tekan lama berhasil
                         if (held != null) return@awaitEachGesture
-                        val key = hit.key as String
+                        // kartu yang tersentuh dicatat oleh kartu itu sendiri (HomeCard) lewat hit-test sentuhan asli, jadi tidak meleset
+                        // walau kartu sedang bergeser oleh animasi; mencocokkan koordinat layout di sini bisa memilih kartu yang salah.
+                        val key = (if (nd.touchT == down.uptimeMillis) nd.touchId else null)
+                            ?.takeIf { it in pin || it in oth } ?: return@awaitEachGesture
+                        val me0 = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == key } ?: return@awaitEachGesture
                         val g = if (key in pin) 0 else 1
                         if (key !in vm.sel) {
                             vm.sel.add(key)
                             hapticDrag.performHapticFeedback(HapticFeedbackType.LongPress)
                         }
-                        nd.begin(key, g, if (g == 0) pin else oth, last - Offset(hit.offset.x.toFloat(), hit.offset.y.toFloat()), last)
+                        nd.begin(key, g, if (g == 0) pin else oth, last - Offset(me0.offset.x.toFloat(), me0.offset.y.toFloat()), last)
+                        val start = last
+                        var moved = false
                         try {
                             while (true) {
                                 val ev = awaitPointerEvent(PointerEventPass.Initial)
                                 val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
                                 ch.consume()
                                 if (!ch.pressed) break
+                                if ((ch.position - start).getDistance() > slop * 2f) moved = true
                                 nd.finger = ch.position
                             }
                         } finally {
                             endDrag()
+                            // seret selesai = kartu sudah dilepas di tempatnya: keluar dari mode pilih. Tekan lama tanpa menggeser tetap memilih.
+                            if (moved) { vm.sel.clear(); vm.sel.addAll(selBefore.filter { id -> vm.note(id) != null }) }
                         }
                     }
                 },
@@ -1352,7 +1394,13 @@ fun HomeCard(
                 shape = RoundedCornerShape(12.dp)
                 clip = false
             } else Modifier
-        )
+        ).pointerInput(d.id) {
+            // hanya mencatat (tidak mengonsumsi): kartu ini yang benar-benar tersentuh, dibaca oleh gestur seret di grid
+            awaitEachGesture {
+                val dn = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                nd.touchId = d.id; nd.touchT = dn.uptimeMillis
+            }
+        }
     ) {
         val first = remember(d.id) { val f = !vm.seen.contains(d.id); vm.seen.add(d.id); f }
         val prog = remember(d.id) { Animatable(if (first) 0f else 1f) }
