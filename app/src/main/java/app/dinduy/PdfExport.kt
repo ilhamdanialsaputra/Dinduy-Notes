@@ -570,9 +570,9 @@ object PdfExport {
         val fs = cx.fs
         val u = cx.u
         val q = qst(b.k, pal)
-        val k = if (b.qMin()) QSC else 1f        // kutipan kecil: huruf, label, bantalan, dan bar diskalakan seperti di editor
+        val k = b.qScale()        // skala kutipan (titik sudut di editor): huruf, label, bantalan, dan bar diskalakan sama persis
         val padX = 22f * k * u
-        val padXr = QUOTE_END_PAD * u
+        val padXr = padX
         val padY = 18f * k * u
         val size = fs * 1.05f * k
         val full = b.bw >= .999f
