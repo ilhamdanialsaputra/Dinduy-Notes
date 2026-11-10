@@ -112,6 +112,12 @@ data class FHit(val key: String, val s: Int, val e: Int)
 class Snap(val bl: List<Blk>, val key: String?, val sel: TextRange)
 
 fun keyBlock(k: String) = k.substringBefore(':')
+
+/** Penanda kutipan kecil di Blk.l (kutipan tidak memakai l untuk hal lain). Dibaca editor dan PDF. */
+const val QMIN = "min"
+/** Skala isi kutipan saat dikecilkan (huruf, label, bantalan). Dipakai editor, estimasi tinggi, dan PDF. */
+const val QSC = .78f
+fun Blk.qMin(): Boolean = ty == "q" && l == QMIN
 fun isCellKey(k: String) = k.indexOf(':') >= 0
 fun cellRC(k: String): Pair<Int, Int> {
     val p = k.split(':')
@@ -817,10 +823,30 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     }
 
     fun setQuote(k: String) = convertFocused { b ->
-        if (b.ty == "q" && b.k == k) b.copy(ty = "p") else b.copy(ty = "q", k = k, ba = b.ba.ifEmpty { "l" })   // sisipan baru: rata kiri
+        if (b.ty == "q" && b.k == k) b.copy(ty = "p", l = "")
+        else b.copy(ty = "q", k = k, ba = b.ba.ifEmpty { "l" }, l = if (b.ty == "q") b.l else "")   // sisipan baru: rata kiri; ganti gaya kutipan tidak mengubah status kecil/besar
     }
 
-    fun setPlain() = convertFocused { b -> b.copy(ty = "p") }
+    fun setPlain() = convertFocused { b -> if (b.ty == "q") b.copy(ty = "p", l = "") else b.copy(ty = "p") }
+
+    /**
+     * Kutipan kecil / besar (tombol di sudut kutipan, seperti kartu tautan yang bisa dikecilkan). Kecil = seluruh isi (huruf, label,
+     * bantalan) diskalakan QSC; teks tetap utuh dan tetap bisa diedit. Status disimpan di Blk.l
+     * (QMIN = kecil, kosong = besar; kutipan tidak memakai l untuk hal lain) sehingga ikut tersimpan, dicadangkan, di-undo, dan
+     * dibaca PDF. [on] null = balik status.
+     */
+    fun quoteMin(bid: String, on: Boolean? = null) {
+        val i = idx(bid)
+        if (i < 0) return
+        val b = blocks[i]
+        if (b.ty != "q") return
+        val nv = on ?: !b.qMin()
+        if (nv == b.qMin()) return
+        commit()
+        animNext()
+        setBlock(i, b.copy(l = if (nv) QMIN else ""))
+        dirty(); norm(); afterStructural()
+    }
 
     /** Perataan paragraf: "" kiri, c tengah, r kanan, j rata kiri-kanan. Tidak berlaku untuk blok kode. */
     fun setAlign(a: String) = convertFocused { b -> if (b.isText && b.ty != "code" && b.ty != "q") b.copy(ta = a) else b }
@@ -1410,7 +1436,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             }
             "hr" -> 28f
             "lnk" -> 110f
-            "code", "q" -> lines(b.r.t, w - 24f) * fs * lh + 28f
+            "q" -> { val k = if (b.qMin()) QSC else 1f; lines(b.r.t, (w - 22f * k - QUOTE_END_PAD) / k) * fs * k * lh + 28f * k }
+            "code" -> lines(b.r.t, w - 24f) * fs * lh + 28f
             else -> lines(b.r.t, w) * fs * lh + 8f
         }
         return dp * dens
