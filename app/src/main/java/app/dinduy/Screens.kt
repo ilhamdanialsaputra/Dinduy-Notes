@@ -1524,6 +1524,7 @@ fun Fab(vm: AppVM, act: Actions, small: Boolean, hide: Boolean, lift: Dp) {
                                 val tracker = VelocityTracker()
                                 tracker.addPosition(down.uptimeMillis, down.position)
                                 var p = 0f
+                                var passed = false
                                 while (true) {
                                     val ev = awaitPointerEvent()
                                     val c = ev.changes.firstOrNull { it.id == down.id } ?: break
@@ -1533,13 +1534,24 @@ fun Fab(vm: AppVM, act: Actions, small: Boolean, hide: Boolean, lift: Dp) {
                                     if (up) break
                                     p = ((sx - c.position.x - slop).coerceAtLeast(0f) / dist).coerceIn(0f, 1f)
                                     val v = p
-                                    scope.launch { QuickFx.p.snapTo(v) }
+                                    // progres mengejar jari lewat spring kaku (bukan snapTo): kecepatan jari terbawa mulus ke animasi lepas jari
+                                    scope.launch { QuickFx.p.animateTo(v, spring(1f, 1400f)) }
+                                    val nowPassed = p > .35f
+                                    if (nowPassed != passed) { passed = nowPassed; haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
                                 }
                                 val vx = tracker.calculateVelocity().x
                                 QuickFx.drag = false
-                                if ((p > .35f || vx < -1000f) && quickStart(vm)) {
+                                if (p > .35f || vx < -1000f) {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    scope.launch { QuickFx.p.animateTo(1f, spring(.8f, 480f)) }
+                                    scope.launch {
+                                        // bilah mekar LEBIH DULU dan tidak menunggu perekam: MediaRecorder disiapkan di thread IO,
+                                        // jadi main thread tidak terblokir dan gerak tidak berhenti di tengah
+                                        val grow = launch { QuickFx.p.animateTo(1f, spring(.8f, 480f)) }
+                                        if (!quickStartAsync(vm)) {
+                                            grow.cancel()
+                                            QuickFx.p.animateTo(0f, spring(1f, 600f))
+                                        }
+                                    }
                                 } else {
                                     scope.launch { QuickFx.p.animateTo(0f, spring(1f, 600f)) }
                                 }
