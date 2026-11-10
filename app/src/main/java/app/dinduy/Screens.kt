@@ -848,6 +848,10 @@ class NoteDrag {
     var finger by mutableStateOf(Offset.Zero)       // posisi jari di dalam grid
     var grab = Offset.Zero                          // titik sentuh relatif terhadap pojok kiri-atas kartu
     var dropping by mutableStateOf(false)
+    var ready by mutableStateOf(false)              // tata letak baru sudah terpasang; bayangan boleh meluncur ke slotnya
+    var h = 0                                       // tinggi kartu seretan (px)
+    var span = 0f                                   // tinggi kartu seretan + jarak antar kartu (px): jarak geser kartu lain di 1 kolom
+    val lift = Animatable(0f)                       // 0 -> 1: kartu terangkat (bayangan & skala muncul perlahan)
     var resid = Offset.Zero                         // jarak kartu dari tempat barunya saat dilepas
     var touchId: String? = null                     // kartu yang baru saja tersentuh (dicatat oleh kartu itu sendiri, jadi pasti benar)
     var touchT = -1L                                // waktu sentuhan tadi, untuk mencocokkan dengan gestur di grid
@@ -862,10 +866,28 @@ class NoteDrag {
     val settle = Animatable(0f)                     // 1 -> 0: kartu meluncur ke tempatnya
 
     fun begin(key: String, g: Int, ord: List<String>, grabAt: Offset, at: Offset) {
-        group = g; orig = ord; order = ord; grab = grabAt; finger = at; dropping = false; id = key
+        group = g; orig = ord; order = ord; grab = grabAt; finger = at; dropping = false; ready = false; id = key
     }
 
-    fun reset() { id = null; dropping = false; order = emptyList() }
+    fun reset() { id = null; dropping = false; ready = false; order = emptyList() }
+
+    /**
+     * 1 kolom: tata letak grid TIDAK berubah selama menyeret (kartu tidak benar-benar dipindah di daftar), jadi tidak ada
+     * lompatan gulir / pertukaran beruntun. Kartu di antara asal dan tujuan hanya digeser secara visual sejauh `span`.
+     */
+    fun shiftOf(key: String): Float {
+        val d = id ?: return 0f
+        if (key == d) return 0f
+        val o = orig.indexOf(d)
+        val t = order.indexOf(d)
+        val k = orig.indexOf(key)
+        if (o < 0 || t < 0 || k < 0 || o == t) return 0f
+        return when {
+            t > o && k > o && k <= t -> -span
+            t < o && k >= t && k < o -> span
+            else -> 0f
+        }
+    }
 }
 
 /**
@@ -1054,7 +1076,8 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         val othersBase = if (sections) live.filter { !it.p } else emptyList()
         // saat menyeret, satu kelompok memakai urutan sementara supaya kartu lain bergeser mengikuti
         fun shown(base: List<Note>, g: Int): List<Note> {
-            if (nd.id == null || nd.group != g || nd.order.isEmpty()) return base
+            // 1 kolom: urutan di grid dibiarkan tetap selama menyeret (kartu lain digeser secara visual, lihat NoteDrag.shiftOf)
+            if (cols == 1 || nd.id == null || nd.group != g || nd.order.isEmpty()) return base
             val byId = base.associateBy { it.id }
             val o = nd.order.mapNotNull { byId[it] }
             return if (o.size == base.size) o else base
@@ -1073,77 +1096,167 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         fun endDrag() {
             val id = nd.id ?: return
             if (nd.dropping) return
-            val info = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id }
             val ghost = nd.startC + (nd.finger - nd.at0)
             nd.dropAt = ghost
-            nd.resid = if (info != null) ghost - (nd.startC + (Offset(info.offset.x.toFloat(), info.offset.y.toFloat()) - nd.off0)) else Offset.Zero
-            if (nd.order != nd.orig) vm.moveOrder(nd.order)
-            nd.dropping = true
-            scope.launch {
-                nd.settle.snapTo(1f)
-                nd.settle.animateTo(0f, spring(.8f, 380f))
-                nd.reset()
+            val changed = nd.order != nd.orig
+            if (cols == 1) {
+                // 1 kolom: urutan baru baru dipasang ke grid sekarang. Kartu lain sudah berada di tempat visualnya, jadi
+                // pemasangan tidak terlihat (animasi penempatan dimatikan selama ada seretan).
+                val oldIdx = nd.orig.indexOf(id)
+                val newIdx = nd.order.indexOf(id)
+                val rangeKeys = HashSet<String>()
+                if (oldIdx >= 0 && newIdx >= 0) rangeKeys.addAll(nd.orig.subList(minOf(oldIdx, newIdx), maxOf(oldIdx, newIdx) + 1))
+                val before = HashMap<String, Int>()
+                for (v in state.layoutInfo.visibleItemsInfo) { val k = v.key as? String ?: continue; before[k] = v.offset.y }
+                nd.dropping = true
+                if (changed) vm.moveOrder(nd.order)
+                scope.launch {
+                    nd.settle.snapTo(1f)
+                    if (changed) {
+                        withFrameNanos { }
+                        withFrameNanos { }
+                        // grid mengikuti kartu pertama yang tampil bila kartu itu ikut berpindah (gulir tiba-tiba bergeser):
+                        // kartu di luar rentang pindahan tidak berubah posisi isinya, jadi selisihnya = lompatan gulir
+                        val ref = state.layoutInfo.visibleItemsInfo.firstOrNull { v ->
+                            val k = v.key as? String
+                            k != null && k !in rangeKeys && before.containsKey(k)
+                        }
+                        if (ref != null) {
+                            val jump = ref.offset.y - (before[ref.key as String] ?: ref.offset.y)
+                            if (jump != 0) state.scrollBy(jump.toFloat())
+                        }
+                        withFrameNanos { }
+                    }
+                    val inf = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id }
+                    nd.resid = if (inf != null) ghost - (nd.startC + (Offset(inf.offset.x.toFloat(), inf.offset.y.toFloat()) - nd.off0)) else Offset.Zero
+                    nd.ready = true
+                    nd.settle.snapTo(1f)
+                    nd.settle.animateTo(0f, spring(.85f, 340f))
+                    nd.lift.snapTo(0f)
+                    nd.reset()
+                }
+            } else {
+                val info = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id }
+                nd.resid = if (info != null) ghost - (nd.startC + (Offset(info.offset.x.toFloat(), info.offset.y.toFloat()) - nd.off0)) else Offset.Zero
+                if (changed) vm.moveOrder(nd.order)
+                nd.ready = true
+                nd.dropping = true
+                scope.launch {
+                    nd.settle.snapTo(1f)
+                    nd.settle.animateTo(0f, spring(.85f, 340f))
+                    nd.lift.snapTo(0f)
+                    nd.reset()
+                }
             }
         }
-        LaunchedEffect(canDrag) { if (!canDrag && nd.id != null) nd.reset() }
+        LaunchedEffect(canDrag, cols) { if (nd.id != null) nd.reset() }
+        // kartu terangkat perlahan (bayangan & skala), bukan muncul tiba-tiba
+        LaunchedEffect(nd.id) { if (nd.id != null) nd.lift.animateTo(1f, spring(.8f, 480f)) }
         // tiap frame selama menyeret: gulir otomatis di tepi layar + cek kartu yang sedang ditindih
         LaunchedEffect(nd.id) {
             val id = nd.id ?: return@LaunchedEffect
+            val density = dens.density
             var blocked: String? = null
             var lastSwap = 0L
+            var lastSwapAt: Offset? = null
+            var lastFrame = 0L
             while (nd.id == id && !nd.dropping) {
                 val now = withFrameNanos { it }
+                val dt = if (lastFrame == 0L) .016f else ((now - lastFrame) / 1_000_000_000f).coerceIn(.004f, .05f)
+                lastFrame = now
+
+                // ---- gulir otomatis: baru aktif setelah jari benar-benar bergerak, kecepatan naik halus (kuadrat) menuju tepi ----
+                if ((nd.finger - nd.at0).getDistance() > 12f * density) {
+                    val topLine = with(dens) { (sat + 72.dp + 28.dp).toPx() }
+                    val botLine = state.layoutInfo.viewportSize.height - 120f * density
+                    val zone = 90f * density
+                    val fy = nd.finger.y
+                    val up = fy < topLine
+                    val down = fy > botLine
+                    val mag = (if (up) topLine - fy else if (down) fy - botLine else 0f) / zone
+                    if (mag > 0f) {
+                        val m = mag.coerceIn(0f, 1f)
+                        val dy = 760f * density * m * m * dt
+                        state.scrollBy(if (up) -dy else dy)
+                    }
+                }
+
                 val li = state.layoutInfo
                 val vis = li.visibleItemsInfo
-                val zone = 72f * dens.density
-                val topLine = with(dens) { (sat + 72.dp + 24.dp).toPx() }
-                val botLine = li.viewportSize.height - 110f * dens.density
-                val fy = nd.finger.y
-                val dy = when {
-                    fy < topLine -> -22f * dens.density * ((topLine - fy) / zone).coerceIn(0.1f, 1f)
-                    fy > botLine -> 22f * dens.density * ((fy - botLine) / zone).coerceIn(0.1f, 1f)
-                    else -> 0f
-                }
-                if (dy != 0f) state.scrollBy(dy)
-                val me = vis.firstOrNull { it.key == id } ?: continue
-                val ctx = dragCtx
-                val startIdx = if (nd.group == 0) (if (ctx.first) 1 else 0) else 2 + ctx.second.size
-                val grp = nd.order
-                val cur = grp.indexOf(id)
-                // tunggu sampai grid selesai menata ulang setelah pertukaran sebelumnya
-                if (cur < 0 || me.index != startIdx + cur) continue
-                // beri grid waktu menata ulang & menganimasikan kartu lain sebelum pertukaran berikutnya
-                if (now - lastSwap < 110_000_000L) continue
-                val cx = nd.finger.x - nd.grab.x + me.size.width / 2f
-                val cy = nd.finger.y - nd.grab.y + me.size.height / 2f
-                var target = -1
+                val byKey = vis.associateBy { it.key }
+
                 if (cols == 1) {
-                    // 1 kolom: tukar hanya dengan tetangga langsung (satu langkah), saat pusat kartu seretan melewati pusat tetangga itu
-                    // pada tata letak SAAT INI. Di keadaan diam pusat kartu seretan selalu di antara pusat kedua tetangganya, jadi tidak
-                    // pernah ada tukar sendiri; setelah bertukar pun pusat tetangga yang baru dilewati ada di sisi seberang jari
-                    // (selisihnya satu tinggi kartu + jarak), jadi tidak mungkin bertukar balik. Aman untuk kartu yang tingginya berbeda.
-                    val hyst = 4f * dens.density
-                    val nxt = grp.getOrNull(cur + 1)?.let { k -> vis.firstOrNull { it.key == k } }
-                    val prv = grp.getOrNull(cur - 1)?.let { k -> vis.firstOrNull { it.key == k } }
-                    if (nxt != null && cy > nxt.offset.y + nxt.size.height / 2f + hyst) target = cur + 1
-                    else if (prv != null && cy < prv.offset.y + prv.size.height / 2f - hyst) target = cur - 1
+                    // ---- 1 KOLOM ----
+                    // Tata letak grid tetap (urutan asli), jadi posisi semua kartu stabil dan keputusan di bawah tidak pernah
+                    // berbalik oleh pergeseran tata letak / gulir otomatis. Tujuan = berapa banyak kartu yang pusatnya sudah
+                    // dilewati pusat bayangan, dihitung pada tata letak asli. Dengan sedikit histeresis supaya tidak bolak-balik.
+                    val orig = nd.orig
+                    val o = orig.indexOf(id)
+                    if (o < 0 || nd.h <= 0) continue
+                    val cur = nd.order.indexOf(id)
+                    val cy = nd.startC.y + (nd.finger.y - nd.at0.y) + nd.h / 2f
+                    var fj = Int.MAX_VALUE
+                    var lj = -1
+                    for (j in orig.indices) if (byKey.containsKey(orig[j])) { if (j < fj) fj = j; lj = j }
+                    if (lj < 0) continue
+                    val hyst = 6f * density
+                    var t = o
+                    var j = o + 1
+                    while (j < orig.size) {
+                        val inf = byKey[orig[j]]
+                        val pass = if (inf != null) cy > inf.offset.y + inf.size.height / 2f + (if (j <= cur) -hyst else hyst)
+                        else j < fj   // di luar layar: di atas = sudah dilewati, di bawah = belum
+                        if (!pass) break
+                        t = j; j++
+                    }
+                    if (t == o) {
+                        j = o - 1
+                        while (j >= 0) {
+                            val inf = byKey[orig[j]]
+                            val pass = if (inf != null) cy < inf.offset.y + inf.size.height / 2f + (if (j >= cur) hyst else -hyst)
+                            else j > lj
+                            if (!pass) break
+                            t = j; j--
+                        }
+                    }
+                    if (t != cur) {
+                        nd.order = orig.toMutableList().also { it.removeAt(o); it.add(t, id) }
+                        hapticDrag.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    }
                 } else {
+                    // ---- 2 KOLOM ----
+                    val me = byKey[id] ?: continue
+                    val ctx = dragCtx
+                    val startIdx = if (nd.group == 0) (if (ctx.first) 1 else 0) else 2 + ctx.second.size
+                    val grp = nd.order
+                    val cur = grp.indexOf(id)
+                    // tunggu sampai grid selesai menata ulang setelah pertukaran sebelumnya
+                    if (cur < 0 || me.index != startIdx + cur) continue
+                    // beri grid waktu menata ulang & menganimasikan kartu lain sebelum pertukaran berikutnya
+                    if (now - lastSwap < 120_000_000L) continue
+                    val cx = nd.startC.x + (nd.finger.x - nd.at0.x) + me.size.width / 2f
+                    val cy = nd.startC.y + (nd.finger.y - nd.at0.y) + me.size.height / 2f
+                    // Setiap titik di grid punya tujuan: area tiap kartu diperlebar setengah jarak antar kartu sehingga tidak ada
+                    // celah mati di antaranya (dulu ada pinggiran 10% / 20% yang tidak merespons).
+                    val pad = 4f * density
+                    val inMe = cx >= me.offset.x && cx <= me.offset.x + me.size.width &&
+                        cy >= me.offset.y && cy <= me.offset.y + me.size.height
+                    var target = -1
                     var overKey: String? = null
-                    for (it in vis) {
-                        val k = it.key as? String ?: continue
+                    if (!inMe) for (v in vis) {
+                        val k = v.key as? String ?: continue
                         if (k == id) continue
                         val ti = grp.indexOf(k)
                         if (ti < 0) continue
-                        val mx = it.size.width * .1f
-                        val my = it.size.height * .2f
-                        if (cx >= it.offset.x + mx && cx <= it.offset.x + it.size.width - mx &&
-                            cy >= it.offset.y + my && cy <= it.offset.y + it.size.height - my
+                        if (cx >= v.offset.x - pad && cx <= v.offset.x + v.size.width + pad &&
+                            cy >= v.offset.y - pad && cy <= v.offset.y + v.size.height + pad
                         ) { target = ti; overKey = k; break }
                     }
-                    // kartu yang baru saja bertukar tidak boleh bertukar balik sebelum pusat kartu seretan keluar dulu dari kartu itu
-                    if (overKey != null && overKey == blocked) target = -1
-                    else if (overKey != blocked) blocked = null
-                    if (target < 0) {
+                    if (overKey != null) {
+                        // kartu yang baru saja bertukar tidak boleh bertukar balik sebelum pusat kartu seretan keluar dulu dari kartu itu
+                        if (overKey == blocked) target = -1 else blocked = null
+                    } else if (!inMe) {
+                        blocked = null
                         // di luar semua kartu: ujung bawah / atas kolom berarti pindah ke akhir / awal kelompok
                         val laneW = li.viewportSize.width / cols.toFloat()
                         val lane = (cx / laneW).toInt().coerceIn(0, cols - 1)
@@ -1151,16 +1264,23 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                         if (mine.isNotEmpty()) {
                             val bottom = mine.maxOf { it.offset.y + it.size.height }
                             val topY = mine.minOf { it.offset.y }
-                            if (cy > bottom && vis.any { it.key == grp.last() }) target = grp.size - 1
-                            else if (cy < topY && vis.any { it.key == grp.first() }) target = 0
+                            if (cy > bottom && byKey.containsKey(grp.last())) target = grp.size - 1
+                            else if (cy < topY && byKey.containsKey(grp.first())) target = 0
+                        } else if (cy > 0f && byKey.containsKey(grp.last())) {
+                            target = grp.size - 1   // kolom kosong: kartu jadi yang terakhir (mengalir ke kolom paling pendek)
                         }
                     }
-                }
-                if (target >= 0 && target != cur) {
-                    blocked = grp.getOrNull(target)
-                    lastSwap = now
-                    nd.order = grp.toMutableList().also { it.removeAt(cur); it.add(target, id) }
-                    hapticDrag.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    // setelah bertukar, jari harus bergeser sedikit dulu: mencegah kartu 'mengejar' pusat bayangan berturut-turut
+                    // ketika tinggi kartu berbeda dan tata letak mengalir ulang
+                    val la = lastSwapAt
+                    if (target >= 0 && la != null && (nd.finger - la).getDistance() < 12f * density) target = -1
+                    if (target >= 0 && target != cur) {
+                        blocked = grp.getOrNull(target)
+                        lastSwap = now
+                        lastSwapAt = nd.finger
+                        nd.order = grp.toMutableList().also { it.removeAt(cur); it.add(target, id) }
+                        hapticDrag.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    }
                 }
             }
         }
@@ -1170,7 +1290,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
             modifier = Modifier.fillMaxSize().nestedScroll(fabConn).graphicsLayer {
                     alpha = if (vm.searchOn) 0f else 1f
                 }
-                .pointerInput(canDrag) {
+                .pointerInput(canDrag, cols) {
                     if (!canDrag) return@pointerInput
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
@@ -1205,6 +1325,8 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                         nd.at0 = last
                         nd.off0 = Offset(me0.offset.x.toFloat(), me0.offset.y.toFloat())
                         nd.w = me0.size.width
+                        nd.h = me0.size.height
+                        nd.span = me0.size.height + 8.dp.toPx()   // + verticalItemSpacing grid
                         val g = if (key in pin) 0 else 1
                         if (key !in vm.sel) {
                             vm.sel.add(key)
@@ -1246,13 +1368,13 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                 T("Pinned", 13f, 500, pal.osv, Modifier.graphicsLayer { if (!vm.searchOn) alpha = shift.p.value.coerceIn(0f, 1f) }.padding(start = 16.dp, top = 12.dp, bottom = 4.dp), ls = .01f)
             }
             gridItems(pinned, key = { it.id }) { d ->
-                HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, wPx, dens.density, pos, (if (nd.id == d.id) holdItemG() else flowItemG()).then(stackMove(d.id, true)), nd, state)
+                HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, wPx, dens.density, pos, (if (nd.id != null && (cols == 1 || nd.id == d.id)) holdItemG() else flowItemG()).then(stackMove(d.id, true)), nd, state)
             }
             if (sections) item(key = "h-other", span = full) {
                 T("Others", 13f, 500, pal.osv, Modifier.graphicsLayer { if (!vm.searchOn) alpha = shift.p.value.coerceIn(0f, 1f) }.padding(start = 16.dp, top = 16.dp, bottom = 4.dp), ls = .01f)
             }
             gridItems(others, key = { it.id }) { d ->
-                HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, wPx, dens.density, pos, (if (nd.id == d.id) holdItemG() else flowItemG()).then(stackMove(d.id, true)), nd, state)
+                HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, wPx, dens.density, pos, (if (nd.id != null && (cols == 1 || nd.id == d.id)) holdItemG() else flowItemG()).then(stackMove(d.id, true)), nd, state)
             }
         }
 
@@ -1264,7 +1386,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                 Modifier
                     .offset {
                         val q = if (nd.dropping) {
-                            val inf = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == ghostId }
+                            val inf = if (nd.ready) state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == ghostId } else null
                             if (inf != null) {
                                 val slot = nd.startC + (Offset(inf.offset.x.toFloat(), inf.offset.y.toFloat()) - nd.off0)
                                 slot + nd.resid * nd.settle.value
@@ -1274,10 +1396,13 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     }
                     .width(with(dens) { nd.w.toDp() })
                     .graphicsLayer {
-                        val k = if (nd.dropping) nd.settle.value.coerceIn(0f, 1f) else 1f
-                        val sc2 = 1f + .035f * k
+                        val k = if (nd.dropping) (if (nd.ready) nd.settle.value.coerceIn(0f, 1f) else 1f) else nd.lift.value.coerceIn(0f, 1f)
+                        val sc2 = 1f + .03f * k
                         scaleX = sc2; scaleY = sc2
-                        shadowElevation = 12.dp.toPx() * k
+                        // bayangan lembut: elevasi lebih besar (lebih menyebar) tetapi warnanya dibuat tipis, bukan gelap & tajam
+                        shadowElevation = 16.dp.toPx() * k
+                        ambientShadowColor = Color.Black.copy(alpha = if (pal.dark) .50f else .22f)
+                        spotShadowColor = Color.Black.copy(alpha = if (pal.dark) .65f else .32f)
                         shape = RoundedCornerShape(12.dp)
                         clip = false
                     }
@@ -1417,11 +1542,20 @@ fun HomeCard(
     val sel = vm.sel
     androidx.compose.runtime.DisposableEffect(d.id) { onDispose { vm.cardMorph.remove(d.id) } }
     val dragging = nd.id == d.id
+    // 1 kolom: kartu di antara asal & tujuan seretan bergeser secara visual (grid tidak berubah selama menyeret)
+    val shiftT = if (cols == 1) nd.shiftOf(d.id) else 0f
+    val shiftA = remember { Animatable(0f) }
+    LaunchedEffect(shiftT, nd.id) {
+        if (nd.id == null) shiftA.snapTo(0f) else shiftA.animateTo(shiftT, spring(.85f, 420f))
+    }
     Column(
         base.makeRoom(vm, d.id, i, { vm.openId?.let { pos[it] } ?: -1 }, hPx, dens, cols, wPx, flat = d.cv.isNotEmpty()).then(
             // ruang kartu tetap ada (supaya kartu lain menata diri di sekitarnya) tetapi tidak terlihat: yang terlihat adalah
             // kartu bayangan di atas grid (lihat HomeScreen), yang posisinya hanya bergantung pada jari
             if (dragging) Modifier.graphicsLayer { alpha = 0f } else Modifier
+        ).then(
+            // saat dilepas, urutan baru dipasang ke grid dan pergeseran visual dihapus pada frame yang sama (posisinya identik)
+            if (cols == 1) Modifier.graphicsLayer { translationY = if (nd.id == null || nd.dropping) 0f else shiftA.value } else Modifier
         ).pointerInput(d.id) {
             // hanya mencatat (tidak mengonsumsi): kartu ini yang benar-benar tersentuh, dibaca oleh gestur seret di grid
             awaitEachGesture {
