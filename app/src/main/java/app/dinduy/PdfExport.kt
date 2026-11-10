@@ -119,11 +119,11 @@ object PdfExport {
      * selebar halaman tetap selebar halaman.
      */
     private fun effFrac(cx: Cx, frac: Float): Float {
-        val f = frac.coerceIn(.2f, 1f)
+        val f = frac.coerceIn(QBW_MIN, 1f)
         val k = (cx.u / cx.r).coerceIn(.35f, 1.6f)
         val t = ((f - .7f) / .3f).coerceIn(0f, 1f)
         val s = t * t * (3f - 2f * t)
-        return (f * (k + (1f - k) * s)).coerceIn(.12f, 1f)
+        return (f * (k + (1f - k) * s)).coerceIn(minOf(.12f, f), 1f)
     }
 
     private class QSt(val bg: Color, val fg: Color, val r: FloatArray, val label: String?, val bar: Boolean = false, val border: Boolean = false)
@@ -577,10 +577,10 @@ object PdfExport {
         val size = fs * 1.05f * k
         val full = b.bw >= .999f
         val iv = if (full) indOf(cx, b, false) else NO_IND
-        val boxW = ((if (full) cx.cw else cx.cw * effFrac(cx, b.bw)) - iv.l - iv.r).coerceAtLeast(60f)
+        val boxW = ((if (full) cx.cw else cx.cw * effFrac(cx, b.bw)) - iv.l - iv.r).coerceAtLeast(60f * k)
         val bx = if (full) iv.l else when (b.alOf()) { "l" -> 0f; "r" -> cx.cw - boxW; else -> (cx.cw - boxW) / 2f }
         f.objW = boxW
-        val lay = mk(cx, b.r, (boxW - padX - padXr).coerceAtLeast(30f), size, q.fg.toArgb(), size * cx.lh, ta = b.ta)
+        val lay = mk(cx, b.r, (boxW - padX - padXr).coerceAtLeast(30f * k), size, q.fg.toArgb(), size * cx.lh, ta = b.ta)
         val lsz = fs * .7f * 1.05f * k
         val lp = TextPaint(Paint.ANTI_ALIAS_FLAG)
         lp.textSize = lsz
@@ -956,7 +956,7 @@ object PdfExport {
         }
         val total = f.y - y0
         val dpW = (cx.cw / cx.r).coerceAtLeast(120f)
-        val frac = if (b.ty == "tbl") (tblWidths(b, dpW).sum() + 3f) / dpW else b.bw.coerceIn(.2f, 1f)
+        val frac = if (b.ty == "tbl") (tblWidths(b, dpW).sum() + 3f) / dpW else b.bwC()
         val al = b.alOf()
         if (al == "c" || frac > maxSide + .001f || total <= 0f || f.objW <= 0f || (b.ty == "tbl" && b.tb.isEmpty())) return 1
         val left = al != "r"
