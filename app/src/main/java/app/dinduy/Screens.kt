@@ -1255,6 +1255,8 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                         if (gi < 0 || gi >= grp.size || grp[gi] != v.key) { fresh = false; break }
                     }
                     if (!fresh) continue
+                    // belum digeser sama sekali (baru tekan lama): jangan ubah urutan apa pun
+                    if ((nd.finger - nd.at0).getDistance() < 12f * density) continue
                     if (now - lastMove < 70_000_000L) continue         // beri waktu animasi geser sebelum keputusan berikutnya
                     val l = f + gv.size - 1                            // indeks kartu tampil paling akhir
 
@@ -1317,9 +1319,16 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                         val dx = laneX[ln] + nd.w / 2f - cx0
                         val dy = if (magnet && slotY <= baseY + 1f) 0f else slotY + nd.h / 2f - cy0
                         val cost = kotlin.math.sqrt(dx * dx + dy * dy) + 4f * density * kotlin.math.abs(i - cur)
-                        if (i == cur) curCost = cost
+                        if (i == cur && dv == null) curCost = cost
                         if (cost < bestCost) { bestCost = cost; best = i }
                         if (i < e) lh2[ln] += hOf(rest[i]) + gapPx
+                    }
+                    // biaya posisi sekarang dihitung dari posisi NYATA kartu di grid (bukan simulasi), supaya hasil simulasi yang
+                    // meleset sedikit tidak membuat slot lain tampak lebih dekat padahal kartu belum digeser
+                    if (dv != null) {
+                        val rdx = dv.offset.x + nd.w / 2f - cx0
+                        val rdy = if (magnet && dv.offset.y <= baseY + 1f) 0f else dv.offset.y + nd.h / 2f - cy0
+                        curCost = kotlin.math.sqrt(rdx * rdx + rdy * rdy)
                     }
                     // histeresis: pindah hanya bila slot baru jelas lebih dekat ke jari; makin jauh lompatannya, makin jelas syaratnya
                     if (best != cur && curCost - bestCost > (10f + 2f * kotlin.math.abs(best - cur)) * density) {
