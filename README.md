@@ -1,7 +1,7 @@
 <div align="center">
 
-<!-- Put your main image here, for example: -->
-<!-- <img src="docs/screenshots/banner.png" alt="Dinduy" width="100%"> -->
+<img width="432" height="432" alt="dinduy_fg" src="https://github.com/user-attachments/assets/69eb543a-5c2c-45e2-a46e-26448acda366" />
+
 
 <br>
 
