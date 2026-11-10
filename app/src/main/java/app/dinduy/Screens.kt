@@ -1159,6 +1159,8 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
             var blocked: String? = null
             var lastSwap = 0L
             var lastSwapAt: Offset? = null
+            var candKey: String? = null      // kandidat tujuan (2 kolom) dan sejak kapan pusat bayangan berada di atasnya
+            var candSince = 0L
             var lastFrame = 0L
             while (nd.id == id && !nd.dropping) {
                 val now = withFrameNanos { it }
@@ -1233,14 +1235,18 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     // tunggu sampai grid selesai menata ulang setelah pertukaran sebelumnya
                     if (cur < 0 || me.index != startIdx + cur) continue
                     // beri grid waktu menata ulang & menganimasikan kartu lain sebelum pertukaran berikutnya
-                    if (now - lastSwap < 120_000_000L) continue
+                    if (now - lastSwap < 160_000_000L) continue
                     val cx = nd.startC.x + (nd.finger.x - nd.at0.x) + me.size.width / 2f
                     val cy = nd.startC.y + (nd.finger.y - nd.at0.y) + me.size.height / 2f
                     // Setiap titik di grid punya tujuan: area tiap kartu diperlebar setengah jarak antar kartu sehingga tidak ada
                     // celah mati di antaranya (dulu ada pinggiran 10% / 20% yang tidak merespons).
                     val pad = 4f * density
-                    val inMe = cx >= me.offset.x && cx <= me.offset.x + me.size.width &&
-                        cy >= me.offset.y && cy <= me.offset.y + me.size.height
+                    // kartu sangat tipis: area "tetap di tempat" dilebarkan sampai minimal 120dp supaya pusat bayangan yang sedikit
+                    // meleset tidak langsung dianggap menindih kartu lain (penyebab kartu di sekitarnya loncat-loncat)
+                    val ex = maxOf(0f, (120f * density - me.size.width) / 2f)
+                    val ey = maxOf(0f, (120f * density - me.size.height) / 2f)
+                    val inMe = cx >= me.offset.x - ex && cx <= me.offset.x + me.size.width + ex &&
+                        cy >= me.offset.y - ey && cy <= me.offset.y + me.size.height + ey
                     var target = -1
                     var overKey: String? = null
                     if (!inMe) for (v in vis) {
@@ -1273,7 +1279,11 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     // setelah bertukar, jari harus bergeser sedikit dulu: mencegah kartu 'mengejar' pusat bayangan berturut-turut
                     // ketika tinggi kartu berbeda dan tata letak mengalir ulang
                     val la = lastSwapAt
-                    if (target >= 0 && la != null && (nd.finger - la).getDistance() < 12f * density) target = -1
+                    if (target >= 0 && la != null && (nd.finger - la).getDistance() < 20f * density) target = -1
+                    // tujuan harus bertahan sebentar di bawah pusat bayangan: lewat sekilas di atas kartu tipis tidak memicu pertukaran
+                    val candNow = if (target >= 0) grp.getOrNull(target) else null
+                    if (candNow != candKey) { candKey = candNow; candSince = now }
+                    if (target >= 0 && now - candSince < 70_000_000L) target = -1
                     if (target >= 0 && target != cur) {
                         blocked = grp.getOrNull(target)
                         lastSwap = now
