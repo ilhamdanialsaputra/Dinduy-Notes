@@ -102,6 +102,11 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.unit.dp
+import androidx.compose.animation.core.snap
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.platform.LocalClipboardManager
 
 // =====================================================================================
 //  Toolbar Material 3 Expressive.
@@ -602,6 +607,98 @@ private fun SRow(on: Boolean = false, enabled: Boolean = true, icon: @Composable
     }
 }
 
+/** Tombol lebar halaman Link: squircle, ditekan = sudut mengecil dan menyempit membal. [filled] = warna utama, selain itu tonal. */
+@Composable
+private fun LinkBtn(label: String, filled: Boolean, enabled: Boolean, modifier: Modifier, icon: @Composable (Color) -> Unit, onClick: () -> Unit) {
+    val pal = LocalPal.current
+    val haptic = LocalHapticFeedback.current
+    val src = remember { MutableInteractionSource() }
+    val pr by src.collectIsPressedAsState()
+    val r by animateDpAsState(if (pr) 14.dp else 28.dp, M3E.spatialFast(), label = "lbr")
+    val sc by animateFloatAsState(if (pr) .95f else 1f, spring(.45f, 700f), label = "lbs")
+    val bg by animateColorAsState(if (filled) pal.p else pal.c4, M3E.effects(), label = "lbb")
+    val fg = if (filled) pal.op else pal.os
+    Row(
+        modifier.height(56.dp)
+            .graphicsLayer { scaleX = sc; scaleY = sc; alpha = if (enabled) 1f else .32f }
+            .clip(RoundedCornerShape(r.nn())).background(bg)
+            .clickable(interactionSource = src, indication = LocalIndication.current, enabled = enabled) {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onClick()
+            },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        icon(fg)
+        Spacer(Modifier.width(8.dp))
+        T(label, 16f, 700, fg)
+    }
+}
+
+/** Ikon papan klip (tempel). */
+@Composable
+private fun PasteIc(c: Color) {
+    Canvas(Modifier.size(22.dp)) {
+        val u = size.width / 24f
+        val st = Stroke(2.2f * u)
+        drawRoundRect(c, Offset(4.5f * u, 5f * u), Size(15f * u, 16.5f * u), CornerRadius(3.5f * u), style = st)
+        drawRoundRect(c, Offset(8.5f * u, 2.5f * u), Size(7f * u, 5f * u), CornerRadius(2.2f * u), style = st)
+    }
+}
+
+/**
+ * Halaman Link di dalam sheet Sisipkan (menggantikan modal). Tanpa keyboard: alamat diisi lewat tombol Paste (terisi otomatis kalau
+ * clipboard sudah berisi alamat web). Karena keyboard tidak dibuka, tinggi sheet dan layar tidak berubah sama sekali.
+ */
+@Composable
+private fun SheetLinkPage(ed: Ed) {
+    val pal = LocalPal.current
+    @Suppress("DEPRECATION")
+    val clip = LocalClipboardManager.current
+    var txt by remember { mutableStateOf(ed.normLink(clip.getText()?.text) ?: "") }
+    val url = ed.normLink(txt)
+    Column(
+        Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // bar alamat (hanya tampilan, tidak memicu keyboard)
+        Row(
+            Modifier.fillMaxWidth().height(68.dp).clip(RoundedCornerShape(34.dp)).background(pal.c4).padding(start = 12.dp, end = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val badge by animateColorAsState(if (url != null) pal.p else pal.pc, M3E.effects(), label = "lkbadge")
+            val rad by animateDpAsState(if (url != null) 16.dp else 22.dp, M3E.spatialFast(), label = "lkrad")
+            Box(Modifier.size(44.dp).clip(RoundedCornerShape(rad.nn())).background(badge), Alignment.Center) {
+                LinkIc(if (url != null) pal.op else pal.opc, 24.dp)
+            }
+            Spacer(Modifier.width(14.dp))
+            Box(Modifier.weight(1f)) {
+                if (txt.isEmpty()) T("https://", 16f, 400, pal.osv, alpha = .6f)
+                else T(txt, 16f, 500, pal.os, maxLines = 1)
+            }
+            XBtn(enabled = txt.isNotEmpty(), onClick = { txt = "" }) { Ic("x", it) }
+        }
+        T(
+            when {
+                url != null -> LinkPreviews.domain(url)
+                txt.isEmpty() -> "Copy a web address, then tap Paste."
+                else -> "That is not a valid web address."
+            },
+            14f, 600, if (url != null) pal.p else pal.osv,
+            Modifier.padding(start = 20.dp).height(20.dp), maxLines = 1
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            LinkBtn("Paste", false, true, Modifier.weight(1f), { PasteIc(it) }) {
+                txt = clip.getText()?.text?.trim().orEmpty()
+            }
+            LinkBtn("Insert", true, url != null, Modifier.weight(1.3f), { LinkIc(it, 22.dp) }) {
+                val u = url
+                if (u != null) { ed.insLink(u); ed.closeSheet() }
+            }
+        }
+    }
+}
+
 @Composable
 private fun Stepper(label: String, v: Int, lo: Int, hi: Int, onChange: (Int) -> Unit) {
     val pal = LocalPal.current
@@ -650,8 +747,17 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM, sheetPxOf: () -> Int, kbNow: () ->
     val last = remember { intArrayOf(1) }
     if (ed.sheet != 0) last[0] = ed.sheet
     val shown = last[0]
+    val popOn = remember { booleanArrayOf(true) }               // ubin melompat masuk hanya saat sheet baru dibuka, bukan saat geser halaman
+    val nav = { p: Int -> popOn[0] = false; ed.sheetPage = p }
     LaunchedEffect(ed.sheet) {                                   // kembali ke daftar setelah sheet selesai menutup
-        if (ed.sheet == 0) { delay(380); if (ed.sheet == 0) ed.sheetPage = 0 }
+        if (ed.sheet == 0) {
+            delay(380)
+            if (ed.sheet == 0) {
+                if (ed.sheetPage == 3) ed.linkAt = null      // ditutup dari halaman Link tanpa menyisipkan
+                ed.sheetPage = 0
+                popOn[0] = true
+            }
+        }
     }
     // geser-tutup: hanya dari bilah pegangan (di luar area gulir), jadi tidak pernah bentrok dengan gulir isi sheet
     val scope = rememberCoroutineScope()
@@ -768,17 +874,30 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM, sheetPxOf: () -> Int, kbNow: () ->
             ) {
                 Box(Modifier.padding(top = 4.dp).size(width = 40.dp, height = 5.dp).clip(CircleShape).background(pal.osv.copy(alpha = .38f)))
             }
-            val page = if (shown == 2) 2 else if (ed.sheetPage == 1) 1 else 0     // 0 Sisipkan, 1 Tabel, 2 Format
-            // pergantian halaman: wadah mengalir ke tinggi halaman baru, isi lama menciut, isi baru melompat masuk (tanpa fade)
-            MorphSwap(page, clip = true, label = "sheetpage") { pg ->
+            val page = if (shown == 2) 2 else when (ed.sheetPage) { 1 -> 1; 3 -> 3; else -> 0 }     // 0 Sisipkan, 1 Tabel, 2 Format, 3 Link
+            // pergantian halaman: geser horizontal (maju = isi baru masuk dari kanan, mundur = dari kiri), tanpa fade.
+            // Tinggi sheet tidak disentuh: wadah halaman mengisi sisa tinggi sheet, jadi ukuran sheet tetap setinggi keyboard.
+            AnimatedContent(
+                targetState = page,
+                modifier = Modifier.fillMaxWidth().weight(1f).clipToBounds(),
+                transitionSpec = {
+                    val d = if ((if (targetState == 0) 0 else 1) > (if (initialState == 0) 0 else 1)) 1 else -1
+                    (slideInHorizontally(spring(.9f, 450f, IntOffset.VisibilityThreshold)) { it * d } togetherWith
+                        slideOutHorizontally(spring(.9f, 450f, IntOffset.VisibilityThreshold)) { -it * d })
+                        .using(SizeTransform(clip = true) { _, _ -> snap() })
+                },
+                label = "sheetpage"
+            ) { pg ->
                 Column(Modifier.fillMaxWidth()) {
                     Row(
                         Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 2.dp, bottom = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (pg == 1) { XBtn(rest = pal.c4, i = 0, onClick = { ed.sheetPage = 0 }) { Ic("chl", it) }; Spacer(Modifier.width(10.dp)) }
-                        else Spacer(Modifier.width(12.dp))
-                        T(if (pg == 2) "Format" else if (pg == 1) "Table" else "Insert", 22f, 800, pal.os, Modifier.weight(1f))
+                        if (pg == 1 || pg == 3) {
+                            XBtn(rest = pal.c4, onClick = { if (pg == 3) ed.linkAt = null; nav(0) }) { Ic("chl", it) }
+                            Spacer(Modifier.width(10.dp))
+                        } else Spacer(Modifier.width(12.dp))
+                        T(if (pg == 2) "Format" else if (pg == 1) "Table" else if (pg == 3) "Link" else "Insert", 22f, 800, pal.os, Modifier.weight(1f))
                         XBtn(rest = pal.c4, onClick = { ed.closeSheet() }) { Ic("x", it) }
                     }
                     // sheet setinggi keyboard: isi yang lebih panjang digulir di dalam sheet, tinggi sheet tidak pernah berubah
@@ -788,22 +907,27 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM, sheetPxOf: () -> Int, kbNow: () ->
                                 val tiles = listOf(
                                     SheetTile("Image", !blkOff, { Ic("img", it) }) { ed.sheet = 0; act.pickImages() },
                                     SheetTile("Camera", !blkOff, { Ic("cam", it) }) { ed.sheet = 0; act.takePhoto(false) },
-                                    SheetTile("Table", !blkOff, { Ic("table", it) }) { ed.sheetPage = 1 },     // geser ke pengaturan baris dan kolom
+                                    SheetTile("Table", !blkOff, { Ic("table", it) }) { nav(1) },     // geser ke pengaturan baris dan kolom
                                     SheetTile("Drawing", true, { InkToolIcon(4, it) }) { ed.sheet = 0; ed.ink.toggle(ed) },
                                     SheetTile("Quote", !convOff, { Ic("quote", it) }) { ed.closeSheet(); if (ed.focus != null) ed.pickQuote = true },
                                     SheetTile("Code", !convOff, { Ic("pre", it) }) { ed.closeSheet(); ed.setCode() },
                                     SheetTile("Divider", !blkOff, { Ic("hr", it) }) { ed.closeSheet(); ed.insHr() },
-                                    SheetTile("Link", !blkOff, { LinkIc(it) }) { ed.openLinkDlg(); ed.closeSheet(false) }
+                                    SheetTile("Link", !blkOff, { LinkIc(it) }) {
+                                        ed.openLinkDlg()          // hanya untuk menyimpan posisi sisip (linkAt); modalnya sudah tidak ada
+                                        ed.linkDlg = false
+                                        nav(3)                    // geser ke halaman Link di dalam sheet
+                                    }
                                 )
                                 Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                     tiles.chunked(4).forEachIndexed { r, row ->
                                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                            row.forEachIndexed { c, t -> SheetTileView(t, r * 4 + c, Modifier.weight(1f)) }
+                                            row.forEachIndexed { c, t -> SheetTileView(t, if (popOn[0]) r * 4 + c else -1, Modifier.weight(1f)) }
                                             repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
                                         }
                                     }
                                 }
                             }
+                            3 -> SheetLinkPage(ed)
                             1 -> {
                                 Stepper("Rows", ed.tbR, 1, 20) { ed.tbR = it }
                                 Stepper("Columns", ed.tbC, 1, 6) { ed.tbC = it }
