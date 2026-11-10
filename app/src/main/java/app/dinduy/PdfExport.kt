@@ -1069,7 +1069,7 @@ object PdfExport {
         val pal = cx.pal
         if (note.t.isNotBlank()) {
             val size = 34f * cx.u
-            val lay = mk(cx, Rt(note.t), cx.cw, size, pal.p.toArgb(), size * 1.1f, bold = true, ls = -.02f)
+            val lay = mk(cx, Rt(note.t), cx.cw, size, pal.p.toArgb(), size * 1.1f, bold = true, ls = -.02f, ta = note.tal)
             val top = 6f * cx.u
             val bot = 12f * cx.u
             f.pieces.add(Piece(top, lay.height.toFloat(), 0f, null) { c -> lay.draw(c) })
