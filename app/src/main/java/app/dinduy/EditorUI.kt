@@ -2624,6 +2624,12 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
         // area catatan berhenti tepat di atas keyboard / navbar; kapsul melayang di atasnya tanpa latar
         Box(
             Modifier.weight(1f).fillMaxWidth().windowInsetsPadding(areaInsets)
+                .layout { m, c ->
+                    // gulir mengikuti ukuran area di frame yang sama (bukan lewat flow yang telat): lihat Ed.followViewport
+                    ed.followViewport(c.maxHeight.toFloat())
+                    val p = m.measure(c)
+                    layout(p.width, p.height) { p.place(0, 0) }
+                }
                 .onSizeChanged { ed.viewH = it.height.toFloat() }
                 .clipToBounds()
                 .inkPinch(ed, scroll)
