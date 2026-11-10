@@ -218,14 +218,14 @@ data class Blk(
     val st: Int = 0,                  // butir bernomor: > 0 = mulai dari angka ini (mis. ketik "4." -> nomor 4); 0 = lanjut dari butir sebelumnya
     val pi: String = "",              // kartu tautan (ty = "lnk"): alamat gambar og:image; alamat tautan di l, judul di r.t
     val cw: List<Float> = emptyList(), // tabel: lebar tiap kolom (dp); kosong / 0 = lebar bawaan (otomatis)
-    val bw: Float = 1f,               // kutipan / kode / garis pemisah: lebar relatif (0.2..1), diatur dengan menyeret pegangan lebar
-    val ba: String = ""               // kutipan / kode / garis / tabel: letak "l" / "c" / "r" (diatur dengan menyeret); kosong = bawaan (tabel kiri, lainnya tengah)
+    val bw: Float = 1f,               // kutipan / kode / garis pemisah / kartu tautan: lebar relatif (0.2..1), diatur dengan menyeret pegangan lebar
+    val ba: String = ""               // kutipan / kode / garis / kartu tautan / tabel: letak "l" / "c" / "r" (diatur dengan menyeret); kosong = bawaan (tabel kiri, lainnya tengah)
 ) {
     val isText: Boolean get() = ty == "p" || ty == "h" || ty == "li" || ty == "q" || ty == "code"
     val isObj: Boolean get() = ty == "tbl" || ty == "img" || ty == "hr" || ty == "lnk"
     val isMulti: Boolean get() = ty == "q" || ty == "code"
-    /** Objek yang bisa diseret, diubah lebarnya, dan dikelilingi teks seperti foto. */
-    val isBox: Boolean get() = ty == "q" || ty == "code" || ty == "hr"
+    /** Objek yang bisa diseret, diubah lebarnya, dan dikelilingi teks seperti foto (kartu tautan juga: sama seperti kutipan / kode / garis). */
+    val isBox: Boolean get() = ty == "q" || ty == "code" || ty == "hr" || ty == "lnk"
     /** Letak objek: l / c / r. Bawaan: tabel di kiri (seperti sebelumnya), kutipan / kode / garis di tengah. */
     fun alOf(): String = if (ba == "l" || ba == "c" || ba == "r") ba else if (ty == "tbl") "l" else "c"
 }
