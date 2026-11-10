@@ -362,8 +362,7 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
                         translationX = lerp(mm.l, 0f, tt)
                         translationY = lerp(mm.t, 0f, tt)
                         transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
-                        val x = (1f - (vm.openP.value - .02f) / .24f).coerceIn(0f, 1f)
-                        alpha = x * x * (3f - 2f * x)
+                        alpha = ghostFade(vm)
                     }
             ) { GhostCard(gn, g) }
         }
@@ -413,10 +412,27 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
  * Pudar isi catatan selama morph (kurva sama dengan yang dulu dipasang NoteLayer pada seluruh isi). Hanya untuk morph dari kartu;
  * selain itu NoteLayer sendiri yang memudarkan, jadi nilainya 1 supaya tidak memudar dua kali.
  */
+/** Progres morph sedang menuju 0 (menutup). Dibaca di fase gambar. */
+fun morphClosing(vm: AppVM): Boolean = vm.openP.targetValue == 0f
+
+/**
+ * Alpha teks kartu (bayangan) di dalam wadah morph. Menutup: teks kartu sudah penuh sebelum wadah mendarat di kartu,
+ * jadi pudar-silang dengan isi catatan selesai lebih awal dan tidak ada sisa teks catatan yang menyusul.
+ */
+fun ghostFade(vm: AppVM): Float {
+    val p = vm.openP.value
+    val x = if (morphClosing(vm)) (1f - (p - .1f) / .3f).coerceIn(0f, 1f)
+        else (1f - (p - .02f) / .24f).coerceIn(0f, 1f)
+    return x * x * (3f - 2f * x)
+}
+
 fun noteFade(vm: AppVM): Float {
     val mm = effMorph(vm)
     if (mm == null || !mm.card) return 1f
-    val x = ((vm.openP.value - .08f) / .4f).coerceIn(0f, 1f)
+    // menutup: isi catatan sudah hilang sebelum wadah sampai di kartu (dulu masih tersisa samar sampai progres .08, jadi
+    // teksnya terlihat "telat" menguncup dibanding kartu); membuka tetap memakai kurva lama
+    val x = if (morphClosing(vm)) ((vm.openP.value - .18f) / .32f).coerceIn(0f, 1f)
+        else ((vm.openP.value - .08f) / .4f).coerceIn(0f, 1f)
     return x * x * (3f - 2f * x)
 }
 
