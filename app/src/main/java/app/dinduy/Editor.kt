@@ -535,8 +535,69 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         afterStructural()
     }
 
+    /**
+     * Enter di dekat dasar layar: gulir SEKETIKA, di frame yang sama dengan lahirnya blok baru. Dulu gulir baru terjadi setelah blok baru
+     * selesai di-layout + efek layout + flow gulir (2-3 frame): baris baru sempat tersembunyi di bawah dock lalu loncat = layar kedip tiap Enter.
+     * Posisi kursor baru diperkirakan dari layout lama: dasar baris tempat kursor berada + jarak antarblok + satu tinggi baris.
+     * Selisih kecil dengan hasil sebenarnya dikoreksi oleh [cursorScrollDelta] seperti biasa.
+     */
+    private fun preScrollNewLine(b: Blk, pos: Int, nty: String) {
+        val sc = scroll ?: return
+        if (reading || selOn || ink.on || titleFocus || findOn || viewH <= 0f) return
+        androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {
+            val lay = lays[b.id] ?: return@withoutReadObservation
+            val kp = kpos[b.id] ?: return@withoutReadObservation
+            if (lsh[b.id] != 1) return@withoutReadObservation
+            val lt = lay.layoutInput.text.length
+            if (lt <= 0) return@withoutReadObservation
+            val o = toLay(b.id, pos).coerceIn(0, lt)
+            val leftBottom = kp.y + lay.getLineBottom(lay.getLineForOffset(o))
+            val fs = vm.noteFs(noteId).toFloat()
+            val gap = (if ((b.ty == "li" && nty == "li") || b.ty == "h") fs * .5f else fs * 1.1f) * dens
+            val newBot = leftBottom + gap + fs * LH * dens
+            val vb = sc.value + viewH - cursorClear()
+            val d = newBot + 3f * dens - vb
+            if (d > 0.5f) sc.dispatchRawDelta(d)
+            Unit
+        }
+    }
+
+    private var vpPrev = 0f
+
+    /**
+     * Dipanggil dari fase UKUR area catatan. Area mengecil (sheet / keyboard / dock naik) dan kursor tadinya terlihat tapi kini tertutup:
+     * gulir digeser di frame yang SAMA dengan perubahan ukuran. Dulu gulir menunggu flow (>= 1 frame setelah layout), jadi tiap frame animasi
+     * isi layar telat selangkah dari ukuran area = layar kedut.
+     */
+    fun followViewport(newH: Float) {
+        val old = vpPrev
+        vpPrev = newH
+        if (old <= 0f || newH >= old - 0.5f) return
+        androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {
+            val sc = scroll ?: return@withoutReadObservation
+            if (reading || selOn || ink.on || titleFocus || findOn || mv != null) return@withoutReadObservation
+            val key = focus ?: return@withoutReadObservation
+            val v = tf[key] ?: return@withoutReadObservation
+            if (!v.selection.collapsed) return@withoutReadObservation
+            val lay = lays[key] ?: return@withoutReadObservation
+            val pos = kpos[key] ?: return@withoutReadObservation
+            if (lsh[key] != 1 || layLen[key] != v.text.length) return@withoutReadObservation
+            val lt = lay.layoutInput.text.length
+            val r = lay.getCursorRect(toLay(key, v.selection.start - 1).coerceIn(0, lt))
+            val top = pos.y + r.top
+            val bot = pos.y + r.bottom
+            val sv = sc.value
+            val clr = cursorClear()
+            val vbOld = sv + old - clr
+            val vbNew = sv + newH - clr
+            if (bot <= vbOld + 2f && top >= sv + 12f * dens - 2f && bot > vbNew) sc.dispatchRawDelta(bot - vbNew)
+            Unit
+        }
+    }
+
     private fun split(i: Int, pos: Int, nty: String) {
         val b = blocks[i]
+        preScrollNewLine(b, pos, nty)
         var left = b.r.slice(0, pos)
         var right = b.r.slice(pos, b.r.t.length)
         if (right.t.startsWith("\n")) right = right.slice(1, right.t.length)
@@ -553,6 +614,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (i < 0) return
         val b = blocks[i]
         commit()
+        if (keep.t.isNotEmpty()) preScrollNewLine(b.copy(r = keep), keep.t.length, "p")
         if (keep.t.isEmpty()) {
             setBlock(i, b.copy(ty = "p", r = Rt()))
             tf[b.id] = TextFieldValue(Z, TextRange(1))
