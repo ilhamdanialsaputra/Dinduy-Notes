@@ -400,19 +400,24 @@ fun TF(
         val fh = if (ed.findOn) ed.hitsOf(key) else emptyList()
         val fc = if (fh.isEmpty()) null else ed.curHit()?.takeIf { it.key == key }
         val ann = remember(rt, pal, fs, sr, fold, fh, fc, jw, just, base.textIndent) {
-            val a = styled(rt, rt.t, 0, pal, fs)
+            // Isi teks mode baca dibuat PERSIS seperti mode ketik: ada awalan tak terlihat Z di depan (lebar nyaris nol). Dulu mode baca tanpa Z,
+            // jadi baris pertama tiap blok punya metrik beda dari mode ketik: selisih kecil tapi tetap per BLOK, jadi di catatan yang banyak blok
+            // pendek tampak "rapat sendiri" tiap pindah mode. Sekarang kedua mode menyusun teks yang sama persis.
+            val a = styled(rt, Z + rt.t, 1, pal, fs)
+            val nz = rt.t.length + 1
             val a2 = if (sr == null && fh.isEmpty()) a else buildAnnotatedString {
                 append(a)
-                if (sr != null) addSel(pal, rt, sr.first, sr.second, 0, rt.t.length)
-                addFind(pal, fh, fc, 0, rt.t.length)
+                if (sr != null) addSel(pal, rt, sr.first + 1, sr.second + 1, 1, nz)
+                addFind(pal, fh, fc, 1, nz)
             }
             if (fold == null) (if (just && jw > 0) justifySpans(a2, base2, jw, tm, dn) else a2)
-            else fold.applyTo(a2, 0).let { fa -> if (just && jw > 0) justifySpans(fa, base2, jw, tm, dn, fold.cutR) else fa }
+            else fold.applyTo(a2, 1).let { fa -> if (just && jw > 0) justifySpans(fa, base2, jw, tm, dn, fold.cutR) else fa }
         }
         val uri = LocalUriHandler.current
         var lay by remember { mutableStateOf<TextLayoutResult?>(null) }
-        LaunchedEffect(lay) { lay?.let { ed.lays[key] = it; ed.lsh[key] = 0 } }
-        Text(
+        LaunchedEffect(lay) { lay?.let { ed.layLen.remove(key); ed.lays[key] = it; ed.lsh[key] = 1 } }   // lsh = 1: sama dengan mode ketik (ada Z)
+        // BasicText, bukan material3 Text: Text menggabungkan gaya tema (LocalTextStyle) ke gaya kita, BasicTextField (mode ketik) tidak.
+        androidx.compose.foundation.text.BasicText(
             ann,
             modifier.heightIn(min = base.lineHeight.value.dp)
                 .onGloballyPositioned { c ->
@@ -432,7 +437,7 @@ fun TF(
                             if (ed.ink.on) return@detectTapGestures
                             val l = lay ?: return@detectTapGestures
                             val o0 = l.getOffsetForPosition(pos)
-                            val o = fold?.t2o(o0, 0) ?: o0
+                            val o = ((fold?.t2o(o0, 1) ?: o0) - 1).coerceIn(0, rt.t.length)
                             if (lite) {
                                 val bk = keyBlock(key)
                                 val inBlk = ed.selObj == bk || ed.focus?.let { keyBlock(it) } == bk
@@ -456,8 +461,10 @@ fun TF(
         LaunchedEffect(key) {
             androidx.compose.runtime.snapshotFlow { ed.req }.collect { r ->
                 if (r != null && r.key == key) {
-                    try { fr.requestFocus() } catch (e: Exception) { }
+                    // Posisi kursor dipasang SEBELUM fokus diminta: sesi input (keyboard) langsung mulai dengan keadaan final.
+                    // Dulu fokus diminta dulu lalu seleksi diubah sesudahnya, jadi keyboard menerima keadaan baru kedua kali = tampak "refresh" dua kali.
                     ed.applyReq(r)
+                    try { fr.requestFocus() } catch (e: Exception) { }
                 }
             }
         }
