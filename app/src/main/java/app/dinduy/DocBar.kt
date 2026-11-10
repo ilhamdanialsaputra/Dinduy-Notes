@@ -698,9 +698,24 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM, sheetPxOf: () -> Int, kbNow: () ->
             // keyboard lambat muncul (sering, apalagi setelah disembunyikan), pesanan dilepas lebih dulu, area catatan turun,
             // lalu naik lagi saat keyboard tiba = toolbar kedut. Batas waktu supaya tidak menggantung bila keyboard tak muncul.
             if (keep) {
-                val need = (total * .9f).toInt()
-                kotlinx.coroutines.withTimeoutOrNull(1000L) {
-                    androidx.compose.runtime.snapshotFlow { imeIn.getBottom(dn) }.first { it >= need }
+                // Pesanan baru boleh dilepas bila keyboard SUDAH setinggi pesanan (saat itu max(ime, pesanan) = ime, jadi melepas tidak menggeser apa pun).
+                // Dulu dilepas di 90%: area langsung turun ~10% lalu naik lagi bersama keyboard = toolbar kedut tiap sheet ditutup.
+                val need = total - 2f
+                val t0 = android.os.SystemClock.uptimeMillis()
+                var prev = -1
+                var still = 0L
+                while (android.os.SystemClock.uptimeMillis() - t0 < 1000L) {
+                    val v = imeIn.getBottom(dn)
+                    if (v >= need) break
+                    // keyboard berhenti naik tapi sedikit lebih pendek dari sheet (mis. baris saran berubah): tak perlu menunggu sampai habis
+                    if (v == prev && v > total * .6f) { still += 16L; if (still >= 160L) break } else still = 0L
+                    prev = v
+                    delay(16)
+                }
+                val cur = imeIn.getBottom(dn).toFloat()
+                // bila tingginya beda, turunkan pesanan mulus ke tinggi keyboard (bukan loncat)
+                if (cur > 0f && cur < total - 2f) {
+                    Animatable(total).animateTo(cur, tween(150)) { ed.sheetReserve = value }
                 }
             }
             ed.sheetReserve = 0f
