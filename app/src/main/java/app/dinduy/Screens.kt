@@ -865,11 +865,22 @@ class NoteDrag {
     var dropAt = Offset.Zero                        // posisi bayangan saat dilepas
     val settle = Animatable(0f)                     // 1 -> 0: kartu meluncur ke tempatnya
 
+    // Kunci item grid milik kartu seretan (kosong = pakai id kartu). Hanya dipakai di 2 kolom.
+    // LazyStaggeredGrid "mengikuti" kunci item yang tampil paling awal di layar: kalau item itu pindah indeks, gulir ikut dipindah
+    // supaya item tsb tetap di tempat. Kartu seretan yang kebetulan paling atas pindah jauh di daftar => layar ikut loncat
+    // (kolom lain ikut tertukar). Dengan kunci baru tiap urutan berubah, kunci lama hilang dari daftar sehingga grid tidak bisa
+    // mengikuti dan posisi gulir tetap di indeks yang sama (di-"pin"). Kartu seretan tak terlihat (alpha 0), jadi aman diganti.
+    var dragKey by mutableStateOf("")
+    private var seq = 0
+    fun slotKey(key: String): String = if (dragKey.isNotEmpty() && key == id) dragKey else key
+    fun realId(k: Any?): String? = if (dragKey.isNotEmpty() && k == dragKey) id else k as? String
+    fun reorder(list: List<String>) { order = list; dragKey = "~drag" + (seq++) }
+
     fun begin(key: String, g: Int, ord: List<String>, grabAt: Offset, at: Offset) {
-        group = g; orig = ord; order = ord; grab = grabAt; finger = at; dropping = false; ready = false; id = key
+        group = g; orig = ord; order = ord; grab = grabAt; finger = at; dropping = false; ready = false; dragKey = ""; id = key
     }
 
-    fun reset() { id = null; dropping = false; ready = false; order = emptyList() }
+    fun reset() { id = null; dropping = false; ready = false; dragKey = ""; order = emptyList() }
 
     /**
      * 1 kolom: tata letak grid TIDAK berubah selama menyeret (kartu tidak benar-benar dipindah di daftar), jadi tidak ada
@@ -1085,6 +1096,9 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         val pinned = shown(pinnedBase, 0)
         val others = shown(othersBase, 1)
         val full = StaggeredGridItemSpan.FullLine
+        // kunci item kartu seretan (lihat NoteDrag.dragKey); dibaca di sini (komposisi) supaya perubahannya ikut memperbarui grid
+        val dk = nd.dragKey
+        val did = nd.id
 
         // ---- seret & lepas ----
         val scope = rememberCoroutineScope()
@@ -1136,8 +1150,10 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     nd.reset()
                 }
             } else {
-                val info = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id }
+                val info = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == nd.slotKey(id) }
                 nd.resid = if (info != null) ghost - (nd.startC + (Offset(info.offset.x.toFloat(), info.offset.y.toFloat()) - nd.off0)) else Offset.Zero
+                // kunci item kembali ke id asli selagi kartu masih tersembunyi & tanpa animasi (modifier hold masih aktif sampai reset)
+                nd.dragKey = ""
                 if (changed) vm.moveOrder(nd.order)
                 nd.ready = true
                 nd.dropping = true
@@ -1158,11 +1174,15 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
             val density = dens.density
             var lastMove = 0L                 // 2 kolom: waktu (ns) pergantian urutan terakhir
             var lastFrame = 0L
+            var pinIdx = -1                   // 2 kolom: indeks item paling atas sebelum urutan berubah (bila yang paling atas adalah kartu seretan)
+            var pinOff = 0
+            var pinLeft = 0                   // sisa frame pemeriksaan pengaman
             while (nd.id == id && !nd.dropping) {
                 val now = withFrameNanos { it }
                 val dt = if (lastFrame == 0L) .016f else ((now - lastFrame) / 1_000_000_000f).coerceIn(.004f, .05f)
                 lastFrame = now
 
+                var auto = false
                 // ---- gulir otomatis: baru aktif setelah jari benar-benar bergerak, kecepatan naik halus (kuadrat) menuju tepi ----
                 if ((nd.finger - nd.at0).getDistance() > 12f * density) {
                     val topLine = with(dens) { (sat + 72.dp + 28.dp).toPx() }
@@ -1175,6 +1195,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     if (mag > 0f) {
                         val m = mag.coerceIn(0f, 1f)
                         val dy = 760f * density * m * m * dt
+                        auto = true
                         state.scrollBy(if (up) -dy else dy)
                     }
                 }
@@ -1182,6 +1203,17 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                 val li = state.layoutInfo
                 val vis = li.visibleItemsInfo
                 val byKey = vis.associateBy { it.key }
+
+                // pengaman 2 kolom: bila item paling atas tadi adalah kartu seretan, posisi gulir (indeks) TIDAK boleh berubah gara-gara
+                // urutan berganti. Kalau ternyata berubah (grid tetap mengikuti kartu itu), kembalikan ke posisi semula.
+                if (pinLeft > 0) {
+                    pinLeft--
+                    if (!auto && cols == 2 && pinIdx >= 0 && state.firstVisibleItemIndex != pinIdx) {
+                        pinLeft = 0
+                        try { state.scrollToItem(pinIdx, pinOff) } catch (e: Exception) { }
+                        continue
+                    }
+                }
 
                 if (cols == 1) {
                     // ---- 1 KOLOM ----
@@ -1244,15 +1276,16 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     val cur = grp.indexOf(id)
                     if (cur < 0 || nd.w <= 0 || nd.h <= 0) continue
                     val gset = HashSet(grp)
-                    val gv = vis.filter { (it.key as? String) in gset }.sortedBy { it.index }
+                    val gv = vis.filter { nd.realId(it.key) in gset }.sortedBy { it.index }
                     if (gv.isEmpty()) continue
-                    val f = grp.indexOf(gv[0].key as String)          // indeks (di kelompok) kartu tampil paling awal
+                    val k0 = nd.realId(gv[0].key) ?: continue
+                    val f = grp.indexOf(k0)                            // indeks (di kelompok) kartu tampil paling awal
                     if (f < 0) continue
                     // tata letak di layar harus sudah mengikuti urutan terbaru; kalau belum, tunggu (jangan menebak)
                     var fresh = true
                     for (v in gv) {
                         val gi = f + (v.index - gv[0].index)
-                        if (gi < 0 || gi >= grp.size || grp[gi] != v.key) { fresh = false; break }
+                        if (gi < 0 || gi >= grp.size || grp[gi] != nd.realId(v.key)) { fresh = false; break }
                     }
                     if (!fresh) continue
                     // belum digeser sama sekali (baru tekan lama): jangan ubah urutan apa pun
@@ -1290,7 +1323,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                         if (laneX[c] == unset) laneX[c] = padPx + c * (nd.w + gapPx)
                     }
                     val hv = HashMap<String, Int>(gv.size * 2)
-                    for (v in gv) hv[v.key as String] = v.size.height
+                    for (v in gv) { val hk = nd.realId(v.key) ?: continue; hv[hk] = v.size.height }
                     fun hOf(k: String): Int = hv[k] ?: nd.h
 
                     val cx0 = nd.startC.x + (nd.finger.x - nd.at0.x) + nd.w / 2f
@@ -1298,7 +1331,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     // magnet ke baris teratas: hanya bila kartu pertama kelompok memang tampil
                     val hasTop = f == 0
                     val baseY = if (hasTop) gv[0].offset.y.toFloat() else 0f
-                    val dv = gv.firstOrNull { it.key == id }
+                    val dv = gv.firstOrNull { nd.realId(it.key) == id }
                     val curTop = hasTop && dv != null && dv.offset.y <= baseY + 1f
                     val mg = minOf(nd.h * .5f, 48f * density) + (if (curTop) 12f * density else 0f)
                     val magnet = hasTop && cy0 - nd.h / 2f < baseY + mg
@@ -1332,7 +1365,14 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     }
                     // histeresis: pindah hanya bila slot baru jelas lebih dekat ke jari; makin jauh lompatannya, makin jelas syaratnya
                     if (best != cur && curCost - bestCost > (10f + 2f * kotlin.math.abs(best - cur)) * density) {
-                        nd.order = rest.toMutableList().also { it.add(best, id) }
+                        // catat dulu apakah kartu seretan sedang menjadi item paling atas (sebelum kuncinya diganti)
+                        val top = vis.minByOrNull { it.index }
+                        if (top != null && nd.realId(top.key) == id) {
+                            pinIdx = state.firstVisibleItemIndex
+                            pinOff = state.firstVisibleItemScrollOffset
+                            pinLeft = 4
+                        }
+                        nd.reorder(rest.toMutableList().also { it.add(best, id) })
                         lastMove = now
                         hapticDrag.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     }
@@ -1422,13 +1462,13 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
             if (sections) item(key = "h-pin", span = full) {
                 T("Pinned", 13f, 500, pal.osv, Modifier.graphicsLayer { if (!vm.searchOn) alpha = shift.p.value.coerceIn(0f, 1f) }.padding(start = 16.dp, top = 12.dp, bottom = 4.dp), ls = .01f)
             }
-            gridItems(pinned, key = { it.id }) { d ->
+            gridItems(pinned, key = { if (dk.isNotEmpty() && it.id == did) dk else it.id }) { d ->
                 HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, wPx, dens.density, pos, (if (nd.id != null && (cols == 1 || nd.id == d.id)) holdItemG() else flowItemG()).then(stackMove(d.id, true)), nd, state)
             }
             if (sections) item(key = "h-other", span = full) {
                 T("Others", 13f, 500, pal.osv, Modifier.graphicsLayer { if (!vm.searchOn) alpha = shift.p.value.coerceIn(0f, 1f) }.padding(start = 16.dp, top = 16.dp, bottom = 4.dp), ls = .01f)
             }
-            gridItems(others, key = { it.id }) { d ->
+            gridItems(others, key = { if (dk.isNotEmpty() && it.id == did) dk else it.id }) { d ->
                 HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, wPx, dens.density, pos, (if (nd.id != null && (cols == 1 || nd.id == d.id)) holdItemG() else flowItemG()).then(stackMove(d.id, true)), nd, state)
             }
         }
