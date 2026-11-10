@@ -643,6 +643,14 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         return ok
     }
 
+    /** Seperti [startRec], tapi perekam disiapkan di thread IO supaya animasi bilah rekam tidak tersendat. */
+    suspend fun startRecAsync(noteId: String, quiet: Boolean = false): Boolean {
+        player.stop()
+        val ok = rec.startAsync(noteId)
+        if (!ok) { if (!quiet) show("Can't start recording" + (rec.lastError?.let { " ($it)" } ?: "")) } else bgSync()
+        return ok
+    }
+
     fun stopRec() {
         val nid = rec.noteId ?: return
         if (nid == QuickFx.QID) { quickFinish(this); return }   // rekaman cepat belum punya catatan: dibuat saat selesai
