@@ -570,16 +570,18 @@ object PdfExport {
         val fs = cx.fs
         val u = cx.u
         val q = qst(b.k, pal)
-        val padX = 22f * u
-        val padY = 18f * u
-        val size = fs * 1.05f
+        val k = if (b.qMin()) QSC else 1f        // kutipan kecil: huruf, label, bantalan, dan bar diskalakan seperti di editor
+        val padX = 22f * k * u
+        val padXr = QUOTE_END_PAD * u
+        val padY = 18f * k * u
+        val size = fs * 1.05f * k
         val full = b.bw >= .999f
         val iv = if (full) indOf(cx, b, false) else NO_IND
         val boxW = ((if (full) cx.cw else cx.cw * effFrac(cx, b.bw)) - iv.l - iv.r).coerceAtLeast(60f)
         val bx = if (full) iv.l else when (b.alOf()) { "l" -> 0f; "r" -> cx.cw - boxW; else -> (cx.cw - boxW) / 2f }
         f.objW = boxW
-        val lay = mk(cx, b.r, (boxW - 2f * padX).coerceAtLeast(30f), size, q.fg.toArgb(), size * cx.lh, ta = b.ta)
-        val lsz = fs * .7f * 1.05f
+        val lay = mk(cx, b.r, (boxW - padX - padXr).coerceAtLeast(30f), size, q.fg.toArgb(), size * cx.lh, ta = b.ta)
+        val lsz = fs * .7f * 1.05f * k
         val lp = TextPaint(Paint.ANTI_ALIAS_FLAG)
         lp.textSize = lsz
         lp.typeface = cx.fonts.bold
@@ -588,7 +590,7 @@ object PdfExport {
         lp.color = (if (isDef) pal.p else q.fg).copy(alpha = if (isDef) 1f else .85f).toArgb()
         val lfm = lp.fontMetrics
         val label = q.label
-        val labelH = if (label != null) (lfm.descent - lfm.ascent) + fs * .45f * .7f else 0f
+        val labelH = if (label != null) (lfm.descent - lfm.ascent) + fs * .45f * .7f * k else 0f
         val boxH = padY * 2f + labelH + lay.height
         val y0 = f.y
         f.cuts.add(y0)
@@ -608,7 +610,7 @@ object PdfExport {
                 c.save()
                 c.clipPath(path)
                 p.color = pal.owc.toArgb()
-                c.drawRect(0f, 0f, 7f * u, boxH, p)
+                c.drawRect(0f, 0f, 7f * k * u, boxH, p)
                 c.restore()
             }
             if (q.border) {
