@@ -3,16 +3,47 @@ package app.dinduy
 import android.content.Context
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.UriHandler
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.Dp
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -24,8 +55,6 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.CoroutineScope
@@ -303,18 +332,71 @@ object LinkPreviews {
     }
 }
 
-/** Kartu pratinjau tautan gaya Google Keep: gambar, judul, domain. Tanpa data (gagal / offline) = tautan biasa. */
+// =====================================================================================================================
+// Kartu tautan = objek sisipan (seperti foto / kutipan / tabel): tekan-tahan untuk memindahkan, seret gagang tepi untuk
+// mengubah lebar, teks mengalir di sampingnya, dan dihapus lewat toolbar (bukan Backspace). Letak, gestur, dan toolbar
+// ditangani BoxCell / BoxFloatGroup / ObjBarContent (jalur yang sama dengan kutipan, kode, dan garis); file ini hanya isinya.
+// =====================================================================================================================
+
+/** Bentuk kartu tautan (M3 Expressive: sudut besar 28dp). Dipakai juga oleh cincin pilihan di BoxBody. */
+val LinkShape: Shape = RoundedCornerShape(28.dp)
+
+/** Buka [url] di aplikasi lain; gagal (tidak ada aplikasi) diabaikan. */
+fun openLink(h: UriHandler, url: String) {
+    try { h.openUri(url) } catch (e: Exception) { }
+}
+
+/** Perkiraan tinggi (dp) kartu selebar [w] sebelum tampilannya terukur (setelah terukur, tinggi sebenarnya dipakai: Ed.objH). */
+fun linkHeightEst(b: Blk, w: Float, fs: Float): Float {
+    val img = if (b.pi.isNotEmpty()) (w - 16f) / 1.91f + 10f else 6f
+    val tw = (w - 16f - 12f - 40f - 12f - 44f).coerceAtLeast(40f)
+    val per = (tw / (fs * .5f)).coerceAtLeast(4f)
+    val lines = if (b.r.t.isEmpty()) 1 else kotlin.math.ceil(b.r.t.length / per).toInt().coerceIn(1, 2)
+    val txt = lines * fs * .98f * 1.35f + fs * .8f * 1.35f + 2f
+    return 16f + img + maxOf(40f, txt) + 6f
+}
+
+/** Ikon tautan (dua mata rantai). [slash] = dicoret (ubah jadi tautan biasa). */
 @Composable
-fun LinkCard(ed: Ed, b: Blk, dm: Dm) {
-    val pal = LocalPal.current
+fun LinkIc(c: Color, sz: Dp = 24.dp, slash: Boolean = false) {
+    Canvas(Modifier.size(sz)) {
+        val u = this.size.width / 24f
+        val sw = 2.2f * u
+        rotate(-45f, Offset(this.size.width / 2f, this.size.height / 2f)) {
+            val st = Stroke(sw, cap = StrokeCap.Round)
+            drawRoundRect(c, Offset(2f * u, 8.5f * u), Size(11f * u, 7f * u), CornerRadius(3.5f * u), style = st)
+            drawRoundRect(c, Offset(11f * u, 8.5f * u), Size(11f * u, 7f * u), CornerRadius(3.5f * u), style = st)
+        }
+        if (slash) drawLine(c, Offset(5f * u, 5f * u), Offset(19f * u, 19f * u), sw, StrokeCap.Round)
+    }
+}
+
+/** Ikon panah keluar (buka di luar aplikasi). */
+@Composable
+fun LinkOutIc(c: Color, sz: Dp = 24.dp) {
+    Canvas(Modifier.size(sz)) {
+        val u = this.size.width / 24f
+        val sw = 2.2f * u
+        drawLine(c, Offset(7f * u, 17f * u), Offset(17f * u, 7f * u), sw, StrokeCap.Round)
+        drawLine(c, Offset(9f * u, 7f * u), Offset(17f * u, 7f * u), sw, StrokeCap.Round)
+        drawLine(c, Offset(17f * u, 7f * u), Offset(17f * u, 15f * u), sw, StrokeCap.Round)
+    }
+}
+
+/**
+ * Isi kartu tautan M3 Expressive: wadah tonal bersudut besar tanpa garis tepi, gambar bersudut dalam (28 - 8 = 20dp),
+ * lencana ikon squircle, judul tebal, domain berwarna utama, dan penanda panah keluar bulat. Tanpa data (gagal / offline)
+ * kartu tetap tampil ringkas: domain + alamat. Lebarnya ditentukan pemanggil lewat [modifier]; ketukan, seret, dan gagang
+ * lebar ditangani BoxCell, jadi tidak ada gestur di sini.
+ */
+@Composable
+fun LinkBody(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
     val ctx = LocalContext.current
-    val uri = LocalUriHandler.current
     val fs = dm.fs
     val url = b.l
     val title = b.r.t
-    val open = { try { uri.openUri(url) } catch (e: Exception) { } }
 
-    // data belum ada: ambil di latar; hasilnya disimpan di blok (ikut tercadangkan), gagal = tetap tautan biasa
+    // data belum ada: ambil di latar; hasilnya disimpan di blok (ikut tercadangkan), gagal = tetap kartu ringkas
     LaunchedEffect(b.id, url) {
         if (b.r.t.isEmpty() && b.pi.isEmpty()) {
             val m = LinkPreviews.meta(url, ctx)
@@ -328,38 +410,92 @@ fun LinkCard(ed: Ed, b: Blk, dm: Dm) {
         value = true to (if (b.pi.isEmpty()) null else LinkPreviews.image(ctx, b.pi))
     }
     val bmp = imgSt.second
+    val showImg = b.pi.isNotEmpty() && (bmp != null || !imgSt.first)
+    val domain = LinkPreviews.domain(url)
 
-    Box(Modifier.fillMaxWidth().padding(bottom = (fs * 1.1f).dp)) {
-        if (title.isEmpty() && b.pi.isEmpty()) {
-            Text(
-                url, Modifier.fillMaxWidth().clickable { open() }, color = pal.p, fontSize = fs.sp,
-                fontFamily = dm.ff, textDecoration = TextDecoration.Underline
-            )
-        } else {
-            val shape = RoundedCornerShape(16.dp)
-            Column(
-                Modifier.fillMaxWidth().clip(shape).background(pal.c2).border(1.dp, pal.ol, shape).clickable { open() }
-            ) {
-                val img = bmp
-                if (img != null) {
-                    Image(img, null, Modifier.fillMaxWidth().aspectRatio(1.91f), contentScale = ContentScale.Crop)
-                } else if (!imgSt.first && b.pi.isNotEmpty()) {
-                    Box(Modifier.fillMaxWidth().aspectRatio(1.91f).background(pal.c4))
+    BoxWithConstraints(modifier.clip(LinkShape).background(pal.c3)) {
+        val showBadge = maxWidth >= 170.dp
+        val showArrow = maxWidth >= 230.dp
+        Column(Modifier.fillMaxWidth().padding(8.dp)) {
+            if (showImg) {
+                Box(Modifier.fillMaxWidth().aspectRatio(1.91f).clip(RoundedCornerShape(20.dp)).background(pal.c4)) {
+                    if (bmp != null) Image(bmp, null, Modifier.matchParentSize(), contentScale = ContentScale.Crop)
                 }
-                Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
-                    if (title.isNotEmpty()) {
-                        T(title, fs, 700, pal.os, maxLines = 2)
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(start = 6.dp, end = 6.dp, top = if (showImg) 10.dp else 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (showBadge) {
+                    Box(Modifier.size(40.dp).clip(RoundedCornerShape(14.dp)).background(pal.pc), Alignment.Center) {
+                        LinkIc(pal.opc, 22.dp)
                     }
-                    T(LinkPreviews.domain(url), fs * .82f, 500, pal.osv, Modifier.padding(top = 2.dp), maxLines = 1)
+                    Spacer(Modifier.width(12.dp))
+                }
+                Column(Modifier.weight(1f)) {
+                    T(if (title.isNotEmpty()) title else domain, fs * .98f, 750, pal.os, maxLines = 2)
+                    T(
+                        if (title.isNotEmpty()) domain else url, fs * .8f, 600,
+                        if (title.isNotEmpty()) pal.p else pal.osv, Modifier.padding(top = 2.dp), maxLines = 1
+                    )
+                }
+                if (showArrow) {
+                    Spacer(Modifier.width(8.dp))
+                    Box(Modifier.size(36.dp).clip(CircleShape).background(pal.sc), Alignment.Center) {
+                        LinkOutIc(pal.osc, 18.dp)
+                    }
                 }
             }
         }
-        if (!ed.reading) {
-            // ubah jadi tautan biasa (teks)
-            IconBtn(
-                "x", pal.os, { ed.linkToText(b.id) }, Modifier.align(Alignment.TopEnd).padding(6.dp),
-                size = 32.dp, bg = pal.s.copy(alpha = .85f), iconSize = 18.dp
-            )
-        }
     }
+}
+
+/** Dialog "Add link" dari ubin Link di sheet Sisipkan. Terisi otomatis kalau clipboard berisi alamat web. Menempel langsung di catatan tetap jalan seperti biasa. */
+@Composable
+fun LinkDialog(ed: Ed) {
+    if (!ed.linkDlg) return
+    val pal = LocalPal.current
+    @Suppress("DEPRECATION")
+    val clip = LocalClipboardManager.current
+    var txt by remember { mutableStateOf(ed.normLink(clip.getText()?.text) ?: "") }
+    val url = ed.normLink(txt)
+    val fr = remember { FocusRequester() }
+    LaunchedEffect(Unit) { delay(150); try { fr.requestFocus() } catch (e: Exception) { } }
+    val go = {
+        val u = url
+        if (u != null) { ed.linkDlg = false; ed.insLink(u) }
+    }
+    AlertDialog(
+        onDismissRequest = { ed.linkDlg = false; ed.linkAt = null },
+        containerColor = pal.c3,
+        shape = RoundedCornerShape(28.dp),
+        icon = {
+            Box(Modifier.size(52.dp).clip(RoundedCornerShape(18.dp)).background(pal.pc), Alignment.Center) { LinkIc(pal.opc, 28.dp) }
+        },
+        title = { T("Add link", 24f, 400, pal.os) },
+        text = {
+            Column {
+                T("Paste a web address. A preview card is added to your note.", 14f, 400, pal.osv)
+                Spacer(Modifier.height(16.dp))
+                Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(pal.c4).padding(horizontal = 16.dp, vertical = 14.dp)) {
+                    if (txt.isEmpty()) T("https://", 16f, 400, pal.osv, alpha = .6f)
+                    BasicTextField(
+                        value = txt, onValueChange = { txt = it },
+                        modifier = Modifier.fillMaxWidth().focusRequester(fr),
+                        singleLine = true,
+                        textStyle = TextStyle(color = pal.os, fontSize = 16.sp),
+                        cursorBrush = SolidColor(pal.p),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { go() })
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { go() }, enabled = url != null) { T("Insert", 15f, 600, if (url != null) pal.p else pal.osv, alpha = if (url != null) 1f else .5f) }
+        },
+        dismissButton = {
+            TextButton(onClick = { ed.linkDlg = false; ed.linkAt = null }) { T("Cancel", 15f, 500, pal.osv) }
+        }
+    )
 }
