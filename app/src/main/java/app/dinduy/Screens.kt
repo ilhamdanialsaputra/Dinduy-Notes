@@ -256,7 +256,9 @@ fun Modifier.makeRoom(vm: AppVM, id: String, idx: Int, openIdx: () -> Int, h: Fl
     // morph dari kartu "Tambah catatan" (lebar penuh) atau menguncup ke tombol Baru tidak boleh menggeser kartu lain
     if (grid && (!m.card || m.up || vm.note(oid) == null)) return@graphicsLayer
     val wave = minOf(Math.abs(idx - oi), 5) * 10f * dens
-    val me = if (grid) vm.cardMorph[id] else null
+    // posisi hasil boundsInWindow terpotong layar: kartu yang sudah terdorong keluar layar bisa tercatat sebagai Rect kosong (0,0,0,0)
+    // lalu dianggap 'di atas' kartu yang dibuka -> melompat ke atas sesaat. Rect tak valid diperlakukan seperti belum ada.
+    val me = if (grid) vm.cardMorph[id]?.takeIf { it.r - it.l > 1f && it.b - it.t > 1f } else null
     if (me != null) {
         // kartu di atas terdorong ke atas, kartu di bawah ke bawah; di 2 kolom kartu di samping juga terdorong
         // ke kiri/kanan menjauhi kartu yang melebar (bukan satu aliran vertikal)
@@ -1353,7 +1355,12 @@ fun HomeCard(
                     val sc = .92f + .08f * pv.coerceIn(0f, 1f); scaleX = sc; scaleY = sc
                 },
                 onLong = { if (d.id !in sel) sel.add(d.id) },
-                track = { m -> if (!vm.searchOn) vm.cardMorph[d.id] = m },
+                track = { m ->
+                    // selama kartu lain sedang membuka/menutup, posisi kartu ini jangan ditimpa: nilainya sudah ikut tergeser
+                    // (dan terpotong layar) oleh makeRoom sendiri, sehingga klasifikasi atas/bawah bisa berbalik di tengah animasi
+                    val busy = vm.openId != null && vm.openId != d.id && vm.openP.value > .001f
+                    if (!vm.searchOn && !busy) vm.cardMorph[d.id] = m
+                },
                 cols = cols,
                 onClick = { m ->
                     if (selMode) { if (d.id in sel) sel.remove(d.id) else sel.add(d.id) }
