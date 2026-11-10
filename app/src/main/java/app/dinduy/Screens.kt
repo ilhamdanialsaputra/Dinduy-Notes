@@ -864,6 +864,10 @@ class NoteDrag {
     var w = 0                                       // lebar kartu (px)
     var dropAt = Offset.Zero                        // posisi bayangan saat dilepas
     val settle = Animatable(0f)                     // 1 -> 0: kartu meluncur ke tempatnya
+    // 2 kolom: tinggi tiap kartu yang pernah tampil (px). Dipakai untuk mensimulasikan tata letak tiap kemungkinan posisi sisip,
+    // jadi kartu yang belum/sudah tidak tampil di layar tetap bisa dihitung.
+    val heights = HashMap<String, Int>()
+    var heightsW = 0                                // lebar kartu saat cache diisi; berubah = cache dibuang
 
     fun begin(key: String, g: Int, ord: List<String>, grabAt: Offset, at: Offset) {
         group = g; orig = ord; order = ord; grab = grabAt; finger = at; dropping = false; ready = false; id = key
@@ -1156,11 +1160,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         LaunchedEffect(nd.id) {
             val id = nd.id ?: return@LaunchedEffect
             val density = dens.density
-            var blocked: String? = null
-            var lastSwap = 0L
-            var lastSwapAt: Offset? = null
-            var candKey: String? = null      // kandidat tujuan (2 kolom) dan sejak kapan pusat bayangan berada di atasnya
-            var candSince = 0L
+            var staleFrames = 0               // 2 kolom: jumlah frame berturut-turut menunggu grid selesai menata ulang
             var lastFrame = 0L
             while (nd.id == id && !nd.dropping) {
                 val now = withFrameNanos { it }
@@ -1227,68 +1227,89 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     }
                 } else {
                     // ---- 2 KOLOM ----
-                    val me = byKey[id] ?: continue
-                    val ctx = dragCtx
-                    val startIdx = if (nd.group == 0) (if (ctx.first) 1 else 0) else 2 + ctx.second.size
+                    // Prinsip: grid staggered menata kartu menurut URUTAN (tiap kartu masuk ke kolom yang paling pendek), jadi menyisipkan
+                    // kartu di indeks i menggeser kartu lain dengan cara yang bisa DIHITUNG. Daripada menebak dari "kartu mana yang
+                    // sedang ditindih" (dulu: abstrak, tergantung timing, dan kartu seretan tidak mendarat di bawah jari), sekarang
+                    // semua posisi sisip disimulasikan dan dipilih yang slotnya paling dekat dengan bayangan di bawah jari.
                     val grp = nd.order
                     val cur = grp.indexOf(id)
-                    // tunggu sampai grid selesai menata ulang setelah pertukaran sebelumnya
-                    if (cur < 0 || me.index != startIdx + cur) continue
-                    // beri grid waktu menata ulang & menganimasikan kartu lain sebelum pertukaran berikutnya
-                    if (now - lastSwap < 160_000_000L) continue
-                    val cx = nd.startC.x + (nd.finger.x - nd.at0.x) + me.size.width / 2f
-                    val cy = nd.startC.y + (nd.finger.y - nd.at0.y) + me.size.height / 2f
-                    // Setiap titik di grid punya tujuan: area tiap kartu diperlebar setengah jarak antar kartu sehingga tidak ada
-                    // celah mati di antaranya (dulu ada pinggiran 10% / 20% yang tidak merespons).
-                    val pad = 4f * density
-                    // kartu sangat tipis: area "tetap di tempat" dilebarkan sampai minimal 120dp supaya pusat bayangan yang sedikit
-                    // meleset tidak langsung dianggap menindih kartu lain (penyebab kartu di sekitarnya loncat-loncat)
-                    val ex = maxOf(0f, (120f * density - me.size.width) / 2f)
-                    val ey = maxOf(0f, (120f * density - me.size.height) / 2f)
-                    val inMe = cx >= me.offset.x - ex && cx <= me.offset.x + me.size.width + ex &&
-                        cy >= me.offset.y - ey && cy <= me.offset.y + me.size.height + ey
-                    var target = -1
-                    var overKey: String? = null
-                    if (!inMe) for (v in vis) {
-                        val k = v.key as? String ?: continue
-                        if (k == id) continue
-                        val ti = grp.indexOf(k)
-                        if (ti < 0) continue
-                        if (cx >= v.offset.x - pad && cx <= v.offset.x + v.size.width + pad &&
-                            cy >= v.offset.y - pad && cy <= v.offset.y + v.size.height + pad
-                        ) { target = ti; overKey = k; break }
+                    if (cur < 0 || nd.w <= 0 || nd.h <= 0) continue
+                    val gset = HashSet(grp)
+                    // simpan tinggi semua kartu kelompok yang sedang tampil
+                    if (nd.heightsW != nd.w) { nd.heights.clear(); nd.heightsW = nd.w }
+                    for (v in vis) { val k = v.key as? String ?: continue; if (k in gset) nd.heights[k] = v.size.height }
+                    nd.heights[id] = nd.h
+                    val gap = 8f * density
+                    var sum = 0L; var cnt = 0
+                    for (k in grp) { val hh = nd.heights[k]; if (hh != null) { sum += hh; cnt++ } }
+                    val avg = if (cnt > 0) (sum / cnt).toInt() else nd.h
+                    fun hOf(k: String): Float = (nd.heights[k] ?: avg).toFloat()
+
+                    // simulasi urutan SAAT INI: dipakai untuk mencocokkan koordinat simulasi dengan tata letak asli di layar
+                    val lh = FloatArray(cols)
+                    val simLane = HashMap<String, Int>(grp.size * 2)
+                    val simY = HashMap<String, Float>(grp.size * 2)
+                    for (k in grp) {
+                        var l = 0
+                        for (c in 1 until cols) if (lh[c] < lh[l] - .5f) l = c
+                        simLane[k] = l; simY[k] = lh[l]
+                        lh[l] += hOf(k) + gap
                     }
-                    if (overKey != null) {
-                        // kartu yang baru saja bertukar tidak boleh bertukar balik sebelum pusat kartu seretan keluar dulu dari kartu itu
-                        if (overKey == blocked) target = -1 else blocked = null
-                    } else if (!inMe) {
-                        blocked = null
-                        // di luar semua kartu: ujung bawah / atas kolom berarti pindah ke akhir / awal kelompok
-                        val laneW = li.viewportSize.width / cols.toFloat()
-                        val lane = (cx / laneW).toInt().coerceIn(0, cols - 1)
-                        val mine = vis.filter { v -> (v.key as? String)?.let { k -> grp.indexOf(k) >= 0 } == true && v.lane == lane }
-                        if (mine.isNotEmpty()) {
-                            val bottom = mine.maxOf { it.offset.y + it.size.height }
-                            val topY = mine.minOf { it.offset.y }
-                            if (cy > bottom && byKey.containsKey(grp.last())) target = grp.size - 1
-                            else if (cy < topY && byKey.containsKey(grp.first())) target = 0
-                        } else if (cy > 0f && byKey.containsKey(grp.last())) {
-                            target = grp.size - 1   // kolom kosong: kartu jadi yang terakhir (mengalir ke kolom paling pendek)
+                    // jangkar: kartu kelompok yang tampil dan paling dekat dengan jari
+                    val cx0 = nd.startC.x + (nd.finger.x - nd.at0.x) + nd.w / 2f
+                    val cy0 = nd.startC.y + (nd.finger.y - nd.at0.y) + nd.h / 2f
+                    var anchor: androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridItemInfo? = null
+                    var anchorD = Float.MAX_VALUE
+                    for (v in vis) {
+                        val k = v.key as? String ?: continue
+                        if (k !in gset) continue
+                        val dd = kotlin.math.abs(v.offset.y + v.size.height / 2f - cy0)
+                        if (dd < anchorD) { anchorD = dd; anchor = v }
+                    }
+                    val an = anchor
+                    if (an == null) continue
+                    val ak = an.key as String
+                    val baseY = an.offset.y - (simY[ak] ?: 0f)           // kelompok mulai di y ini (koordinat grid)
+                    val flip = cols == 2 && (simLane[ak] ?: an.lane) != an.lane  // kolom tertukar (selisih pembulatan di baris pertama)
+                    // tata letak di layar belum selesai mengikuti urutan terbaru: tunggu (maks 3 frame supaya tidak pernah macet)
+                    var consistent = true
+                    for (v in vis) {
+                        val k = v.key as? String ?: continue
+                        if (k !in gset) continue
+                        val sy = simY[k] ?: continue
+                        if (kotlin.math.abs(v.offset.y - (baseY + sy)) > 3f * density) { consistent = false; break }
+                    }
+                    if (!consistent && staleFrames < 3) { staleFrames++; continue }
+                    staleFrames = 0
+
+                    // simulasi tanpa kartu seretan; sebelum menaruh kartu ke-i, slot sisip = kolom terpendek saat itu
+                    val rest = grp.filter { it != id }
+                    val lh2 = FloatArray(cols)
+                    val padS = 8f * density
+                    val vh = li.viewportSize.height.toFloat()
+                    var best = cur
+                    var bestCost = Float.MAX_VALUE
+                    var curCost = Float.MAX_VALUE
+                    for (i in 0..rest.size) {
+                        var l = 0
+                        for (c in 1 until cols) if (lh2[c] < lh2[l] - .5f) l = c
+                        val slotY = baseY + lh2[l]
+                        val lane = if (flip) cols - 1 - l else l
+                        val sx = padS + lane * (nd.w + gap)
+                        val dx = sx + nd.w / 2f - cx0
+                        val dy = slotY + nd.h / 2f - cy0
+                        // slot sudah jauh di bawah jari dan hanya makin turun: tidak perlu dicek lagi
+                        if (dy > bestCost + vh) break
+                        val cost = kotlin.math.sqrt(dx * dx + dy * dy) + 3f * density * kotlin.math.abs(i - cur)
+                        if (i == cur) curCost = cost
+                        if (cost < bestCost) { bestCost = cost; best = i }
+                        if (i < rest.size) {
+                            lh2[l] += hOf(rest[i]) + gap
                         }
                     }
-                    // setelah bertukar, jari harus bergeser sedikit dulu: mencegah kartu 'mengejar' pusat bayangan berturut-turut
-                    // ketika tinggi kartu berbeda dan tata letak mengalir ulang
-                    val la = lastSwapAt
-                    if (target >= 0 && la != null && (nd.finger - la).getDistance() < 20f * density) target = -1
-                    // tujuan harus bertahan sebentar di bawah pusat bayangan: lewat sekilas di atas kartu tipis tidak memicu pertukaran
-                    val candNow = if (target >= 0) grp.getOrNull(target) else null
-                    if (candNow != candKey) { candKey = candNow; candSince = now }
-                    if (target >= 0 && now - candSince < 70_000_000L) target = -1
-                    if (target >= 0 && target != cur) {
-                        blocked = grp.getOrNull(target)
-                        lastSwap = now
-                        lastSwapAt = nd.finger
-                        nd.order = grp.toMutableList().also { it.removeAt(cur); it.add(target, id) }
+                    // histeresis: pindah hanya bila slot baru jelas lebih dekat ke jari daripada slot sekarang
+                    if (best != cur && curCost - bestCost > 10f * density) {
+                        nd.order = rest.toMutableList().also { it.add(best, id) }
                         hapticDrag.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     }
                 }
