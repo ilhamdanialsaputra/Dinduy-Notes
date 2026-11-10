@@ -239,8 +239,19 @@ fun AnnotatedString.Builder.addFind(pal: Pal, hits: List<FHit>, cur: FHit?, off:
     }
 }
 
+/**
+ * Pembagian tinggi baris yang SAMA untuk mode baca dan mode ketik. Penyebab "teks rapat sendiri" saat pindah mode: mode baca memakai
+ * material3 Text, yang diam-diam menggabungkan gaya teks tema (LocalTextStyle) berisi LineHeightStyle(Center, Trim.None); mode ketik memakai
+ * BasicTextField yang TIDAK menggabungkannya, jadi memakai bawaan Compose (Proportional, trim ujung) = jarak baris lebih rapat.
+ * Dengan menetapkannya eksplisit di gaya dasar, kedua mode (dan perhitungan teks mengelilingi gambar) memakai aturan yang sama persis.
+ */
+val TextLHS = androidx.compose.ui.text.style.LineHeightStyle(
+    alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
+    trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.None
+)
+
 fun baseStyle(pal: Pal, dm: Dm, color: Color = pal.os, size: Float = dm.fs, w: Int = 400, lhEm: Float = dm.lh, ls: Float = 0f) =
-    TextStyle(color = color, fontFamily = dm.ff, fontSize = size.sp, fontWeight = FontWeight(w), lineHeight = (lhEm * size).sp, letterSpacing = ls.em)
+    TextStyle(color = color, fontFamily = dm.ff, fontSize = size.sp, fontWeight = FontWeight(w), lineHeight = (lhEm * size).sp, letterSpacing = ls.em, lineHeightStyle = TextLHS)
 
 /** Default Compose untuk gulir horizontal (kode / tabel); NoteScreen mematikan gulir vertikal bawaan lewat LocalBringIntoViewSpec. */
 private val LocalHBiv = androidx.compose.runtime.staticCompositionLocalOf<BringIntoViewSpec?> { null }
@@ -375,8 +386,9 @@ fun TF(
     val rt = rtS.value
     val fs = base.fontSize.value
     val just = base.textAlign == androidx.compose.ui.text.style.TextAlign.Justify
-    val base2 = if (base.textAlign == androidx.compose.ui.text.style.TextAlign.Justify)
-        base.copy(textAlign = androidx.compose.ui.text.style.TextAlign.Start, lineBreak = androidx.compose.ui.text.style.LineBreak.Simple) else base
+    val base2 = (if (base.textAlign == androidx.compose.ui.text.style.TextAlign.Justify)
+        base.copy(textAlign = androidx.compose.ui.text.style.TextAlign.Start, lineBreak = androidx.compose.ui.text.style.LineBreak.Simple) else base)
+        .copy(lineHeightStyle = TextLHS)   // sama di mode baca (Text) dan mode ketik (BasicTextField): lihat TextLHS
     val tm = androidx.compose.ui.text.rememberTextMeasurer()
     val dn = androidx.compose.ui.platform.LocalDensity.current
     var jw by remember { mutableStateOf(0) }       // lebar kolom teks (px), dipakai rata kiri-kanan
@@ -1461,7 +1473,8 @@ private fun tblHeightDp(ed: Ed, b: Blk, dm: Dm, pal: Pal, tm: TextMeasurer, dn: 
     var tot = 3f
     b.tb.forEachIndexed { r, row ->
         val st = TextStyle(
-            fontFamily = dm.ff, fontSize = fsz.sp, lineHeight = (fsz * 1.45f).sp, fontWeight = FontWeight(if (r == 0) 850 else 400)
+            fontFamily = dm.ff, fontSize = fsz.sp, lineHeight = (fsz * 1.45f).sp, fontWeight = FontWeight(if (r == 0) 850 else 400),
+            lineHeightStyle = TextLHS
         )
         var mx = lhPx
         row.forEachIndexed { c, cell ->
