@@ -113,11 +113,13 @@ class Snap(val bl: List<Blk>, val key: String?, val sel: TextRange)
 
 fun keyBlock(k: String) = k.substringBefore(':')
 
-/** Penanda kutipan kecil di Blk.l (kutipan tidak memakai l untuk hal lain). Dibaca editor dan PDF. */
-const val QMIN = "min"
-/** Skala isi kutipan saat dikecilkan (huruf, label, bantalan). Dipakai editor, estimasi tinggi, dan PDF. */
-const val QSC = .78f
-fun Blk.qMin(): Boolean = ty == "q" && l == QMIN
+/** Skala terkecil isi kutipan (huruf, label, bantalan). */
+const val QSC_MIN = .5f
+/**
+ * Skala isi kutipan (1 = normal). Disimpan sebagai angka di Blk.l (kutipan tidak memakai l untuk hal lain; kosong = 1), sehingga ikut
+ * tersimpan, dicadangkan, di-undo, dan dibaca PDF. Diubah titik sudut kutipan (lihat BoxCell) bersama lebarnya, seperti foto.
+ */
+fun Blk.qScale(): Float = if (ty == "q") (l.toFloatOrNull() ?: 1f).coerceIn(QSC_MIN, 1f) else 1f
 fun isCellKey(k: String) = k.indexOf(':') >= 0
 fun cellRC(k: String): Pair<Int, Int> {
     val p = k.split(':')
@@ -830,22 +832,15 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     fun setPlain() = convertFocused { b -> if (b.ty == "q") b.copy(ty = "p", l = "") else b.copy(ty = "p") }
 
     /**
-     * Kutipan kecil / besar (tombol di sudut kutipan, seperti kartu tautan yang bisa dikecilkan). Kecil = seluruh isi (huruf, label,
-     * bantalan) diskalakan QSC; teks tetap utuh dan tetap bisa diedit. Status disimpan di Blk.l
-     * (QMIN = kecil, kosong = besar; kutipan tidak memakai l untuk hal lain) sehingga ikut tersimpan, dicadangkan, di-undo, dan
-     * dibaca PDF. [on] null = balik status.
+     * Skala kutipan langsung saat titik sudut diseret (seperti foto): lebar [f] (pecahan lebar halaman) dan skala isi [k] berubah bersama,
+     * jadi kutipan menyusut utuh: huruf, label, bantalan. Skala disimpan di Blk.l (lihat qScale).
      */
-    fun quoteMin(bid: String, on: Boolean? = null) {
-        val i = idx(bid)
-        if (i < 0) return
-        val b = blocks[i]
-        if (b.ty != "q") return
-        val nv = on ?: !b.qMin()
-        if (nv == b.qMin()) return
-        commit()
-        animNext()
-        setBlock(i, b.copy(l = if (nv) QMIN else ""))
-        dirty(); norm(); afterStructural()
+    fun quoteScaleLive(bid: String, f: Float, k: Float) {
+        val kk = (kotlin.math.round(k.coerceIn(QSC_MIN, 1f) * 100f) / 100f)
+        blocks = blocks.map {
+            if (it.id == bid && it.ty == "q") it.copy(bw = f.coerceIn(.2f, 1f), l = if (kk >= .995f) "" else kk.toString()) else it
+        }
+        dirty()
     }
 
     /** Perataan paragraf: "" kiri, c tengah, r kanan, j rata kiri-kanan. Tidak berlaku untuk blok kode. */
@@ -1436,7 +1431,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             }
             "hr" -> 28f
             "lnk" -> 110f
-            "q" -> { val k = if (b.qMin()) QSC else 1f; lines(b.r.t, (w - 22f * k - QUOTE_END_PAD) / k) * fs * k * lh + 28f * k }
+            "q" -> { val k = b.qScale(); lines(b.r.t, (w - 44f * k) / k) * fs * k * lh + 28f * k }
             "code" -> lines(b.r.t, w - 24f) * fs * lh + 28f
             else -> lines(b.r.t, w) * fs * lh + 8f
         }
