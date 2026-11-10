@@ -244,7 +244,7 @@ fun LazyStaggeredGridItemScope.flowItemG(): Modifier = Modifier.animateItem(
  * kartu di atas terdorong ke atas, kartu di bawah terdorong ke bawah mengikuti tepi kartu yang melebar,
  * sedikit mengecil dan memudar. Saat menutup, geraknya berbalik dengan spring yang sama.
  */
-fun Modifier.makeRoom(vm: AppVM, id: String, idx: Int, openIdx: () -> Int, h: Float, dens: Float, cols: Int = 1, w: Float = 0f): Modifier = graphicsLayer {
+fun Modifier.makeRoom(vm: AppVM, id: String, idx: Int, openIdx: () -> Int, h: Float, dens: Float, cols: Int = 1, w: Float = 0f, flat: Boolean = false): Modifier = graphicsLayer {
     val oid = vm.openId
     val m = vm.morph
     val p = vm.openP.value.coerceIn(0f, 1f)
@@ -275,6 +275,8 @@ fun Modifier.makeRoom(vm: AppVM, id: String, idx: Int, openIdx: () -> Int, h: Fl
     val s = 1f - .05f * p
     scaleX = s; scaleY = s
     alpha = 1f - .6f * p
+    // kartu bersampul: alpha<1 memaksa layer offscreen untuk bitmap besar -> kedip saat kartu terpotong tepi layar; ModulateAlpha menghindarinya
+    if (flat) compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.ModulateAlpha
 }
 
 @Composable
@@ -1308,7 +1310,7 @@ fun HomeCard(
     androidx.compose.runtime.DisposableEffect(d.id) { onDispose { vm.cardMorph.remove(d.id) } }
     val dragging = nd.id == d.id
     Column(
-        base.makeRoom(vm, d.id, i, { vm.openId?.let { pos[it] } ?: -1 }, hPx, dens, cols, wPx).then(
+        base.makeRoom(vm, d.id, i, { vm.openId?.let { pos[it] } ?: -1 }, hPx, dens, cols, wPx, flat = d.cv.isNotEmpty()).then(
             if (dragging) Modifier.zIndex(1f).graphicsLayer {
                 // kartu yang diseret mengikuti jari; posisi layout-nya bisa berubah saat urutan bertukar, jadi selisihnya dihitung tiap frame
                 val info = gs.layoutInfo.visibleItemsInfo.firstOrNull { it.key == d.id }
@@ -1325,11 +1327,11 @@ fun HomeCard(
             } else Modifier
         )
     ) {
-        val first = remember(d.id) { !vm.seen.contains(d.id) }
+        val first = remember(d.id) { val f = !vm.seen.contains(d.id); vm.seen.add(d.id); f }
         val prog = remember(d.id) { Animatable(if (first) 0f else 1f) }
         LaunchedEffect(d.id) {
             if (first) {
-                delay(minOf(i, 8) * 55L); vm.seen.add(d.id)
+                delay(minOf(i, 8) * 55L)
                 prog.animateTo(1f, spring(.7f, 350f))
             }
         }
