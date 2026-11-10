@@ -12,6 +12,7 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -50,7 +51,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,6 +63,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -108,6 +112,7 @@ object QuickFx {
     var noteBound by mutableStateOf(false)         // rekaman sedang menempel di catatan terbuka, bilah disembunyikan
     var closeTick by mutableIntStateOf(0)          // dinaikkan agar bilah menguncup kembali ke tombol +
     var lastMs by mutableStateOf(0L)               // waktu terakhir, ditampilkan selama bilah menguncup
+    @JvmField var starting = false                 // perekam sedang disiapkan di thread IO (bilah sudah mekar)
     @JvmField var returning = false                // catatan kosong menguncup balik ke bilah (bukan ke tombol +)
     @JvmField var barMorph: Morph? = null          // posisi bilah di layar, titik awal/akhir morph catatan
 }
@@ -116,6 +121,22 @@ fun micOk(ctx: Context): Boolean =
     ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
 /** Mulai merekam. Belum ada catatan: id sementara dipakai sampai selesai. */
+/**
+ * Versi tanpa memblokir main thread (dipakai gesture geser FAB): perekam disiapkan di thread IO sementara bilah terus mekar.
+ * Gagal = false; pemanggil yang menguncupkan bilah kembali.
+ */
+suspend fun quickStartAsync(vm: AppVM, quiet: Boolean = false): Boolean {
+    if (vm.rec.active || QuickFx.starting) return false
+    QuickFx.starting = true
+    try {
+        val ok = vm.startRecAsync(QuickFx.QID, quiet)
+        if (ok) { QuickFx.shown = true; QuickFx.lastMs = 0L }
+        return ok
+    } finally {
+        QuickFx.starting = false
+    }
+}
+
 fun quickStart(vm: AppVM, quiet: Boolean = false): Boolean {
     if (vm.rec.active) return false
     val ok = vm.startRec(QuickFx.QID, quiet)
@@ -171,63 +192,130 @@ private fun QTimer(vm: AppVM) {
     T(fmtTime(ms), 24f, 900, pal.opc, maxLines = 1)
 }
 
+private fun easeOutBack(t: Float): Float {
+    val x = t.coerceIn(0f, 1f) - 1f
+    return 1f + 2.70158f * x * x * x + 1.70158f * x * x
+}
+
+private fun smooth(t: Float): Float {
+    val x = t.coerceIn(0f, 1f)
+    return x * x * (3f - 2f * x)
+}
+
+/**
+ * Isi bilah. SEMUA gerak di sini hanya fungsi dari satu progres [QuickFx.p] (bukan timer sendiri-sendiri), jadi isi selalu sinkron
+ * dengan bentuk wadah dan tidak pernah ada momen "kosong" di tengah morph:
+ *   0.00-0.24  tombol + berputar 90 derajat sambil mengecil
+ *   0.10-0.55  tombol stop tumbuh dari titik nol dengan pantulan kecil (menggantikan +)
+ *   0.28-0.78  titik rekam, waktu, dan gelombang meluncur masuk dari arah tombol
+ */
 @Composable
-private fun QuickVoiceBody(vm: AppVM, fabWdp: Dp) {
+private fun QuickVoiceBody(vm: AppVM, fabWdp: Dp, btnDown: Boolean) {
     val pal = LocalPal.current
-    val pulse by rememberInfiniteTransition(label = "qp").animateFloat(
-        1f, .3f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "qpa"
-    )
+    val tr = rememberInfiniteTransition(label = "qp")
+    val halo by tr.animateFloat(0f, 1f, infiniteRepeatable(tween(1300, easing = LinearOutSlowInEasing)), label = "qh")
+    val rc = if (pal.mono) pal.opc else Color(0xFFE5484D)
+    // tombol stop: lingkaran saat diam, menyempit lebih kotak saat ditekan (bahasa bentuk yang sama dengan toolbar lain)
+    val bR by animateDpAsState(if (btnDown) 20.dp else 30.dp, M3E.spatialFast(), label = "qbr")
+    val bS by animateFloatAsState(if (btnDown) .9f else 1f, spring(.45f, 700f), label = "qbs")
+    // gelombang meluncur halus antar sampel (sampel baru tiap 50 ms), bukan melompat
+    val frac = remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(Unit) {
+        var ref: List<Float>? = null
+        var t0 = 0L
+        while (true) {
+            withFrameNanos { now ->
+                val a = vm.rec.amps
+                if (a !== ref) { ref = a; t0 = now }
+                frac.floatValue = ((now - t0) / 50_000_000f).coerceIn(0f, 1f)
+            }
+        }
+    }
     Box(Modifier.fillMaxSize()) {
-        // isi tombol + (sama persis dengan FAB, menempel di sisi kanan) memudar saat bilah melebar
+        // isi tombol + (sama persis dengan FAB, menempel di sisi kanan)
         Row(
             Modifier.align(Alignment.CenterEnd).width(fabWdp).fillMaxHeight().padding(horizontal = 28.dp)
-                .graphicsLayer { alpha = (1f - QuickFx.p.value * 3.5f).coerceIn(0f, 1f) },
+                .graphicsLayer { alpha = (1f - QuickFx.p.value / .24f).coerceIn(0f, 1f) },
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center
         ) {
-            Ic("plus", pal.opc, 36.dp)
+            Box(
+                Modifier.graphicsLayer {
+                    val t = (QuickFx.p.value / .24f).coerceIn(0f, 1f)
+                    rotationZ = 90f * t
+                    val s = 1f - .4f * t
+                    scaleX = s; scaleY = s
+                }
+            ) { Ic("plus", pal.opc, 36.dp) }
             if (fabWdp > 100.dp) {
                 Spacer(Modifier.width(14.dp))
                 T("New", 22f, 900, pal.opc, maxLines = 1)
             }
         }
-        // isi bilah: titik rekam, waktu, gelombang suara
+        // isi bilah: titik rekam berhalo, waktu, gelombang suara
         Row(
-            Modifier.fillMaxSize().padding(start = 28.dp, end = 92.dp)
-                .graphicsLayer { alpha = ((QuickFx.p.value - .5f) / .4f).coerceIn(0f, 1f) },
+            Modifier.fillMaxSize().padding(start = 22.dp, end = 96.dp)
+                .graphicsLayer {
+                    val t = smooth((QuickFx.p.value - .28f) / .5f)
+                    alpha = t
+                    translationX = (1f - t) * 48.dp.toPx()
+                },
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(Modifier.size(12.dp).graphicsLayer { alpha = pulse }.clip(CircleShape).background(Color(0xFFE5484D)))
-            Spacer(Modifier.width(12.dp))
+            Box(Modifier.size(36.dp), Alignment.Center) {
+                Box(
+                    Modifier.size(34.dp).graphicsLayer {
+                        val sc = .4f + .6f * halo
+                        scaleX = sc; scaleY = sc
+                        alpha = (1f - halo) * .45f
+                    }.clip(CircleShape).background(rc)
+                )
+                Box(Modifier.size(14.dp).clip(CircleShape).background(rc))
+            }
+            Spacer(Modifier.width(8.dp))
             QTimer(vm)
-            Spacer(Modifier.width(16.dp))
-            Canvas(Modifier.weight(1f).height(44.dp)) {
+            Spacer(Modifier.width(14.dp))
+            Canvas(Modifier.weight(1f).height(48.dp).clipToBounds()) {
                 val bw = 4.dp.toPx()
-                val step = bw + 4.dp.toPx()
-                val n = (size.width / step).toInt().coerceAtLeast(1)
-                val list = vm.rec.amps.takeLast(n)
-                val off = n - list.size
+                val step = bw + 3.dp.toPx()
                 val minH = 6.dp.toPx()
-                for (i in 0 until n) {
-                    val a = if (i < off) 0f else list[i - off]
+                val fade = 56.dp.toPx()
+                val list = vm.rec.amps
+                val f = frac.floatValue
+                val n = (size.width / step).toInt() + 3
+                for (k in 0 until n) {
+                    val idx = list.size - 1 - k
+                    val x = size.width - bw - (k - 1 + f) * step
+                    if (x + bw < 0f || x > size.width) continue
+                    val a = if (idx >= 0) {
+                        val cur = list[idx]
+                        (list.getOrElse(idx - 1) { cur } + 2f * cur + list.getOrElse(idx + 1) { cur }) / 4f
+                    } else 0f
                     val h = minH + a * (size.height - minH)
+                    // makin ke kiri makin pudar; sebelum ada sampel: titik-titik redup sebagai garis dasar
+                    val al = (x / fade).coerceIn(0f, 1f) * (if (idx >= 0) 1f else .4f)
                     drawRoundRect(
-                        pal.opc, Offset(i * step, (size.height - h) / 2f), Size(bw, h), CornerRadius(bw / 2f)
+                        pal.opc.copy(alpha = al), Offset(x, (size.height - h) / 2f), Size(bw, h), CornerRadius(bw / 2f)
                     )
                 }
             }
         }
-        // tombol selesai di kanan: + berubah menjadi kotak stop
+        // tombol selesai di kanan: tumbuh dari titik nol menggantikan +, lalu menjadi kotak stop
         Box(
             Modifier.align(Alignment.CenterEnd).size(88.dp).graphicsLayer {
-                val a = ((QuickFx.p.value - .45f) / .4f).coerceIn(0f, 1f)
-                alpha = a
-                val s = .6f + .4f * a
+                val s = easeOutBack((QuickFx.p.value - .10f) / .45f).coerceAtLeast(0f) * bS
                 scaleX = s; scaleY = s
             },
             Alignment.Center
         ) {
-            Box(Modifier.size(60.dp).clip(CircleShape).background(pal.p), Alignment.Center) {
-                Ic("stop", pal.op, 28.dp)
+            Box(Modifier.size(60.dp).clip(RoundedCornerShape(bR.nn())).background(pal.p), Alignment.Center) {
+                Box(
+                    Modifier.graphicsLayer {
+                        val t = smooth((QuickFx.p.value - .45f) / .3f)
+                        alpha = t
+                        val s = .5f + .5f * t
+                        scaleX = s; scaleY = s
+                    }
+                ) { Ic("stop", pal.op, 28.dp) }
             }
         }
     }
@@ -245,6 +333,7 @@ fun QuickVoice(vm: AppVM, lift: Dp) {
     val dens = LocalDensity.current
     val sab = sabDp()
     val rec = vm.rec
+    var btnDown by remember { mutableStateOf(false) }   // jari sedang menahan tombol stop (bentuknya ikut menyempit)
 
     // bilah menguncup kembali ke tombol +
     LaunchedEffect(QuickFx.closeTick) {
@@ -311,6 +400,7 @@ fun QuickVoice(vm: AppVM, lift: Dp) {
                         val slop = viewConfiguration.touchSlop
                         val btnX = size.width - 88.dp.toPx()
                         val onBtn = down.position.x >= btnX
+                        btnDown = onBtn
                         val tracker = VelocityTracker()
                         tracker.addPosition(down.uptimeMillis, down.position)
                         var mode = 0   // 0 menunggu, 1 geser kanan (tutup), 2 geser atas (buka catatan)
@@ -328,6 +418,7 @@ fun QuickVoice(vm: AppVM, lift: Dp) {
                             if (mode == 0) {
                                 if (up) { tap = true; break }
                                 if (abs(dx) > slop || abs(dy) > slop) {
+                                    btnDown = false
                                     if (dx > 0f && abs(dx) > abs(dy)) {
                                         mode = 1
                                         QuickFx.drag = true
@@ -350,13 +441,15 @@ fun QuickVoice(vm: AppVM, lift: Dp) {
                             if (mode == 1) {
                                 p = (1f - (dx - slop).coerceAtLeast(0f) / distClose).coerceIn(0f, 1f)
                                 val v = p
-                                scope.launch { QuickFx.p.snapTo(v) }
+                                // mengejar jari lewat spring kaku supaya kecepatan jari terbawa mulus ke animasi lepas jari
+                                scope.launch { QuickFx.p.animateTo(v, spring(1f, 1400f)) }
                             } else {
                                 p = ((-dy - slop).coerceAtLeast(0f) / distOpen).coerceIn(0f, 1f)
                                 val v = p
-                                scope.launch { vm.openP.snapTo(v) }
+                                scope.launch { vm.openP.animateTo(v, spring(1f, 1400f)) }
                             }
                         }
+                        btnDown = false
                         when {
                             mode == 0 && tap && onBtn -> {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -394,7 +487,7 @@ fun QuickVoice(vm: AppVM, lift: Dp) {
                     }
                 }
         ) {
-            QuickVoiceBody(vm, fabWdp)
+            QuickVoiceBody(vm, fabWdp, btnDown)
         }
     }
 }
