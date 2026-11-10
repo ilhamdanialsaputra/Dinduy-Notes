@@ -1501,10 +1501,11 @@ private fun boxHeightEst(ed: Ed, b: Blk, dm: Dm, pal: Pal, tm: TextMeasurer, dn:
         "hr" -> 8f + fs * 1.8f
         "q" -> {
             val q = qs(b.k, pal)
-            val avail = ((w - 44f) * dn.density).toInt().coerceAtLeast(1)
-            val fz = fs * 1.05f
+            val k = if (b.qMin()) QSC else 1f
+            val avail = ((w - 22f * k - QUOTE_END_PAD) * dn.density).toInt().coerceAtLeast(1)
+            val fz = fs * 1.05f * k
             val h = tm.measure(styled(b.r, b.r.t, 0, pal, fz), baseStyle(pal, dm, q.fg, fz, 500), constraints = Constraints(maxWidth = avail)).size.height / dn.density
-            h + 36f + (if (q.label != null) fs * .7f * 1.05f * 1.4f + fs * .45f * .7f else 0f)
+            h + 36f * k + (if (q.label != null) (fs * .7f * 1.05f * 1.4f + fs * .45f * .7f) * k else 0f)
         }
         "lnk" -> linkHeightEst(b, w, fs)
         else -> {
@@ -1858,6 +1859,7 @@ private fun BoxCell(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                     if (!focusedHere || ed.reading || ed.ink.on || ed.selOn || ed.mv != null) return@awaitEachGesture
+                    if (bS.ty == "q" && down.position.x > size.width - 40.dp.toPx() && down.position.y < 40.dp.toPx()) return@awaitEachGesture   // tombol kecil/besar milik dirinya
                     val slop = viewConfiguration.touchSlop
                     var up: PointerInputChange? = null
                     while (true) {
@@ -1879,8 +1881,11 @@ private fun BoxCell(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
             .objLift(
                 ed, b.id, focusedHere && !hr, textKeys = { listOf(bS.id) },
                 skip = { pos ->
+                    // tombol kecil/besar kutipan (sudut kanan atas) tidak memulai angkat
+                    val onToggle = bS.ty == "q" && pos.x > box.width - 40f * dn.density && pos.y < 40f * dn.density
                     // gagang lebar (tepi, tengah vertikal) tampil hanya saat terpilih: sentuhan di sana milik gagang, bukan angkat
-                    if (!(edit && armed && !lifted)) false
+                    if (onToggle) true
+                    else if (!(edit && armed && !lifted)) false
                     else {
                         val right = bS.alOf() != "r"
                         val gw = 32f * dn.density
@@ -1904,6 +1909,9 @@ private fun BoxCell(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
         // belum terpilih: lapisan ketuk menahan sentuhan supaya tidak langsung masuk ke teks (gulir tetap lewat)
         if (!hr && edit && !armed && !lifted) {
             Box(Modifier.matchParentSize().pointerInput(b.id) { detectTapGestures(onTap = { ed.selectObj(bS.id) }) })
+        }
+        if (b.ty == "q" && !lifted && !ed.ink.on) {
+            QuoteToggle(ed, b, pal, Modifier.align(Alignment.TopEnd).padding(top = 4.dp, end = 4.dp))
         }
         if (edit && !lifted && armed) {
             val right = al != "r"
@@ -1938,6 +1946,37 @@ private fun Modifier.selRing(on: Boolean, shape: Shape, color: Color): Modifier 
     }
 }
 
+/** Ruang kanan kutipan (dp): sedikit lebih lebar dari kiri supaya teks tidak tertimpa tombol kecil/besar. Dipakai juga oleh PDF dan estimasi tinggi. */
+const val QUOTE_END_PAD = 32
+
+/** Tombol bulat di sudut kanan atas kutipan. Besar: ikon "kecilkan" (siku menuju tengah). Kecil: ikon "besarkan" (siku menjauh). */
+@Composable
+private fun QuoteToggle(ed: Ed, b: Blk, pal: Pal, modifier: Modifier) {
+    val q = qs(b.k, pal)
+    val min = b.qMin()
+    val c = if (b.k == "def") pal.p else q.fg
+    Box(
+        modifier.size(26.dp).clip(CircleShape).background(c.copy(alpha = .14f))
+            .clickable { ed.quoteMin(b.id) },
+        Alignment.Center
+    ) {
+        Canvas(Modifier.size(14.dp)) {
+            val u = size.width / 14f
+            val st = Stroke(1.9f * u, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round)
+            val p = androidx.compose.ui.graphics.Path().apply {
+                if (min) {   // keluar
+                    moveTo(1.5f * u, 5.5f * u); lineTo(1.5f * u, 1.5f * u); lineTo(5.5f * u, 1.5f * u)
+                    moveTo(12.5f * u, 8.5f * u); lineTo(12.5f * u, 12.5f * u); lineTo(8.5f * u, 12.5f * u)
+                } else {     // masuk
+                    moveTo(5.5f * u, 1.5f * u); lineTo(5.5f * u, 5.5f * u); lineTo(1.5f * u, 5.5f * u)
+                    moveTo(8.5f * u, 12.5f * u); lineTo(8.5f * u, 8.5f * u); lineTo(12.5f * u, 8.5f * u)
+                }
+            }
+            drawPath(p, c, style = st)
+        }
+    }
+}
+
 /** Isi kutipan / kode / garis tanpa letak dan pegangan. Lebarnya ditentukan pemanggil lewat [modifier]. */
 @Composable
 private fun BoxBody(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier, sel: Boolean = false) {
@@ -1946,20 +1985,22 @@ private fun BoxBody(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier, sel: B
     when (b.ty) {
         "q" -> {
             val q = qs(b.k, pal)
+            // kecil = semua ikut diskalakan (huruf, label, bantalan), teks tetap utuh dan bisa diedit; berubah halus dengan animasi
+            val k by androidx.compose.animation.core.animateFloatAsState(if (b.qMin()) QSC else 1f, androidx.compose.animation.core.tween(220), label = "qsc")
             Box(
                 modifier.selRing(sel, q.shape, ring).clip(q.shape).background(q.bg)
                     .then(if (q.border) Modifier.border(3.dp, pal.p, q.shape) else Modifier)
-                    .drawBehind { if (q.bar) drawRect(pal.owc, size = Size(7.dp.toPx(), size.height)) }
-                    .padding(horizontal = 22.dp, vertical = 18.dp)
+                    .drawBehind { if (q.bar) drawRect(pal.owc, size = Size(7.dp.toPx() * k, size.height)) }
+                    .padding(start = (22f * k).dp, end = QUOTE_END_PAD.dp, top = (18f * k).dp, bottom = (18f * k).dp)   // ruang kanan untuk tombol di sudut
             ) {
                 Column {
                     if (q.label != null) {
                         T(
-                            q.label.uppercase(), fs * .7f * 1.05f, 900, if (b.k == "def") pal.p else q.fg,
-                            Modifier.padding(bottom = (fs * .45f * .7f).dp), ls = .12f, alpha = if (b.k == "def") 1f else .85f
+                            q.label.uppercase(), fs * .7f * 1.05f * k, 900, if (b.k == "def") pal.p else q.fg,
+                            Modifier.padding(bottom = (fs * .45f * .7f * k).dp), ls = .12f, alpha = if (b.k == "def") 1f else .85f
                         )
                     }
-                    TF(ed, b.id, baseStyle(pal, dm, q.fg, fs * 1.05f, 500).aligned(b), Modifier.fillMaxWidth())
+                    TF(ed, b.id, baseStyle(pal, dm, q.fg, fs * 1.05f * k, 500).aligned(b), Modifier.fillMaxWidth())
                 }
             }
         }
