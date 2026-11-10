@@ -297,7 +297,7 @@ object PdfExport {
     /** Satu StaticLayout dengan gaya inline. narrow/indent: jumlah baris pertama yang digeser (teks mengelilingi gambar). */
     private fun mk(
         cx: Cx, rt: Rt, width: Float, size: Float, color: Int, lineH: Float,
-        bold: Boolean = false, mono: Boolean = false, ls: Float = 0f, ta: String = "",
+        bold: Boolean = false, mono: Boolean = false, ls: Float = 0f, ta: String = "", italic: Boolean = false,
         strike: Boolean = false, narrow: Int = 0, indent: Int = 0, leftSide: Boolean = true, ind: Ind = NO_IND
     ): JL {
         val text = rt.t
@@ -365,7 +365,7 @@ object PdfExport {
         val p = TextPaint(Paint.ANTI_ALIAS_FLAG)
         p.textSize = size
         p.color = color
-        p.typeface = if (mono) fonts.mono else fonts.pick(bold, false)
+        p.typeface = if (mono) fonts.mono else fonts.pick(bold, italic)
         p.letterSpacing = ls
         val fm = p.fontMetrics
         val add = lineH - (fm.descent - fm.ascent)
@@ -1069,7 +1069,7 @@ object PdfExport {
         val pal = cx.pal
         if (note.t.isNotBlank()) {
             val size = 34f * cx.u
-            val lay = mk(cx, Rt(note.t), cx.cw, size, pal.p.toArgb(), size * 1.1f, bold = true, ls = -.02f, ta = note.tal)
+            val lay = mk(cx, Rt(note.t), cx.cw, size, titleColorOf(pal, note.tcl.coerceIn(0, TITLE_COLORS - 1)).toArgb(), size * 1.1f, bold = note.tbo, italic = note.tit, ls = -.02f, ta = note.tal)
             val top = 6f * cx.u
             val bot = 12f * cx.u
             f.pieces.add(Piece(top, lay.height.toFloat(), 0f, null) { c -> lay.draw(c) })
