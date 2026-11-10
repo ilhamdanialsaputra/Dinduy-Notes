@@ -1100,30 +1100,15 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                 val cy = nd.finger.y - nd.grab.y + me.size.height / 2f
                 var target = -1
                 if (cols == 1) {
-                    // 1 kolom: titik sisip ditentukan oleh pusat kartu yang diseret dibanding pusat kartu LAIN, yang diukur seolah kartu
-                    // yang diseret tidak ada di daftar. Hasilnya tidak bergantung pada slot kartu yang diseret saat ini, jadi setelah
-                    // bertukar tidak ada tukar-balik (itulah penyebab kedip & loncat pada kartu yang tingginya berbeda).
-                    val gap = 8f * dens.density
-                    val dh = me.size.height + gap
-                    val hyst = 6f * dens.density
-                    var minVis = Int.MAX_VALUE
-                    for (v in vis) {
-                        val gi = grp.indexOf(v.key as? String ?: continue)
-                        if (gi in 0 until minVis) minVis = gi
-                    }
-                    var ins = 0
-                    for (gi in grp.indices) {
-                        val k = grp[gi]
-                        if (k == id) continue
-                        val v = vis.firstOrNull { it.key == k }
-                        val above = if (v == null) gi < minVis else {
-                            val c = v.offset.y + v.size.height / 2f - (if (gi > cur) dh else 0f)
-                            // sedikit penahan: kartu yang sudah di atas / bawah tidak berpindah hanya karena jari bergetar
-                            if (gi < cur) c < cy + hyst else c < cy - hyst
-                        }
-                        if (above) ins++ else break
-                    }
-                    target = ins.coerceIn(0, grp.size - 1)
+                    // 1 kolom: tukar hanya dengan tetangga langsung (satu langkah), saat pusat kartu seretan melewati pusat tetangga itu
+                    // pada tata letak SAAT INI. Di keadaan diam pusat kartu seretan selalu di antara pusat kedua tetangganya, jadi tidak
+                    // pernah ada tukar sendiri; setelah bertukar pun pusat tetangga yang baru dilewati ada di sisi seberang jari
+                    // (selisihnya satu tinggi kartu + jarak), jadi tidak mungkin bertukar balik. Aman untuk kartu yang tingginya berbeda.
+                    val hyst = 4f * dens.density
+                    val nxt = grp.getOrNull(cur + 1)?.let { k -> vis.firstOrNull { it.key == k } }
+                    val prv = grp.getOrNull(cur - 1)?.let { k -> vis.firstOrNull { it.key == k } }
+                    if (nxt != null && cy > nxt.offset.y + nxt.size.height / 2f + hyst) target = cur + 1
+                    else if (prv != null && cy < prv.offset.y + prv.size.height / 2f - hyst) target = cur - 1
                 } else {
                     var overKey: String? = null
                     for (it in vis) {
