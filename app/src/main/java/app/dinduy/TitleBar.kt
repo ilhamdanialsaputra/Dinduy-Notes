@@ -51,15 +51,15 @@ private fun fromHsl(h: Float, s: Float, l: Float): Color =
  * Pada tema gelap, hitam murni tidak terbaca di atas latar gelap, jadi "Black" memakai warna teks tema (putih lembut).
  */
 @Composable
-fun titleColor(k: Int): Color {
-    val pal = LocalPal.current
-    return when (k) {
-        1 -> hslOf(pal.p).let { fromHsl(it[0], it[1] * .5f, it[2]) }
-        2 -> hslOf(pal.p).let { fromHsl(it[0] + 60f, it[1] * .95f, it[2]) }
-        3 -> pal.opc
-        4 -> if (pal.dark) pal.os else Color.Black
-        else -> pal.p
-    }
+fun titleColor(k: Int): Color = titleColorOf(LocalPal.current, k)
+
+/** Versi non-Composable (dipakai ekspor PDF yang punya palet sendiri). */
+fun titleColorOf(pal: Pal, k: Int): Color = when (k) {
+    1 -> hslOf(pal.p).let { fromHsl(it[0], it[1] * .5f, it[2]) }
+    2 -> hslOf(pal.p).let { fromHsl(it[0] + 60f, it[1] * .95f, it[2]) }
+    3 -> pal.opc
+    4 -> if (pal.dark) pal.os else Color.Black
+    else -> pal.p
 }
 
 private val TITLE_COLOR_NAMES = listOf("Primary", "Secondary", "Tertiary", "Strong", "Black")
