@@ -1496,7 +1496,7 @@ private fun tblHeightDp(ed: Ed, b: Blk, dm: Dm, pal: Pal, tm: TextMeasurer, dn: 
 /** Perkiraan tinggi (dp) kutipan / kode / garis sebelum tampilannya terukur. */
 private fun boxHeightEst(ed: Ed, b: Blk, dm: Dm, pal: Pal, tm: TextMeasurer, dn: Density): Float {
     val fs = dm.fs
-    val w = ed.widthDp * b.bw.coerceIn(.2f, 1f)
+    val w = ed.widthDp * b.bwC()
     return when (b.ty) {
         "hr" -> 8f + fs * 1.8f
         "q" -> {
@@ -1535,7 +1535,7 @@ private fun planFloat(ed: Ed, i: Int, dm: Dm, pal: Pal, tm: TextMeasurer, dn: De
     } else if (b.isBox) {
         // kutipan / kode / garis: sama seperti foto; lebar = lebar relatif, tinggi = hasil ukur tampilan (perkiraan sebelum terukur)
         left = b.alOf() != "r"
-        imgW = ed.widthDp * b.bw.coerceIn(.2f, 1f)
+        imgW = ed.widthDp * b.bwC()
         imgH = ed.objH[b.id] ?: boxHeightEst(ed, b, dm, pal, tm, dn)
     } else {
         val m = b.im[0]
@@ -1792,7 +1792,7 @@ private fun BoxFloatGroup(ed: Ed, vm: AppVM, b: Blk, plan: FloatPlan, od: Map<St
     val pal = LocalPal.current
     val bottom = if (b.ty == "hr") 0f else dm.fs * 1.1f
     val hDp = ed.objH[b.id] ?: 0f
-    val w = (ed.widthDp * b.bw.coerceIn(.2f, 1f)).dp
+    val w = (ed.widthDp * b.bwC()).dp
     val lifted = ed.mv?.let { it.bid == b.id } == true
     val al = b.alOf()
     val ctr = al == "c"
@@ -1824,7 +1824,7 @@ private fun BoxBlock(ed: Ed, b: Blk, dm: Dm, pal: Pal) {
     Box(
         Modifier.fillMaxWidth().padding(start = il.dp, end = ir.dp, bottom = bottom),
         contentAlignment = when (b.alOf()) { "l" -> Alignment.TopStart; "r" -> Alignment.TopEnd; else -> Alignment.TopCenter }
-    ) { BoxCell(ed, b, dm, pal, if (full) Modifier.fillMaxWidth() else Modifier.width((ed.widthDp * b.bw.coerceIn(.2f, 1f)).dp)) }
+    ) { BoxCell(ed, b, dm, pal, if (full) Modifier.fillMaxWidth() else Modifier.width((ed.widthDp * b.bwC()).dp)) }
 }
 
 /**
@@ -1918,11 +1918,12 @@ private fun BoxCell(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
                 Modifier.align(if (right) Alignment.CenterEnd else Alignment.CenterStart)
                     .width(32.dp).fillMaxHeight().heightIn(max = 96.dp),
                 0, if (right) Alignment.CenterEnd else Alignment.CenterStart,
-                onStart = { ed.commit(); rs[0] = ed.widthDp * dn.density * bS.bw.coerceIn(.2f, 1f); rs[1] = 0f },
+                onStart = { ed.commit(); rs[0] = ed.widthDp * dn.density * bS.bwC(); rs[1] = 0f },
                 onDrag = { dx, _ ->
                     rs[1] += dx * gx * kk
                     val cw = ed.widthDp * dn.density
-                    val minF = if (bS.ty == "hr") .2f else (150f / ed.widthDp.coerceAtLeast(150f)).coerceIn(.3f, .6f)
+                    val minF = if (bS.ty == "hr") .2f else if (bS.ty == "q") ((150f / ed.widthDp.coerceAtLeast(150f)).coerceIn(.3f, .6f) * bS.qScale()).coerceAtLeast(QBW_MIN)
+                        else (150f / ed.widthDp.coerceAtLeast(150f)).coerceIn(.3f, .6f)
                     var f = ((rs[0] + rs[1]) / cw).coerceIn(minF, 1f)
                     if (f > .94f) f = 1f
                     ed.boxLive(bS.id, f)
@@ -1930,21 +1931,23 @@ private fun BoxCell(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
                 onEnd = { ed.commit() }
             )
             if (b.ty == "q") {
-                // titik sudut (seperti foto): seret = skala seluruh kutipan (lebar + huruf + bantalan) bersama, dinamis dan kontinu
+                // titik sudut (seperti foto): seret = ubah UKURAN kutipan secara kontinu dan hampir tanpa batas bawah. Bentuk (rasio lebar:tinggi,
+                // pemenggalan baris) tidak berubah: lebar tampil dan skala isi (huruf, label, bantalan) berubah dengan faktor yang sama.
+                // Lebar / reflow hanya diubah gagang tepi di atas.
                 val cs = remember { floatArrayOf(0f, 0f, 0f, 0f, 0f) }   // lebar px, bw, skala, geser, tinggi px
                 Grip(
                     Modifier.align(if (right) Alignment.BottomEnd else Alignment.BottomStart).size(50.dp), 2,
                     if (right) Alignment.BottomEnd else Alignment.BottomStart,
                     onStart = {
                         ed.commit()
-                        cs[0] = box.width.toFloat().coerceAtLeast(1f); cs[1] = bS.bw.coerceIn(.2f, 1f); cs[2] = bS.qScale()
+                        cs[0] = box.width.toFloat().coerceAtLeast(1f); cs[1] = bS.bwC(); cs[2] = bS.qScale()
                         cs[3] = 0f; cs[4] = box.height.toFloat().coerceAtLeast(1f)
                     },
                     onDrag = { dx, dy ->
                         cs[3] += (dx * gx * kk + dy * (cs[0] / cs[4])) / 2f
-                        val r = ((cs[0] + cs[3]) / cs[0]).coerceAtLeast(.05f)
-                        val minF = (150f / ed.widthDp.coerceAtLeast(150f)).coerceIn(.3f, .6f)
-                        ed.quoteScaleLive(bS.id, (cs[1] * r).coerceIn(minF, 1f), (cs[2] * r).coerceIn(QSC_MIN, 1f))
+                        val lo = maxOf(QSC_MIN / cs[2], QBW_MIN / cs[1])
+                        val r = ((cs[0] + cs[3]) / cs[0]).coerceAtLeast(lo)
+                        ed.quoteScaleLive(bS.id, minOf(1f, cs[1] * r), minOf(1f, cs[2] * r))
                     },
                     onEnd = { ed.commit() }
                 )
