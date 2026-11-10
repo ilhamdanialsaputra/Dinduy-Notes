@@ -413,12 +413,12 @@ fun LinkBody(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
     val showImg = b.pi.isNotEmpty() && (bmp != null || !imgSt.first)
     val domain = LinkPreviews.domain(url)
 
-    BoxWithConstraints(modifier.clip(LinkShape).background(pal.c3)) {
+    BoxWithConstraints(modifier.clip(LinkShape).background(pal.sc)) {
         val showBadge = maxWidth >= 170.dp
         val showArrow = maxWidth >= 230.dp
         Column(Modifier.fillMaxWidth().padding(8.dp)) {
             if (showImg) {
-                Box(Modifier.fillMaxWidth().aspectRatio(1.91f).clip(RoundedCornerShape(20.dp)).background(pal.c4)) {
+                Box(Modifier.fillMaxWidth().aspectRatio(1.91f).clip(RoundedCornerShape(20.dp)).background(pal.osc.copy(alpha = .12f))) {
                     if (bmp != null) Image(bmp, null, Modifier.matchParentSize(), contentScale = ContentScale.Crop)
                 }
             }
@@ -427,21 +427,21 @@ fun LinkBody(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (showBadge) {
-                    Box(Modifier.size(40.dp).clip(RoundedCornerShape(14.dp)).background(pal.pc), Alignment.Center) {
-                        LinkIc(pal.opc, 22.dp)
+                    Box(Modifier.size(40.dp).clip(RoundedCornerShape(14.dp)).background(pal.p), Alignment.Center) {
+                        LinkIc(pal.op, 22.dp)
                     }
                     Spacer(Modifier.width(12.dp))
                 }
                 Column(Modifier.weight(1f)) {
-                    T(if (title.isNotEmpty()) title else domain, fs * .98f, 750, pal.os, maxLines = 2)
+                    T(if (title.isNotEmpty()) title else domain, fs * .98f, 750, pal.osc, maxLines = 2)
                     T(
                         if (title.isNotEmpty()) domain else url, fs * .8f, 600,
-                        if (title.isNotEmpty()) pal.p else pal.osv, Modifier.padding(top = 2.dp), maxLines = 1
+                        if (title.isNotEmpty()) pal.p else pal.osc.copy(alpha = .7f), Modifier.padding(top = 2.dp), maxLines = 1
                     )
                 }
                 if (showArrow) {
                     Spacer(Modifier.width(8.dp))
-                    Box(Modifier.size(36.dp).clip(CircleShape).background(pal.sc), Alignment.Center) {
+                    Box(Modifier.size(36.dp).clip(CircleShape).background(pal.osc.copy(alpha = .14f)), Alignment.Center) {
                         LinkOutIc(pal.osc, 18.dp)
                     }
                 }
