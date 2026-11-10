@@ -272,8 +272,12 @@ fun Modifier.makeRoom(vm: AppVM, id: String, idx: Int, openIdx: () -> Int, h: Fl
     } else {
         translationY = if (idx < oi) -(maxOf(m.t, 0f) + wave) * p else (maxOf(h - m.b, 0f) + wave) * p
     }
-    val s = 1f - .05f * p
-    scaleX = s; scaleY = s
+    // kartu bersampul tidak ikut mengecil: skala yang berubah tiap frame membuat Skia berpindah level mipmap bitmap sampul
+    // (FilterQuality.Medium) -> gambar tampak 'melompat' / berkedip, terutama pada kartu yang separuh terpotong di tepi layar
+    if (!flat) {
+        val s = 1f - .05f * p
+        scaleX = s; scaleY = s
+    }
     alpha = 1f - .6f * p
     // kartu bersampul: alpha<1 memaksa layer offscreen untuk bitmap besar -> kedip saat kartu terpotong tepi layar; ModulateAlpha menghindarinya
     if (flat) compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.ModulateAlpha
