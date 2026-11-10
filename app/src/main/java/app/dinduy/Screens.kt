@@ -1202,16 +1202,22 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     for (j in orig.indices) if (byKey.containsKey(orig[j])) { if (j < fj) fj = j; lj = j }
                     if (lj < 0) continue
                     val hyst = 6f * density
+                    // magnet ke posisi paling atas: cukup tepi atas bayangan menyentuh area slot teratas (tidak perlu pusatnya melewati
+                    // pusat kartu pertama, yang dulu membuat kartu harus nyaris tenggelam di bawah head bar)
+                    val first0 = byKey[orig[0]]
+                    val mg = minOf(nd.h * .5f, 48f * density) + (if (cur == 0) 12f * density else 0f)
+                    val toTop = o > 0 && first0 != null && cy - nd.h / 2f < first0.offset.y + mg
                     var t = o
                     var j = o + 1
-                    while (j < orig.size) {
+                    while (!toTop && j < orig.size) {
                         val inf = byKey[orig[j]]
                         val pass = if (inf != null) cy > inf.offset.y + inf.size.height / 2f + (if (j <= cur) -hyst else hyst)
                         else j < fj   // di luar layar: di atas = sudah dilewati, di bawah = belum
                         if (!pass) break
                         t = j; j++
                     }
-                    if (t == o) {
+                    if (toTop) t = 0
+                    else if (t == o) {
                         j = o - 1
                         while (j >= 0) {
                             val inf = byKey[orig[j]]
@@ -1287,6 +1293,10 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     val lh2 = FloatArray(cols)
                     val padS = 8f * density
                     val vh = li.viewportSize.height.toFloat()
+                    // magnet ke baris teratas: tepi atas bayangan cukup menyentuh area slot teratas (pilih kiri/kanan menurut posisi jari)
+                    val curTop = (simY[id] ?: 1f) <= .5f
+                    val mg = minOf(nd.h * .5f, 48f * density) + (if (curTop) 12f * density else 0f)
+                    val magnet = cy0 - nd.h / 2f < baseY + mg
                     var best = cur
                     var bestCost = Float.MAX_VALUE
                     var curCost = Float.MAX_VALUE
@@ -1297,7 +1307,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                         val lane = if (flip) cols - 1 - l else l
                         val sx = padS + lane * (nd.w + gap)
                         val dx = sx + nd.w / 2f - cx0
-                        val dy = slotY + nd.h / 2f - cy0
+                        val dy = if (magnet && lh2[l] <= .5f) 0f else slotY + nd.h / 2f - cy0
                         // slot sudah jauh di bawah jari dan hanya makin turun: tidak perlu dicek lagi
                         if (dy > bestCost + vh) break
                         val cost = kotlin.math.sqrt(dx * dx + dy * dy) + 3f * density * kotlin.math.abs(i - cur)
