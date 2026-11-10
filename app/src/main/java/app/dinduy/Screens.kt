@@ -239,6 +239,11 @@ fun LazyStaggeredGridItemScope.flowItemG(): Modifier = Modifier.animateItem(
     fadeInSpec = tweenSpec(280, 60), placementSpec = PlaceSpec, fadeOutSpec = tweenSpec(160)
 )
 
+/** Kartu yang sedang diseret: tetap memakai animateItem (supaya pelacak animasi tidak terputus) tetapi tanpa animasi apa pun. */
+fun LazyStaggeredGridItemScope.holdItemG(): Modifier = Modifier.animateItem(
+    fadeInSpec = null, placementSpec = null, fadeOutSpec = null
+)
+
 /**
  * Saat sebuah catatan membuka (morph kartu -> layar penuh), kartu lain tidak ditimpa begitu saja:
  * kartu di atas terdorong ke atas, kartu di bawah terdorong ke bawah mengikuti tepi kartu yang melebar,
@@ -846,6 +851,14 @@ class NoteDrag {
     var resid = Offset.Zero                         // jarak kartu dari tempat barunya saat dilepas
     var touchId: String? = null                     // kartu yang baru saja tersentuh (dicatat oleh kartu itu sendiri, jadi pasti benar)
     var touchT = -1L                                // waktu sentuhan tadi, untuk mencocokkan dengan gestur di grid
+    var touchLocal = Offset.Zero                    // titik sentuh tadi di dalam kartu (koordinat lokal kartu itu)
+    // kartu bayangan (yang mengikuti jari) digambar di atas grid dengan koordinat dari jari saja, tidak dari layout grid,
+    // jadi tidak pernah ketinggalan satu frame / meloncat saat urutan bertukar
+    var startC = Offset.Zero                        // pojok kiri-atas kartu di dalam grid saat seretan dimulai
+    var at0 = Offset.Zero                           // posisi jari saat seretan dimulai
+    var off0 = Offset.Zero                          // offset item di layoutInfo saat seretan dimulai
+    var w = 0                                       // lebar kartu (px)
+    var dropAt = Offset.Zero                        // posisi bayangan saat dilepas
     val settle = Animatable(0f)                     // 1 -> 0: kartu meluncur ke tempatnya
 
     fun begin(key: String, g: Int, ord: List<String>, grabAt: Offset, at: Offset) {
@@ -1061,7 +1074,9 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
             val id = nd.id ?: return
             if (nd.dropping) return
             val info = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id }
-            nd.resid = if (info != null) Offset(nd.finger.x - nd.grab.x - info.offset.x, nd.finger.y - nd.grab.y - info.offset.y) else Offset.Zero
+            val ghost = nd.startC + (nd.finger - nd.at0)
+            nd.dropAt = ghost
+            nd.resid = if (info != null) ghost - (nd.startC + (Offset(info.offset.x.toFloat(), info.offset.y.toFloat()) - nd.off0)) else Offset.Zero
             if (nd.order != nd.orig) vm.moveOrder(nd.order)
             nd.dropping = true
             scope.launch {
@@ -1075,8 +1090,9 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         LaunchedEffect(nd.id) {
             val id = nd.id ?: return@LaunchedEffect
             var blocked: String? = null
+            var lastSwap = 0L
             while (nd.id == id && !nd.dropping) {
-                withFrameNanos { }
+                val now = withFrameNanos { it }
                 val li = state.layoutInfo
                 val vis = li.visibleItemsInfo
                 val zone = 72f * dens.density
@@ -1096,6 +1112,8 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                 val cur = grp.indexOf(id)
                 // tunggu sampai grid selesai menata ulang setelah pertukaran sebelumnya
                 if (cur < 0 || me.index != startIdx + cur) continue
+                // beri grid waktu menata ulang & menganimasikan kartu lain sebelum pertukaran berikutnya
+                if (now - lastSwap < 110_000_000L) continue
                 val cx = nd.finger.x - nd.grab.x + me.size.width / 2f
                 val cy = nd.finger.y - nd.grab.y + me.size.height / 2f
                 var target = -1
@@ -1140,6 +1158,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                 }
                 if (target >= 0 && target != cur) {
                     blocked = grp.getOrNull(target)
+                    lastSwap = now
                     nd.order = grp.toMutableList().also { it.removeAt(cur); it.add(target, id) }
                     hapticDrag.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 }
@@ -1181,6 +1200,11 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                         val key = (if (nd.touchT == down.uptimeMillis) nd.touchId else null)
                             ?.takeIf { it in pin || it in oth } ?: return@awaitEachGesture
                         val me0 = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == key } ?: return@awaitEachGesture
+                        // pojok kiri-atas kartu di dalam grid = posisi jari saat menyentuh dikurangi titik sentuh di dalam kartu
+                        nd.startC = down.position - nd.touchLocal
+                        nd.at0 = last
+                        nd.off0 = Offset(me0.offset.x.toFloat(), me0.offset.y.toFloat())
+                        nd.w = me0.size.width
                         val g = if (key in pin) 0 else 1
                         if (key !in vm.sel) {
                             vm.sel.add(key)
@@ -1222,13 +1246,43 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                 T("Pinned", 13f, 500, pal.osv, Modifier.graphicsLayer { if (!vm.searchOn) alpha = shift.p.value.coerceIn(0f, 1f) }.padding(start = 16.dp, top = 12.dp, bottom = 4.dp), ls = .01f)
             }
             gridItems(pinned, key = { it.id }) { d ->
-                HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, wPx, dens.density, pos, (if (nd.id == d.id) Modifier else flowItemG()).then(stackMove(d.id, true)), nd, state)
+                HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, wPx, dens.density, pos, (if (nd.id == d.id) holdItemG() else flowItemG()).then(stackMove(d.id, true)), nd, state)
             }
             if (sections) item(key = "h-other", span = full) {
                 T("Others", 13f, 500, pal.osv, Modifier.graphicsLayer { if (!vm.searchOn) alpha = shift.p.value.coerceIn(0f, 1f) }.padding(start = 16.dp, top = 16.dp, bottom = 4.dp), ls = .01f)
             }
             gridItems(others, key = { it.id }) { d ->
-                HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, wPx, dens.density, pos, (if (nd.id == d.id) Modifier else flowItemG()).then(stackMove(d.id, true)), nd, state)
+                HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, wPx, dens.density, pos, (if (nd.id == d.id) holdItemG() else flowItemG()).then(stackMove(d.id, true)), nd, state)
+            }
+        }
+
+        // kartu bayangan yang mengikuti jari. Posisinya dihitung dari jari saja; saat dilepas ia meluncur ke slot barunya.
+        val ghostId = nd.id
+        val ghostNote = ghostId?.let { vm.note(it) }
+        if (ghostId != null && ghostNote != null && nd.w > 0) {
+            Box(
+                Modifier
+                    .offset {
+                        val q = if (nd.dropping) {
+                            val inf = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == ghostId }
+                            if (inf != null) {
+                                val slot = nd.startC + (Offset(inf.offset.x.toFloat(), inf.offset.y.toFloat()) - nd.off0)
+                                slot + nd.resid * nd.settle.value
+                            } else nd.dropAt
+                        } else nd.startC + (nd.finger - nd.at0)
+                        IntOffset(q.x.toInt(), q.y.toInt())
+                    }
+                    .width(with(dens) { nd.w.toDp() })
+                    .graphicsLayer {
+                        val k = if (nd.dropping) nd.settle.value.coerceIn(0f, 1f) else 1f
+                        val sc2 = 1f + .035f * k
+                        scaleX = sc2; scaleY = sc2
+                        shadowElevation = 12.dp.toPx() * k
+                        shape = RoundedCornerShape(12.dp)
+                        clip = false
+                    }
+            ) {
+                NoteCard(ghostNote, pos[ghostId] ?: 0, "f", true, Modifier, cols = cols) { }
             }
         }
 
@@ -1365,25 +1419,14 @@ fun HomeCard(
     val dragging = nd.id == d.id
     Column(
         base.makeRoom(vm, d.id, i, { vm.openId?.let { pos[it] } ?: -1 }, hPx, dens, cols, wPx, flat = d.cv.isNotEmpty()).then(
-            if (dragging) Modifier.zIndex(1f).graphicsLayer {
-                // kartu yang diseret mengikuti jari; posisi layout-nya bisa berubah saat urutan bertukar, jadi selisihnya dihitung tiap frame
-                val info = gs.layoutInfo.visibleItemsInfo.firstOrNull { it.key == d.id }
-                val tr = if (nd.dropping) nd.resid * nd.settle.value
-                    else if (info != null) Offset(nd.finger.x - nd.grab.x - info.offset.x, nd.finger.y - nd.grab.y - info.offset.y)
-                    else Offset.Zero
-                translationX = tr.x; translationY = tr.y
-                val k = if (nd.dropping) nd.settle.value.coerceIn(0f, 1f) else 1f
-                val s = 1f + .035f * k
-                scaleX = s; scaleY = s
-                shadowElevation = 12.dp.toPx() * k
-                shape = RoundedCornerShape(12.dp)
-                clip = false
-            } else Modifier
+            // ruang kartu tetap ada (supaya kartu lain menata diri di sekitarnya) tetapi tidak terlihat: yang terlihat adalah
+            // kartu bayangan di atas grid (lihat HomeScreen), yang posisinya hanya bergantung pada jari
+            if (dragging) Modifier.graphicsLayer { alpha = 0f } else Modifier
         ).pointerInput(d.id) {
             // hanya mencatat (tidak mengonsumsi): kartu ini yang benar-benar tersentuh, dibaca oleh gestur seret di grid
             awaitEachGesture {
                 val dn = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                nd.touchId = d.id; nd.touchT = dn.uptimeMillis
+                nd.touchId = d.id; nd.touchT = dn.uptimeMillis; nd.touchLocal = dn.position
             }
         }
     ) {
