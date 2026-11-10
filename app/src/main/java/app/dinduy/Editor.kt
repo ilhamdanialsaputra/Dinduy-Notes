@@ -114,7 +114,11 @@ class Snap(val bl: List<Blk>, val key: String?, val sel: TextRange)
 fun keyBlock(k: String) = k.substringBefore(':')
 
 /** Skala terkecil isi kutipan (huruf, label, bantalan). */
-const val QSC_MIN = .5f
+const val QSC_MIN = .1f
+/** Lebar relatif terkecil kutipan (kutipan boleh jauh lebih sempit dari objek lain karena isinya ikut diskalakan). */
+const val QBW_MIN = .03f
+/** Lebar relatif tampil, dibatasi per jenis objek (kutipan boleh sangat sempit saat diskalakan kecil; lainnya min 20%). */
+fun Blk.bwC(): Float = bw.coerceIn(if (ty == "q") QBW_MIN else .2f, 1f)
 /**
  * Skala isi kutipan (1 = normal). Disimpan sebagai angka di Blk.l (kutipan tidak memakai l untuk hal lain; kosong = 1), sehingga ikut
  * tersimpan, dicadangkan, di-undo, dan dibaca PDF. Diubah titik sudut kutipan (lihat BoxCell) bersama lebarnya, seperti foto.
@@ -838,7 +842,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     fun quoteScaleLive(bid: String, f: Float, k: Float) {
         val kk = (kotlin.math.round(k.coerceIn(QSC_MIN, 1f) * 100f) / 100f)
         blocks = blocks.map {
-            if (it.id == bid && it.ty == "q") it.copy(bw = f.coerceIn(.2f, 1f), l = if (kk >= .995f) "" else kk.toString()) else it
+            if (it.id == bid && it.ty == "q") it.copy(bw = f.coerceIn(QBW_MIN, 1f), l = if (kk >= .995f) "" else kk.toString()) else it
         }
         dirty()
     }
@@ -1184,9 +1188,9 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val o = objH[id]
         if (o == null || kotlin.math.abs(o - h) > .5f) objH[id] = h
     }
-    fun boxSideOk(b: Blk): Boolean = b.isBox && b.alOf() != "c" && b.bw.coerceIn(.2f, 1f) <= maxSideW() + .001f
+    fun boxSideOk(b: Blk): Boolean = b.isBox && b.alOf() != "c" && b.bwC() <= maxSideW() + .001f
     fun boxLive(bid: String, w: Float) {
-        blocks = blocks.map { if (it.id == bid) it.copy(bw = w.coerceIn(.2f, 1f)) else it }
+        blocks = blocks.map { if (it.id == bid) it.copy(bw = w.coerceIn(if (it.ty == "q") QBW_MIN else .2f, 1f)) else it }
         dirty()
     }
 
@@ -1431,7 +1435,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             }
             "hr" -> 28f
             "lnk" -> 110f
-            "q" -> { val k = b.qScale(); lines(b.r.t, (w - 44f * k) / k) * fs * k * lh + 28f * k }
+            "q" -> { val k = b.qScale(); lines(b.r.t, (w * b.bwC() - 44f * k) / k) * fs * k * lh + 28f * k }
             "code" -> lines(b.r.t, w - 24f) * fs * lh + 28f
             else -> lines(b.r.t, w) * fs * lh + 8f
         }
@@ -1698,7 +1702,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             wp = ((tblWidths(b, widthDp).sum() + 3f) * dens).coerceAtMost(w)
             if (q != null) hp = minOf(q[1], m.h)
         } else if (b.isBox) {
-            wp = w * b.bw.coerceIn(.2f, 1f)
+            wp = w * b.bwC()
             val oh = (objH[b.id] ?: 0f) * dens
             if (oh > 0f) hp = if (q != null) minOf(q[1], oh) else oh
         }
