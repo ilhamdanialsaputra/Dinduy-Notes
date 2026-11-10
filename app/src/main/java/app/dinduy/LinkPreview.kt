@@ -449,3 +449,7 @@ fun LinkBody(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
         }
     }
 }
+
+/** Dialog link sudah diganti halaman Link di sheet Sisipkan (lihat DocBar.kt). Sisa kosong supaya pemanggil lama tetap terkompilasi; hapus bersama pemanggilnya. */
+@Composable
+fun LinkDialog(ed: Ed) { }
