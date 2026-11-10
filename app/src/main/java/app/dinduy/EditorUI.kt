@@ -1078,7 +1078,7 @@ fun Modifier.objLift(
                     if (cc == null || !cc.isAttached || c == null || !c.isAttached) true
                     else {
                         val p = cc.localPositionOf(c, pos)
-                        val m = 8f * ed.dens
+                        val m = 4f * ed.dens   // margin tipis: hanya tepat di atas huruf yang milik seleksi teks
                         keys().none { k -> ed.glyphRect(k)?.inflate(m)?.contains(p) == true }
                     }
                 }
@@ -1847,8 +1847,35 @@ private fun BoxCell(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
     val armed = ed.selObj == b.id || focusedHere
     val rs = remember { floatArrayOf(0f, 0f) }
     var box by remember { mutableStateOf(IntSize.Zero) }
+    val co = remember { arrayOfNulls<androidx.compose.ui.layout.LayoutCoordinates>(1) }
     Box(
         modifier.onSizeChanged { box = it; ed.setObjH(bS.id, with(dn) { it.height.toDp().value }) }
+            .onGloballyPositioned { co[0] = it }
+            .pointerInput(b.id) {
+                // Saat teks objek sedang diedit: ketukan singkat di luar huruf (bantalan, label, ruang kosong) = keluar dari teks,
+                // kembali ke mode pilih objek (gagang lebar + toolbar objek). Dibaca di pass Initial dan dikonsumsi, supaya
+                // field di dalamnya tidak ikut memasang kursor. Ketukan tepat di atas huruf tetap milik teks.
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    if (!focusedHere || ed.reading || ed.ink.on || ed.selOn || ed.mv != null) return@awaitEachGesture
+                    val slop = viewConfiguration.touchSlop
+                    var up: PointerInputChange? = null
+                    while (true) {
+                        val ev = awaitPointerEvent(PointerEventPass.Initial)
+                        val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                        if ((c.position - down.position).getDistance() > slop || c.uptimeMillis - down.uptimeMillis > 300L) break
+                        if (!c.pressed) { up = c; break }
+                    }
+                    val u = up ?: return@awaitEachGesture
+                    val cc = ed.contentCoords
+                    val ct = co[0]
+                    val onText = if (cc == null || !cc.isAttached || ct == null || !ct.isAttached) true else {
+                        val p = cc.localPositionOf(ct, u.position)
+                        ed.glyphRect(bS.id)?.inflate(4f * ed.dens)?.contains(p) == true
+                    }
+                    if (!onText) { u.consume(); ed.selectObj(bS.id) }
+                }
+            }
             .objLift(
                 ed, b.id, focusedHere && !hr, textKeys = { listOf(bS.id) },
                 skip = { pos ->
