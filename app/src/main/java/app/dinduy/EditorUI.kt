@@ -2402,6 +2402,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     val nfs = vm.noteFs(ed.noteId)
     val dm = remember(nfs, ffNow) { Dm(nfs.toFloat(), LH, ffNow) }   // instance stabil: blok tidak recompose tanpa sebab
     val scroll = rememberScrollState()
+    val trFx = rememberTranscriptFx(vm, ed, scroll)   // transkrip selesai: gulir + sorot
     InkSetup(ed)
     // Tombol back Android: tutup yang paling atas dulu. Mode ketik -> mode baca (tampilan penuh) -> baru keluar catatan.
     BackHandler(true) {
@@ -2668,6 +2669,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                             onEnd = { ed.selEnd() },
                             lead = 70L
                         )
+                        .transcriptReveal(ed, trFx, pal)
                         .drawWithContent { inkContent(ed.ink) }
                 ) {
                     DropGhost(ed)
@@ -2783,6 +2785,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
             InkFrame(ed)
             BottomBars(ed, vm, act, (!ed.reading || ed.selEdit) && !ed.titleFocus && !ed.findOn && !ed.ink.on, imeOpen)
             InkBar(ed, vm)
+            TranscriptPill(trFx)
         }
     }
     // sheet Sisipkan / Format: di luar area catatan, menempel di dasar layar dan setinggi keyboard

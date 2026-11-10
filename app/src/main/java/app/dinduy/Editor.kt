@@ -2992,6 +2992,26 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         nw.forEach { seed(it) }
         norm()
         afterStructural()
+        tRevealIds = nw.map { it.id }.toSet()
+        tRevealTick++   // NoteScreen: gulir ke transkrip dan sorot (lihat TranscriptReveal.kt)
+    }
+
+    /** Transkrip yang baru masuk: id bloknya dan penghitung pemicu animasi "pamer" (gulir + sorot). */
+    var tRevealIds by mutableStateOf<Set<String>>(emptySet())
+    var tRevealTick by mutableStateOf(0)
+
+    /** Rentang vertikal (atas, bawah) di ruang konten untuk sekelompok blok yang sudah tersusun; null bila belum ada. */
+    fun spanOf(ids: Set<String>): Pair<Float, Float>? {
+        if (ids.isEmpty()) return null
+        var t = Float.MAX_VALUE
+        var b = -1f
+        for ((k, pos) in kpos) {
+            if (keyBlock(k) !in ids) continue
+            val h = lays[k]?.size?.height?.toFloat() ?: continue
+            t = minOf(t, pos.y)
+            b = maxOf(b, pos.y + h)
+        }
+        return if (b < 0f) null else t to b
     }
 
     /** Rekaman suara sedang berjalan untuk catatan ini. */
