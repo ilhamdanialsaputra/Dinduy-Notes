@@ -194,6 +194,10 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         sheet = 0
     }
     var sheetPage by mutableStateOf(0)    // halaman dalam sheet Sisipkan: 0 daftar, 1 pengaturan tabel
+    /** Dialog "Add link" (ubin Link di sheet Sisipkan). [linkAt] = blok tempat kartu akan disisipkan sesudahnya (dicatat saat dialog dibuka). */
+    var linkDlg by mutableStateOf(false)
+    var linkAt: String? = null
+    fun openLinkDlg() { linkAt = focus?.let { keyBlock(it) } ?: selImg?.first; linkDlg = true }
     var tbR by mutableStateOf(3)          // jumlah baris tabel yang akan disisipkan
     var tbC by mutableStateOf(3)          // jumlah kolom
 
@@ -660,13 +664,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
                     blocks = blocks.filterIndexed { j, _ -> j != i - 1 }
                     focusAt(b.id, 0)
                 }
-                pv.ty == "lnk" -> {
-                    // kartu tautan kembali jadi tautan biasa (teks); Backspace berikutnya menghapusnya
-                    val nb = Blk(id = pv.id, ty = "p", r = Rt(pv.l, listOf(Sp(0, pv.l.length, K.L, pv.l))))
-                    blocks = blocks.toMutableList().also { it[i - 1] = nb }
-                    seed(nb)
-                    focusAt(nb.id, nb.r.t.length)
-                }
+                pv.ty == "lnk" -> selectObj(pv.id)   // kartu tautan adalah objek sisipan: Backspace tidak menghapusnya, hanya memilihnya (hapus lewat toolbar)
                 pv.ty == "tbl" -> {
                     val r = pv.tb.size - 1
                     val c = pv.tb[r].size - 1
@@ -695,7 +693,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (ns0.isEmpty()) return
         // satu alamat web saja yang ditempel ke paragraf kosong -> kartu pratinjau tautan
         val lone = if (ns0.size == 1 && ns0[0].ty == "p" && b.ty == "p" && b.r.t.isBlank()) asUrl(ns0[0].r.t) else null
-        val ns = if (lone != null) listOf(Blk(ty = "lnk", l = lone)) else ns0
+        val ns = if (lone != null) listOf(Blk(ty = "lnk", l = lone, ba = "l")) else ns0
         val l = blocks.toMutableList()
         val rt = b.r
         if (b.ty == "img") l.addAll(i + 1, ns)
@@ -868,8 +866,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     fun grid(c: Int, r: Int): List<List<Rt>> = List(r) { List(c) { Rt() } }
 
-    fun insertObjs(list: List<Blk>) {
-        val key = focus?.let { keyBlock(it) } ?: selImg?.first ?: blocks.last().id
+    fun insertObjs(list: List<Blk>, at: String? = null) {
+        val key = at ?: focus?.let { keyBlock(it) } ?: selImg?.first ?: blocks.last().id
         var i = idx(key)
         if (i < 0) i = blocks.size - 1
         commit()
@@ -886,8 +884,28 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             "tbl" -> focusAt("${last.id}:0:0", 0)
             "hr" -> blocks.getOrNull(idx(last.id) + 1)?.let { focusAt(it.id, 0) }
             "img" -> { selImg = last.id to 0; clearReq++ }
+            "lnk" -> {
+                blocks.getOrNull(idx(last.id) + 1)?.let { if (it.isText) focusAt(it.id, 0) }
+                revealMedia(last.id)
+            }
         }
         afterStructural()
+    }
+
+    /** Alamat dari teks yang diketik / ditempel: "contoh.com" diberi https://. null kalau bukan alamat web. */
+    fun normLink(s: String?): String? {
+        val t = s?.trim().orEmpty()
+        if (t.isEmpty() || t.any { it.isWhitespace() }) return null
+        val has = t.startsWith("http://", true) || t.startsWith("https://", true)
+        if (!has && !t.contains('.')) return null
+        return asUrl(if (has) t else "https://$t")
+    }
+
+    /** Sisipkan kartu tautan (dari ubin Link). Pratinjau diambil otomatis setelah kartu tampil. */
+    fun insLink(url: String) {
+        val u = normLink(url) ?: return
+        insertObjs(listOf(Blk(ty = "lnk", l = u, ba = "l")), linkAt)
+        linkAt = null
     }
 
     fun insTable(r: Int = 3, c: Int = 3) = insertObjs(listOf(Blk(ty = "tbl", tb = grid(c, r), ca = List(c) { "left" }, ba = "l")))
@@ -905,7 +923,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (i < 0) return
         val b = blocks[i]
         commit()
-        val nb = Blk(ty = "lnk", l = url)
+        val nb = Blk(ty = "lnk", l = url, ba = "l")
         blocks = blocks.toMutableList().also { it[i] = nb }
         tf.remove(b.id)
         afterStructural()
@@ -920,6 +938,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (i < 0 || blocks[i].ty != "lnk") return
         val b = blocks[i]
         commit()
+        selObj = null
         val nb = Blk(id = b.id, ty = "p", r = Rt(b.l, listOf(Sp(0, b.l.length, K.L, b.l))))
         setBlock(i, nb)
         seed(nb)
