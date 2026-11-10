@@ -299,8 +299,10 @@ private fun MorphDock(kind: Int, content: @Composable (Int) -> Unit) {
 @Composable
 fun ObjBarContent(ed: Ed, ob: Blk) {
     val al = ob.alOf()
+    val lnk = ob.ty == "lnk"
+    val uri = androidx.compose.ui.platform.LocalUriHandler.current
     Row(
-        Modifier.height(DockH).padding(horizontal = 8.dp),
+        Modifier.widthIn(max = DockW).height(DockH).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -308,8 +310,15 @@ fun ObjBarContent(ed: Ed, ob: Blk) {
             count = 3, sel = when (al) { "l" -> 0; "c" -> 1; "r" -> 2; else -> -1 }, i = 0,
             onPick = { ed.objAlign(ob.id, when (it) { 0 -> "l"; 1 -> "c"; else -> "r" }) }
         ) { k, c -> AlignArrow(k, c) }
-        XBtn(tone = 1, i = 1, onClick = { ed.objDelete(ob.id) }) { Ic("del", it) }
-        if (ed.selObj != null) XBtn(tone = 2, i = 2, w = 68.dp, onClick = { ed.selObj = null }) { Ic("ok", it) }
+        if (lnk) {
+            // kartu tautan: buka tautan, atau ubah jadi tautan biasa (teks)
+            XGroup(i = 1) {
+                XBtn(onClick = { openLink(uri, ob.l) }) { LinkOutIc(it) }
+                XBtn(onClick = { ed.linkToText(ob.id) }) { LinkIc(it, slash = true) }
+            }
+        }
+        XBtn(tone = 1, i = if (lnk) 2 else 1, onClick = { ed.objDelete(ob.id) }) { Ic("del", it) }
+        if (ed.selObj != null) XBtn(tone = 2, i = if (lnk) 3 else 2, w = 68.dp, onClick = { ed.selObj = null }) { Ic("ok", it) }
     }
 }
 
@@ -783,7 +792,8 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM, sheetPxOf: () -> Int, kbNow: () ->
                                     SheetTile("Drawing", true, { InkToolIcon(4, it) }) { ed.sheet = 0; ed.ink.toggle(ed) },
                                     SheetTile("Quote", !convOff, { Ic("quote", it) }) { ed.closeSheet(); if (ed.focus != null) ed.pickQuote = true },
                                     SheetTile("Code", !convOff, { Ic("pre", it) }) { ed.closeSheet(); ed.setCode() },
-                                    SheetTile("Divider", !blkOff, { Ic("hr", it) }) { ed.closeSheet(); ed.insHr() }
+                                    SheetTile("Divider", !blkOff, { Ic("hr", it) }) { ed.closeSheet(); ed.insHr() },
+                                    SheetTile("Link", !blkOff, { LinkIc(it) }) { ed.openLinkDlg(); ed.closeSheet(false) }
                                 )
                                 Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                     tiles.chunked(4).forEachIndexed { r, row ->
