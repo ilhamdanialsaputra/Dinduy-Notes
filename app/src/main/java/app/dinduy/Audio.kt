@@ -16,6 +16,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
@@ -66,10 +67,12 @@ class Rec(private val ctx: Context, private val scope: CoroutineScope) {
 
     @Volatile var lastError: String? = null
 
-    fun start(note: String): Boolean {
-        lastError = null
-        if (mr != null) { lastError = "recorder busy"; return false }
-        val nid = uid()
+    /** true selama MediaRecorder sedang disiapkan di thread IO (lihat [startAsync]). */
+    @Volatile var starting = false
+        private set
+
+    /** Menyiapkan dan menjalankan MediaRecorder. Aman dipanggil dari thread mana pun; hasilnya null kalau gagal. */
+    private fun prepareRecorder(nid: String): MediaRecorder? {
         val f = AudioFiles.file(ctx, nid)
         f.parentFile?.mkdirs()
         val r = newRecorder()
@@ -87,8 +90,13 @@ class Rec(private val ctx: Context, private val scope: CoroutineScope) {
             lastError = e.javaClass.simpleName + (e.message?.let { ": $it" } ?: "")
             try { r.release() } catch (x: Exception) { }
             f.delete()
-            return false
+            return null
         }
+        return r
+    }
+
+    /** Menyerahkan perekam yang sudah jalan ke state (harus di main thread). */
+    private fun adopt(r: MediaRecorder, nid: String, note: String) {
         mr = r
         curId = nid
         t0 = SystemClock.elapsedRealtime()
@@ -108,6 +116,32 @@ class Rec(private val ctx: Context, private val scope: CoroutineScope) {
                 ms = SystemClock.elapsedRealtime() - t0
             }
         }
+    }
+
+    fun start(note: String): Boolean {
+        lastError = null
+        if (mr != null || starting) { lastError = "recorder busy"; return false }
+        val nid = uid()
+        val r = prepareRecorder(nid) ?: return false
+        adopt(r, nid, note)
+        return true
+    }
+
+    /**
+     * Sama seperti [start], tetapi prepare()/start() MediaRecorder (bisa memblokir ratusan milidetik) berjalan di thread IO.
+     * Dipakai saat bilah rekam sedang beranimasi: kalau dijalankan di main thread, animasi berhenti di tengah jalan.
+     */
+    suspend fun startAsync(note: String): Boolean {
+        lastError = null
+        if (mr != null || starting) { lastError = "recorder busy"; return false }
+        starting = true
+        val nid = uid()
+        val r = try {
+            // NonCancellable: perekam yang sudah menyala tidak boleh bocor kalau pemanggil keburu dibatalkan
+            withContext(NonCancellable + Dispatchers.IO) { prepareRecorder(nid) }
+        } finally { starting = false }
+        if (r == null) return false
+        adopt(r, nid, note)
         return true
     }
 
