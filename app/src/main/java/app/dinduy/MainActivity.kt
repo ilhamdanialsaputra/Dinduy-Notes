@@ -92,6 +92,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import kotlin.math.abs
@@ -503,10 +504,16 @@ fun SnackHost(vm: AppVM, bottom: Dp, aboveKeyboard: Boolean) {
     val pal = LocalPal.current
     val sn = vm.snack
     var shown by remember { mutableStateOf<Snack?>(null) }
+    // geser kiri/kanan untuk menutup: offset horizontal + penanda sedang disentuh (menahan penutupan otomatis)
+    val off = remember { Animatable(0f) }
+    var dragging by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     LaunchedEffect(sn) {
         if (sn != null) {
+            off.snapTo(0f)
             shown = sn
             delay(4200)
+            while (dragging) delay(100)
             if (vm.snack === sn) vm.snack = null
         }
     }
@@ -523,7 +530,45 @@ fun SnackHost(vm: AppVM, bottom: Dp, aboveKeyboard: Boolean) {
             val s = shown
             if (s != null) {
                 Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(pal.os).padding(start = 22.dp, end = 8.dp),
+                    Modifier.fillMaxWidth()
+                        .graphicsLayer {
+                            translationX = off.value
+                            alpha = (1f - abs(off.value) / (size.width.coerceAtLeast(1f) * .9f)).coerceIn(0f, 1f)
+                        }
+                        .pointerInput(s.id) {
+                            val vt = VelocityTracker()
+                            var acc = 0f
+                            detectHorizontalDragGestures(
+                                onDragStart = { dragging = true; vt.resetTracking(); acc = 0f },
+                                onDragCancel = {
+                                    dragging = false
+                                    scope.launch { off.animateTo(0f, spring(.8f, 500f)) }
+                                },
+                                onDragEnd = {
+                                    dragging = false
+                                    val v = vt.calculateVelocity().x
+                                    val w = size.width.toFloat()
+                                    val far = abs(off.value) > w * .3f
+                                    val flick = abs(v) > 900f && v * off.value >= 0f
+                                    if (far || flick) {
+                                        val dir = if (off.value != 0f) (if (off.value > 0f) 1f else -1f) else (if (v >= 0f) 1f else -1f)
+                                        scope.launch {
+                                            off.animateTo(dir * w * 1.2f, tween(180))
+                                            if (vm.snack === s) vm.snack = null
+                                        }
+                                    } else {
+                                        scope.launch { off.animateTo(0f, spring(.8f, 500f)) }
+                                    }
+                                },
+                                onHorizontalDrag = { change, dx ->
+                                    change.consume()
+                                    acc += dx
+                                    vt.addPosition(change.uptimeMillis, Offset(acc, 0f))
+                                    scope.launch { off.snapTo(off.value + dx) }
+                                }
+                            )
+                        }
+                        .clip(RoundedCornerShape(24.dp)).background(pal.os).padding(start = 22.dp, end = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     T(s.msg, 15f, 600, pal.s, Modifier.weight(1f).padding(vertical = 18.dp))
