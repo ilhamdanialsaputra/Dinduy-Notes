@@ -1501,8 +1501,8 @@ private fun boxHeightEst(ed: Ed, b: Blk, dm: Dm, pal: Pal, tm: TextMeasurer, dn:
         "hr" -> 8f + fs * 1.8f
         "q" -> {
             val q = qs(b.k, pal)
-            val k = if (b.qMin()) QSC else 1f
-            val avail = ((w - 22f * k - QUOTE_END_PAD) * dn.density).toInt().coerceAtLeast(1)
+            val k = b.qScale()
+            val avail = ((w - 44f * k) * dn.density).toInt().coerceAtLeast(1)
             val fz = fs * 1.05f * k
             val h = tm.measure(styled(b.r, b.r.t, 0, pal, fz), baseStyle(pal, dm, q.fg, fz, 500), constraints = Constraints(maxWidth = avail)).size.height / dn.density
             h + 36f * k + (if (q.label != null) (fs * .7f * 1.05f * 1.4f + fs * .45f * .7f) * k else 0f)
@@ -1859,7 +1859,8 @@ private fun BoxCell(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                     if (!focusedHere || ed.reading || ed.ink.on || ed.selOn || ed.mv != null) return@awaitEachGesture
-                    if (bS.ty == "q" && down.position.x > size.width - 40.dp.toPx() && down.position.y < 40.dp.toPx()) return@awaitEachGesture   // tombol kecil/besar milik dirinya
+                    if (bS.ty == "q" && down.position.y > size.height - 50.dp.toPx() &&
+                        (if (bS.alOf() != "r") down.position.x > size.width - 50.dp.toPx() else down.position.x < 50.dp.toPx())) return@awaitEachGesture   // titik sudut milik dirinya
                     val slop = viewConfiguration.touchSlop
                     var up: PointerInputChange? = null
                     while (true) {
@@ -1881,16 +1882,15 @@ private fun BoxCell(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
             .objLift(
                 ed, b.id, focusedHere && !hr, textKeys = { listOf(bS.id) },
                 skip = { pos ->
-                    // tombol kecil/besar kutipan (sudut kanan atas) tidak memulai angkat
-                    val onToggle = bS.ty == "q" && pos.x > box.width - 40f * dn.density && pos.y < 40f * dn.density
-                    // gagang lebar (tepi, tengah vertikal) tampil hanya saat terpilih: sentuhan di sana milik gagang, bukan angkat
-                    if (onToggle) true
-                    else if (!(edit && armed && !lifted)) false
+                    // gagang lebar (tepi, tengah vertikal) dan titik sudut kutipan tampil hanya saat terpilih: sentuhan di sana milik gagang, bukan angkat
+                    if (!(edit && armed && !lifted)) false
                     else {
                         val right = bS.alOf() != "r"
                         val gw = 32f * dn.density
                         val inX = if (right) pos.x > box.width - gw else pos.x < gw
-                        inX && kotlin.math.abs(pos.y - box.height / 2f) < minOf(box.height / 2f, 48f * dn.density)
+                        val cg = 50f * dn.density
+                        val inCorner = bS.ty == "q" && pos.y > box.height - cg && (if (right) pos.x > box.width - cg else pos.x < cg)
+                        inCorner || (inX && kotlin.math.abs(pos.y - box.height / 2f) < minOf(box.height / 2f, 48f * dn.density))
                     }
                 }
             )
@@ -1909,9 +1909,6 @@ private fun BoxCell(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
         // belum terpilih: lapisan ketuk menahan sentuhan supaya tidak langsung masuk ke teks (gulir tetap lewat)
         if (!hr && edit && !armed && !lifted) {
             Box(Modifier.matchParentSize().pointerInput(b.id) { detectTapGestures(onTap = { ed.selectObj(bS.id) }) })
-        }
-        if (b.ty == "q" && !lifted && !ed.ink.on) {
-            QuoteToggle(ed, b, pal, Modifier.align(Alignment.TopEnd).padding(top = 4.dp, end = 4.dp))
         }
         if (edit && !lifted && armed) {
             val right = al != "r"
@@ -1932,6 +1929,26 @@ private fun BoxCell(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
                 },
                 onEnd = { ed.commit() }
             )
+            if (b.ty == "q") {
+                // titik sudut (seperti foto): seret = skala seluruh kutipan (lebar + huruf + bantalan) bersama, dinamis dan kontinu
+                val cs = remember { floatArrayOf(0f, 0f, 0f, 0f, 0f) }   // lebar px, bw, skala, geser, tinggi px
+                Grip(
+                    Modifier.align(if (right) Alignment.BottomEnd else Alignment.BottomStart).size(50.dp), 2,
+                    if (right) Alignment.BottomEnd else Alignment.BottomStart,
+                    onStart = {
+                        ed.commit()
+                        cs[0] = box.width.toFloat().coerceAtLeast(1f); cs[1] = bS.bw.coerceIn(.2f, 1f); cs[2] = bS.qScale()
+                        cs[3] = 0f; cs[4] = box.height.toFloat().coerceAtLeast(1f)
+                    },
+                    onDrag = { dx, dy ->
+                        cs[3] += (dx * gx * kk + dy * (cs[0] / cs[4])) / 2f
+                        val r = ((cs[0] + cs[3]) / cs[0]).coerceAtLeast(.05f)
+                        val minF = (150f / ed.widthDp.coerceAtLeast(150f)).coerceIn(.3f, .6f)
+                        ed.quoteScaleLive(bS.id, (cs[1] * r).coerceIn(minF, 1f), (cs[2] * r).coerceIn(QSC_MIN, 1f))
+                    },
+                    onEnd = { ed.commit() }
+                )
+            }
         }
     }
 }
@@ -1946,37 +1963,6 @@ private fun Modifier.selRing(on: Boolean, shape: Shape, color: Color): Modifier 
     }
 }
 
-/** Ruang kanan kutipan (dp): sedikit lebih lebar dari kiri supaya teks tidak tertimpa tombol kecil/besar. Dipakai juga oleh PDF dan estimasi tinggi. */
-const val QUOTE_END_PAD = 32
-
-/** Tombol bulat di sudut kanan atas kutipan. Besar: ikon "kecilkan" (siku menuju tengah). Kecil: ikon "besarkan" (siku menjauh). */
-@Composable
-private fun QuoteToggle(ed: Ed, b: Blk, pal: Pal, modifier: Modifier) {
-    val q = qs(b.k, pal)
-    val min = b.qMin()
-    val c = if (b.k == "def") pal.p else q.fg
-    Box(
-        modifier.size(26.dp).clip(CircleShape).background(c.copy(alpha = .14f))
-            .clickable { ed.quoteMin(b.id) },
-        Alignment.Center
-    ) {
-        Canvas(Modifier.size(14.dp)) {
-            val u = size.width / 14f
-            val st = Stroke(1.9f * u, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round)
-            val p = androidx.compose.ui.graphics.Path().apply {
-                if (min) {   // keluar
-                    moveTo(1.5f * u, 5.5f * u); lineTo(1.5f * u, 1.5f * u); lineTo(5.5f * u, 1.5f * u)
-                    moveTo(12.5f * u, 8.5f * u); lineTo(12.5f * u, 12.5f * u); lineTo(8.5f * u, 12.5f * u)
-                } else {     // masuk
-                    moveTo(5.5f * u, 1.5f * u); lineTo(5.5f * u, 5.5f * u); lineTo(1.5f * u, 5.5f * u)
-                    moveTo(8.5f * u, 12.5f * u); lineTo(8.5f * u, 8.5f * u); lineTo(12.5f * u, 8.5f * u)
-                }
-            }
-            drawPath(p, c, style = st)
-        }
-    }
-}
-
 /** Isi kutipan / kode / garis tanpa letak dan pegangan. Lebarnya ditentukan pemanggil lewat [modifier]. */
 @Composable
 private fun BoxBody(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier, sel: Boolean = false) {
@@ -1985,13 +1971,13 @@ private fun BoxBody(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier, sel: B
     when (b.ty) {
         "q" -> {
             val q = qs(b.k, pal)
-            // kecil = semua ikut diskalakan (huruf, label, bantalan), teks tetap utuh dan bisa diedit; berubah halus dengan animasi
-            val k by androidx.compose.animation.core.animateFloatAsState(if (b.qMin()) QSC else 1f, androidx.compose.animation.core.tween(220), label = "qsc")
+            // skala isi mengikuti titik sudut (seperti foto): huruf, label, bantalan, bar ikut mengecil; teks tetap utuh dan bisa diedit
+            val k = b.qScale()
             Box(
                 modifier.selRing(sel, q.shape, ring).clip(q.shape).background(q.bg)
                     .then(if (q.border) Modifier.border(3.dp, pal.p, q.shape) else Modifier)
                     .drawBehind { if (q.bar) drawRect(pal.owc, size = Size(7.dp.toPx() * k, size.height)) }
-                    .padding(start = (22f * k).dp, end = QUOTE_END_PAD.dp, top = (18f * k).dp, bottom = (18f * k).dp)   // ruang kanan untuk tombol di sudut
+                    .padding(horizontal = (22f * k).dp, vertical = (18f * k).dp)
             ) {
                 Column {
                     if (q.label != null) {
