@@ -1052,7 +1052,9 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         val scope = rememberCoroutineScope()
         val hapticDrag = LocalHapticFeedback.current
         val dragCtx by rememberUpdatedState(Triple(sections, pinnedBase.map { it.id }, othersBase.map { it.id }))
-        val canDrag = !vm.searchOn && !vm.remFilter && vm.openId == null && live.size > 1
+        // openId bukan state dan tidak pernah dikosongkan setelah catatan ditutup, jadi tidak boleh dipakai di sini;
+        // status "catatan sedang terbuka / menutup" dicek langsung saat jari menyentuh (lihat pointerInput di bawah)
+        val canDrag = !vm.searchOn && !vm.remFilter && live.size > 1
         fun endDrag() {
             val id = nd.id ?: return
             if (nd.dropping) return
@@ -1133,6 +1135,8 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     if (!canDrag) return@pointerInput
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        // catatan sedang dibuka / menutup (morph berjalan): jangan mulai seret
+                        if (vm.openP.value > .001f || vm.nav.stack.any { it is Scr.Note }) return@awaitEachGesture
                         val (_, pin, oth) = dragCtx
                         val hit = state.layoutInfo.visibleItemsInfo.firstOrNull { v ->
                             val k = v.key as? String
@@ -1140,21 +1144,38 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                                 down.position.x >= v.offset.x && down.position.x <= v.offset.x + v.size.width &&
                                 down.position.y >= v.offset.y && down.position.y <= v.offset.y + v.size.height
                         } ?: return@awaitEachGesture
-                        // tekan lama: kartu terangkat (dan terpilih, seperti Keep); geser untuk memindahkan
-                        val lp = awaitLongPressOrCancellation(down.id) ?: return@awaitEachGesture
+                        // tunggu tekan lama tanpa menyentuh kejadian: gulir dan ketuk biasa tetap jalan seperti semula.
+                        // Batal bila jari terangkat atau bergeser melewati batas (itu gulir / geser arsip-hapus, bukan seret).
+                        val slop = viewConfiguration.touchSlop
+                        var last = down.position
+                        val held = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                            while (true) {
+                                val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                val c = ev.changes.firstOrNull { it.id == down.id }
+                                if (c == null || !c.pressed || (c.position - down.position).getDistance() > slop) break
+                                last = c.position
+                            }
+                        }
+                        // held != null berarti loop berakhir sebelum waktunya (batal); null = tekan lama berhasil
+                        if (held != null) return@awaitEachGesture
                         val key = hit.key as String
                         val g = if (key in pin) 0 else 1
-                        if (key !in vm.sel) vm.sel.add(key)
-                        hapticDrag.performHapticFeedback(HapticFeedbackType.LongPress)
-                        nd.begin(key, g, if (g == 0) pin else oth, lp.position - Offset(hit.offset.x.toFloat(), hit.offset.y.toFloat()), lp.position)
-                        while (true) {
-                            val ev = awaitPointerEvent(PointerEventPass.Initial)
-                            val ch = ev.changes.firstOrNull { it.id == lp.id } ?: break
-                            ch.consume()
-                            if (!ch.pressed) break
-                            nd.finger = ch.position
+                        if (key !in vm.sel) {
+                            vm.sel.add(key)
+                            hapticDrag.performHapticFeedback(HapticFeedbackType.LongPress)
                         }
-                        endDrag()
+                        nd.begin(key, g, if (g == 0) pin else oth, last - Offset(hit.offset.x.toFloat(), hit.offset.y.toFloat()), last)
+                        try {
+                            while (true) {
+                                val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                                ch.consume()
+                                if (!ch.pressed) break
+                                nd.finger = ch.position
+                            }
+                        } finally {
+                            endDrag()
+                        }
                     }
                 },
             contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = sat + 78.dp, bottom = 160.dp + sab),
