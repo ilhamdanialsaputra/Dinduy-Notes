@@ -117,7 +117,7 @@ fun isDinduyUri(ctx: android.content.Context, u: Uri): Boolean {
 
 object Imgs {
     // sampul harus sudah ada di cache saat catatan dibuka (kalau tidak, ia muncul belakangan = kedip), jadi cache dibuat lega
-    private val cache = object : android.util.LruCache<String, ImageBitmap>(maxOf(48L * 1024 * 1024, Runtime.getRuntime().maxMemory() / 6).toInt()) {
+    private val cache = object : android.util.LruCache<String, ImageBitmap>(maxOf(96L * 1024 * 1024, Runtime.getRuntime().maxMemory() / 4).toInt()) {
         override fun sizeOf(key: String, value: ImageBitmap): Int = value.width * value.height * 4
     }
 
@@ -278,6 +278,11 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             docs.addAll(db.docs.filter { it.dt == 0L || now - it.dt < 2592000000L })
             labels.addAll(db.lbl)
             syncLabels()
+            // muat semua sampul ke cache di latar belakang agar kartu bersampul tak muncul belakangan (kedip) saat masuk layar
+            val covers = docs.filter { it.cv.isNotEmpty() }.map { it.cv }
+            if (covers.isNotEmpty()) viewModelScope.launch(Dispatchers.IO) {
+                covers.forEach { try { Imgs.load(imgDir, it) } catch (e: Throwable) { } }
+            }
         }
     }
 
