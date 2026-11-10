@@ -882,8 +882,8 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM, sheetPxOf: () -> Int, kbNow: () ->
                 modifier = Modifier.fillMaxWidth().weight(1f).clipToBounds(),
                 transitionSpec = {
                     val d = if ((if (targetState == 0) 0 else 1) > (if (initialState == 0) 0 else 1)) 1 else -1
-                    (slideInHorizontally(spring(.9f, 450f, IntOffset.VisibilityThreshold)) { it * d } togetherWith
-                        slideOutHorizontally(spring(.9f, 450f, IntOffset.VisibilityThreshold)) { -it * d })
+                    (slideInHorizontally(spring<IntOffset>(.9f, 450f)) { it * d } togetherWith
+                        slideOutHorizontally(spring<IntOffset>(.9f, 450f)) { -it * d })
                         .using(SizeTransform(clip = true) { _, _ -> snap() })
                 },
                 label = "sheetpage"
