@@ -421,10 +421,14 @@ fun ToolDock(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean) {
 
     AnimatedVisibility(
         visible = visible,
-        enter = expandVertically(M3E.spatial(), expandFrom = Alignment.Top) +
+        // Muncul / hilang HANYA lewat lapisan gambar + geser (tinggi tata letak dock langsung penuh, tidak dianimasikan). Dulu expandVertically /
+        // shrinkVertically membuat tinggi dock berubah tiap frame, dan gulir kursor mengejarnya lewat flow (telat satu frame, terpotong batas gulir)
+        // tepat saat keyboard juga naik (ketuk teks di mode baca = dock + keyboard muncul bersamaan) = layar naik patah-patah.
+        // Kini gulir kursor menerima tinggi dock final sekali, dan sisanya (keyboard) diikuti per frame di fase ukur.
+        enter = slideInVertically(M3E.spatial()) { it / 2 } +
             scaleIn(M3E.spatial(), .86f, TransformOrigin(.5f, 1f)),
         // dock tetap tampil di atas sheet (sheet menggantikan keyboard), jadi kursor selalu di atas toolbar utama
-        exit = shrinkVertically(M3E.spatial(), shrinkTowards = Alignment.Top) +
+        exit = slideOutVertically(M3E.spatial()) { it / 2 } +
             scaleOut(M3E.spatial(), .86f, TransformOrigin(.5f, 1f))
     ) {
         MorphDock(kind) { k ->
