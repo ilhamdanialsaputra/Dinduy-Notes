@@ -212,52 +212,58 @@ fun AnnotatedString.Builder.addSel(pal: Pal, rt: Rt, a0: Int, b0: Int, off: Int,
 }
 
 /**
- * Indikator seleksi gaya Material 3 Expressive: highlight rounded per baris (ujung blok membulat, sambungan antarbaris rapat),
- * lapisan glow lembut di sekelilingnya, muncul dengan spring (fade + mekar vertikal), berdenyut halus saat rentang berubah,
- * dan memudar saat seleksi dilepas. Digambar DI BELAKANG teks, jadi keterbacaan tetap. Tidak menyentuh mekanisme seleksi / handle / clipboard.
+ * Indikator seleksi ala Gemini + Material You: "pill" tonal berwarna primer dengan sudut membulat penuh, tiap baris menyatu
+ * jadi satu bentuk organik. Highlight MENGALIR: tumbuh dari titik awal lalu kedua ujungnya mengikuti rentang baru dengan spring
+ * (perluas / ciutkan terasa cair). Warna bergradasi lembut + aura tipis, memudar saat dilepas. Digambar DI BELAKANG teks.
+ * Tidak menyentuh mekanisme seleksi / handle / clipboard.
  */
 @Composable
 fun Modifier.selGlow(sr: Pair<Int, Int>?, color: Color, map: (Int) -> Int, layout: () -> TextLayoutResult?): Modifier {
     val prog = remember { Animatable(0f) }
-    val pulse = remember { Animatable(0f) }
+    val sA = remember { Animatable(0f) }
+    val eA = remember { Animatable(0f) }
     val last = remember { arrayOfNulls<Pair<Int, Int>>(1) }
     if (sr != null) last[0] = sr
     LaunchedEffect(sr != null) {
-        if (sr != null) prog.animateTo(1f, spring(dampingRatio = .62f, stiffness = 380f)) else prog.animateTo(0f, tween(160))
+        if (sr != null) prog.animateTo(1f, spring(dampingRatio = .8f, stiffness = 500f)) else prog.animateTo(0f, tween(180))
     }
-    LaunchedEffect(sr) { if (sr != null) { pulse.snapTo(1f); pulse.animateTo(0f, tween(340)) } }
+    LaunchedEffect(sr) {
+        if (sr == null) return@LaunchedEffect
+        val flow = spring<Float>(dampingRatio = .78f, stiffness = 420f)
+        if (prog.value < .05f) { sA.snapTo(sr.first.toFloat()); eA.snapTo(sr.first.toFloat()) }   // muncul: tumbuh dari titik awal
+        kotlinx.coroutines.coroutineScope {
+            launch { sA.animateTo(sr.first.toFloat(), flow) }
+            launch { eA.animateTo(sr.second.toFloat(), flow) }
+        }
+    }
     return drawBehind {
         val p = prog.value
-        if (p <= .001f) return@drawBehind
-        val r = last[0] ?: return@drawBehind
+        if (p <= .001f || last[0] == null) return@drawBehind
         val l = layout() ?: return@drawBehind
         val n = l.layoutInput.text.length
-        val s = map(r.first + 1).coerceIn(0, n); val e = map(r.second + 1).coerceIn(0, n)
-        if (e <= s) return@drawBehind
+        val s = map(sA.value.roundToInt() + 1).coerceIn(0, n); val e = map(eA.value.roundToInt() + 1).coerceIn(0, n)
+        val lo = minOf(s, e); val hi = maxOf(s, e)
+        if (hi <= lo) return@drawBehind
         val a = p.coerceIn(0f, 1f)
-        val grow = p.coerceIn(0f, 1.15f)
-        val boost = pulse.value * .07f
-        val rad = 7.dp.toPx(); val sq = 2.dp.toPx(); val inset = .5.dp.toPx(); val g = 3.dp.toPx() * grow
-        val ls = l.getLineForOffset(s); val le = l.getLineForOffset(maxOf(s, e - 1))
+        val aura = 2.5.dp.toPx() * a
+        val ls = l.getLineForOffset(lo); val le = l.getLineForOffset(maxOf(lo, hi - 1))
         for (i in ls..le) {
-            val xa = if (i == ls) l.getHorizontalPosition(s, true) else l.getLineLeft(i)
-            val xb = if (i == le && e < l.getLineEnd(i)) l.getHorizontalPosition(e, true) else l.getLineRight(i)
-            val x0 = minOf(xa, xb); val x1 = maxOf(xa, xb)
-            if (x1 - x0 < 1f) continue
-            val t0 = l.getLineTop(i) + inset; val b0 = l.getLineBottom(i) - inset
-            val cy = (t0 + b0) / 2f; val hh = (b0 - t0) / 2f * (.72f + .28f * grow)
-            val cl = if (i == ls) rad else sq; val cr = if (i == le) rad else sq
-            fun shape(d: Float) = androidx.compose.ui.graphics.Path().apply {
-                addRoundRect(
-                    androidx.compose.ui.geometry.RoundRect(
-                        x0 - d, cy - hh - d, x1 + d, cy + hh + d,
-                        androidx.compose.ui.geometry.CornerRadius(cl + d, cl + d), androidx.compose.ui.geometry.CornerRadius(cr + d, cr + d),
-                        androidx.compose.ui.geometry.CornerRadius(cr + d, cr + d), androidx.compose.ui.geometry.CornerRadius(cl + d, cl + d)
-                    )
-                )
+            val xa = if (i == ls) l.getHorizontalPosition(lo, true) else l.getLineLeft(i)
+            val xb = if (i == le && hi < l.getLineEnd(i)) l.getHorizontalPosition(hi, true) else l.getLineRight(i)
+            val x0 = minOf(xa, xb) - 1.5.dp.toPx(); val x1 = maxOf(xa, xb) + 1.5.dp.toPx()
+            if (x1 - x0 < 3f) continue
+            val t0 = l.getLineTop(i); val b0 = l.getLineBottom(i)
+            val rad = minOf((b0 - t0) / 2f, 12.dp.toPx())
+            fun pill(d: Float) = androidx.compose.ui.graphics.Path().apply {
+                addRoundRect(androidx.compose.ui.geometry.RoundRect(x0 - d, t0 - d, x1 + d, b0 + d, androidx.compose.ui.geometry.CornerRadius(rad + d)))
             }
-            drawPath(shape(g), color.copy(alpha = .10f * a))
-            drawPath(shape(0f), color.copy(alpha = (.26f + boost) * a))
+            drawPath(pill(aura), color.copy(alpha = .08f * a))
+            drawPath(
+                pill(0f),
+                androidx.compose.ui.graphics.Brush.horizontalGradient(
+                    listOf(color.copy(alpha = .30f * a), color.copy(alpha = .20f * a)), startX = x0, endX = x1
+                )
+            )
         }
     }
 }
