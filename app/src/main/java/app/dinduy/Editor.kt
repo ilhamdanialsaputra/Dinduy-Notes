@@ -2509,7 +2509,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             val dy = if (p.y < pos.y) pos.y - p.y else if (p.y > pos.y + h) p.y - (pos.y + h) else 0f
             val dx = if (p.x < pos.x) pos.x - p.x else if (p.x > pos.x + w) p.x - (pos.x + w) else 0f
             val d = dy * 4f + dx
-            if (d < bd) { bd = d; best = k }
+            if (d < bd) { bd = d; best = k; if (d == 0f) break }   // tepat di atas blok ini: selesai
+            else if (pos.y > p.y && (pos.y - p.y) * 4f >= bd) break // daftar berurut ke bawah: blok berikutnya pasti lebih jauh
         }
         return best?.let { it to bd }
     }
