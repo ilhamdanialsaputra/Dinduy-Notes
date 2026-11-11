@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
@@ -83,22 +84,53 @@ val DockW = 304.dp
 /** Warna ikon bawaan di dalam wadah tertentu (null = pakai pal.os). */
 val LocalDockFg = compositionLocalOf<Color?> { null }
 
+/**
+ * Tanda: komposisi ini berada DI DALAM dock toolbar (bukan sheet). Dock memakai gerak "stretch" (melar / memipih seperti jeli);
+ * sheet Sisipkan / Format berada di luar dock, jadi tetap memakai gerak lama dan tidak tersentuh.
+ */
+val LocalDockMotion = compositionLocalOf { false }
+
+/**
+ * Arah pergantian isi yang sedang berlangsung: +1 = isi baru datang dari kanan (isi lama keluar ke kiri), -1 = sebaliknya.
+ * Berupa wadah angka yang dibaca per frame saat MENGGAMBAR (bukan saat komposisi), jadi tidak memicu recompose sama sekali.
+ */
+val LocalDockDir = compositionLocalOf { intArrayOf(1) }
+
 /** Jari-jari sudut tidak boleh negatif walau pegas memantul melewati nol. */
 fun Dp.nn(): Dp = if (this < 0.dp) 0.dp else this
 
 /**
- * Masuk dengan "melompat": membesar dari titik nol dengan pegas, berurutan menurut [i]. Tanpa alpha sama sekali.
- * Jeda dasar [base] memberi waktu isi toolbar lama menciut dulu, jadi dua isi tidak pernah bertumpuk.
+ * Masuk berurutan menurut [i]. Tanpa alpha sama sekali.
+ *  - Di dalam dock ([LocalDockMotion]): MELAR masuk. Elemen tumbuh melebar dari tepi arah datangnya sambil menggeser sedikit,
+ *    pegasnya melewati titik akhir sekali (melar sedikit berlebih lalu menyusut), jadi terasa elastis, bukan "pop" dari titik nol.
+ *  - Di luar dock (sheet): tetap melompat dari titik nol seperti semula.
+ * Jeda dasar [base] memberi waktu isi toolbar lama menciut dulu, jadi dua isi tidak pernah bertumpuk (sebelum mulai, elemen tersembunyi).
  */
 @Composable
 fun Modifier.popIn(i: Int, base: Long = 70L): Modifier {
     if (i < 0) return this
+    val dock = LocalDockMotion.current
+    val dirH = LocalDockDir.current
     val a = remember { Animatable(0f) }
     LaunchedEffect(Unit) {
         delay(base + i * 28L)
-        a.animateTo(1f, spring(dampingRatio = .52f, stiffness = 520f))
+        if (dock) a.animateTo(1f, spring<Float>(dampingRatio = .66f, stiffness = 330f))
+        else a.animateTo(1f, spring<Float>(dampingRatio = .52f, stiffness = 520f))
     }
-    return this.graphicsLayer { val p = a.value.coerceAtLeast(0f); scaleX = p; scaleY = p }
+    return this.graphicsLayer {
+        val p = a.value
+        if (!dock) {
+            val k = p.coerceAtLeast(0f); scaleX = k; scaleY = k
+        } else if (p <= 0f) {
+            scaleX = 0f; scaleY = 0f
+        } else {
+            val d = dirH[0]
+            scaleX = .1f + .9f * p
+            scaleY = .72f + .28f * p
+            translationX = d * 26.dp.toPx() * (1f - p)
+            transformOrigin = TransformOrigin(if (d > 0) 1f else 0f, .5f)
+        }
+    }
 }
 
 /**
@@ -131,8 +163,23 @@ fun XBtn(
         else -> h / 2
     }
     val r by animateDpAsState(rT, M3E.spatialFast(), label = "xr")
-    val sx by animateFloatAsState(if (pr) .88f else 1f, spring(.45f, 700f), label = "xsx")
-    val sy by animateFloatAsState(if (pr) .94f else 1f, spring(.45f, 700f), label = "xsy")
+    // Di dalam dock: ditekan = MELAR melebar dan memipih (jeli), bukan menyempit. Di luar dock (sheet): gerak lama.
+    val dock = LocalDockMotion.current
+    val sx by animateFloatAsState(
+        if (pr) (if (dock) 1.1f else .88f) else 1f,
+        if (dock) spring<Float>(.4f, 520f) else spring<Float>(.45f, 700f), label = "xsx"
+    )
+    val sy by animateFloatAsState(
+        if (pr) (if (dock) .86f else .94f) else 1f,
+        if (dock) spring<Float>(.4f, 520f) else spring<Float>(.45f, 700f), label = "xsy"
+    )
+    // Berganti terpilih / tidak: tombol melar sekali lalu menyusut berayun, sambil bentuknya berubah (lingkaran <-> squircle)
+    val kick = remember { Animatable(0f) }
+    val seen = remember { booleanArrayOf(false) }
+    if (dock) LaunchedEffect(on) {
+        if (!seen[0]) seen[0] = true
+        else { kick.snapTo(1f); kick.animateTo(0f, spring<Float>(dampingRatio = .4f, stiffness = 260f)) }
+    }
     val restC = if (rest == Color.Unspecified) pal.p.copy(alpha = 0f) else rest
     val bgT = when (tone) { 1 -> pal.ec; 2 -> pal.p; else -> if (on) pal.p else restC }
     val fgT = when (tone) { 1 -> pal.oec; 2 -> pal.op; else -> if (on) pal.op else (LocalDockFg.current ?: pal.os) }
@@ -140,7 +187,7 @@ fun XBtn(
     val fg by animateColorAsState(fgT, M3E.effects(), label = "xf")
     Box(
         modifier.popIn(i).size(w, h)
-            .graphicsLayer { scaleX = sx; scaleY = sy; alpha = if (enabled) 1f else .3f }
+            .graphicsLayer { scaleX = sx * (1f + .16f * kick.value); scaleY = sy * (1f - .12f * kick.value); alpha = if (enabled) 1f else .3f }
             .clip(RoundedCornerShape(r.nn())).background(bg)
             .clickable(interactionSource = src, indication = LocalIndication.current, enabled = enabled) {
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -212,24 +259,28 @@ fun SlideSeg(
 
 /**
  * Penukar isi yang MENGUBAH BENTUK wadahnya, bukan memudarkan isi.
- *  - Wadah (pemanggil) mengikuti ukuran isi baru dengan pegas, jadi lebar / tinggi mengalir.
- *  - Isi lama menciut cepat ke arah [originX] (titik tombol yang ditekan) dan terpotong oleh wadah. TANPA alpha.
- *  - Isi baru tidak ikut menciut: tiap tombolnya melompat masuk sendiri (lihat [popIn]) setelah isi lama hilang.
+ *  - Wadah (pemanggil) mengikuti ukuran isi baru dengan pegas, jadi lebar / tinggi mengalir (ukuran TIDAK diubah: tinggi dock dibaca layar).
+ *  - Isi lama memipih ke satu tepi (arah keluarnya, atau [originX] bila diberikan) dan terpotong oleh wadah. TANPA alpha.
+ *  - Isi baru tidak ikut menciut: tiap elemennya MELAR masuk sendiri dari tepi seberang (lihat [popIn]) setelah isi lama hilang.
+ *  - [dirOf] (lama, baru) -> +1 / -1 = arah datangnya isi baru. Tanpa [dirOf] dan [originX], isi lama menciut ke tengah seperti semula.
  */
 @Composable
 fun <T> MorphSwap(
     target: T,
     modifier: Modifier = Modifier,
     clip: Boolean = false,
-    originX: (T, T) -> Float = { _, _ -> .5f },
+    originX: ((T, T) -> Float)? = null,
+    dirOf: ((T, T) -> Int)? = null,
     label: String = "morph",
     content: @Composable (T) -> Unit
 ) {
+    val dirH = remember { intArrayOf(1) }
     AnimatedContent(
         targetState = target,
         modifier = modifier,
         contentAlignment = Alignment.Center,
         transitionSpec = {
+            if (dirOf != null) dirH[0] = dirOf(initialState, targetState)
             (EnterTransition.None togetherWith ExitTransition.None)
                 .using(SizeTransform(clip = clip) { _, _ -> M3E.sizeSpring() })
         },
@@ -240,16 +291,16 @@ fun <T> MorphSwap(
             transitionSpec = { if (targetState == EnterExitState.Visible) tween(1) else tween(170) },
             label = "mph"
         ) { if (it == EnterExitState.Visible) 1f else 0f }
-        val ox = originX(s, target)
         Box(
             Modifier.graphicsLayer {
                 if (exiting) {
                     val k = ((pr.coerceIn(0f, 1f) - .15f) / .85f).coerceIn(0f, 1f)
+                    val ox = originX?.invoke(s, target) ?: if (dirOf != null) (if (dirH[0] > 0) 0f else 1f) else .5f
                     scaleX = k
-                    scaleY = .6f + .4f * k
+                    scaleY = if (dirOf != null) .86f + .14f * k else .6f + .4f * k
                     transformOrigin = TransformOrigin(ox, .5f)
                 }
             }
-        ) { content(s) }
+        ) { CompositionLocalProvider(LocalDockDir provides dirH) { content(s) } }
     }
 }
