@@ -452,7 +452,10 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
                     val ids0 = blocks.mapTo(HashSet()) { it.id }
                     paste(key, df.p, insStr, lastMd.isNotEmpty() && insStr.trimEnd('\n') == lastMd)
                     pasteArm = null
-                    if (blocks !== bl0) fxPaste(Pt(key, df.p), insStr.trimEnd('\n').length, ids0)   // hanya bila benar-benar menyisip
+                    if (blocks !== bl0) {   // hanya bila benar-benar menyisip
+                        keepCaret(key, df.p, ids0)
+                        fxPaste(Pt(key, df.p), insStr.trimEnd('\n').length, ids0)
+                    }
                 }
                 return
             }
@@ -465,11 +468,13 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val rt = oldRt.edit(nt, typing)
         putRt(key, rt)
         tf[key] = v
-        if (df.ins >= 60) holdFollow()   // sisipan besar sekaligus = tempel (ketikan / autocorrect / suara jauh lebih pendek)
+        var pasted = df.ins >= 60   // sisipan besar sekaligus = tempel (ketikan / autocorrect / suara jauh lebih pendek)
+        if (pasted) holdFollow()
         if (df.ins > 0 && pasteArm != null) {   // Ctrl+V tanpa seleksi
-            if (insStr == pasteArm && android.os.SystemClock.uptimeMillis() - pasteArmAt < 800L) fxSet(3, listOf(key), mapOf(key to (df.p to df.p + df.ins)))
+            if (insStr == pasteArm && android.os.SystemClock.uptimeMillis() - pasteArmAt < 800L) { pasted = true; fxSet(3, listOf(key), mapOf(key to (df.p to df.p + df.ins))) }
             pasteArm = null
         }
+        if (pasted) tf[key] = v.copy(selection = TextRange(df.p + 1))   // kursor tetap di awal tempelan
         typing = rt.flags(v.selection.min - 1, v.selection.max - 1)
         // pengelompokan undo per kalimat
         if (df.ins > 0) {
@@ -2442,6 +2447,14 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (fresh.isNotEmpty()) fxSet(3, fresh, emptyMap())
         else fxSet(3, listOf(lo.key), mapOf(lo.key to (lo.off to lo.off + len)))
     }
+    /** Setelah tempel: kursor TETAP di tempatnya (awal teks yang ditempel), tidak lompat ke ujung tempelan. Bila kolomnya sudah diganti blok baru, kursor ke awal blok tempelan pertama. */
+    private fun keepCaret(key: String, off: Int, before: Set<String>) {
+        val ok = blockOfKey(key) != null && rtOf(key).t.length >= off
+        val k = if (ok) key else (blocks.firstOrNull { it.id !in before && it.isText }?.id ?: return)
+        val o = if (ok) off else 0
+        tf[k]?.let { tf[k] = it.copy(selection = TextRange((o + 1).coerceIn(1, it.text.length.coerceAtLeast(1)))) }
+        focusAt(k, o)
+    }
     /** Ctrl+V tanpa seleksi: catat teks clipboard; penyisipan identik dalam 0,8 dtk di onValueChange dianggap tempel. */
     fun fxArmPaste(s: String?) { pasteArm = s?.takeIf { it.isNotEmpty() }; pasteArmAt = android.os.SystemClock.uptimeMillis() }
 
@@ -3127,6 +3140,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val mine = lastMd.isNotEmpty() && s.trimEnd('\n') == lastMd
         if (mine && lastMdBlocky && !isCellKey(lo.key) && blockOfKey(lo.key)?.isMulti != true) paste(lo.key, lo.off, s, true)
         else typeAt(lo.key, lo.off, s, mine)
+        keepCaret(lo.key, lo.off, fxBefore)
         fxPaste(lo, s.trimEnd('\n').length, fxBefore)
     }
 
