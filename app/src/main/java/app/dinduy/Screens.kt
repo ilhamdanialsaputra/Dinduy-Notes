@@ -1899,7 +1899,7 @@ fun Fab(vm: AppVM, act: Actions, small: Boolean, hide: Boolean, lift: Dp) {
     val sab = sabDp()
     val dens = LocalDensity.current.density
     val shape = RoundedCornerShape(r)
-    Box(Modifier.fillMaxSize().padding(end = 20.dp, bottom = 44.dp + sab), contentAlignment = Alignment.BottomEnd) {
+    Box(Modifier.fillMaxSize().padding(end = 20.dp, bottom = 24.dp + sab), contentAlignment = Alignment.BottomEnd) {
         Row(
             Modifier.offset(y = -ly)
                 .onGloballyPositioned { c ->
