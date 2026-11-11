@@ -25,6 +25,12 @@ import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.composed
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.layout.layoutId
+import androidx.compose.ui.unit.round
+import androidx.compose.animation.core.VectorConverter
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.zIndex
@@ -864,23 +870,14 @@ class NoteDrag {
     var w = 0                                       // lebar kartu (px)
     var dropAt = Offset.Zero                        // posisi bayangan saat dilepas
     val settle = Animatable(0f)                     // 1 -> 0: kartu meluncur ke tempatnya
-
-    // Kunci item grid milik kartu seretan (kosong = pakai id kartu). Hanya dipakai di 2 kolom.
-    // LazyStaggeredGrid "mengikuti" kunci item yang tampil paling awal di layar: kalau item itu pindah indeks, gulir ikut dipindah
-    // supaya item tsb tetap di tempat. Kartu seretan yang kebetulan paling atas pindah jauh di daftar => layar ikut loncat
-    // (kolom lain ikut tertukar). Dengan kunci baru tiap urutan berubah, kunci lama hilang dari daftar sehingga grid tidak bisa
-    // mengikuti dan posisi gulir tetap di indeks yang sama (di-"pin"). Kartu seretan tak terlihat (alpha 0), jadi aman diganti.
-    var dragKey by mutableStateOf("")
-    private var seq = 0
-    fun slotKey(key: String): String = if (dragKey.isNotEmpty() && key == id) dragKey else key
-    fun realId(k: Any?): String? = if (dragKey.isNotEmpty() && k == dragKey) id else k as? String
-    fun reorder(list: List<String>) { order = list; dragKey = "~drag" + (seq++) }
+    // 2 kolom: kolom (0 kiri / 1 kanan) tiap kartu di kelompok yang diseret, sementara selama seretan (disimpan permanen saat dilepas)
+    var laneOv by mutableStateOf<Map<String, Int>>(emptyMap())
 
     fun begin(key: String, g: Int, ord: List<String>, grabAt: Offset, at: Offset) {
-        group = g; orig = ord; order = ord; grab = grabAt; finger = at; dropping = false; ready = false; dragKey = ""; id = key
+        group = g; orig = ord; order = ord; grab = grabAt; finger = at; dropping = false; ready = false; id = key
     }
 
-    fun reset() { id = null; dropping = false; ready = false; dragKey = ""; order = emptyList() }
+    fun reset() { id = null; dropping = false; ready = false; order = emptyList(); laneOv = emptyMap() }
 
     /**
      * 1 kolom: tata letak grid TIDAK berubah selama menyeret (kartu tidak benar-benar dipindah di daftar), jadi tidak ada
@@ -913,6 +910,107 @@ private class StackShift(
     val p: Animatable<Float, androidx.compose.animation.core.AnimationVector1D>
 )
 
+
+/** Satu blok isi beranda 2 kolom: judul ("Pinned" / "Others" / "empty") atau satu kelompok kartu. */
+private class HBlock(val head: String?, val ids: List<String>)
+
+/**
+ * Kartu meluncur mulus ke posisi barunya (pengganti animateItem, yang hanya ada di daftar lazy).
+ * Posisi diukur di induk yang sama untuk semua kartu, jadi kartu yang pindah kolom pun meluncur lintas kolom.
+ */
+private fun Modifier.slideTo(): Modifier = composed {
+    val scope = rememberCoroutineScope()
+    var target by remember { mutableStateOf(IntOffset.Zero) }
+    val holder = remember { arrayOfNulls<Animatable<IntOffset, androidx.compose.animation.core.AnimationVector2D>>(1) }
+    this.onPlaced { c ->
+        val t = c.positionInParent().round()
+        // penempatan pertama: langsung di tempatnya (tanpa meluncur dari pojok)
+        if (holder[0] == null) holder[0] = Animatable(t, IntOffset.VectorConverter)
+        target = t
+    }.offset {
+        val a = holder[0]
+        if (a == null) IntOffset.Zero else {
+            if (a.targetValue != target) scope.launch { a.animateTo(target, PlaceSpec) }
+            a.value - target
+        }
+    }
+}
+
+/**
+ * Tata letak beranda 2 kolom dengan kolom EKSPLISIT: tiap kartu punya kolomnya sendiri (laneOf), urutan di dalam kolom mengikuti
+ * urutan daftar. Kartu yang belum punya kolom masuk ke kolom yang paling pendek (seperti grid staggered). Karena kolom tetap,
+ * menukar dua kartu hanya mengubah dua kartu itu; kartu lain tetap di kolomnya (hanya menyesuaikan tinggi).
+ * Posisi hasil ukur ditulis ke `rects` (id -> [x, y, lebar, tinggi] dalam isi yang tergulir), kolom yang dipakai ke `lanesOut`,
+ * dan kolom yang baru dihitung (belum tersimpan) ke `fresh`.
+ */
+@Composable
+private fun TwoColLayout(
+    blocks: List<HBlock>, laneOf: (String) -> Int?, dragId: String?,
+    padS: Int, padTop: Int, padBottom: Int, gap: Int,
+    rects: HashMap<String, IntArray>, lanesOut: HashMap<String, Int>, fresh: HashMap<String, Int>,
+    modifier: Modifier = Modifier, content: @Composable (String) -> Unit
+) {
+    androidx.compose.ui.layout.Layout(
+        modifier = modifier,
+        content = {
+            for (b in blocks) {
+                val h = b.head
+                if (h != null) {
+                    androidx.compose.runtime.key(h) {
+                        Box(Modifier.layoutId(h).slideTo(), propagateMinConstraints = true) { content(h) }
+                    }
+                } else for (id in b.ids) {
+                    androidx.compose.runtime.key(id) {
+                        Box(
+                            Modifier.layoutId(id).then(if (id == dragId) Modifier else Modifier.slideTo()),
+                            propagateMinConstraints = true
+                        ) { content(id) }
+                    }
+                }
+            }
+        }
+    ) { ms, c ->
+        val w = c.maxWidth
+        val byId = HashMap<String, androidx.compose.ui.layout.Measurable>(ms.size * 2)
+        for (m in ms) { val k = m.layoutId as? String ?: continue; byId[k] = m }
+        val colW = ((w - 2 * padS - gap) / 2).coerceAtLeast(0)
+        rects.clear(); lanesOut.clear(); fresh.clear()
+        val placed = ArrayList<Triple<androidx.compose.ui.layout.Placeable, Int, Int>>(ms.size)
+        var y = padTop
+        for (b in blocks) {
+            val h = b.head
+            if (h != null) {
+                val m = byId[h] ?: continue
+                val pl = m.measure(androidx.compose.ui.unit.Constraints.fixedWidth((w - 2 * padS).coerceAtLeast(0)))
+                placed.add(Triple(pl, padS, y))
+                rects[h] = intArrayOf(padS, y, pl.width, pl.height)
+                y += pl.height + gap
+            } else {
+                val ly = intArrayOf(y, y)
+                for (id in b.ids) {
+                    val m = byId[id] ?: continue
+                    val pl = m.measure(androidx.compose.ui.unit.Constraints.fixedWidth(colW))
+                    val ln: Int = laneOf(id)?.takeIf { it == 0 || it == 1 } ?: run {
+                        val v = if (ly[0] <= ly[1]) 0 else 1      // kolom terpendek, seri -> kiri
+                        fresh[id] = v
+                        v
+                    }
+                    lanesOut[id] = ln
+                    val x = padS + ln * (colW + gap)
+                    placed.add(Triple(pl, x, ly[ln]))
+                    rects[id] = intArrayOf(x, ly[ln], pl.width, pl.height)
+                    ly[ln] += pl.height + gap
+                }
+                y = maxOf(ly[0], ly[1])
+            }
+        }
+        val total = maxOf(padTop, y - gap) + padBottom
+        layout(w, total) {
+            for ((pl, px, py) in placed) pl.place(px, py)
+        }
+    }
+}
+
 @Composable
 fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmall: (Boolean) -> Unit) {
     val pal = LocalPal.current
@@ -924,6 +1022,12 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
     // state daftar hasil cari diangkat ke sini supaya posisi kartunya bisa dibaca untuk animasi buka/tutup pencarian
     val resState = rememberLazyStaggeredGridState()
     val nd = remember { NoteDrag() }
+    // 2 kolom: tata letak kolom eksplisit (bukan LazyVerticalStaggeredGrid), supaya kolom tiap kartu tetap dan seretan = tukar posisi
+    val scroll = rememberScrollState()
+    val rects = remember { HashMap<String, IntArray>() }       // id -> [x, y, lebar, tinggi] di dalam isi yang tergulir
+    val lanesCur = remember { HashMap<String, Int>() }         // id -> kolom yang sedang dipakai tata letak
+    val lanesNew = remember { HashMap<String, Int>() }         // kolom yang baru dihitung (kartu belum punya kolom); disimpan setelah tata letak
+    val vpH = remember { IntArray(1) }                         // tinggi area tampil
     // tween tanpa overshoot supaya buka/tutup pencarian tidak bergetar
     val saRaw by animateFloatAsState(if (vm.searchOn) 1f else 0f, if (vm.searchOn) spring(.9f, 380f) else spring(.95f, 460f), label = "sa")
     val sa = saRaw.coerceIn(0f, 1f)
@@ -959,10 +1063,18 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
     }
     val pos = remember(live) { live.withIndex().associate { it.value.id to it.index } }
 
-    LaunchedEffect(state) {
-        androidx.compose.runtime.snapshotFlow { state.canScrollBackward }.collect { back -> if (!back) onSmall(false) }
+    LaunchedEffect(state, scroll, cols) {
+        androidx.compose.runtime.snapshotFlow { if (cols == 2) scroll.value > 0 else state.canScrollBackward }.collect { back -> if (!back) onSmall(false) }
     }
-    LaunchedEffect(vm.filter, vm.remFilter) { try { state.scrollToItem(0) } catch (e: Exception) { } }
+    LaunchedEffect(vm.filter, vm.remFilter) {
+        try { state.scrollToItem(0) } catch (e: Exception) { }
+        try { scroll.scrollTo(0) } catch (e: Exception) { }
+    }
+    // pindah 1 <-> 2 kolom: mulai dari atas (posisi gulir kedua mode tidak sebanding)
+    LaunchedEffect(cols) {
+        try { state.scrollToItem(0) } catch (e: Exception) { }
+        try { scroll.scrollTo(0) } catch (e: Exception) { }
+    }
     // setelah catatan ditutup, kartunya (yang naik ke atas karena baru diedit) harus terlihat: gulir mulus ke atas,
     // bersamaan dengan morph yang menguncup ke kartu itu
     LaunchedEffect(vm.revealTick) {
@@ -981,6 +1093,22 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
             idx = 1 + pin.size + 1 + j
         }
         try {
+            if (cols == 2) {
+                // 2 kolom: semua kartu sudah tersusun, posisinya diketahui; geser seminimal mungkin sampai kartu itu utuh terlihat
+                withFrameNanos { }
+                val r = rects[id] ?: return@LaunchedEffect
+                val topPx2 = with(dens) { (sat + 72.dp).toPx() }
+                val botPx2 = vpH[0] - with(dens) { 24.dp.toPx() }
+                val top = r[1] - scroll.value.toFloat()
+                val bot = top + r[3]
+                val d2 = when {
+                    top < topPx2 -> top - topPx2
+                    bot > botPx2 -> if (r[3] <= botPx2 - topPx2) bot - botPx2 else top - topPx2
+                    else -> 0f
+                }
+                if (d2 != 0f) scroll.animateScrollBy(d2, tween(320, easing = Emph))
+                return@LaunchedEffect
+            }
             val topPx = with(dens) { (sat + 72.dp).toPx() }
             val botPx = state.layoutInfo.viewportEndOffset - with(dens) { 24.dp.toPx() }
             val info = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id }
@@ -1031,12 +1159,15 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                 // posisi kartu di daftar asal: beranda (membuka) atau hasil cari (menutup; daftar itu baru dilepas, infonya masih terakhir)
                 val src = if (opening) state else resState
                 val mv = HashMap<String, Offset>()
-                if (flip[0] > 0) for (v in src.layoutInfo.visibleItemsInfo) {
+                if (flip[0] > 0 && opening && cols == 2) {
+                    for ((k, r) in rects) mv[k] = Offset(r[0].toFloat(), (r[1] - scroll.value).toFloat())
+                } else if (flip[0] > 0) for (v in src.layoutInfo.visibleItemsInfo) {
                     val k = v.key as? String ?: continue
                     mv[if (opening) k else k.removePrefix("s")] = Offset(v.offset.x.toFloat(), v.offset.y.toFloat())
                 }
                 val px = if (flip[0] == 0) 0f else {
-                    if (!state.canScrollBackward) 0f else {
+                    if (cols == 2) { if (scroll.value <= 0) 0f else scroll.value.toFloat().coerceIn(0f, hPx * .5f) }
+                    else if (!state.canScrollBackward) 0f else {
                         val vis = state.layoutInfo.visibleItemsInfo
                         val avg = if (vis.isEmpty()) 0f else vis.map { it.size.height }.average().toFloat()
                         val est = (state.firstVisibleItemIndex.toFloat() / cols) * (avg + 8f * dens.density) + state.firstVisibleItemScrollOffset
@@ -1055,13 +1186,22 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
             val q = 1f - shift.p.value
             if (q <= .001f) return@graphicsLayer
             val f = shift.from[id]
-            val cur = if (f == null) null else {
-                val k = if (closing) id else "s" + id
-                (if (closing) state else resState).layoutInfo.visibleItemsInfo.firstOrNull { it.key == k }
+            var curX = 0f
+            var curY = 0f
+            var has = false
+            if (f != null) {
+                if (closing && cols == 2) {
+                    val r = rects[id]
+                    if (r != null) { curX = r[0].toFloat(); curY = (r[1] - scroll.value).toFloat(); has = true }
+                } else {
+                    val k = if (closing) id else "s" + id
+                    val cur = (if (closing) state else resState).layoutInfo.visibleItemsInfo.firstOrNull { it.key == k }
+                    if (cur != null) { curX = cur.offset.x.toFloat(); curY = cur.offset.y.toFloat(); has = true }
+                }
             }
-            if (f != null && cur != null) {
-                translationX = (f.x - cur.offset.x) * q
-                translationY = (f.y - cur.offset.y) * q
+            if (f != null && has) {
+                translationX = (f.x - curX) * q
+                translationY = (f.y - curY) * q
             } else {
                 translationY = (if (closing) shift.px else -shift.px) * q
             }
@@ -1096,9 +1236,6 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         val pinned = shown(pinnedBase, 0)
         val others = shown(othersBase, 1)
         val full = StaggeredGridItemSpan.FullLine
-        // kunci item kartu seretan (lihat NoteDrag.dragKey); dibaca di sini (komposisi) supaya perubahannya ikut memperbarui grid
-        val dk = nd.dragKey
-        val did = nd.id
 
         // ---- seret & lepas ----
         val scope = rememberCoroutineScope()
@@ -1107,6 +1244,8 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         // openId bukan state dan tidak pernah dikosongkan setelah catatan ditutup, jadi tidak boleh dipakai di sini;
         // status "catatan sedang terbuka / menutup" dicek langsung saat jari menyentuh (lihat pointerInput di bawah)
         val canDrag = !vm.searchOn && !vm.remFilter && live.size > 1
+        // kolom tetap hanya berlaku di beranda penuh; di tampilan label kartunya tersaring, jadi kolom dihitung otomatis (kolom terpendek)
+        val useLanes = vm.filter == null && !vm.remFilter
         fun endDrag() {
             val id = nd.id ?: return
             if (nd.dropping) return
@@ -1150,11 +1289,12 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     nd.reset()
                 }
             } else {
-                val info = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == nd.slotKey(id) }
-                nd.resid = if (info != null) ghost - (nd.startC + (Offset(info.offset.x.toFloat(), info.offset.y.toFloat()) - nd.off0)) else Offset.Zero
-                // kunci item kembali ke id asli selagi kartu masih tersembunyi & tanpa animasi (modifier hold masih aktif sampai reset)
-                nd.dragKey = ""
-                if (changed) vm.moveOrder(nd.order)
+                nd.resid = Offset.Zero
+                val ov = nd.laneOv
+                if (changed || (useLanes && ov.any { (k, v) -> vm.lanes[k] != v })) {
+                    vm.moveOrder(nd.order, keepLanes = true)
+                    if (useLanes) vm.setLanes(ov)
+                }
                 nd.ready = true
                 nd.dropping = true
                 scope.launch {
@@ -1172,21 +1312,19 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         LaunchedEffect(nd.id) {
             val id = nd.id ?: return@LaunchedEffect
             val density = dens.density
-            var lastMove = 0L                 // 2 kolom: waktu (ns) pergantian urutan terakhir
+            var lastMove = 0L                 // 2 kolom: waktu (ns) pertukaran terakhir
+            var blockId: String? = null       // 2 kolom: kartu yang baru saja ditukar (tidak boleh langsung ditukar balik)
+            var lastSwapAt = Offset.Zero      // 2 kolom: posisi jari saat pertukaran terakhir
             var lastFrame = 0L
-            var pinIdx = -1                   // 2 kolom: indeks item paling atas sebelum urutan berubah (bila yang paling atas adalah kartu seretan)
-            var pinOff = 0
-            var pinLeft = 0                   // sisa frame pemeriksaan pengaman
             while (nd.id == id && !nd.dropping) {
                 val now = withFrameNanos { it }
                 val dt = if (lastFrame == 0L) .016f else ((now - lastFrame) / 1_000_000_000f).coerceIn(.004f, .05f)
                 lastFrame = now
 
-                var auto = false
                 // ---- gulir otomatis: baru aktif setelah jari benar-benar bergerak, kecepatan naik halus (kuadrat) menuju tepi ----
                 if ((nd.finger - nd.at0).getDistance() > 12f * density) {
                     val topLine = with(dens) { (sat + 72.dp + 28.dp).toPx() }
-                    val botLine = state.layoutInfo.viewportSize.height - 120f * density
+                    val botLine = (if (cols == 2) hPx else state.layoutInfo.viewportSize.height.toFloat()) - 120f * density
                     val zone = 90f * density
                     val fy = nd.finger.y
                     val up = fy < topLine
@@ -1195,25 +1333,13 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     if (mag > 0f) {
                         val m = mag.coerceIn(0f, 1f)
                         val dy = 760f * density * m * m * dt
-                        auto = true
-                        state.scrollBy(if (up) -dy else dy)
+                        if (cols == 2) scroll.scrollBy(if (up) -dy else dy) else state.scrollBy(if (up) -dy else dy)
                     }
                 }
 
                 val li = state.layoutInfo
                 val vis = li.visibleItemsInfo
                 val byKey = vis.associateBy { it.key }
-
-                // pengaman 2 kolom: bila item paling atas tadi adalah kartu seretan, posisi gulir (indeks) TIDAK boleh berubah gara-gara
-                // urutan berganti. Kalau ternyata berubah (grid tetap mengikuti kartu itu), kembalikan ke posisi semula.
-                if (pinLeft > 0) {
-                    pinLeft--
-                    if (!auto && cols == 2 && pinIdx >= 0 && state.firstVisibleItemIndex != pinIdx) {
-                        pinLeft = 0
-                        try { state.scrollToItem(pinIdx, pinOff) } catch (e: Exception) { }
-                        continue
-                    }
-                }
 
                 if (cols == 1) {
                     // ---- 1 KOLOM ----
@@ -1266,126 +1392,82 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                         hapticDrag.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     }
                 } else {
-                    // ---- 2 KOLOM ----
-                    // Prinsip: grid staggered menaruh tiap kartu di kolom yang paling pendek, jadi hasil menyisipkan kartu di indeks i
-                    // bisa DIHITUNG. Semua posisi sisip disimulasikan, lalu dipilih slot yang paling dekat dengan bayangan di bawah jari.
-                    // Simulasi tidak lagi menebak dari awal daftar (tinggi kartu di luar layar tidak diketahui, pembulatan jarak, lompatan
-                    // kolom): ia DIKALIBRASI dari tata letak nyata di layar. Posisi awal tiap kolom = kartu pertama yang tampil di kolom itu,
-                    // jarak antar kartu & posisi x kolom diukur langsung, dan hanya slot di sekitar kartu yang tampil yang dipertimbangkan.
+                    // ---- 2 KOLOM: TUKAR POSISI ----
+                    // Kolom tiap kartu tetap. Kartu seretan bertukar tempat (urutan + kolom) dengan kartu yang ditindih pusat bayangan;
+                    // kartu lain tidak berpindah kolom, hanya menyesuaikan tinggi. Posisi dibaca dari tata letak sendiri (rects),
+                    // jadi tidak ada tebakan / simulasi.
                     val grp = nd.order
                     val cur = grp.indexOf(id)
                     if (cur < 0 || nd.w <= 0 || nd.h <= 0) continue
-                    val gset = HashSet(grp)
-                    val gv = vis.filter { nd.realId(it.key) in gset }.sortedBy { it.index }
-                    if (gv.isEmpty()) continue
-                    val k0 = nd.realId(gv[0].key) ?: continue
-                    val f = grp.indexOf(k0)                            // indeks (di kelompok) kartu tampil paling awal
-                    if (f < 0) continue
-                    // tata letak di layar harus sudah mengikuti urutan terbaru; kalau belum, tunggu (jangan menebak)
-                    var fresh = true
-                    for (v in gv) {
-                        val gi = f + (v.index - gv[0].index)
-                        if (gi < 0 || gi >= grp.size || grp[gi] != nd.realId(v.key)) { fresh = false; break }
-                    }
-                    if (!fresh) continue
-                    // belum digeser sama sekali (baru tekan lama): jangan ubah urutan apa pun
+                    // belum digeser sama sekali (baru tekan lama): jangan ubah apa pun
                     if ((nd.finger - nd.at0).getDistance() < 12f * density) continue
-                    if (now - lastMove < 70_000_000L) continue         // beri waktu animasi geser sebelum keputusan berikutnya
-                    val l = f + gv.size - 1                            // indeks kartu tampil paling akhir
-
-                    // jarak antar kartu yang SEBENARNYA (dua kartu berurutan di kolom yang sama)
-                    var gapPx = with(dens) { 8.dp.roundToPx() }
-                    run {
-                        val lastInLane = arrayOfNulls<androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridItemInfo>(cols)
-                        for (v in gv) {
-                            val pv = lastInLane[v.lane]
-                            if (pv != null) {
-                                val g = v.offset.y - (pv.offset.y + pv.size.height)
-                                if (g in 0..(64 * density).toInt()) { gapPx = g; return@run }
+                    // beri waktu tata letak mengikuti pertukaran sebelumnya
+                    if (now - lastMove < 120_000_000L) continue
+                    val me = rects[id] ?: continue
+                    val cx = nd.startC.x + (nd.finger.x - nd.at0.x) + nd.w / 2f
+                    val cy = nd.startC.y + (nd.finger.y - nd.at0.y) + nd.h / 2f + scroll.value
+                    var target: String? = null
+                    for (k in grp) {
+                        if (k == id) continue
+                        val r = rects[k] ?: continue
+                        // pusat bayangan harus masuk cukup dalam ke kartu (bukan sekadar menyentuh tepinya)
+                        val ix = r[2] * .2f
+                        val iy = r[3] * .2f
+                        if (cx >= r[0] + ix && cx <= r[0] + r[2] - ix && cy >= r[1] + iy && cy <= r[1] + r[3] - iy) { target = k; break }
+                    }
+                    // pasangan yang baru ditukar tidak boleh langsung ditukar balik sebelum pusat bayangan keluar dari kartunya
+                    if (blockId != null && target != blockId) blockId = null
+                    // setelah menukar, jari harus bergerak dulu sebelum pertukaran berikutnya (mencegah tukar beruntun karena kartu di bawahnya naik)
+                    val far = (nd.finger - lastSwapAt).getDistance() >= 28f * density
+                    if (target != null && target != blockId && far) {
+                        val j = grp.indexOf(target)
+                        if (j >= 0 && j != cur) {
+                            val nl = grp.toMutableList()
+                            nl[cur] = target
+                            nl[j] = id
+                            if (useLanes) {
+                                val lm = HashMap(nd.laneOv)
+                                val la = lm[id]
+                                val lb = lm[target]
+                                if (la != null && lb != null) { lm[id] = lb; lm[target] = la }
+                                nd.laneOv = lm
                             }
-                            lastInLane[v.lane] = v
+                            nd.order = nl
+                            blockId = target
+                            lastSwapAt = nd.finger
+                            lastMove = now
+                            hapticDrag.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         }
-                    }
-                    // posisi awal tiap kolom (y tempat kartu berikutnya jatuh) & posisi x kolom, dari kartu pertama yang tampil di kolom itu
-                    val unset = Int.MIN_VALUE
-                    val laneY = IntArray(cols) { unset }
-                    val laneX = IntArray(cols) { unset }
-                    for (v in gv) {
-                        val ln = v.lane
-                        if (ln !in 0 until cols) continue
-                        if (laneY[ln] == unset) { laneY[ln] = v.offset.y; laneX[ln] = v.offset.x }
-                    }
-                    var seedMin = Int.MAX_VALUE
-                    for (c in 0 until cols) if (laneY[c] != unset && laneY[c] < seedMin) seedMin = laneY[c]
-                    val padPx = with(dens) { 8.dp.roundToPx() }
-                    for (c in 0 until cols) {
-                        if (laneY[c] == unset) laneY[c] = seedMin
-                        if (laneX[c] == unset) laneX[c] = padPx + c * (nd.w + gapPx)
-                    }
-                    val hv = HashMap<String, Int>(gv.size * 2)
-                    for (v in gv) { val hk = nd.realId(v.key) ?: continue; hv[hk] = v.size.height }
-                    fun hOf(k: String): Int = hv[k] ?: nd.h
-
-                    val cx0 = nd.startC.x + (nd.finger.x - nd.at0.x) + nd.w / 2f
-                    val cy0 = nd.startC.y + (nd.finger.y - nd.at0.y) + nd.h / 2f
-                    // magnet ke baris teratas: hanya bila kartu pertama kelompok memang tampil
-                    val hasTop = f == 0
-                    val baseY = if (hasTop) gv[0].offset.y.toFloat() else 0f
-                    val dv = gv.firstOrNull { nd.realId(it.key) == id }
-                    val curTop = hasTop && dv != null && dv.offset.y <= baseY + 1f
-                    val mg = minOf(nd.h * .5f, 48f * density) + (if (curTop) 12f * density else 0f)
-                    val magnet = hasTop && cy0 - nd.h / 2f < baseY + mg
-
-                    // slot yang dipertimbangkan hanya di sekitar kartu yang tampil: [s, e] pada daftar tanpa kartu seretan
-                    val rest = grp.filter { it != id }
-                    val s = if (f > cur) f - 1 else f
-                    val e = minOf(rest.size, if (l >= cur) l else l + 1)
-                    if (s < 0 || s > e) continue
-                    var best = cur
-                    var bestCost = Float.MAX_VALUE
-                    var curCost = Float.MAX_VALUE
-                    val lh2 = laneY.copyOf()
-                    for (i in s..e) {
-                        var ln = 0
-                        for (c in 1 until cols) if (lh2[c] < lh2[ln]) ln = c      // sama dengan grid: kolom terpendek, seri -> kolom kiri
-                        val slotY = lh2[ln]
-                        val dx = laneX[ln] + nd.w / 2f - cx0
-                        val dy = if (magnet && slotY <= baseY + 1f) 0f else slotY + nd.h / 2f - cy0
-                        val cost = kotlin.math.sqrt(dx * dx + dy * dy) + 4f * density * kotlin.math.abs(i - cur)
-                        if (i == cur && dv == null) curCost = cost
-                        if (cost < bestCost) { bestCost = cost; best = i }
-                        if (i < e) lh2[ln] += hOf(rest[i]) + gapPx
-                    }
-                    // biaya posisi sekarang dihitung dari posisi NYATA kartu di grid (bukan simulasi), supaya hasil simulasi yang
-                    // meleset sedikit tidak membuat slot lain tampak lebih dekat padahal kartu belum digeser
-                    if (dv != null) {
-                        val rdx = dv.offset.x + nd.w / 2f - cx0
-                        val rdy = if (magnet && dv.offset.y <= baseY + 1f) 0f else dv.offset.y + nd.h / 2f - cy0
-                        curCost = kotlin.math.sqrt(rdx * rdx + rdy * rdy)
-                    }
-                    // histeresis: pindah hanya bila slot baru jelas lebih dekat ke jari; makin jauh lompatannya, makin jelas syaratnya
-                    if (best != cur && curCost - bestCost > (10f + 2f * kotlin.math.abs(best - cur)) * density) {
-                        // catat dulu apakah kartu seretan sedang menjadi item paling atas (sebelum kuncinya diganti)
-                        val top = vis.minByOrNull { it.index }
-                        if (top != null && nd.realId(top.key) == id) {
-                            pinIdx = state.firstVisibleItemIndex
-                            pinOff = state.firstVisibleItemScrollOffset
-                            pinLeft = 4
+                    } else if (target == null && useLanes && far) {
+                        // area kosong di bawah kartu terakhir sebuah kolom: pindah ke ujung kolom itu
+                        val lane = if (cx < wPx / 2f) 0 else 1
+                        var lastBot = Int.MIN_VALUE      // tepi bawah kartu terakhir di kolom itu (tanpa kartu seretan)
+                        var gTop = Int.MAX_VALUE
+                        var gBot = Int.MIN_VALUE
+                        for (k in grp) {
+                            val r = rects[k] ?: continue
+                            if (r[1] < gTop) gTop = r[1]
+                            if (r[1] + r[3] > gBot) gBot = r[1] + r[3]
+                            if (k != id && nd.laneOv[k] == lane && r[1] + r[3] > lastBot) lastBot = r[1] + r[3]
                         }
-                        nd.reorder(rest.toMutableList().also { it.add(best, id) })
-                        lastMove = now
-                        hapticDrag.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        val myLane = nd.laneOv[id]
+                        val inside = if (lastBot == Int.MIN_VALUE) cy >= gTop else cy > lastBot
+                        val alreadyLast = myLane == lane && me[1] + me[3] >= lastBot
+                        if (myLane != null && inside && cy < gBot + 80f * density && !alreadyLast) {
+                            val lm = HashMap(nd.laneOv)
+                            lm[id] = lane
+                            nd.laneOv = lm
+                            nd.order = grp.filter { it != id } + id
+                            lastSwapAt = nd.finger
+                            lastMove = now
+                            hapticDrag.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        }
                     }
                 }
             }
         }
-        LazyVerticalStaggeredGrid(
-            columns = StaggeredGridCells.Fixed(cols),
-            state = state,
-            modifier = Modifier.fillMaxSize().nestedScroll(fabConn).graphicsLayer {
-                    alpha = if (vm.searchOn) 0f else 1f
-                }
-                .pointerInput(canDrag, cols) {
+        // seret & lepas (satu gestur untuk kedua mode)
+        val dragMod =                 Modifier.pointerInput(canDrag, cols, useLanes) {
                     if (!canDrag) return@pointerInput
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
@@ -1414,20 +1496,31 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                         // walau kartu sedang bergeser oleh animasi; mencocokkan koordinat layout di sini bisa memilih kartu yang salah.
                         val key = (if (nd.touchT == down.uptimeMillis) nd.touchId else null)
                             ?.takeIf { it in pin || it in oth } ?: return@awaitEachGesture
-                        val me0 = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == key } ?: return@awaitEachGesture
+                        val m0x: Float
+                        val m0y: Float
+                        val m0w: Int
+                        val m0h: Int
+                        if (cols == 2) {
+                            val r0 = rects[key] ?: return@awaitEachGesture
+                            m0x = r0[0].toFloat(); m0y = (r0[1] - scroll.value).toFloat(); m0w = r0[2]; m0h = r0[3]
+                        } else {
+                            val me0 = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == key } ?: return@awaitEachGesture
+                            m0x = me0.offset.x.toFloat(); m0y = me0.offset.y.toFloat(); m0w = me0.size.width; m0h = me0.size.height
+                        }
                         // pojok kiri-atas kartu di dalam grid = posisi jari saat menyentuh dikurangi titik sentuh di dalam kartu
                         nd.startC = down.position - nd.touchLocal
                         nd.at0 = last
-                        nd.off0 = Offset(me0.offset.x.toFloat(), me0.offset.y.toFloat())
-                        nd.w = me0.size.width
-                        nd.h = me0.size.height
-                        nd.span = me0.size.height + 8.dp.toPx()   // + verticalItemSpacing grid
+                        nd.off0 = Offset(m0x, m0y)
+                        nd.w = m0w
+                        nd.h = m0h
+                        nd.span = m0h + 8.dp.toPx()   // + verticalItemSpacing grid
                         val g = if (key in pin) 0 else 1
                         if (key !in vm.sel) {
                             vm.sel.add(key)
                             hapticDrag.performHapticFeedback(HapticFeedbackType.LongPress)
                         }
-                        nd.begin(key, g, if (g == 0) pin else oth, last - Offset(me0.offset.x.toFloat(), me0.offset.y.toFloat()), last)
+                        nd.begin(key, g, if (g == 0) pin else oth, last - Offset(m0x, m0y), last)
+                        if (cols == 2) nd.laneOv = if (useLanes) HashMap<String, Int>().also { lm -> for (k in (if (g == 0) pin else oth)) lanesCur[k]?.let { lm[k] = it } } else emptyMap()
                         val start = last
                         var moved = false
                         try {
@@ -1445,7 +1538,61 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                             if (moved) { vm.sel.clear(); vm.sel.addAll(selBefore.filter { id -> vm.note(id) != null }) }
                         }
                     }
-                },
+                }
+        if (cols == 2) {
+            val noteById = live.associateBy { it.id }
+            val blocks = ArrayList<HBlock>().also { bl ->
+                if (live.isEmpty()) bl.add(HBlock("empty", emptyList()))
+                if (sections) bl.add(HBlock("h-pin", emptyList()))
+                bl.add(HBlock(null, pinned.map { it.id }))
+                if (sections) bl.add(HBlock("h-other", emptyList()))
+                bl.add(HBlock(null, others.map { it.id }))
+            }
+            val laneOf: (String) -> Int? = { id -> if (useLanes) (nd.laneOv[id] ?: vm.lanes[id]) else null }
+            val padS = with(dens) { 8.dp.roundToPx() }
+            val padTop = with(dens) { (sat + 78.dp).roundToPx() }
+            val padBottom = with(dens) { (160.dp + sab).roundToPx() }
+            Box(
+                Modifier.fillMaxSize().nestedScroll(fabConn).graphicsLayer {
+                    alpha = if (vm.searchOn) 0f else 1f
+                }.then(dragMod)
+            ) {
+                Column(Modifier.fillMaxSize().onSizeChanged { vpH[0] = it.height }.verticalScroll(scroll)) {
+                    TwoColLayout(
+                        blocks = blocks, laneOf = laneOf, dragId = nd.id,
+                        padS = padS, padTop = padTop, padBottom = padBottom, gap = padS,
+                        rects = rects, lanesOut = lanesCur, fresh = lanesNew,
+                        modifier = Modifier.fillMaxWidth().onGloballyPositioned {
+                            // kartu yang baru dapat kolom (baru dibuat / baru diedit): simpan, supaya kolomnya tidak berubah lagi
+                            if (nd.id == null && useLanes && !vm.searchOn && lanesNew.isNotEmpty()) {
+                                val m = HashMap(lanesNew)
+                                lanesNew.clear()
+                                vm.setLanes(m)
+                            }
+                        }
+                    ) { k ->
+                        when (k) {
+                            "empty" -> T(
+                                if (vm.remFilter) "No reminders yet. Open a note and tap the bell icon."
+                                else if (vm.filter != null) "No notes with this label yet" else "Tap New to get started", 17f, 600, pal.osv,
+                                Modifier.fillMaxWidth().padding(vertical = 48.dp), align = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                            "h-pin" -> T("Pinned", 13f, 500, pal.osv, Modifier.graphicsLayer { if (!vm.searchOn) alpha = shift.p.value.coerceIn(0f, 1f) }.padding(start = 16.dp, top = 12.dp, bottom = 4.dp), ls = .01f)
+                            "h-other" -> T("Others", 13f, 500, pal.osv, Modifier.graphicsLayer { if (!vm.searchOn) alpha = shift.p.value.coerceIn(0f, 1f) }.padding(start = 16.dp, top = 16.dp, bottom = 4.dp), ls = .01f)
+                            else -> {
+                                val d = noteById[k]
+                                if (d != null) HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, wPx, dens.density, pos, stackMove(d.id, true), nd, state)
+                            }
+                        }
+                    }
+                }
+            }
+        } else LazyVerticalStaggeredGrid(
+            columns = StaggeredGridCells.Fixed(cols),
+            state = state,
+            modifier = Modifier.fillMaxSize().nestedScroll(fabConn).graphicsLayer {
+                    alpha = if (vm.searchOn) 0f else 1f
+                }.then(dragMod),
             contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = sat + 78.dp, bottom = 160.dp + sab),
             verticalItemSpacing = 8.dp,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1462,13 +1609,13 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
             if (sections) item(key = "h-pin", span = full) {
                 T("Pinned", 13f, 500, pal.osv, Modifier.graphicsLayer { if (!vm.searchOn) alpha = shift.p.value.coerceIn(0f, 1f) }.padding(start = 16.dp, top = 12.dp, bottom = 4.dp), ls = .01f)
             }
-            gridItems(pinned, key = { if (dk.isNotEmpty() && it.id == did) dk else it.id }) { d ->
+            gridItems(pinned, key = { it.id }) { d ->
                 HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, wPx, dens.density, pos, (if (nd.id != null && (cols == 1 || nd.id == d.id)) holdItemG() else flowItemG()).then(stackMove(d.id, true)), nd, state)
             }
             if (sections) item(key = "h-other", span = full) {
                 T("Others", 13f, 500, pal.osv, Modifier.graphicsLayer { if (!vm.searchOn) alpha = shift.p.value.coerceIn(0f, 1f) }.padding(start = 16.dp, top = 16.dp, bottom = 4.dp), ls = .01f)
             }
-            gridItems(others, key = { if (dk.isNotEmpty() && it.id == did) dk else it.id }) { d ->
+            gridItems(others, key = { it.id }) { d ->
                 HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, wPx, dens.density, pos, (if (nd.id != null && (cols == 1 || nd.id == d.id)) holdItemG() else flowItemG()).then(stackMove(d.id, true)), nd, state)
             }
         }
@@ -1481,11 +1628,20 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                 Modifier
                     .offset {
                         val q = if (nd.dropping) {
-                            val inf = if (nd.ready) state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == ghostId } else null
-                            if (inf != null) {
-                                val slot = nd.startC + (Offset(inf.offset.x.toFloat(), inf.offset.y.toFloat()) - nd.off0)
-                                slot + nd.resid * nd.settle.value
-                            } else nd.dropAt
+                            if (cols == 2) {
+                                // 2 kolom: meluncur ke slot kartu di tata letak sendiri
+                                val r = if (nd.ready) rects[ghostId] else null
+                                if (r != null) {
+                                    val sl = Offset(r[0].toFloat(), (r[1] - scroll.value).toFloat())
+                                    sl + (nd.dropAt - sl) * nd.settle.value
+                                } else nd.dropAt
+                            } else {
+                                val inf = if (nd.ready) state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == ghostId } else null
+                                if (inf != null) {
+                                    val slot = nd.startC + (Offset(inf.offset.x.toFloat(), inf.offset.y.toFloat()) - nd.off0)
+                                    slot + nd.resid * nd.settle.value
+                                } else nd.dropAt
+                            }
                         } else nd.startC + (nd.finger - nd.at0)
                         IntOffset(q.x.toInt(), q.y.toInt())
                     }
