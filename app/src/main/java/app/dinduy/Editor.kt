@@ -2389,6 +2389,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     val ipos = HashMap<String, Rect>()        // kotak tiap gambar di ruang konten
     val folds = HashMap<String, Fold>()       // pemotongan baris buatan (teks mengelilingi gambar), per kolom teks
     var contentCoords: LayoutCoordinates? = null
+    /** Area judul (ruang konten). Tekan-tahan di sini milik judul sendiri, bukan seleksi isi catatan. */
+    var titleRect: androidx.compose.ui.geometry.Rect? = null
     private var selBack: Pt? = null            // asal dari mode ketik: kembali ke sana saat selesai
     /** Seleksi yang dimulai dari mode ketik (bar alat tetap tampil, kursor kembali setelah selesai). */
     val selEdit: Boolean get() = selOn && selBack != null
@@ -2801,6 +2803,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     /** Pindahkan isi seleksi [span] ke [to]: format ikut (tebal, miring, dst; blok utuh bila lintas blok), satu langkah undo. */
     private fun tlApply(span: Pair<Pt, Pt>, to: Pt) {
+        val wasReading = reading   // dipindah dari mode baca: tetap di mode baca, tanpa editor / keyboard
         val (lo, hi) = span
         val single = lo.key == hi.key
         // muatan diambil SEBELUM seleksi dihapus
@@ -2873,6 +2876,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val fresh = blocks.filter { it.id !in ids0 }.map { it.id }
         if (fresh.isNotEmpty()) fxSet(5, fresh + lo.key, emptyMap(), lo)
         else fxSet(5, listOf(key, lo.key).distinct(), mapOf(key to (off to off + insLen)), lo)
+        if (wasReading) { req = null; reading = true; clearReq++ }
         tick++
     }
 
