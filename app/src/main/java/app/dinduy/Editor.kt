@@ -309,6 +309,18 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         req = Req(key, pos, ++rq)
     }
 
+    /** Kolom teks yang SAAT INI memegang fokus (bukan state, tidak memicu recompose). Diisi oleh onFocusChanged tiap kolom. */
+    var liveFocus: String? = null
+    /** Kapan (uptimeMillis) kolom yang sedang fokus dilepas dari komposisi (blok dihapus / digabung / diganti kolom lain). */
+    var focusDroppedAt = 0L
+    /**
+     * true: keyboard sedang terbuka lewat kolom lain (atau kolom itu baru saja hilang di frame ini), jadi fokus ke [key] harus
+     * langsung diminta di frame yang SAMA. Menunggu satu frame membuat sesi input sempat berhenti (keyboard menutup) lalu mulai lagi
+     * (keyboard membuka) = layar dan toolbar "berkedut" tiap blok dihapus / kursor pindah blok.
+     */
+    fun kbWarm(key: String): Boolean =
+        !fromRead && ((liveFocus != null && liveFocus != key) || android.os.SystemClock.uptimeMillis() - focusDroppedAt < 400L)
+
     fun applyReq(r: Req) {
         val v = tf[r.key] ?: return
         val rs = r.sel
