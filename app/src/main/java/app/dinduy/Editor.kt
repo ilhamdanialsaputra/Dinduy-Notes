@@ -99,6 +99,9 @@ class Fold(val cuts: IntArray, val pn: IntArray, val pl: FloatArray, val cutR: F
 /** Titik di dalam teks (kunci kolom + offset) untuk seleksi lintas blok. */
 data class Pt(val key: String, val off: Int)
 
+/** Efek visual salin (1) / potong (2) / tempel (3): kolom [keys] menggambar efeknya (rentang di [ranges], kosong = seluruh teks kolom). Hanya tampilan. */
+class SelFx(val kind: Int, val keys: List<String>, val ranges: Map<String, Pair<Int, Int>>, val tick: Long)
+
 /** Gambar yang sedang diangkat (tekan-tahan lalu geser). */
 class Mv(val bid: String, val imgId: String, val row: Boolean, val top: Float, val h: Float, val g: Float = -1f)
 
@@ -2381,6 +2384,24 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     /** Rentang terseleksi pada satu kolom teks, atau null. */
     /** Tanda tangan seleksi (berubah tiap rentang berubah) + urutan blok [key] di dalam seleksi (indeks, jumlah blok): dipakai efek visual seleksi. */
     fun selSig(): String? = selSpan()?.let { "${it.first.key}:${it.first.off}:${it.second.key}:${it.second.off}" }
+    var fx by mutableStateOf<SelFx?>(null)
+    private var fxN = 0L
+    /** Salin: efek di seleksi yang sedang ada (panggil SEBELUM seleksi dilepas). */
+    fun fxCopy() {
+        val sg = selSegs(); if (sg.isEmpty()) return
+        fx = SelFx(1, sg.map { it.first }, sg.filter { it.third > it.second }.associate { it.first to (it.second to it.third) }, ++fxN)
+    }
+    /** Potong: letupan di titik potong (panggil SEBELUM teks dihapus). */
+    fun fxCut() {
+        val (lo, _) = selSpan() ?: return
+        fx = SelFx(2, listOf(lo.key), mapOf(lo.key to (lo.off to lo.off)), ++fxN)
+    }
+    private fun fxPaste(lo: Pt, len: Int, before: Set<String>) {
+        val fresh = blocks.filter { it.id !in before }.map { it.id }
+        fx = if (fresh.isNotEmpty()) SelFx(3, fresh, emptyMap(), ++fxN)
+        else SelFx(3, listOf(lo.key), mapOf(lo.key to (lo.off to lo.off + len)), ++fxN)
+    }
+
     fun selWave(key: String): Pair<Int, Int>? {
         val (lo, hi) = selSpan() ?: return null
         val il = ordMap[lo.key] ?: return null; val ih = ordMap[hi.key] ?: return null; val ik = ordMap[key] ?: return null
@@ -3049,11 +3070,13 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     fun selPaste(s: String) {
         if (s.isEmpty()) return
         val (lo, _) = selSpan() ?: return
+        val fxBefore = blocks.mapTo(HashSet()) { it.id }
         selDelete()
         // teks yang ditempel = Markdown yang baru disalin dari catatan: pulihkan formatnya (blok maupun sebaris)
         val mine = lastMd.isNotEmpty() && s.trimEnd('\n') == lastMd
         if (mine && lastMdBlocky && !isCellKey(lo.key) && blockOfKey(lo.key)?.isMulti != true) paste(lo.key, lo.off, s, true)
         else typeAt(lo.key, lo.off, s, mine)
+        fxPaste(lo, s.trimEnd('\n').length, fxBefore)
     }
 
     /** Sisipkan teks s di posisi off (dipakai tempel dan mengetik di atas seleksi), lalu kursor di akhir teks itu. */
