@@ -124,18 +124,25 @@ object Imgs {
 
     fun peek(id: String): ImageBitmap? = cache.get(id)
 
+    // maksimal 2 dekode bersamaan: saat app baru dibuka, semua sampul meminta dekode sekaligus (lonjakan memori + GC = lag)
+    private val gate = java.util.concurrent.Semaphore(2)
+
     fun load(dir: File, id: String): ImageBitmap? {
         cache.get(id)?.let { return it }
         val f = File(dir, "$id.jpg")
         if (!f.exists()) return null
-        val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(f.path, o)
-        var s = 1
-        while (o.outWidth / (s * 2) >= 1200) s *= 2
-        val bm = BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inSampleSize = s }) ?: return null
-        val ib = bm.asImageBitmap()
-        cache.put(id, ib)
-        return ib
+        gate.acquire()
+        try {
+            cache.get(id)?.let { return it }
+            val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(f.path, o)
+            var s = 1
+            while (o.outWidth / (s * 2) >= 1200) s *= 2
+            val bm = BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inSampleSize = s }) ?: return null
+            val ib = bm.asImageBitmap()
+            cache.put(id, ib)
+            return ib
+        } finally { gate.release() }
     }
 }
 
@@ -391,7 +398,8 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             // catatan yang isinya baru diedit kembali ke atas (seperti Keep); posisi manualnya dilepas
             docs[i] = if (nn.u != old.u && nn.o == old.o && nn.o != 0L) nn.copy(o = 0L) else nn
             // catatan yang baru diedit naik ke atas: kolomnya dilepas supaya ia masuk ke kolom yang paling pendek
-            if (nn.u != old.u) clearLanes(listOf(id))
+            // di-pin / dilepas pin: kartu pindah blok, jadi kolomnya dihitung ulang (slot kosong paling awal, mulai dari kiri)
+            if (nn.u != old.u || nn.p != old.p) clearLanes(listOf(id))
             save()
         }
     }
