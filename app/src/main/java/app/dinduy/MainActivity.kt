@@ -528,25 +528,25 @@ fun SnackHost(vm: AppVM, bottom: Dp, aboveKeyboard: Boolean) {
         if (sn != null) {
             off.snapTo(0f)
             shown = sn
-            delay(4200)
+            delay(if (sn.undo != null) 3000L else 1800L)   // singkat: pesan biasa 1,8 dtk, ada Undo 3 dtk
             while (dragging) delay(100)
             if (vm.snack === sn) vm.snack = null
         }
     }
     Box(
         Modifier.fillMaxSize().then(if (aboveKeyboard) Modifier.windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars)) else Modifier)
-            .padding(bottom = bottom, start = 16.dp, end = 16.dp),
+                        .padding(bottom = bottom, start = 24.dp, end = 24.dp),
         contentAlignment = Alignment.BottomCenter
     ) {
         AnimatedVisibility(
             visible = sn != null,
-            enter = slideInVertically(spring(.7f, 400f)) { it * 2 } + fadeIn(),
-            exit = slideOutVertically(tween(250, easing = Emph)) { it * 2 } + fadeOut()
+            enter = slideInVertically(spring(.8f, 500f)) { it } + fadeIn(tween(120)),
+            exit = slideOutVertically(tween(180, easing = Emph)) { it } + fadeOut(tween(160))
         ) {
             val s = shown
             if (s != null) {
                 Row(
-                    Modifier.fillMaxWidth()
+                    Modifier
                         .graphicsLayer {
                             translationX = off.value
                             alpha = (1f - abs(off.value) / (size.width.coerceAtLeast(1f) * .9f)).coerceIn(0f, 1f)
@@ -584,15 +584,15 @@ fun SnackHost(vm: AppVM, bottom: Dp, aboveKeyboard: Boolean) {
                                 }
                             )
                         }
-                        .clip(RoundedCornerShape(24.dp)).background(pal.os).padding(start = 22.dp, end = 8.dp),
+                        .clip(RoundedCornerShape(50)).background(pal.os).padding(start = 16.dp, end = if (s.undo != null) 4.dp else 16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    T(s.msg, 15f, 600, pal.s, Modifier.weight(1f).padding(vertical = 18.dp))
+                    T(s.msg, 13f, 600, pal.s, Modifier.padding(vertical = 9.dp), maxLines = 2)
                     if (s.undo != null) {
                         Box(
-                            Modifier.clip(RoundedCornerShape(18.dp)).clickable { vm.snack = null; s.undo.invoke() }
-                                .padding(horizontal = 16.dp, vertical = 12.dp)
-                        ) { T("Undo", 15f, 900, pal.pc) }
+                            Modifier.clip(RoundedCornerShape(50)).clickable { vm.snack = null; s.undo.invoke() }
+                                .padding(horizontal = 12.dp, vertical = 7.dp)
+                        ) { T("Undo", 13f, 900, pal.pc) }
                     }
                 }
             }
