@@ -403,6 +403,12 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         }
         val df = diff(oldRt.t, nt)
         val insStr = nt.substring(df.p, df.p + df.ins)
+        // keyboard (IME) mengembalikan teks yang baru saja dipindah (angkat-jatuhkan): buang, jangan jadi ganda
+        if (key == tlGKey && df.ins > 0 && insStr == tlGWord && System.currentTimeMillis() - tlGAt < 2500) {
+            tlGKey = null
+            tf[key] = TextFieldValue(Z + oldRt.t, TextRange(old.selection.end.coerceIn(1, oldRt.t.length + 1)))
+            return
+        }
         val cell = isCellKey(key)
         // URL ditempel ke paragraf kosong -> kartu pratinjau tautan (ketikan biasa satu-satu tidak ikut, hanya tempel)
         if (df.ins >= 8 && !cell && b.ty == "p" && oldRt.t.isBlank()) {
@@ -2565,6 +2571,9 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     /** Tujuan animasi mendarat / batal (ruang konten); dibaca overlay saat [tl] sudah null. */
     var tlLand by mutableStateOf<Offset?>(null)
     private var tlFinger = 0f
+    private var tlGKey: String? = null
+    private var tlGWord = ""
+    private var tlGAt = 0L
     private var tlJob: Job? = null
 
     private fun inSel(h: Pt, span: Pair<Pt, Pt>) = !lessPt(h, span.first) && !lessPt(span.second, h)
@@ -2678,6 +2687,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         } else if (key == hi.key) {
             key = lo.key; off = lo.off + (off - hi.off)
         }
+        if (single) { tlGKey = lo.key; tlGWord = plain; tlGAt = System.currentTimeMillis() } else tlGKey = null
         commit()
         val n0 = hist.size
         val h0 = this.hi
