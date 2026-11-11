@@ -266,7 +266,7 @@ private fun PhotoBtn(open: Boolean, enabled: Boolean, onToggle: () -> Unit, onCa
     MorphSwap(open, dirOf = { _, b -> if (b) 1 else -1 }, label = "photo") { o ->
         if (!o) XBtn(enabled = enabled, onClick = onToggle) { Ic("img", it) }
         else Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
-            XBtn(on = true, i = 0, onClick = onCamera) { Ic("cam", it) }
+            XBtn(i = 0, onClick = onCamera) { Ic("cam", it) }
             XBtn(i = 1, onClick = onGallery) { Ic("img", it) }
             XBtn(i = 2, onClick = onToggle) { Ic("x", it) }
         }
