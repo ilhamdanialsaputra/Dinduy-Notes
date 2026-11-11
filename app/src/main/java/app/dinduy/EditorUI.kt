@@ -230,6 +230,41 @@ private fun roundedPoly(pts: List<Offset>, r: Float): androidx.compose.ui.graphi
     return path
 }
 
+/** Bentuk seleksi satu blok (path membulat + kotak batas), di-cache supaya tidak dibangun ulang tiap frame selama layout / rentang sama. */
+private class SelShape(val path: androidx.compose.ui.graphics.Path, val bx0: Float, val bx1: Float, val by0: Float, val by1: Float)
+private class SelShapeCache {
+    private var lay: TextLayoutResult? = null
+    private var s = -1; private var e = -1; private var d = 0f
+    private var shape: SelShape? = null
+    private var ok = false
+    inline fun get(l: TextLayoutResult, s0: Int, e0: Int, d0: Float, build: () -> SelShape?): SelShape? {
+        if (ok && lay === l && s == s0 && e == e0 && d == d0) return shape
+        val r = build()
+        lay = l; s = s0; e = e0; d = d0; shape = r; ok = true
+        return r
+    }
+}
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.buildSelShape(l: TextLayoutResult, s: Int, e: Int): SelShape? {
+    val ls = l.getLineForOffset(s); val le = l.getLineForOffset(maxOf(s, e - 1))
+    val pad = 1.dp.toPx(); val minW = 6.dp.toPx()
+    val xl = FloatArray(le - ls + 1); val xr = FloatArray(le - ls + 1); val yt = FloatArray(le - ls + 1); val yb = FloatArray(le - ls + 1)
+    for (i in ls..le) {
+        val k = i - ls
+        val xa = if (i == ls) l.getHorizontalPosition(s, true) else l.getLineLeft(i)
+        val xb = if (i == le && e < l.getLineEnd(i)) l.getHorizontalPosition(e, true) else l.getLineRight(i)
+        xl[k] = minOf(xa, xb) - pad; xr[k] = maxOf(maxOf(xa, xb) + pad, minOf(xa, xb) - pad + minW)
+        yt[k] = if (k == 0) l.getLineTop(i) else yb[k - 1]; yb[k] = l.getLineBottom(i)
+    }
+    if (le == ls && xr[0] - xl[0] < 2f) return null
+    val pts = ArrayList<Offset>()
+    for (k in xr.indices) { pts.add(Offset(xr[k], yt[k])); pts.add(Offset(xr[k], yb[k])) }
+    for (k in xl.indices.reversed()) { pts.add(Offset(xl[k], yb[k])); pts.add(Offset(xl[k], yt[k])) }
+    val clean = ArrayList<Offset>()
+    for (pt in pts) if (clean.isEmpty() || clean.last() != pt) clean.add(pt)
+    if (clean.size > 1 && clean.first() == clean.last()) clean.removeAt(clean.size - 1)
+    return SelShape(roundedPoly(clean, 8.dp.toPx()), xl.min(), xr.max(), yt.first(), yb.last())
+}
+
 /**
  * Indikator seleksi Material You. Seleksi per blok digambar sebagai SATU bentuk utuh (semua sudut membulat). Saat menyeret, bentuk
  * mengikuti seleksi SEKETIKA. Begitu berhenti (~70ms) seluruh seleksi (semua blok) "settle" bersama: aura glow berlapis mengembang lalu mereda,
@@ -238,22 +273,26 @@ private fun roundedPoly(pts: List<Offset>, r: Float): androidx.compose.ui.graphi
  * Digambar DI BELAKANG teks. Tidak menyentuh mekanisme seleksi / handle / clipboard.
  */
 @Composable
-fun Modifier.selGlow(sr: Pair<Int, Int>?, color: Color, map: (Int) -> Int, layout: () -> TextLayoutResult?, sig: Any? = null, wave: Pair<Int, Int>? = null, fresh: () -> Boolean = { true }, lifted: () -> Boolean = { false }): Modifier {
+fun Modifier.selGlow(sr: Pair<Int, Int>?, color: Color, map: (Int) -> Int, layout: () -> TextLayoutResult?, sig: () -> Any? = { null }, wave: () -> Pair<Int, Int>? = { null }, fresh: () -> Boolean = { true }, lifted: () -> Boolean = { false }): Modifier {
     val first = remember { booleanArrayOf(true) }
     val prog = remember { Animatable(0f) }
     val settle = remember { Animatable(1f) }   // 1 = efek selesai / tidak tampil
     val last = remember { arrayOfNulls<Pair<Int, Int>>(1) }
     if (sr != null) last[0] = sr
-    val wIdx = wave?.first ?: 0; val wCnt = wave?.second ?: 1
+    val cache = remember { SelShapeCache() }
     LaunchedEffect(sr != null) { if (sr != null) prog.snapTo(1f) else prog.animateTo(0f, tween(150)) }   // muncul: langsung penuh
-    LaunchedEffect(sig, sr != null) {
+    LaunchedEffect(sr != null) {
         if (sr == null) return@LaunchedEffect
-        val firstRun = first[0]; first[0] = false
-        settle.snapTo(1f)                       // sedang berubah / diseret: tanpa efek tambahan
-        if (firstRun && !fresh()) return@LaunchedEffect   // composable baru dengan seleksi lama (pindah mode / blok masuk layar): bukan perubahan seleksi, jangan "settle"
-        kotlinx.coroutines.delay(70)            // berhenti? (dibatalkan otomatis kalau seleksi berubah lagi)
-        settle.snapTo(0f)
-        settle.animateTo(1f, tween(900 + minOf(wCnt, 8) * 110, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+        var firstRun = first[0]; first[0] = false
+        // sig dibaca di sini (bukan di komposisi): seleksi bergeser tidak memicu recompose blok; hanya memulai ulang timer settle
+        androidx.compose.runtime.snapshotFlow { sig() }.collectLatest {
+            settle.snapTo(1f)                   // sedang berubah / diseret: tanpa efek tambahan
+            if (firstRun) { firstRun = false; if (!fresh()) return@collectLatest }   // composable baru dengan seleksi lama: bukan perubahan seleksi, jangan "settle"
+            kotlinx.coroutines.delay(70)        // berhenti? (dibatalkan otomatis kalau seleksi berubah lagi)
+            val wCnt = wave()?.second ?: 1
+            settle.snapTo(0f)
+            settle.animateTo(1f, tween(900 + minOf(wCnt, 8) * 110, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+        }
     }
     return drawBehind {
         val p = if (sr != null) 1f else prog.value
@@ -266,25 +305,9 @@ fun Modifier.selGlow(sr: Pair<Int, Int>?, color: Color, map: (Int) -> Int, layou
         val t = settle.value
         val lf = lifted()                       // teks sedang diangkat (TextLift): aura lembut stabil, tanpa settle
         val fx = if (lf || t >= 1f) 0f else kotlin.math.sin(t * kotlin.math.PI.toFloat())   // 0 -> 1 -> 0
-        val ls = l.getLineForOffset(s); val le = l.getLineForOffset(maxOf(s, e - 1))
-        val pad = 1.dp.toPx(); val minW = 6.dp.toPx()
-        val xl = FloatArray(le - ls + 1); val xr = FloatArray(le - ls + 1); val yt = FloatArray(le - ls + 1); val yb = FloatArray(le - ls + 1)
-        for (i in ls..le) {
-            val k = i - ls
-            val xa = if (i == ls) l.getHorizontalPosition(s, true) else l.getLineLeft(i)
-            val xb = if (i == le && e < l.getLineEnd(i)) l.getHorizontalPosition(e, true) else l.getLineRight(i)
-            xl[k] = minOf(xa, xb) - pad; xr[k] = maxOf(maxOf(xa, xb) + pad, minOf(xa, xb) - pad + minW)
-            yt[k] = if (k == 0) l.getLineTop(i) else yb[k - 1]; yb[k] = l.getLineBottom(i)
-        }
-        if (le == ls && xr[0] - xl[0] < 2f) return@drawBehind
-        val pts = ArrayList<Offset>()
-        for (k in xr.indices) { pts.add(Offset(xr[k], yt[k])); pts.add(Offset(xr[k], yb[k])) }
-        for (k in xl.indices.reversed()) { pts.add(Offset(xl[k], yb[k])); pts.add(Offset(xl[k], yt[k])) }
-        val clean = ArrayList<Offset>()
-        for (pt in pts) if (clean.isEmpty() || clean.last() != pt) clean.add(pt)
-        if (clean.size > 1 && clean.first() == clean.last()) clean.removeAt(clean.size - 1)
-        val path = roundedPoly(clean, 8.dp.toPx())
-        val bx0 = xl.min(); val bx1 = xr.max(); val by0 = yt.first(); val by1 = yb.last()
+        val shape = cache.get(l, s, e, density) { buildSelShape(l, s, e) } ?: return@drawBehind
+        val path = shape.path
+        val bx0 = shape.bx0; val bx1 = shape.bx1; val by0 = shape.by0; val by1 = shape.by1
         fun st(width: Float, join: androidx.compose.ui.graphics.StrokeJoin) = androidx.compose.ui.graphics.drawscope.Stroke(width = width, join = join)
         if (lf) {
             drawPath(path, color.copy(alpha = .12f * p), style = st(width = 20.dp.toPx(), join = androidx.compose.ui.graphics.StrokeJoin.Round))
@@ -298,6 +321,7 @@ fun Modifier.selGlow(sr: Pair<Int, Int>?, color: Color, map: (Int) -> Int, layou
         drawPath(path, color.copy(alpha = (.28f + fx * .12f) * p))
         if (fx > 0f) drawPath(path, color.copy(alpha = .55f * fx), style = st(width = 1.6.dp.toPx(), join = androidx.compose.ui.graphics.StrokeJoin.Round))
         if (t < 1f) {   // kilau ganda; berurutan antarblok (blok pertama lebih dulu)
+            val (wIdx, wCnt) = wave() ?: (0 to 1)
             val ov = 2f
             val q = ((t * (wCnt + ov) - wIdx) / ov).coerceIn(0f, 1f)
             if (q > 0f && q < 1f) {
@@ -629,12 +653,17 @@ fun TF(
     // Blok yang tidak sedang diedit TETAP berupa BasicText ringan (pola yang sama dengan sel tabel). Dulu keluar dari mode baca
     // memasang BasicTextField + VisualTransformation + justify untuk SEMUA blok sekaligus tepat saat keyboard mulai naik
     // (lemot, layar kedut, sesi IME restart = keyboard muncul dua kali). Kini hanya satu kolom yang dipasang.
-    val lite = !ed.reading && !activeS.value && (isCellKey(key) || !ed.selOn)
+    // Seleksi aktif di mode ketik: blok yang tidak aktif TETAP ringan (BasicText + selGlow). Dulu !ed.selOn memaksa SEMUA blok berganti
+    // jadi BasicTextField + VisualTransformation sekaligus saat seleksi dimulai, lalu relayout tiap geseran = lag berat saat drag ke bawah.
+    val lite = !ed.reading && !activeS.value
     if (ed.reading || lite) {
-        val sr = if (ed.selOn) ed.selRangeOf(key) else null
+        val srS = remember(key) { androidx.compose.runtime.derivedStateOf { if (ed.selOn) ed.selRangeOf(key) else null } }
+        val sr = srS.value
+        // rentang hanya memengaruhi teks bila ada stabilo (addSel); tanpa stabilo, teks TIDAK perlu disusun ulang tiap seleksi bergeser
+        val srK = if (rt.sp.any { it.k == K.M }) sr else null
         val fh = if (ed.findOn) ed.hitsOf(key) else emptyList()
         val fc = if (fh.isEmpty()) null else ed.curHit()?.takeIf { it.key == key }
-        val ann = remember(rt, pal, fs, sr, fold, fh, fc, jw, just, base.textIndent, lite, hint) {
+        val ann = remember(rt, pal, fs, srK, fold, fh, fc, jw, just, base.textIndent, lite, hint) {
             // Isi teks mode baca dibuat PERSIS seperti mode ketik: ada awalan tak terlihat Z di depan (lebar nyaris nol). Dulu mode baca tanpa Z,
             // jadi baris pertama tiap blok punya metrik beda dari mode ketik: selisih kecil tapi tetap per BLOK, jadi di catatan yang banyak blok
             // pendek tampak "rapat sendiri" tiap pindah mode. Sekarang kedua mode menyusun teks yang sama persis.
@@ -643,9 +672,9 @@ fun TF(
                 append(a0); pushStyle(androidx.compose.ui.text.SpanStyle(color = base.color.copy(alpha = .4f))); append(hint); pop()
             } else a0
             val nz = rt.t.length + 1
-            val a2 = if (sr == null && fh.isEmpty()) a else buildAnnotatedString {
+            val a2 = if (srK == null && fh.isEmpty()) a else buildAnnotatedString {
                 append(a)
-                if (sr != null) addSel(pal, rt, sr.first + 1, sr.second + 1, 1, nz)
+                if (srK != null) addSel(pal, rt, srK.first + 1, srK.second + 1, 1, nz)
                 addFind(pal, fh, fc, 1, nz)
             }
             if (fold == null) (if (just && jw > 0) justifySpans(a2, base2, jw, tm, dn) else a2)
@@ -657,7 +686,7 @@ fun TF(
         // BasicText, bukan material3 Text: Text menggabungkan gaya tema (LocalTextStyle) ke gaya kita, BasicTextField (mode ketik) tidak.
         androidx.compose.foundation.text.BasicText(
             ann,
-            modifier.selGlow(sr, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }, if (sr != null) ed.selSig() else null, if (sr != null) ed.selWave(key) else null, { ed.selFresh() }, { ed.tl != null }).fxGlow(ed.fx?.takeIf { key in it.keys }, key, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }).heightIn(min = base.lineHeight.value.dp)
+            modifier.selGlow(sr, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }, { ed.selSig() }, { ed.selWave(key) }, { ed.selFresh() }, { ed.tl != null }).fxGlow(ed.fx?.takeIf { key in it.keys }, key, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }).heightIn(min = base.lineHeight.value.dp)
                 .onGloballyPositioned { c ->
                     val cc = ed.contentCoords
                     if (cc != null && cc.isAttached && c.isAttached) {
@@ -666,7 +695,7 @@ fun TF(
                     }
                 }
                 .pointerInput(rt, ed.selOn, lite) {
-                    if (ed.selOn && !lite) detectTapGestures { ed.clearSel() }
+                    if (ed.selOn && (!lite || !isCellKey(key))) detectTapGestures { ed.clearSel() }   // blok biasa: ketuk = batal seleksi (perilaku sama seperti saat dulu berupa field)
                     else detectTapGestures(
                         // mode baca: ketuk sekali di teks mana pun = langsung mengedit di situ (ketuk tautan = buka tautan)
                         // sel tabel ringan (mode ketik): ketuk = pasang kolom teks sungguhan di sel itu dan fokus ke sana
@@ -726,16 +755,19 @@ fun TF(
         }
         val kbc = LocalSoftwareKeyboardController.current
         // gulir ke kursor kini ditangani NoteScreen (ed.cursorScrollDelta): langsung ikut keyboard tiap frame, tanpa delay / animasi tambahan
-        val sr = if (ed.selOn) ed.selRangeOf(key) else null
+        val srS = remember(key) { androidx.compose.runtime.derivedStateOf { if (ed.selOn) ed.selRangeOf(key) else null } }
+        val sr = srS.value
+        // rentang hanya memengaruhi teks bila ada stabilo (addSel); tanpa stabilo, teks TIDAK perlu disusun ulang tiap seleksi bergeser
+        val srK = if (rt.sp.any { it.k == K.M }) sr else null
         val fh = if (ed.findOn) ed.hitsOf(key) else emptyList()
         val fc = if (fh.isEmpty()) null else ed.curHit()?.takeIf { it.key == key }
-        val vt = remember(rt, pal, fs, fold, sr, fh, fc, jw, just, base.textIndent) {
+        val vt = remember(rt, pal, fs, fold, srK, fh, fc, jw, just, base.textIndent) {
             VisualTransformation { t ->
                 val a0 = styled(rt, t.text, 1, pal, fs)
-                val a = if (sr == null && fh.isEmpty()) a0 else buildAnnotatedString {
+                val a = if (srK == null && fh.isEmpty()) a0 else buildAnnotatedString {
                     append(a0)
-                    if (sr != null) {
-                        addSel(pal, rt, sr.first + 1, sr.second + 1, 1, t.text.length)
+                    if (srK != null) {
+                        addSel(pal, rt, srK.first + 1, srK.second + 1, 1, t.text.length)
                     }
                     addFind(pal, fh, fc, 1, t.text.length)
                 }
@@ -768,7 +800,7 @@ fun TF(
         ) {
             BasicTextField(
                 value = v, onValueChange = { ed.onText(key, it) },
-                modifier = modifier.selGlow(sr, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }, if (sr != null) ed.selSig() else null, if (sr != null) ed.selWave(key) else null, { ed.selFresh() }, { ed.tl != null }).fxGlow(ed.fx?.takeIf { key in it.keys }, key, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }).focusProperties { canFocus = !ed.ink.on }.focusRequester(fr).trackPos(ed, key)
+                modifier = modifier.selGlow(sr, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }, { ed.selSig() }, { ed.selWave(key) }, { ed.selFresh() }, { ed.tl != null }).fxGlow(ed.fx?.takeIf { key in it.keys }, key, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }).focusProperties { canFocus = !ed.ink.on }.focusRequester(fr).trackPos(ed, key)
                     .then(
                         // sheet bawah aktif => field readOnly (kursor bawaan tidak digambar), jadi kursor digambar manual agar tetap terlihat
                         if (foc && ed.sheet != 0) Modifier.drawWithContent {
