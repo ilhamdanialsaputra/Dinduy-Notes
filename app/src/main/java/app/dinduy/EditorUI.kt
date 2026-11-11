@@ -3035,7 +3035,9 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                             onStart = { pos -> !ed.ink.on && !ed.ink.busy && ed.mv == null && (ed.tlBegin(pos, pos.y - scroll.value) || ed.selLong(pos, pos.y - scroll.value)) },
                             onMove = { pos, _ -> if (ed.tl != null) ed.tlMove(pos, pos.y - scroll.value) else ed.selMove(pos, pos.y - scroll.value) },
                             onEnd = { ok -> if (ed.tl != null) ed.tlEnd(ok) else ed.selEnd() },
-                            lead = 70L
+                            lead = 70L,
+                            // tekan-tahan di area judul = milik judul (seleksi judul sendiri), isi catatan jangan ikut terseleksi / menggulir
+                            accept = { pos -> ed.titleRect?.contains(pos) != true }
                         )
                         .transcriptReveal(ed, trFx, pal)
                         .drawWithContent { inkContent(ed.ink) }
@@ -3068,15 +3070,34 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                                 }
                             }
                         }
-                        Box(Modifier.padding(top = 48.dp + coverInset, bottom = 20.dp)) {
+                        Box(
+                            Modifier.onGloballyPositioned { c ->
+                                val cc = ed.contentCoords
+                                ed.titleRect = if (cc != null && cc.isAttached && c.isAttached) cc.localBoundingBoxOf(c) else null
+                            }.padding(top = 48.dp + coverInset, bottom = 20.dp)
+                        ) {
+                            // judul memakai efek seleksi yang sama dengan isi catatan (selGlow); sorotan bawaan field disembunyikan, pegangan tetap
+                            var tfv by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(ed.title)) }
+                            if (tfv.text != ed.title) tfv = androidx.compose.ui.text.input.TextFieldValue(ed.title, TextRange(minOf(tfv.selection.end, ed.title.length)))
+                            var tLay by remember { mutableStateOf<TextLayoutResult?>(null) }
+                            val tSel = tfv.selection.takeIf { !it.collapsed && ed.titleFocus && !ed.reading }?.let { it.min to it.max }
+                            val tCols = androidx.compose.foundation.text.selection.LocalTextSelectionColors.current
+                            CompositionLocalProvider(
+                                androidx.compose.foundation.text.selection.LocalTextSelectionColors provides
+                                    androidx.compose.foundation.text.selection.TextSelectionColors(tCols.handleColor, Color.Transparent)
+                            ) {
                             if (ed.title.isEmpty()) {
                                 Box(Modifier.fillMaxWidth(), tPh) {
                                     T("Title", 46f, if (tBold) 1000 else 400, pal.osv, alpha = .5f, ls = -.02f)
                                 }
                             }
                             androidx.compose.foundation.text.BasicTextField(
-                                value = ed.title,
-                                onValueChange = { v -> val nl = v.contains('\n'); ed.titleChanged(v); if (nl) firstText() },
+                                value = tfv,
+                                onValueChange = { v ->
+                                    tfv = v
+                                    if (v.text != ed.title) { val nl = v.text.contains('\n'); ed.titleChanged(v.text); if (nl) firstText() }
+                                },
+                                onTextLayout = { tLay = it },
                                 readOnly = ed.reading,
                                 visualTransformation = titleVt,
                                 textStyle = TextStyle(
@@ -3088,7 +3109,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                                 cursorBrush = SolidColor(pal.p),
                                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
                                 keyboardActions = KeyboardActions(onNext = { firstText() }),
-                                modifier = Modifier.fillMaxWidth().focusProperties { canFocus = !ed.ink.on }.focusRequester(titleFr)
+                                modifier = Modifier.fillMaxWidth().selGlow(tSel, pal.p, { it }, { tLay }, { tfv.selection }).focusProperties { canFocus = !ed.ink.on }.focusRequester(titleFr)
                                     .onFocusChanged { ed.titleFocus = it.isFocused; if (it.isFocused) { ed.selImg = null; ed.selObj = null } }
                                     .then(
                                         if (ed.reading) Modifier.wordTap(
@@ -3097,6 +3118,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                                         ) else Modifier
                                     )
                             )
+                            }
                         }
                         for ((sb, splan) in ed.slotsOf(plans)) {
                             key(sb.id) {
