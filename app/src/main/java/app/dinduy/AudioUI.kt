@@ -313,7 +313,9 @@ fun AudioCard(vm: AppVM, noteId: String, a: Aud, idx: Int, total: Int, title: St
     val pr by src.collectIsPressedAsState()
     val ps by animateFloatAsState(if (pr) .92f else 1f, spring(.5f, 600f), label = "ps")
     // kartu suara bercorak warna utama: beda dari gambar (netral) dan dari kertas, jadi tidak menyatu
-    val cardBg = androidx.compose.ui.graphics.lerp(pal.s, pal.p, if (pal.dark) .20f else .14f)
+    val cardBg = if (pal.dark)   // gelap: sedikit lebih terang dari kertas, saturasi sangat rendah (condong ke warna teks, hint tipis warna utama)
+        androidx.compose.ui.graphics.lerp(androidx.compose.ui.graphics.lerp(pal.s, pal.os, .09f), pal.p, .05f)
+    else androidx.compose.ui.graphics.lerp(pal.s, pal.p, .14f)
     val btnBg = androidx.compose.ui.graphics.lerp(cardBg, pal.os, .10f)
     val btnTr = androidx.compose.ui.graphics.lerp(cardBg, pal.p, .30f)
 
