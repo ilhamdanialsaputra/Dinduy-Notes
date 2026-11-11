@@ -111,6 +111,9 @@ class MergeT(val bid: String, val imgId: String, val after: Boolean)
 data class FHit(val key: String, val s: Int, val e: Int)
 class Snap(val bl: List<Blk>, val key: String?, val sel: TextRange)
 
+/** Teks terseleksi yang sedang diangkat (tekan-tahan di atas seleksi): potongan awal untuk pratinjau, jumlah baris, jumlah huruf. */
+class TLift(val text: String, val lines: Int, val chars: Int)
+
 fun keyBlock(k: String) = k.substringBefore(':')
 
 /** Skala terkecil isi kutipan (huruf, label, bantalan). */
@@ -2546,6 +2549,168 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
                 delay(16)
             }
         }
+    }
+
+    // ---------- angkat & jatuhkan teks terseleksi ----------
+    /** Teks yang sedang terangkat (null = tidak ada). */
+    var tl by mutableStateOf<TLift?>(null)
+    /** Posisi jari di ruang konten (px). */
+    var tlX by mutableStateOf(0f)
+    var tlY by mutableStateOf(0f)
+    /** Titik jatuh saat ini; null = bukan sasaran sah (foto, atau di dalam seleksi itu sendiri). */
+    var tlDrop by mutableStateOf<Pt?>(null)
+    /** Tujuan animasi mendarat / batal (ruang konten); dibaca overlay saat [tl] sudah null. */
+    var tlLand by mutableStateOf<Offset?>(null)
+    private var tlFinger = 0f
+    private var tlJob: Job? = null
+
+    private fun inSel(h: Pt, span: Pair<Pt, Pt>) = !lessPt(h, span.first) && !lessPt(span.second, h)
+
+    /** Apakah titik [p] (ruang konten) tepat di atas huruf yang sedang terseleksi. */
+    fun tlHit(p: Offset): Boolean {
+        if (!selOn || selDrag) return false
+        val span = selSpan() ?: return false
+        if (span.first == span.second) return false
+        if (ipos.values.any { it.contains(p) }) return false
+        val h = hitPt(p) ?: return false
+        val r = selRangeOf(h.key) ?: return false
+        if (h.off < r.first || h.off > r.second) return false
+        val lay = lays[h.key] ?: return false
+        val pos = kpos[h.key] ?: return false
+        val lp = p - pos
+        if (lp.y < 0f || lp.y > lay.size.height) return false
+        val ln = lay.getLineForVerticalPosition(lp.y)
+        val slack = 14f * dens
+        return lp.x >= lay.getLineLeft(ln) - slack && lp.x <= lay.getLineRight(ln) + slack
+    }
+
+    /** Tekan-tahan di atas seleksi: angkat. False bila bukan di atas seleksi (biarkan seleksi biasa yang bereaksi). */
+    fun tlBegin(p: Offset, fingerY: Float): Boolean {
+        if (tl != null || !tlHit(p)) return false
+        val txt = selText()
+        if (txt.isEmpty()) return false
+        val flat = txt.replace(Regex("\\s*\n+\\s*"), " · ").trim()
+        tl = TLift(if (flat.length > 120) flat.substring(0, 120).trimEnd() + "…" else flat, txt.count { it == '\n' } + 1, txt.length)
+        tlX = p.x; tlY = p.y; tlFinger = fingerY
+        tlLand = null; tlDrop = null
+        tlTarget(p)
+        tlAuto()
+        buzz?.invoke()
+        return true
+    }
+
+    fun tlMove(p: Offset, fingerY: Float) {
+        if (tl == null) return
+        tlX = p.x; tlY = p.y; tlFinger = fingerY
+        tlTarget(p)
+    }
+
+    private fun tlTarget(p: Offset) {
+        if (ipos.values.any { it.contains(p) }) { tlDrop = null; return }   // foto bukan sasaran
+        val h = hitPt(p)
+        val span = selSpan()
+        tlDrop = if (h == null || span == null || inSel(h, span)) null else h
+    }
+
+    private fun tlAuto() {
+        tlJob?.cancel()
+        tlJob = scope.launch {
+            while (tl != null) {
+                val sc = scroll
+                if (sc != null && viewH > 0f) {
+                    val edge = 80f * dens
+                    val v = when {
+                        tlFinger < edge -> -(edge - tlFinger) / edge
+                        tlFinger > viewH - edge -> (tlFinger - (viewH - edge)) / edge
+                        else -> 0f
+                    }
+                    if (v != 0f) {
+                        val got = sc.scrollBy(v.coerceIn(-1f, 1f) * 18f * dens)
+                        if (got != 0f) { tlY += got; tlTarget(Offset(tlX, tlY)) }
+                    }
+                }
+                delay(16)
+            }
+        }
+    }
+
+    /** Jari dilepas ([ok] false = gestur batal). Di titik sah: teks dipindah; selain itu kembali ke asalnya. */
+    fun tlEnd(ok: Boolean) {
+        if (tl == null) return
+        tlJob?.cancel()
+        val to = tlDrop
+        val span = selSpan()
+        val valid = ok && to != null && span != null && !inSel(to, span)
+        val land = if (valid) to?.let { ptRect(it) } else span?.first?.let { ptRect(it) }
+        tlLand = land?.let { Offset(it.left, it.center.y) }
+        tl = null; tlDrop = null
+        buzz?.invoke()
+        if (valid && to != null && span != null) tlApply(span, to)
+    }
+
+    /** Pindahkan isi seleksi [span] ke [to]: format ikut (tebal, miring, dst; blok utuh bila lintas blok), satu langkah undo. */
+    private fun tlApply(span: Pair<Pt, Pt>, to: Pt) {
+        val (lo, hi) = span
+        val single = lo.key == hi.key
+        // muatan diambil SEBELUM seleksi dihapus
+        val rt: Rt? = if (single) rtOf(lo.key).slice(lo.off, hi.off) else null
+        val keepMd = lastMd
+        val keepBlocky = lastMdBlocky
+        val md = if (single) "" else selMd()
+        val blocky = !single && lastMdBlocky
+        val plain = selText()
+        lastMd = keepMd; lastMdBlocky = keepBlocky
+        val segs = selSegs()
+        val whole = single && lo.off <= 0 && hi.off >= rtOf(lo.key).t.length
+        val srcId = if (single && !isCellKey(lo.key)) keyBlock(lo.key) else null
+        // letak sasaran sesudah seleksi dihapus
+        var key = to.key
+        var off = to.off
+        if (single) {
+            if (key == lo.key && off > hi.off) off -= (hi.off - lo.off)
+        } else if (isCellKey(lo.key) || isCellKey(hi.key)) {
+            for ((k, s, e) in segs) if (k == key && e > s && off >= e) off -= (e - s)
+        } else if (key == hi.key) {
+            key = lo.key; off = lo.off + (off - hi.off)
+        }
+        commit()
+        val n0 = hist.size
+        val h0 = hi
+        selDelete()
+        val tb = blockOfKey(key) ?: return
+        val cell = isCellKey(key)
+        if (rt != null) {
+            val t0 = rt.t
+            if (t0.indexOf('\n') >= 0 && !tb.isMulti && !cell) typeAt(key, off, t0, false)
+            else {
+                val flat = if (cell && t0.indexOf('\n') >= 0) Rt(t0.replace('\n', ' '), rt.sp) else rt
+                val ins = if (tb.ty == "code") Rt(flat.t) else flat
+                val cur = rtOf(key)
+                val o = off.coerceIn(0, cur.t.length)
+                val nr = cur.slice(0, o) + ins + cur.slice(o, cur.t.length)
+                putRt(key, nr)
+                tf[key] = TextFieldValue(Z + nr.t, TextRange(o + ins.t.length + 1))
+                dirty(); commit()
+                focusAt(key, o + ins.t.length)
+            }
+        } else {
+            val plainTarget = cell || tb.isMulti
+            if (plainTarget) typeAt(key, off, plain, false)
+            else if (blocky) paste(key, off, md, true)
+            else typeAt(key, off, md, true)
+        }
+        // paragraf asal yang dipindah utuh dan kini kosong ikut dibuang (tidak meninggalkan baris bolong)
+        if (whole && srcId != null && srcId != keyBlock(key)) {
+            val sb = blocks.firstOrNull { it.id == srcId }
+            if (sb != null && isEmptyP(sb) && sb.ik.isEmpty() && blocks.size > 1) {
+                blocks = blocks.filter { it.id != srcId }
+                tf.remove(srcId)
+                afterStructural()
+            }
+        }
+        // hapus + sisip = SATU langkah undo
+        while (hi > h0 + 1 && hist.size >= n0) { hist.removeAt(hi - 1); hi-- }
+        tick++
     }
 
     // ---------- keyboard: pilih semua, panah, shift+panah (panel "pengeditan teks" Gboard / keyboard fisik) ----------
