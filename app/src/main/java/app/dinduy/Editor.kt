@@ -209,6 +209,17 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     /** Sheet ditutup pengguna: keyboard dimunculkan lagi di tempat yang sama. Dibaca DocSheet saat animasi tutup dimulai. */
     var kbBack = false
     var kbShow: (() -> Unit)? = null
+    /** Blok yang fokusnya ditahan selama sheet terbuka. Jenis blok berubah (heading / plain text) = TextField dibuat ulang; meminta fokus
+     *  saat sheet masih terbuka memunculkan keyboard di balik sheet (layar kedut + macet). Fokus baru dikembalikan saat sheet ditutup. */
+    var deferKey: String? = null
+    /** Kembalikan fokus yang ditahan (kursor / seleksi sudah dipasang oleh applyReq). Mengembalikan true bila ada yang dikembalikan. */
+    fun resumeFocus(): Boolean {
+        val k = deferKey ?: return false
+        deferKey = null
+        if (idx(k) < 0) return false
+        req = Req(k, 0, ++rq, tf[k]?.selection)
+        return true
+    }
     /** Tutup sheet. [restoreKb] true: bila sheet tadinya menggantikan keyboard, keyboard muncul lagi dan area catatan tidak bergerak sama sekali. */
     fun closeSheet(restoreKb: Boolean = true) {
         if (sheet == 0) return
