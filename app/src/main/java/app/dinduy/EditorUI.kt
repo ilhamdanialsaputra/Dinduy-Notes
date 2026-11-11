@@ -394,16 +394,22 @@ fun TF(
     var jw by remember { mutableStateOf(0) }       // lebar kolom teks (px), dipakai rata kiri-kanan
     // Sel tabel yang tidak sedang diedit digambar sebagai Text ringan (sama seperti mode baca); BasicTextField hanya dipasang di sel aktif.
     val activeS = remember(key) { androidx.compose.runtime.derivedStateOf { ed.focus == key || ed.req?.key == key } }
-    val lite = !ed.reading && isCellKey(key) && !activeS.value
+    // Blok yang tidak sedang diedit TETAP berupa BasicText ringan (pola yang sama dengan sel tabel). Dulu keluar dari mode baca
+    // memasang BasicTextField + VisualTransformation + justify untuk SEMUA blok sekaligus tepat saat keyboard mulai naik
+    // (lemot, layar kedut, sesi IME restart = keyboard muncul dua kali). Kini hanya satu kolom yang dipasang.
+    val lite = !ed.reading && !activeS.value && (isCellKey(key) || !ed.selOn)
     if (ed.reading || lite) {
         val sr = if (ed.selOn) ed.selRangeOf(key) else null
         val fh = if (ed.findOn) ed.hitsOf(key) else emptyList()
         val fc = if (fh.isEmpty()) null else ed.curHit()?.takeIf { it.key == key }
-        val ann = remember(rt, pal, fs, sr, fold, fh, fc, jw, just, base.textIndent) {
+        val ann = remember(rt, pal, fs, sr, fold, fh, fc, jw, just, base.textIndent, lite, hint) {
             // Isi teks mode baca dibuat PERSIS seperti mode ketik: ada awalan tak terlihat Z di depan (lebar nyaris nol). Dulu mode baca tanpa Z,
             // jadi baris pertama tiap blok punya metrik beda dari mode ketik: selisih kecil tapi tetap per BLOK, jadi di catatan yang banyak blok
             // pendek tampak "rapat sendiri" tiap pindah mode. Sekarang kedua mode menyusun teks yang sama persis.
-            val a = styled(rt, Z + rt.t, 1, pal, fs)
+            val a0 = styled(rt, Z + rt.t, 1, pal, fs)
+            val a = if (lite && rt.t.isEmpty() && hint != null) buildAnnotatedString {
+                append(a0); pushStyle(androidx.compose.ui.text.SpanStyle(color = base.color.copy(alpha = .4f))); append(hint); pop()
+            } else a0
             val nz = rt.t.length + 1
             val a2 = if (sr == null && fh.isEmpty()) a else buildAnnotatedString {
                 append(a)
@@ -438,6 +444,7 @@ fun TF(
                             val l = lay ?: return@detectTapGestures
                             val o0 = l.getOffsetForPosition(pos)
                             val o = ((fold?.t2o(o0, 1) ?: o0) - 1).coerceIn(0, rt.t.length)
+                            if (lite && !isCellKey(key)) { ed.focusAt(key, o); return@detectTapGestures }
                             if (lite) {
                                 val bk = keyBlock(key)
                                 val inBlk = ed.selObj == bk || ed.focus?.let { keyBlock(it) } == bk
@@ -464,7 +471,14 @@ fun TF(
                     // Posisi kursor dipasang SEBELUM fokus diminta: sesi input (keyboard) langsung mulai dengan keadaan final.
                     // Dulu fokus diminta dulu lalu seleksi diubah sesudahnya, jadi keyboard menerima keadaan baru kedua kali = tampak "refresh" dua kali.
                     ed.applyReq(r)
-                    try { fr.requestFocus() } catch (e: Exception) { }
+                    // tunggu satu frame: fokus sebelum field terpasang membuat sesi IME dimulai ulang (keyboard muncul dua kali)
+                    androidx.compose.runtime.withFrameNanos { }
+                    if (!foc) {
+                        try { fr.requestFocus() } catch (e: Exception) {
+                            androidx.compose.runtime.withFrameNanos { }
+                            try { fr.requestFocus() } catch (e2: Exception) { }
+                        }
+                    }
                 }
             }
         }
