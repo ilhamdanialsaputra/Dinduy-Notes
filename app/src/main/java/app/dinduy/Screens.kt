@@ -999,9 +999,13 @@ private fun TwoColLayout(
                 val hh = intArrayOf(0, 0)
                 for (k in 0 until n) if (saved[k] >= 0) hh[saved[k]] += items[k].second.height + gap
                 val lane = IntArray(n)
+                val cn = intArrayOf(0, 0)
+                for (k in 0 until n) if (saved[k] >= 0) cn[saved[k]]++
                 for (k in 0 until n) {
                     if (saved[k] >= 0) { lane[k] = saved[k]; continue }
-                    val v = if (hh[0] <= hh[1]) 0 else 1
+                    // seri tinggi (atau tinggi belum terukur = 0): kolom dengan kartu lebih sedikit, bukan selalu kiri
+                    val v = if (hh[0] < hh[1]) 0 else if (hh[0] > hh[1]) 1 else if (cn[0] <= cn[1]) 0 else 1
+                    cn[v]++
                     lane[k] = v
                     hh[v] += items[k].second.height + gap
                     fresh[items[k].first] = v
