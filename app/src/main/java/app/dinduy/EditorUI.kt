@@ -238,7 +238,8 @@ private fun roundedPoly(pts: List<Offset>, r: Float): androidx.compose.ui.graphi
  * Digambar DI BELAKANG teks. Tidak menyentuh mekanisme seleksi / handle / clipboard.
  */
 @Composable
-fun Modifier.selGlow(sr: Pair<Int, Int>?, color: Color, map: (Int) -> Int, layout: () -> TextLayoutResult?, sig: Any? = null, wave: Pair<Int, Int>? = null): Modifier {
+fun Modifier.selGlow(sr: Pair<Int, Int>?, color: Color, map: (Int) -> Int, layout: () -> TextLayoutResult?, sig: Any? = null, wave: Pair<Int, Int>? = null, fresh: () -> Boolean = { true }, lifted: () -> Boolean = { false }): Modifier {
+    val first = remember { booleanArrayOf(true) }
     val prog = remember { Animatable(0f) }
     val settle = remember { Animatable(1f) }   // 1 = efek selesai / tidak tampil
     val last = remember { arrayOfNulls<Pair<Int, Int>>(1) }
@@ -247,7 +248,9 @@ fun Modifier.selGlow(sr: Pair<Int, Int>?, color: Color, map: (Int) -> Int, layou
     LaunchedEffect(sr != null) { if (sr != null) prog.snapTo(1f) else prog.animateTo(0f, tween(150)) }   // muncul: langsung penuh
     LaunchedEffect(sig, sr != null) {
         if (sr == null) return@LaunchedEffect
+        val firstRun = first[0]; first[0] = false
         settle.snapTo(1f)                       // sedang berubah / diseret: tanpa efek tambahan
+        if (firstRun && !fresh()) return@LaunchedEffect   // composable baru dengan seleksi lama (pindah mode / blok masuk layar): bukan perubahan seleksi, jangan "settle"
         kotlinx.coroutines.delay(70)            // berhenti? (dibatalkan otomatis kalau seleksi berubah lagi)
         settle.snapTo(0f)
         settle.animateTo(1f, tween(900 + minOf(wCnt, 8) * 110, easing = androidx.compose.animation.core.FastOutSlowInEasing))
@@ -261,7 +264,8 @@ fun Modifier.selGlow(sr: Pair<Int, Int>?, color: Color, map: (Int) -> Int, layou
         val s = map(r.first + 1).coerceIn(0, n); val e = map(r.second + 1).coerceIn(0, n)
         if (e <= s) return@drawBehind
         val t = settle.value
-        val fx = if (t >= 1f) 0f else kotlin.math.sin(t * kotlin.math.PI.toFloat())   // 0 -> 1 -> 0
+        val lf = lifted()                       // teks sedang diangkat (TextLift): aura lembut stabil, tanpa settle
+        val fx = if (lf || t >= 1f) 0f else kotlin.math.sin(t * kotlin.math.PI.toFloat())   // 0 -> 1 -> 0
         val ls = l.getLineForOffset(s); val le = l.getLineForOffset(maxOf(s, e - 1))
         val pad = 1.dp.toPx(); val minW = 6.dp.toPx()
         val xl = FloatArray(le - ls + 1); val xr = FloatArray(le - ls + 1); val yt = FloatArray(le - ls + 1); val yb = FloatArray(le - ls + 1)
@@ -282,6 +286,11 @@ fun Modifier.selGlow(sr: Pair<Int, Int>?, color: Color, map: (Int) -> Int, layou
         val path = roundedPoly(clean, 8.dp.toPx())
         val bx0 = xl.min(); val bx1 = xr.max(); val by0 = yt.first(); val by1 = yb.last()
         fun st(width: Float, join: androidx.compose.ui.graphics.StrokeJoin) = androidx.compose.ui.graphics.drawscope.Stroke(width = width, join = join)
+        if (lf) {
+            drawPath(path, color.copy(alpha = .12f * p), style = st(width = 20.dp.toPx(), join = androidx.compose.ui.graphics.StrokeJoin.Round))
+            drawPath(path, color.copy(alpha = .20f * p), style = st(width = 10.dp.toPx(), join = androidx.compose.ui.graphics.StrokeJoin.Round))
+            drawPath(path, color.copy(alpha = .45f * p), style = st(width = 1.6.dp.toPx(), join = androidx.compose.ui.graphics.StrokeJoin.Round))
+        }
         if (fx > 0f) {   // aura berlapis (luar lebar & samar, dalam lebih pekat) + garis tepi bercahaya
             drawPath(path, color.copy(alpha = .10f * fx), style = st(width = 22.dp.toPx() * fx, join = androidx.compose.ui.graphics.StrokeJoin.Round))
             drawPath(path, color.copy(alpha = .20f * fx), style = st(width = 11.dp.toPx() * fx, join = androidx.compose.ui.graphics.StrokeJoin.Round))
@@ -319,6 +328,9 @@ fun Modifier.selGlow(sr: Pair<Int, Int>?, color: Color, map: (Int) -> Int, layou
  * Potong: letupan cahaya (cincin + percikan) di titik potong. Tempel: teks yang masuk menyala lalu mereda dengan kilau ganda.
  * Antarblok berurutan (blok pertama lebih dulu). Digambar DI BELAKANG teks.
  */
+/** Apakah kolom [key] menggambar glow tujuan (kind 5: kolom asal yang bukan tujuan hanya kebagian letupan). */
+private fun fxDest(f: SelFx, key: String) = if (f.kind != 5) true else if (f.ranges.isNotEmpty()) key in f.ranges else key != f.origin?.key
+
 @Composable
 fun Modifier.fxGlow(fx: SelFx?, key: String, color: Color, map: (Int) -> Int, layout: () -> TextLayoutResult?): Modifier {
     val t = remember { Animatable(1f) }
@@ -326,9 +338,12 @@ fun Modifier.fxGlow(fx: SelFx?, key: String, color: Color, map: (Int) -> Int, la
     if (fx != null) cur[0] = fx
     LaunchedEffect(fx?.tick) {
         val f = fx ?: return@LaunchedEffect
+        val el = android.os.SystemClock.uptimeMillis() - f.at
+        if (el > 350L) return@LaunchedEffect   // sekali-putar: composable yang terpasang belakangan (pindah mode / kursor) tidak memutar efek lama
         t.snapTo(0f)
-        kotlinx.coroutines.delay((f.keys.indexOf(key).coerceAtLeast(0).coerceAtMost(10)) * 70L)
-        t.animateTo(1f, tween(if (f.kind == 2) 650 else 900, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+        val stag = if (f.kind == 5 && f.origin?.key == key && !fxDest(f, key)) 0 else f.keys.indexOf(key).coerceAtLeast(0).coerceAtMost(10) * 70
+        if (stag - el > 0) kotlinx.coroutines.delay(stag - el)
+        t.animateTo(1f, tween(if (f.kind == 2) 650 else if (f.kind == 4 || f.kind == 6) 700 else 900, easing = androidx.compose.animation.core.FastOutSlowInEasing))
     }
     return drawBehind {
         val f = cur[0] ?: return@drawBehind
@@ -339,21 +354,23 @@ fun Modifier.fxGlow(fx: SelFx?, key: String, color: Color, map: (Int) -> Int, la
         val rg = f.ranges[key]
         val env = kotlin.math.sin(tt * kotlin.math.PI.toFloat())
         fun st(w: Float) = androidx.compose.ui.graphics.drawscope.Stroke(width = w, join = androidx.compose.ui.graphics.StrokeJoin.Round)
-        if (f.kind == 2) {   // potong: letupan di titik potong
-            val o = map((rg?.first ?: 0) + 1).coerceIn(0, n)
+        fun burst(off0: Int, sc: Float) {   // letupan: cincin + percikan di titik [off0]
+            val o = map(off0 + 1).coerceIn(0, n)
             val cr = l.getCursorRect(o)
             val c = Offset(cr.left, (cr.top + cr.bottom) / 2f)
             val k = 1f - (1f - tt) * (1f - tt)                      // ease-out
             val a = 1f - tt
-            drawCircle(color.copy(alpha = .30f * a), radius = 8.dp.toPx() + 54.dp.toPx() * k, center = c)
-            drawCircle(color.copy(alpha = .70f * a), radius = 6.dp.toPx() + 38.dp.toPx() * k, center = c, style = st(2.dp.toPx() * a + .5f))
+            drawCircle(color.copy(alpha = .30f * a), radius = (8.dp.toPx() + 54.dp.toPx() * k) * sc, center = c)
+            drawCircle(color.copy(alpha = .70f * a), radius = (6.dp.toPx() + 38.dp.toPx() * k) * sc, center = c, style = st(2.dp.toPx() * a + .5f))
             for (i in 0 until 8) {   // percikan
                 val ang = (i * 45f + 18f) * (kotlin.math.PI.toFloat() / 180f)
-                val d = 10.dp.toPx() + 44.dp.toPx() * k
-                drawCircle(color.copy(alpha = .85f * a), radius = 2.6.dp.toPx() * (1f - tt * .7f), center = Offset(c.x + kotlin.math.cos(ang) * d, c.y + kotlin.math.sin(ang) * d))
+                val d = (10.dp.toPx() + 44.dp.toPx() * k) * sc
+                drawCircle(color.copy(alpha = .85f * a), radius = 2.6.dp.toPx() * sc * (1f - tt * .7f), center = Offset(c.x + kotlin.math.cos(ang) * d, c.y + kotlin.math.sin(ang) * d))
             }
-            return@drawBehind
         }
+        if (f.kind == 2) { burst(rg?.first ?: 0, 1f); return@drawBehind }   // potong: letupan di titik potong
+        if (f.kind == 5 && f.origin?.key == key) burst(f.origin?.off ?: 0, .55f)   // jatuh: letupan kecil di asal
+        if (f.kind == 5 && !fxDest(f, key)) return@drawBehind
         // salin / tempel: bentuk dari rentang (null = seluruh teks kolom)
         val s = if (rg != null) map(rg.first + 1).coerceIn(0, n) else map(1).coerceIn(0, n)
         val e = if (rg != null) map(rg.second + 1).coerceIn(0, n) else n
@@ -402,7 +419,24 @@ fun Modifier.fxGlow(fx: SelFx?, key: String, color: Color, map: (Int) -> Int, la
             }
             sweep((tt * 1.8f).coerceIn(0f, 1f), .9f, 1f)
             sweep((tt * 1.8f - .25f).coerceIn(0f, 1f), .4f, 1.7f)
-        } else {   // tempel: menyala lalu mereda
+        } else if (f.kind == 4) {   // angkat: bentuk "terlepas" (aura mengembang + pop kecil + percikan naik); aura stabil lanjut dari selGlow
+            val k = 1f - (1f - tt) * (1f - tt)
+            val a = 1f - tt
+            scale(1f + .03f * kotlin.math.sin(minOf(1f, tt * 2.2f) * kotlin.math.PI.toFloat()), Offset((bx0 + bx1) / 2f, (by0 + by1) / 2f)) {
+                drawPath(path, color.copy(alpha = .24f * a), style = st(8.dp.toPx() + 24.dp.toPx() * k))
+                drawPath(path, color.copy(alpha = .22f * a), style = st(4.dp.toPx() + 8.dp.toPx() * k))
+                drawPath(path, color.copy(alpha = .65f * a), style = st(1.8.dp.toPx()))
+            }
+            for (i in 0 until 6) {
+                val fx0 = bx0 + (bx1 - bx0) * (i + .5f) / 6f
+                drawCircle(color.copy(alpha = .8f * a), radius = 2.2.dp.toPx() * (1f - tt * .6f), center = Offset(fx0, by0 - 3.dp.toPx() - 20.dp.toPx() * k))
+            }
+            sweep((tt * 1.6f).coerceIn(0f, 1f), .8f, 1f)
+        } else if (f.kind == 6) {   // batal: pudar halus
+            val inv = (1f - tt) * (1f - tt)
+            drawPath(path, color.copy(alpha = .16f * inv), style = st(14.dp.toPx() * (.5f + .5f * inv)))
+            drawPath(path, color.copy(alpha = .45f * inv), style = st(1.6.dp.toPx()))
+        } else {   // tempel / jatuh: menyala lalu mereda
             val dec = (1f - tt) * (1f - tt)
             drawPath(path, color.copy(alpha = .18f * dec), style = st(22.dp.toPx() * (.4f + .6f * dec)))
             drawPath(path, color.copy(alpha = .38f * dec))
@@ -623,7 +657,7 @@ fun TF(
         // BasicText, bukan material3 Text: Text menggabungkan gaya tema (LocalTextStyle) ke gaya kita, BasicTextField (mode ketik) tidak.
         androidx.compose.foundation.text.BasicText(
             ann,
-            modifier.selGlow(sr, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }, if (sr != null) ed.selSig() else null, if (sr != null) ed.selWave(key) else null).fxGlow(ed.fx?.takeIf { key in it.keys }, key, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }).heightIn(min = base.lineHeight.value.dp)
+            modifier.selGlow(sr, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }, if (sr != null) ed.selSig() else null, if (sr != null) ed.selWave(key) else null, { ed.selFresh() }, { ed.tl != null }).fxGlow(ed.fx?.takeIf { key in it.keys }, key, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }).heightIn(min = base.lineHeight.value.dp)
                 .onGloballyPositioned { c ->
                     val cc = ed.contentCoords
                     if (cc != null && cc.isAttached && c.isAttached) {
@@ -734,7 +768,7 @@ fun TF(
         ) {
             BasicTextField(
                 value = v, onValueChange = { ed.onText(key, it) },
-                modifier = modifier.selGlow(sr, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }, if (sr != null) ed.selSig() else null, if (sr != null) ed.selWave(key) else null).fxGlow(ed.fx?.takeIf { key in it.keys }, key, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }).focusProperties { canFocus = !ed.ink.on }.focusRequester(fr).trackPos(ed, key)
+                modifier = modifier.selGlow(sr, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }, if (sr != null) ed.selSig() else null, if (sr != null) ed.selWave(key) else null, { ed.selFresh() }, { ed.tl != null }).fxGlow(ed.fx?.takeIf { key in it.keys }, key, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }).focusProperties { canFocus = !ed.ink.on }.focusRequester(fr).trackPos(ed, key)
                     .then(
                         // sheet bawah aktif => field readOnly (kursor bawaan tidak digambar), jadi kursor digambar manual agar tetap terlihat
                         if (foc && ed.sheet != 0) Modifier.drawWithContent {
@@ -762,7 +796,7 @@ fun TF(
                                     val s = clipM.getText()?.text
                                     if (!s.isNullOrEmpty()) ed.selPaste(s)
                                     true
-                                } else false
+                                } else { ed.fxArmPaste(clipM.getText()?.text); false }
                             e.key == Key.Backspace && !ctrl && !e.isAltPressed -> ed.backKey(key)   // shift boleh aktif: Gboard mengirim Backspace dengan meta SHIFT saat mode kapital
                             e.key == Key.MoveHome -> ed.jumpKey(key, false, ctrl, e.isShiftPressed)
                             e.key == Key.MoveEnd -> ed.jumpKey(key, true, ctrl, e.isShiftPressed)
