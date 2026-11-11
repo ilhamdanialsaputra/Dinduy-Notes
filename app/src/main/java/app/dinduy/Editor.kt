@@ -303,6 +303,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         blocks = blocks.toMutableList().also { it[i] = nb }
     }
 
+    /** true: baru keluar dari mode baca, belum ada kolom teks yang punya fokus. Fokus lama (usang) tidak boleh ikut memasang kolom. */
+    var fromRead = false
     fun focusAt(key: String, pos: Int) {
         req = Req(key, pos, ++rq)
     }
@@ -316,7 +318,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             v.copy(selection = TextRange(rs.start.coerceIn(0, n), rs.end.coerceIn(0, n)))
         } else v.copy(selection = TextRange(p))
         caretMoved(r.key)
-        if (req === r) req = null
+        if (req === r) { req = null; fromRead = false }
     }
 
     fun onFocus(key: String) {
@@ -3324,6 +3326,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     fun exitReading(key: String? = null, off: Int = 0) {
         selOn = false; pa = null; pf = null; selBack = null; selDrag = false
         reading = false
+        fromRead = key != null
         if (key != null) focusAt(key, off)
     }
 }
