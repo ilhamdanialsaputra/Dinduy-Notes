@@ -212,11 +212,28 @@ fun AnnotatedString.Builder.addSel(pal: Pal, rt: Rt, a0: Int, b0: Int, off: Int,
     }
 }
 
+/** Poligon ortogonal [pts] (berurutan, tertutup) dengan SEMUA sudut dibulatkan (cembung maupun cekung) -> satu bentuk utuh. */
+private fun roundedPoly(pts: List<Offset>, r: Float): androidx.compose.ui.graphics.Path {
+    val path = androidx.compose.ui.graphics.Path()
+    val n = pts.size
+    for (i in 0 until n) {
+        val prev = pts[(i + n - 1) % n]; val cur = pts[i]; val next = pts[(i + 1) % n]
+        val d1 = kotlin.math.hypot(prev.x - cur.x, prev.y - cur.y); val d2 = kotlin.math.hypot(next.x - cur.x, next.y - cur.y)
+        val rr = minOf(r, d1 / 2f, d2 / 2f)
+        val ax = if (d1 > 0f) cur.x + (prev.x - cur.x) / d1 * rr else cur.x; val ay = if (d1 > 0f) cur.y + (prev.y - cur.y) / d1 * rr else cur.y
+        val bx = if (d2 > 0f) cur.x + (next.x - cur.x) / d2 * rr else cur.x; val by = if (d2 > 0f) cur.y + (next.y - cur.y) / d2 * rr else cur.y
+        if (i == 0) path.moveTo(ax, ay) else path.lineTo(ax, ay)
+        path.quadraticTo(cur.x, cur.y, bx, by)
+    }
+    path.close()
+    return path
+}
+
 /**
- * Indikator seleksi Material You. Saat menyeleksi / menyeret: highlight tonal bersudut sedang yang mengikuti seleksi SEKETIKA (tanpa delay).
- * Begitu pengguna berhenti (rentang diam ~220ms) muncul efek "settle" ala Gemini: kilau (shimmer) menyapu highlight dari kiri ke kanan,
- * baris demi baris, dibarengi aura glow yang membesar lalu mereda dan intensitas warna yang naik sebentar. Digambar DI BELAKANG teks.
- * Tidak menyentuh mekanisme seleksi / handle / clipboard.
+ * Indikator seleksi Material You. Seleksi (satu paragraf, beberapa baris) digambar sebagai SATU bentuk utuh, bukan potongan per baris:
+ * kotak tonal dengan semua sudut membulat (termasuk sudut cekung di sambungan antarbaris). Saat menyeret, bentuk mengikuti seleksi SEKETIKA.
+ * Begitu berhenti (~70ms) muncul efek "settle" ala Gemini pada bentuk yang sama: aura glow mengembang lalu mereda, intensitas naik sebentar,
+ * dan kilau menyapu seluruh bentuk dari kiri ke kanan. Digambar DI BELAKANG teks. Tidak menyentuh mekanisme seleksi / handle / clipboard.
  */
 @Composable
 fun Modifier.selGlow(sr: Pair<Int, Int>?, color: Color, map: (Int) -> Int, layout: () -> TextLayoutResult?): Modifier {
@@ -224,7 +241,7 @@ fun Modifier.selGlow(sr: Pair<Int, Int>?, color: Color, map: (Int) -> Int, layou
     val settle = remember { Animatable(1f) }   // 1 = efek selesai / tidak tampil
     val last = remember { arrayOfNulls<Pair<Int, Int>>(1) }
     if (sr != null) last[0] = sr
-    LaunchedEffect(sr != null) { if (sr != null) prog.snapTo(1f) else prog.animateTo(0f, tween(150)) }   // muncul: langsung penuh (tanpa fade-in)
+    LaunchedEffect(sr != null) { if (sr != null) prog.snapTo(1f) else prog.animateTo(0f, tween(150)) }   // muncul: langsung penuh
     LaunchedEffect(sr) {
         if (sr == null) return@LaunchedEffect
         settle.snapTo(1f)                       // sedang berubah / diseret: tanpa efek tambahan
@@ -233,7 +250,7 @@ fun Modifier.selGlow(sr: Pair<Int, Int>?, color: Color, map: (Int) -> Int, layou
         settle.animateTo(1f, tween(650, easing = androidx.compose.animation.core.FastOutSlowInEasing))
     }
     return drawBehind {
-        val p = if (sr != null) 1f else prog.value   // saat ada seleksi langsung penuh di frame yang sama (tanpa menunggu efek)
+        val p = if (sr != null) 1f else prog.value
         val r = last[0]
         if (p <= .001f || r == null) return@drawBehind
         val l = layout() ?: return@drawBehind
@@ -243,45 +260,40 @@ fun Modifier.selGlow(sr: Pair<Int, Int>?, color: Color, map: (Int) -> Int, layou
         val t = settle.value
         val fx = if (t >= 1f) 0f else kotlin.math.sin(t * kotlin.math.PI.toFloat())   // 0 -> 1 -> 0
         val ls = l.getLineForOffset(s); val le = l.getLineForOffset(maxOf(s, e - 1))
-        val cnt = le - ls + 1
-        val rad = 6.dp.toPx(); val tight = 1.5.dp.toPx(); val pad = 1.dp.toPx()
-        val al = (.28f + fx * .07f) * p
-        val shine = androidx.compose.ui.graphics.lerp(color, Color.White, .55f)
+        val pad = 1.dp.toPx(); val minW = 6.dp.toPx()
+        // kotak per baris (kiri, kanan, atas, bawah); atas = bawah baris sebelumnya supaya tak ada celah antarbaris
+        val xl = FloatArray(le - ls + 1); val xr = FloatArray(le - ls + 1); val yt = FloatArray(le - ls + 1); val yb = FloatArray(le - ls + 1)
         for (i in ls..le) {
+            val k = i - ls
             val xa = if (i == ls) l.getHorizontalPosition(s, true) else l.getLineLeft(i)
             val xb = if (i == le && e < l.getLineEnd(i)) l.getHorizontalPosition(e, true) else l.getLineRight(i)
-            val x0 = minOf(xa, xb) - pad; val x1 = maxOf(xa, xb) + pad
-            if (x1 - x0 < 2f) continue
-            val t0 = l.getLineTop(i); val b0 = l.getLineBottom(i)
-            val cl = if (i == ls) rad else tight; val cr = if (i == le) rad else tight
-            fun shape(d: Float) = androidx.compose.ui.graphics.Path().apply {
-                addRoundRect(
-                    androidx.compose.ui.geometry.RoundRect(
-                        x0 - d, t0 - d, x1 + d, b0 + d,
-                        androidx.compose.ui.geometry.CornerRadius(cl + d), androidx.compose.ui.geometry.CornerRadius(cr + d),
-                        androidx.compose.ui.geometry.CornerRadius(cr + d), androidx.compose.ui.geometry.CornerRadius(cl + d)
-                    )
+            xl[k] = minOf(xa, xb) - pad; xr[k] = maxOf(maxOf(xa, xb) + pad, minOf(xa, xb) - pad + minW)
+            yt[k] = if (k == 0) l.getLineTop(i) else yb[k - 1]; yb[k] = l.getLineBottom(i)
+        }
+        if (le == ls && xr[0] - xl[0] < 2f) return@drawBehind
+        val pts = ArrayList<Offset>()
+        for (k in xr.indices) { pts.add(Offset(xr[k], yt[k])); pts.add(Offset(xr[k], yb[k])) }          // sisi kanan, ke bawah
+        for (k in xl.indices.reversed()) { pts.add(Offset(xl[k], yb[k])); pts.add(Offset(xl[k], yt[k])) } // sisi kiri, ke atas
+        val clean = ArrayList<Offset>()
+        for (pt in pts) if (clean.isEmpty() || clean.last() != pt) clean.add(pt)
+        if (clean.size > 1 && clean.first() == clean.last()) clean.removeAt(clean.size - 1)
+        val path = roundedPoly(clean, 8.dp.toPx())
+        val bx0 = xl.min(); val bx1 = xr.max(); val by0 = yt.first(); val by1 = yb.last()
+        if (fx > 0f) {   // aura: bentuk yang sama, digemukkan lewat stroke bulat
+            drawPath(path, color.copy(alpha = .14f * fx), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 10.dp.toPx() * fx, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+        }
+        drawPath(path, color.copy(alpha = (.28f + fx * .07f) * p))
+        if (t < 1f) {   // kilau menyapu seluruh bentuk
+            val bw = maxOf((bx1 - bx0) * .4f, 64.dp.toPx())
+            val cx = bx0 - bw / 2f + t * (bx1 - bx0 + bw)
+            val shine = androidx.compose.ui.graphics.lerp(color, Color.White, .55f)
+            clipPath(path) {
+                drawRect(
+                    androidx.compose.ui.graphics.Brush.horizontalGradient(
+                        listOf(Color.Transparent, shine.copy(alpha = .5f * p), Color.Transparent), startX = cx - bw / 2f, endX = cx + bw / 2f
+                    ),
+                    topLeft = Offset(bx0, by0), size = androidx.compose.ui.geometry.Size(bx1 - bx0, by1 - by0)
                 )
-            }
-            if (fx > 0f) drawPath(shape(5.dp.toPx() * fx), color.copy(alpha = .14f * fx * p))   // aura
-            val body = shape(0f)
-            drawPath(body, color.copy(alpha = al))
-            if (t < 1f) {
-                // kilau menyapu baris demi baris: tiap baris punya jendela waktunya sendiri
-                val q = (t * cnt - (i - ls)).coerceIn(0f, 1f)
-                if (q > 0f && q < 1f) {
-                    val bw = maxOf((x1 - x0) * .45f, 56.dp.toPx())
-                    val cx = x0 - bw / 2f + q * (x1 - x0 + bw)
-                    clipPath(body) {
-                        drawRect(
-                            androidx.compose.ui.graphics.Brush.horizontalGradient(
-                                listOf(Color.Transparent, shine.copy(alpha = .55f * p), Color.Transparent),
-                                startX = cx - bw / 2f, endX = cx + bw / 2f
-                            ),
-                            topLeft = Offset(x0, t0), size = androidx.compose.ui.geometry.Size(x1 - x0, b0 - t0)
-                        )
-                    }
-                }
             }
         }
     }
