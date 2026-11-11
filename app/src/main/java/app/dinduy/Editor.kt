@@ -3442,7 +3442,9 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     fun exitReading(key: String? = null, off: Int = 0) {
         selOn = false; pa = null; pf = null; selBack = null; selDrag = false
         reading = false
-        fromRead = key != null
+        // fromRead = true hanya bila memang keluar dari mode baca (belum ada kolom yang memegang fokus). Bila keyboard sudah terbuka lewat kolom lain
+        // (mis. tempel / potong / hapus seleksi saat mengetik), fokus harus pindah di frame yang SAMA: menunggu satu frame = keyboard menutup lalu naik lagi (kedut).
+        fromRead = key != null && liveFocus == null
         if (key != null) focusAt(key, off)
     }
 }
