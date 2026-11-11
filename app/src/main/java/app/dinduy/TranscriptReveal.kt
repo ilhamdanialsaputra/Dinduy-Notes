@@ -208,8 +208,11 @@ fun rememberTranscriptFx(vm: AppVM, ed: Ed, scroll: ScrollState): TrFx {
 
         // ---------- 1. pil masuk ----------
         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        launch { fx.pill.animateTo(1f, BouncySpatial) }
-        launch { delay(140); fx.pillLabel.animateTo(1f, spring(.7f, 420f)) }
+        // transkrip sudah terlihat di layar: pil tidak perlu (fiturnya hanya untuk pengguna yang jauh dari transkrip)
+        if (!seen0) {
+            launch { fx.pill.animateTo(1f, BouncySpatial) }
+            launch { delay(140); fx.pillLabel.animateTo(1f, spring(.7f, 420f)) }
+        }
         if (!seen0) delay(if (auto) 320 else 120)
 
         // ---------- 2. bawa transkrip ke layar ----------
@@ -245,6 +248,7 @@ fun rememberTranscriptFx(vm: AppVM, ed: Ed, scroll: ScrollState): TrFx {
                 }
             }
             fx.actionable = false
+            launch { hidePill() }   // sudah menyoroti transkrip: pil atas ditutup
         }
 
         // ---------- 3. sorotan ----------
