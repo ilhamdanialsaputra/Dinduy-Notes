@@ -11,6 +11,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.setValue
@@ -164,6 +165,41 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     private val file = File(ctx.filesDir, "dinduy.json")
     val imgDir = File(ctx.filesDir, "img")
     private val sp = ctx.getSharedPreferences("dinduy", 0)
+
+    // ---------- kolom beranda (mode 2 kolom) ----------
+    // Tiap kartu punya kolom tetap (0 = kiri, 1 = kanan), jadi menukar dua kartu tidak membuat kartu lain pindah kolom.
+    // Urutan di dalam kolom mengikuti urutan umum (sorted). Kartu tanpa kolom (baru / baru diedit) masuk ke kolom yang paling pendek.
+    val lanes = mutableStateMapOf<String, Int>().also { m ->
+        try {
+            for (line in sp.getString("lanes", null).orEmpty().split('\n')) {
+                val t = line.lastIndexOf('\t')
+                if (t <= 0) continue
+                val v = line.substring(t + 1).toIntOrNull() ?: continue
+                if (v == 0 || v == 1) m[line.substring(0, t)] = v
+            }
+        } catch (e: Exception) { }
+    }
+
+    private fun saveLanes() {
+        val ids = docs.map { it.id }.toHashSet()
+        val sb = StringBuilder()
+        for ((k, v) in lanes.toMap()) if (k in ids) sb.append(k).append('\t').append(v).append('\n')
+        sp.edit().putString("lanes", sb.toString()).apply()
+    }
+
+    /** Simpan kolom beberapa kartu sekaligus. */
+    fun setLanes(m: Map<String, Int>) {
+        var ch = false
+        for ((k, v) in m) if (lanes[k] != v) { lanes[k] = v; ch = true }
+        if (ch) saveLanes()
+    }
+
+    fun clearLanes(ids: Collection<String>? = null) {
+        var ch = false
+        if (ids == null) { if (lanes.isNotEmpty()) { lanes.clear(); ch = true } }
+        else for (k in ids) if (lanes.remove(k) != null) ch = true
+        if (ch) saveLanes()
+    }
 
     var pr by mutableStateOf(Prefs())
     val docs = mutableStateListOf<Note>()
@@ -354,6 +390,8 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             val nn = f(old)
             // catatan yang isinya baru diedit kembali ke atas (seperti Keep); posisi manualnya dilepas
             docs[i] = if (nn.u != old.u && nn.o == old.o && nn.o != 0L) nn.copy(o = 0L) else nn
+            // catatan yang baru diedit naik ke atas: kolomnya dilepas supaya ia masuk ke kolom yang paling pendek
+            if (nn.u != old.u) clearLanes(listOf(id))
             save()
         }
     }
@@ -522,6 +560,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     fun setSort(s: String) {
         if (pr.sort == s) return
         for (i in docs.indices) if (docs[i].o != 0L) docs[i] = docs[i].copy(o = 0L)
+        clearLanes()
         setPr(pr.copy(sort = s))
     }
 
@@ -530,9 +569,11 @@ class AppVM(app: Application) : AndroidViewModel(app) {
      * Kunci urut yang sudah dimiliki kelompok itu dibagikan ulang menurut urutan baru, jadi catatan lain
      * (yang tersembunyi oleh label / filter) tetap berada di tempatnya.
      */
-    fun moveOrder(ids: List<String>) {
+    fun moveOrder(ids: List<String>, keepLanes: Boolean = false) {
         val live = ids.mapNotNull { note(it) }
         if (live.size < 2) return
+        // 1 kolom: kolom lama tidak berlaku lagi untuk urutan baru (2 kolom menghitung ulang). 2 kolom menyimpan kolomnya sendiri.
+        if (!keepLanes) clearLanes(ids)
         val keys = live.map { sortKey(it) }.sortedDescending().toMutableList()
         for (i in 1 until keys.size) if (keys[i] >= keys[i - 1]) keys[i] = keys[i - 1] - 1L
         val m = HashMap<String, Long>()
