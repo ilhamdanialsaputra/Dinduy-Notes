@@ -304,18 +304,28 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     private fun putRt(key: String, rt: Rt) {
         val id = keyBlock(key)
+        val i = idx(id)
+        if (i < 0) return
+        val b = blocks[i]
         val rc = if (isCellKey(key)) cellRC(key) else null
-        blocks = blocks.map { b ->
-            if (b.id != id) b
-            else if (rc != null) b.copy(tb = b.tb.mapIndexed { ri, row ->
+        val nb = if (rc != null) b.copy(tb = b.tb.mapIndexed { ri, row ->
                 if (ri != rc.first) row else row.mapIndexed { ci, cell -> if (ci == rc.second) rt else cell }
             })
             else b.copy(r = rt, ik = inkRemap(b.ik, b.r.t, rt.t))   // jangkar coretan ikut bergeser mengikuti perubahan huruf
-        }
+        setBlock(i, nb)
     }
 
+    /**
+     * Ganti satu blok. Dulu tiap huruf mengetik = seluruh daftar dipetakan ulang (O(N)) lalu idMap dibangun ulang dari nol di pencarian
+     * berikutnya (O(N) lagi). Kini cukup salin daftar (arraycopy) dan perbarui SATU entri idMap, jadi biaya per huruf tidak lagi
+     * bergantung pada jumlah blok isi (alokasi + GC jauh berkurang di catatan panjang).
+     */
     private fun setBlock(i: Int, nb: Blk) {
-        blocks = blocks.toMutableList().also { it[i] = nb }
+        val old = blocks
+        val nl = ArrayList<Blk>(old.size).also { it.addAll(old); it[i] = nb }
+        val keepMap = idMapFor === old && old[i].id == nb.id
+        blocks = nl
+        if (keepMap) { idMap[nb.id] = nb; idMapFor = nl }
     }
 
     /** true: baru keluar dari mode baca, belum ada kolom teks yang punya fokus. Fokus lama (usang) tidak boleh ikut memasang kolom. */
@@ -502,9 +512,16 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     }
 
     private fun scheduleCommit() {
-        cJob?.cancel()
-        cJob = scope.launch { delay(800); commit() }
+        // Satu coroutine penunggu saja; tiap ketikan hanya memperbarui cap waktu (dulu: batalkan + luncurkan coroutine baru per huruf)
+        cAt = android.os.SystemClock.uptimeMillis()
+        if (cJob?.isActive == true) return
+        cJob = scope.launch {
+            while (true) { val w = cAt + 800L - android.os.SystemClock.uptimeMillis(); if (w <= 0L) break; delay(w) }
+            commit()
+        }
     }
+    private var cAt = 0L
+    private var sAt = 0L
 
     private fun autoBlock(key: String, v: TextFieldValue, df: Df): Boolean {
         val i = idx(key)
@@ -3384,8 +3401,12 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     // ---------- simpan ----------
     fun dirty() {
         chg = true
-        sJob?.cancel()
-        sJob = scope.launch { delay(450); flush() }
+        sAt = android.os.SystemClock.uptimeMillis()
+        if (sJob?.isActive == true) return
+        sJob = scope.launch {
+            while (true) { val w = sAt + 450L - android.os.SystemClock.uptimeMillis(); if (w <= 0L) break; delay(w) }
+            flush()
+        }
     }
 
     fun titleChanged(t: String) {
