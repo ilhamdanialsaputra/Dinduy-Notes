@@ -468,11 +468,15 @@ fun TF(
         LaunchedEffect(key) {
             androidx.compose.runtime.snapshotFlow { ed.req }.collect { r ->
                 if (r != null && r.key == key) {
+                    // Dibaca SEBELUM applyReq (applyReq mengisi ed.focus): apakah keyboard sedang terbuka lewat kolom lain?
+                    val warm = ed.kbWarm(key)
                     // Posisi kursor dipasang SEBELUM fokus diminta: sesi input (keyboard) langsung mulai dengan keadaan final.
                     // Dulu fokus diminta dulu lalu seleksi diubah sesudahnya, jadi keyboard menerima keadaan baru kedua kali = tampak "refresh" dua kali.
                     ed.applyReq(r)
-                    // tunggu satu frame: fokus sebelum field terpasang membuat sesi IME dimulai ulang (keyboard muncul dua kali)
-                    androidx.compose.runtime.withFrameNanos { }
+                    // Keluar dari mode baca (belum ada keyboard): tunggu satu frame supaya fokus tidak mendahului field terpasang
+                    // (sesi IME dimulai ulang = keyboard muncul dua kali). Pindah / hapus blok saat keyboard SUDAH terbuka: jangan menunggu,
+                    // karena fokus lama sudah lepas di frame ini; menunggu = keyboard sempat menutup lalu membuka lagi (berkedut).
+                    if (!warm) androidx.compose.runtime.withFrameNanos { }
                     if (!foc) {
                         try { fr.requestFocus() } catch (e: Exception) {
                             androidx.compose.runtime.withFrameNanos { }
@@ -480,6 +484,12 @@ fun TF(
                         }
                     }
                 }
+            }
+        }
+        // kolom yang sedang fokus ikut hilang dari komposisi (blok dihapus / digabung): catat waktunya supaya kolom tujuan langsung meminta fokus
+        DisposableEffect(key) {
+            onDispose {
+                if (ed.liveFocus == key || foc) { ed.focusDroppedAt = android.os.SystemClock.uptimeMillis(); if (ed.liveFocus == key) ed.liveFocus = null }   // onFocusChanged bisa sudah mengosongkan liveFocus: cap waktu di sana juga
             }
         }
         val kbc = LocalSoftwareKeyboardController.current
@@ -567,7 +577,11 @@ fun TF(
                             else -> false
                         }
                     }
-                    .onFocusChanged { foc = it.isFocused; if (it.isFocused) { ed.onFocus(key); if (ed.sheet != 0) kbc?.hide() } }
+                    .onFocusChanged {
+                        foc = it.isFocused
+                        if (it.isFocused) { ed.liveFocus = key; ed.onFocus(key); if (ed.sheet != 0) kbc?.hide() }
+                        else if (ed.liveFocus == key) { ed.liveFocus = null; ed.focusDroppedAt = android.os.SystemClock.uptimeMillis() }
+                    }
                     .wordTap(
                         onTap = { if (ed.selEdit) ed.dropSel() },
                         onDouble = { pos ->
