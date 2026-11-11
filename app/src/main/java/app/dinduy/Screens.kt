@@ -950,22 +950,18 @@ private fun TwoColLayout(
     rects: HashMap<String, IntArray>, lanesOut: HashMap<String, Int>, fresh: HashMap<String, Int>,
     modifier: Modifier = Modifier, content: @Composable (String) -> Unit
 ) {
+    val flatKeys = ArrayList<String>().also { l -> for (b in blocks) { val h = b.head; if (h != null) l.add(h) else l.addAll(b.ids) } }
     androidx.compose.ui.layout.Layout(
         modifier = modifier,
         content = {
-            for (b in blocks) {
-                val h = b.head
-                if (h != null) {
-                    androidx.compose.runtime.key(h) {
-                        Box(Modifier.layoutId(h).slideTo(), propagateMinConstraints = true) { content(h) }
-                    }
-                } else for (id in b.ids) {
-                    androidx.compose.runtime.key(id) {
-                        Box(
-                            Modifier.layoutId(id).then(if (id == dragId) Modifier else Modifier.slideTo()),
-                            propagateMinConstraints = true
-                        ) { content(id) }
-                    }
+            // satu daftar datar ber-key: kartu yang pindah blok (mis. di-pin) tetap instance yang sama, jadi slideTo bisa
+            // menganimasikannya dari posisi lama ke posisi baru (sebelumnya kartu dibuang & dibuat ulang = kedip)
+            for (k in flatKeys) {
+                androidx.compose.runtime.key(k) {
+                    Box(
+                        Modifier.layoutId(k).then(if (k == dragId) Modifier else Modifier.slideTo()),
+                        propagateMinConstraints = true
+                    ) { content(k) }
                 }
             }
         }
@@ -986,15 +982,34 @@ private fun TwoColLayout(
                 rects[h] = intArrayOf(padS, y, pl.width, pl.height)
                 y += pl.height + gap
             } else {
-                val ly = intArrayOf(y, y)
+                val items = ArrayList<Pair<String, androidx.compose.ui.layout.Placeable>>(b.ids.size)
                 for (id in b.ids) {
                     val m = byId[id] ?: continue
-                    val pl = m.measure(androidx.compose.ui.unit.Constraints.fixedWidth(colW))
-                    val ln: Int = laneOf(id)?.takeIf { it == 0 || it == 1 } ?: run {
-                        val v = if (ly[0] <= ly[1]) 0 else 1      // kolom terpendek, seri -> kiri
-                        fresh[id] = v
-                        v
-                    }
+                    items.add(id to m.measure(androidx.compose.ui.unit.Constraints.fixedWidth(colW)))
+                }
+                val n = items.size
+                val saved = IntArray(n) { laneOf(items[it].first)?.takeIf { v -> v == 0 || v == 1 } ?: -1 }
+                // kolom tersimpan yang timpang parah (satu kolom hampir kosong) dianggap rusak: dihitung ulang seimbang
+                if (dragId == null && n >= 3) {
+                    val hs = intArrayOf(0, 0); var cnt = 0
+                    for (k in 0 until n) if (saved[k] >= 0) { hs[saved[k]] += items[k].second.height + gap; cnt++ }
+                    if (cnt >= 3 && minOf(hs[0], hs[1]) * 5 < maxOf(hs[0], hs[1])) java.util.Arrays.fill(saved, -1)
+                }
+                // kartu bersimpanan kolom dihitung dulu; kartu baru mengisi kolom yang paling pendek (kosong = paling awal, mulai dari kiri)
+                val hh = intArrayOf(0, 0)
+                for (k in 0 until n) if (saved[k] >= 0) hh[saved[k]] += items[k].second.height + gap
+                val lane = IntArray(n)
+                for (k in 0 until n) {
+                    if (saved[k] >= 0) { lane[k] = saved[k]; continue }
+                    val v = if (hh[0] <= hh[1]) 0 else 1
+                    lane[k] = v
+                    hh[v] += items[k].second.height + gap
+                    fresh[items[k].first] = v
+                }
+                val ly = intArrayOf(y, y)
+                for (k in 0 until n) {
+                    val (id, pl) = items[k]
+                    val ln = lane[k]
                     lanesOut[id] = ln
                     val x = padS + ln * (colW + gap)
                     placed.add(Triple(pl, x, ly[ln]))
@@ -1541,12 +1556,18 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                 }
         if (cols == 2) {
             val noteById = live.associateBy { it.id }
+            // 2 kolom menyusun SEMUA kartu sekaligus (bukan lazy): saat app baru dibuka, puluhan kartu dikomposisi dalam satu frame
+            // (itu yang bikin lag awal). Jadi mulai dari layar pertama saja, sisanya ditambah bertahap per beberapa frame.
+            var composeN by remember { mutableStateOf(14) }
+            LaunchedEffect(live.size) { while (composeN < live.size) { withFrameNanos { }; composeN += 8 } }
+            val pinnedC = pinned.take(composeN)
+            val othersC = others.take((composeN - pinnedC.size).coerceAtLeast(0))
             val blocks = ArrayList<HBlock>().also { bl ->
                 if (live.isEmpty()) bl.add(HBlock("empty", emptyList()))
                 if (sections) bl.add(HBlock("h-pin", emptyList()))
-                bl.add(HBlock(null, pinned.map { it.id }))
+                bl.add(HBlock(null, pinnedC.map { it.id }))
                 if (sections) bl.add(HBlock("h-other", emptyList()))
-                bl.add(HBlock(null, others.map { it.id }))
+                bl.add(HBlock(null, othersC.map { it.id }))
             }
             val laneOf: (String) -> Int? = { id -> if (useLanes) (nd.laneOv[id] ?: vm.lanes[id]) else null }
             val padS = with(dens) { 8.dp.roundToPx() }
