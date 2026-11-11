@@ -447,6 +447,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
                 putRt(key, rt2)
                 tf[key] = TextFieldValue(Z + rt2.t, TextRange(df.p + 1))
                 if (insStr == "\n") enter(key, df.p) else {
+                    holdFollow()
                     val bl0 = blocks
                     val ids0 = blocks.mapTo(HashSet()) { it.id }
                     paste(key, df.p, insStr, lastMd.isNotEmpty() && insStr.trimEnd('\n') == lastMd)
@@ -464,6 +465,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val rt = oldRt.edit(nt, typing)
         putRt(key, rt)
         tf[key] = v
+        if (df.ins >= 60) holdFollow()   // sisipan besar sekaligus = tempel (ketikan / autocorrect / suara jauh lebih pendek)
         if (df.ins > 0 && pasteArm != null) {   // Ctrl+V tanpa seleksi
             if (insStr == pasteArm && android.os.SystemClock.uptimeMillis() - pasteArmAt < 800L) fxSet(3, listOf(key), mapOf(key to (df.p to df.p + df.ins)))
             pasteArm = null
@@ -1586,6 +1588,10 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         }
     }
 
+    private var csHoldUntil = 0L
+    /** Salin / potong / tempel: layar TIDAK boleh menggulir mengejar kursor (tanpa lompatan, tanpa coba-ulang gulir). Pengikut kursor kembali normal saat mengetik berikutnya. */
+    fun holdFollow(ms: Long = 1500L) { csHoldUntil = android.os.SystemClock.uptimeMillis() + ms; csPend = false; csTry = 0 }
+
     /** Selisih gulir agar kursor tetap terlihat di atas keyboard + kapsul; dipanggil lewat snapshotFlow. */
     fun cursorScrollDelta(scrollV: Int): Float {
         if (reading || selOn || ink.on || titleFocus || findOn) { csPend = false; return 0f }
@@ -1594,6 +1600,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         if (!v.selection.collapsed || viewH <= 0f) return 0f
         if (csBump < 0) return 0f   // hanya untuk berlangganan (dipakai coba-ulang)
         val sig = CsSig(key, v.selection.start, v.text.length, viewH, barNow())
+        if (android.os.SystemClock.uptimeMillis() < csHoldUntil) { csSig = sig; csPend = false; return 0f }   // sedang salin / tempel: diam di tempat
         val old = csSig
         if (sig != old) {
             csSig = sig
@@ -2411,6 +2418,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     private var pasteArmAt = 0L
     /** Satu-satunya pintu efek: pasang [fx], kosongkan otomatis sesudah efek selesai. Aksi kembar (<150ms, jenis sama) diabaikan. */
     private fun fxSet(kind: Int, keys: List<String>, ranges: Map<String, Pair<Int, Int>>, origin: Pt? = null) {
+        if (kind in 1..3) holdFollow()
         val now = android.os.SystemClock.uptimeMillis()
         fx?.let { if (it.kind == kind && now - it.at < 150L) return }
         val f = SelFx(kind, keys, ranges, ++fxN, origin, now)
@@ -3112,6 +3120,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     fun selPaste(s: String) {
         if (s.isEmpty()) return
         val (lo, _) = selSpan() ?: return
+        holdFollow()
         val fxBefore = blocks.mapTo(HashSet()) { it.id }
         selDelete()
         // teks yang ditempel = Markdown yang baru disalin dari catatan: pulihkan formatnya (blok maupun sebaris)
