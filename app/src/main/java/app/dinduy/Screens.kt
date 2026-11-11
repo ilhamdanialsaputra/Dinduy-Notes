@@ -1028,6 +1028,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
     val lanesCur = remember { HashMap<String, Int>() }         // id -> kolom yang sedang dipakai tata letak
     val lanesNew = remember { HashMap<String, Int>() }         // kolom yang baru dihitung (kartu belum punya kolom); disimpan setelah tata letak
     val vpH = remember { IntArray(1) }                         // tinggi area tampil
+    var collapseTick by remember { mutableIntStateOf(0) }      // naik setelah tata letak awal selesai: kartu yang jauh dari layar boleh diciutkan
     // tween tanpa overshoot supaya buka/tutup pencarian tidak bergetar
     val saRaw by animateFloatAsState(if (vm.searchOn) 1f else 0f, if (vm.searchOn) spring(.9f, 380f) else spring(.95f, 460f), label = "sa")
     val sa = saRaw.coerceIn(0f, 1f)
@@ -1552,6 +1553,24 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
             val padS = with(dens) { 8.dp.roundToPx() }
             val padTop = with(dens) { (sat + 78.dp).roundToPx() }
             val padBottom = with(dens) { (160.dp + sab).roundToPx() }
+            // ---- virtualisasi 2 kolom ----
+            // Kartu yang jauh dari layar diganti placeholder setinggi kartu aslinya (tinggi diingat dari pengukuran sebelumnya),
+            // jadi posisi kartu lain tidak berubah. Kartu baru dirender penuh bila sudah dekat dengan layar (jarak 1 layar).
+            // Kartu yang tingginya belum diketahui selalu dirender penuh dulu supaya terukur.
+            val heights = remember(wPx, cols) { HashMap<String, Int>() }
+            val winStep = (hPx * .5f).toInt().coerceAtLeast(200)
+            val bucket by remember(winStep) { derivedStateOf { scroll.value / winStep } }
+            LaunchedEffect(live.size, wPx) { delay(450); collapseTick++ }
+            fun isFar(id: String): Boolean {
+                if (collapseTick == 0) return false
+                val b = bucket
+                if (id == nd.id || id == vm.openId) return false
+                val r = rects[id] ?: return false
+                if (heights[id] == null) return false
+                val lo = b * winStep - hPx
+                val hi = (b + 1) * winStep + 2f * hPx
+                return r[1] + r[3] < lo || r[1] > hi
+            }
             Box(
                 Modifier.fillMaxSize().nestedScroll(fabConn).graphicsLayer {
                     alpha = if (vm.searchOn) 0f else 1f
@@ -1581,7 +1600,11 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                             "h-other" -> T("Others", 13f, 500, pal.osv, Modifier.graphicsLayer { if (!vm.searchOn) alpha = shift.p.value.coerceIn(0f, 1f) }.padding(start = 16.dp, top = 16.dp, bottom = 4.dp), ls = .01f)
                             else -> {
                                 val d = noteById[k]
-                                if (d != null) HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, wPx, dens.density, pos, stackMove(d.id, true), nd, state)
+                                if (d != null) {
+                                    val hh = heights[k]
+                                    if (hh != null && isFar(k)) Spacer(Modifier.fillMaxWidth().height(with(dens) { hh.toDp() }))
+                                    else HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, wPx, dens.density, pos, stackMove(d.id, true).onSizeChanged { heights[d.id] = it.height }, nd, state)
+                                }
                             }
                         }
                     }
