@@ -2675,7 +2675,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         }
         commit()
         val n0 = hist.size
-        val h0 = hi
+        val h0 = this.hi
         selDelete()
         val tb = blockOfKey(key) ?: return
         val cell = isCellKey(key)
@@ -2709,7 +2709,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             }
         }
         // hapus + sisip = SATU langkah undo
-        while (hi > h0 + 1 && hist.size >= n0) { hist.removeAt(hi - 1); hi-- }
+        while (this.hi > h0 + 1 && hist.size >= n0) { hist.removeAt(this.hi - 1); this.hi-- }
         tick++
     }
 
