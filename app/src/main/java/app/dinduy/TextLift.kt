@@ -72,9 +72,10 @@ private fun LiftChip(ed: Ed, v: () -> Float) {
             .offset {
                 val w = sz.width.toFloat()
                 val h = sz.height.toFloat()
-                val gap = 44.dp.toPx()
+                val gap = 26.dp.toPx()
+                val lead = TL_LEAD.dp.toPx()
                 val sy = (ed.scroll?.value ?: 0).toFloat()
-                val cy0 = ay.value - up.value * (h / 2f + gap)
+                val cy0 = ay.value - up.value * (lead + h / 2f + gap)
                 val cy = maxOf(cy0, sy + 8.dp.toPx() + h / 2f)
                 val maxX = ed.widthDp * dn.density
                 val cx = ax.value.coerceIn(w / 2f - 12.dp.toPx(), maxOf(w / 2f, maxX + 12.dp.toPx() - w / 2f))
@@ -138,8 +139,11 @@ private fun BoxScope.DropCaret(ed: Ed) {
                 Offset(bx.value - pad, by.value - pad), Size(bw.value + pad * 2, bh.value + pad * 2), CornerRadius(14.dp.toPx())
             )
         }
-        val w = 3.dp.toPx() * k
-        drawRoundRect(pal.p, Offset(cx.value - w / 2f, cy.value - 1.dp.toPx()), Size(w, (ch.value + 2.dp.toPx()) * k.coerceIn(0f, 1f)), CornerRadius(w / 2f))
-        drawCircle(pal.p, 5.dp.toPx() * k, Offset(cx.value, cy.value - 3.dp.toPx()))
+        val w = 4.dp.toPx() * k
+        val kk = k.coerceIn(0f, 1f)
+        // halo lembut di kepala supaya kursor mudah dilihat di mana pun
+        drawCircle(pal.p.copy(alpha = .18f * kk), 16.dp.toPx() * k, Offset(cx.value, cy.value - 4.dp.toPx()))
+        drawRoundRect(pal.p, Offset(cx.value - w / 2f, cy.value - 2.dp.toPx()), Size(w, (ch.value + 4.dp.toPx()) * kk), CornerRadius(w / 2f))
+        drawCircle(pal.p, 7.dp.toPx() * k, Offset(cx.value, cy.value - 5.dp.toPx()))
     }
 }
