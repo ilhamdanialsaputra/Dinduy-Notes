@@ -2725,9 +2725,10 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                         .inkInput(ed, vm, scroll)
                         .holdDrag(
                             true,
-                            onStart = { pos -> !ed.ink.on && !ed.ink.busy && ed.mv == null && ed.selLong(pos, pos.y - scroll.value) },
-                            onMove = { pos, _ -> ed.selMove(pos, pos.y - scroll.value) },
-                            onEnd = { ed.selEnd() },
+                            // tekan-tahan di atas seleksi = angkat teksnya; di tempat lain = seleksi kata seperti biasa
+                            onStart = { pos -> !ed.ink.on && !ed.ink.busy && ed.mv == null && (ed.tlBegin(pos, pos.y - scroll.value) || ed.selLong(pos, pos.y - scroll.value)) },
+                            onMove = { pos, _ -> if (ed.tl != null) ed.tlMove(pos, pos.y - scroll.value) else ed.selMove(pos, pos.y - scroll.value) },
+                            onEnd = { ok -> if (ed.tl != null) ed.tlEnd(ok) else ed.selEnd() },
                             lead = 70L
                         )
                         .transcriptReveal(ed, trFx, pal)
@@ -2816,8 +2817,9 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                         )
                     }
                     InkLayers(ed, vm, scroll)
-                    if (ed.selOn) SelHandles(ed)
+                    if (ed.selOn && ed.tl == null) SelHandles(ed)
                     SelBubble(ed, vm, act) { scroll.value }   // selalu ada di komposisi supaya bisa animasi keluar; scroll dibaca lewat lambda (fase layout)
+                    TextLift(ed)
                 }
                 // kartu suara + transkrip: selalu di bawah isi catatan (editor dan mode baca), di luar area seleksi teks
                 if (hasAu) {
@@ -2929,7 +2931,7 @@ fun SelBubble(ed: Ed, vm: AppVM, act: Actions, scrollY: () -> Int) {
     val span = if (ed.selOn) ed.selSpan() else null
     val r0 = span?.let { ed.ptRect(it.first) }
     val r1 = span?.let { ed.ptRect(it.second) }
-    val live = ed.selOn && !ed.selDrag && span != null && r0 != null && r1 != null
+    val live = ed.selOn && !ed.selDrag && ed.tl == null && span != null && r0 != null && r1 != null
     val measured = bs != IntSize.Zero
     // Posisi dihitung dari nilai scroll TERBARU. Fungsi ini dipanggil di fase layout (lambda offset di bawah), bukan di komposisi:
     // sebelumnya scroll dibaca saat komposisi, jadi tiap scroll cepat posisi bubble selalu telat satu frame dari isi
