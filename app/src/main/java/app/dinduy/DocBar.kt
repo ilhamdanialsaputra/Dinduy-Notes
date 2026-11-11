@@ -837,6 +837,7 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM, sheetPxOf: () -> Int, kbNow: () ->
             px[0] = sheetPxOf(); fromKb[0] = kbNow()
         }
         ed.sheetFromKb = fromKb[0]
+        ed.deferKey = null
         // Pesanan ruang dipasang SINKRON di komposisi yang sama dengan terbukanya sheet (dulu baru di LaunchedEffect, satu frame
         // atau lebih kemudian). Selama celah itu keyboard sudah mulai turun, area catatan sempat membesar lalu ditarik lagi =
         // toolbar dan layar kedut.
@@ -853,6 +854,7 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM, sheetPxOf: () -> Int, kbNow: () ->
             val total = px[0].toFloat()
             val keep = ed.kbBack && ed.focus != null
             ed.kbBack = false
+            if (!keep) ed.deferKey = null
             if (keep) ed.kbShow?.invoke()                // keyboard naik menggantikan sheet; area catatan tidak bergerak
             prog.animateTo(0f, tween(230, easing = EmphAccel)) { if (!keep) ed.sheetReserve = value * total }
             // Pesanan ruang baru dilepas setelah keyboard BENAR-BENAR kembali setinggi semula. Dulu memakai delay(260) tetap: bila
