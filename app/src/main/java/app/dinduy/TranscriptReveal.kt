@@ -2,6 +2,7 @@ package app.dinduy
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.SpringSpec
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -43,16 +44,20 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
-import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -79,9 +84,9 @@ import kotlin.math.roundToInt
 // GERAK (pegas M3 Expressive: spatial = boleh memantul, effects = tanpa pantulan)
 //   1. Pil "Transcript ready" melompat dari atas sebagai LINGKARAN ikon (spatial bouncy), lalu MELEBAR jadi pil
 //      penuh (morph lingkaran -> pil). Ikon ikut "pop".
-//   2. Wadah tonal mekar dari judul transkrip: tinggi + lebar + radius sudut bermorf (44dp -> 28dp), pegas lembut
-//      yang sedikit melampaui. Aksen kiri tumbuh menyusul (stagger), dua kilau bintang berputar muncul,
-//      lalu seberkas cahaya miring menyapu wadah dari atas ke bawah.
+//   2. Sorotan ala Google Gemini: sapuan gradasi lembut (biru -> ungu -> merah muda) turun dari atas ke bawah. Di balik
+//      tepi sapuan, wadah tonal + garis tepi gradasi + pendar halus tersingkap pelan-pelan (tepi sapuan berbulu, bukan
+//      garis keras). Warna gradasi terus mengalir pelan selama sorotan tampil. Tanpa ikon, bintang, atau garis aksen.
 //   3. Semuanya memudar dengan pegas effects (tanpa pantulan); wadah menciut sedikit sambil hilang.
 //
 // UX / ANTI-BENTROK (inti perubahan ini)
@@ -110,10 +115,9 @@ class TrFx {
     val pill = Animatable(0f)        // 0..~1.1: pil masuk (spatial, memantul)
     val pillLabel = Animatable(0f)   // 0 = lingkaran ikon, 1 = pil penuh dengan label
     val drag = Animatable(0f)        // geser-untuk-tutup (px, negatif = ke atas)
-    val bloom = Animatable(0f)       // 0..~1.05: wadah mekar
-    val accent = Animatable(0f)      // 0..~1.1: aksen kiri tumbuh (menyusul bloom)
-    val spark = Animatable(0f)       // 0..~1.2: kilau bintang
-    val glow = Animatable(0f)        // 0..1: seberkas cahaya menyapu
+    val bloom = Animatable(0f)       // 0..~1: wadah mekar (lebar + radius sudut)
+    val flow = Animatable(0f)        // 0..1: gradasi warna mengalir pelan selama sorotan
+    val glow = Animatable(0f)        // 0..1: sapuan penyingkap dari atas ke bawah
     val fade = Animatable(0f)        // 0..1: keterlihatan keseluruhan sorotan
 
     /** -1: transkrip di atas layar, 0: sudah terlihat, 1: di bawah layar. Dipakai panah di pil aksi. */
@@ -191,7 +195,7 @@ fun rememberTranscriptFx(vm: AppVM, ed: Ed, scroll: ScrollState): TrFx {
         }
 
         // ---------- reset ----------
-        fx.bloom.snapTo(0f); fx.accent.snapTo(0f); fx.spark.snapTo(0f); fx.glow.snapTo(0f); fx.fade.snapTo(0f)
+        fx.bloom.snapTo(0f); fx.flow.snapTo(0f); fx.glow.snapTo(0f); fx.fade.snapTo(0f)
         fx.pill.snapTo(0f); fx.pillLabel.snapTo(0f); fx.drag.snapTo(0f)
         val dismiss0 = fx.dismissTick
         val jump0 = fx.jumpTick
@@ -247,21 +251,18 @@ fun rememberTranscriptFx(vm: AppVM, ed: Ed, scroll: ScrollState): TrFx {
         delay(90)
         if (!wasBusy) haptic.performHapticFeedback(HapticFeedbackType.LongPress)   // tidak mengganggu orang yang sedang mengetik
         fx.fade.snapTo(1f)
-        launch { fx.bloom.animateTo(1f, spring(.72f, 220f)) }
-        launch { delay(90); fx.accent.animateTo(1f, spring(.6f, 300f)) }
-        launch { delay(240); fx.spark.animateTo(1f, spring(.5f, 260f)) }
-        launch { delay(420); fx.glow.animateTo(1f, tween(1000, easing = Emph)) }
+        launch { fx.bloom.animateTo(1f, spring(.9f, 240f)) }
+        launch { fx.glow.animateTo(1f, tween(1250, easing = Emph)) }
+        launch { fx.flow.animateTo(1f, tween(4200, easing = LinearEasing)) }
 
         // tahan sebentar; ketuk / geser pil = tutup lebih cepat
         withTimeoutOrNull(2600L) { snapshotFlow { fx.dismissTick }.first { it > dismiss0 } }
 
         // ---------- 4. keluar ----------
         launch { hidePill() }
-        launch { fx.spark.animateTo(0f, FastEffects) }
-        launch { fx.accent.animateTo(0f, SlowEffects) }
         launch { fx.bloom.animateTo(.96f, SlowEffects) }
         fx.fade.animateTo(0f, SlowEffects)
-        fx.bloom.snapTo(0f); fx.glow.snapTo(0f)
+        fx.bloom.snapTo(0f); fx.glow.snapTo(0f); fx.flow.snapTo(0f)
     }
     return fx
 }
@@ -273,84 +274,104 @@ fun Modifier.transcriptReveal(ed: Ed, fx: TrFx, pal: Pal): Modifier = drawBehind
     val span = ed.spanOf(ed.tRevealIds) ?: return@drawBehind
     drawReveal(
         span.first, span.second,
-        fx.bloom.value, fx.accent.value, fx.glow.value, fx.spark.value, f, pal
+        fx.bloom.value, fx.flow.value, fx.glow.value, f, pal
     )
+}
+
+// Warna gradasi khas Gemini
+private val GemBlue = Color(0xFF4285F4)
+private val GemPurple = Color(0xFF9B72CB)
+private val GemRose = Color(0xFFD96570)
+
+/** Gambar [content] di layer sendiri lalu "dipotong" oleh [mask] (alpha mask) supaya tepinya berbulu, bukan garis keras. */
+private fun DrawScope.maskedLayer(bounds: Rect, mask: Brush, alpha: Float, content: DrawScope.() -> Unit) {
+    drawIntoCanvas { canvas ->
+        canvas.saveLayer(bounds, Paint().apply { this.alpha = alpha })
+        content(this@maskedLayer)
+        drawRect(mask, bounds.topLeft, bounds.size, blendMode = BlendMode.DstIn)
+        canvas.restore()
+    }
 }
 
 private fun DrawScope.drawReveal(
     top: Float, bottom: Float,
-    bloom: Float, accent: Float, glow: Float, spark: Float, fade: Float, pal: Pal
+    bloom: Float, flow: Float, glow: Float, fade: Float, pal: Pal
 ) {
     val d = density
     val a = fade.coerceIn(0f, 1f)
-    val b = bloom.coerceAtLeast(0f)
-    val bc = b.coerceAtMost(1f)
+    val bc = bloom.coerceIn(0f, 1f)
     val padX = 16f * d
     val padY = 14f * d
-    // lebar ikut mekar: mulai menyempit dari kiri-kanan, lalu melebar penuh
-    val inset = (1f - bc) * 28f * d
+    // lebar ikut mekar pelan dari kiri-kanan; tinggi penuh (penyingkapan vertikal dikerjakan sapuan)
+    val inset = (1f - bc) * 20f * d
     val l = -padX + inset
     val r = size.width + padX - inset
     val t = top - padY
-    val h = ((bottom - top) + padY * 2f) * b
-    if (h <= 1f || r - l <= 1f) return
+    val h = (bottom - top) + padY * 2f
+    val w = r - l
+    if (h <= 1f || w <= 1f) return
     // radius sudut ikut bermorf: besar (hampir pil) -> 28dp
-    val cr = minOf(lerp(44f * d, 28f * d, bc), h / 2f, (r - l) / 2f)
+    val cr = minOf(lerp(44f * d, 28f * d, bc), h / 2f, w / 2f)
     val rr = CornerRadius(cr)
 
-    // wadah tonal: gradasi halus dari atas (lebih pekat) ke bawah, plus garis tepi tipis
-    drawRoundRect(
-        Brush.verticalGradient(
-            listOf(pal.pc.copy(alpha = .72f * a), pal.pc.copy(alpha = .42f * a)),
-            startY = t, endY = t + h
-        ),
-        Offset(l, t), Size(r - l, h), rr
+    // ---- sapuan: tepi depan turun dari atas; area di atasnya tersingkap, tepi depan berbulu ----
+    val feather = 150f * d
+    val ext = 40f * d                       // ruang untuk pendar di luar tepi wadah
+    val y0 = t - ext
+    val y1 = t + h + feather + ext
+    val front = y0 + (y1 - y0) * glow       // glow = 1 -> semuanya tersingkap penuh
+    val span = y1 - y0
+    val fa = ((front - feather - y0) / span).coerceIn(0f, 1f)
+    val fb = ((front - y0) / span).coerceIn(0f, 1f)
+    val solid = Color.Black
+    val none = Color.Black.copy(alpha = 0f)
+    val revealMask = Brush.verticalGradient(
+        0f to solid, fa to solid, fb to none, 1f to none,
+        startY = y0, endY = y1
     )
-    drawRoundRect(pal.p.copy(alpha = .26f * a), Offset(l, t), Size(r - l, h), rr, style = Stroke(1.5f * d))
 
-    // aksen kiri: berbentuk pil, tumbuh menyusul wadah dengan pegas sendiri
-    val barMax = (h - 28f * d).coerceAtLeast(0f)
-    val barH = minOf(barMax * accent.coerceAtLeast(0f), (h - 16f * d).coerceAtLeast(0f))
-    if (barH > 0f) drawRoundRect(pal.p.copy(alpha = a), Offset(l + 8f * d, t + 14f * d), Size(4f * d, barH), CornerRadius(2f * d))
+    // gradasi Gemini yang mengalir pelan ke samping (mirror supaya tidak ada sambungan)
+    val sx = l - w * .6f + w * 1.3f * flow
+    val gem = Brush.horizontalGradient(
+        listOf(GemBlue, GemPurple, GemRose, GemPurple, GemBlue),
+        startX = sx, endX = sx + w * 1.4f, tileMode = TileMode.Mirror
+    )
 
-    // cahaya miring menyapu dari atas ke bawah, terpotong bentuk wadah
+    val bounds = Rect(l - ext, t - ext, r + ext, t + h + ext)
+    maskedLayer(bounds, revealMask, a) {
+        // wadah tonal (mengikuti tema) + semburat gradasi sangat tipis
+        drawRoundRect(
+            Brush.verticalGradient(
+                listOf(pal.pc.copy(alpha = .60f), pal.pc.copy(alpha = .34f)),
+                startY = t, endY = t + h
+            ),
+            Offset(l, t), Size(w, h), rr
+        )
+        drawRoundRect(gem, Offset(l, t), Size(w, h), rr, alpha = if (pal.dark) .16f else .10f)
+        // pendar lembut di luar tepi (beberapa lapis garis makin tipis = blur palsu yang murah)
+        drawRoundRect(gem, Offset(l, t), Size(w, h), rr, alpha = .07f, style = Stroke(16f * d))
+        drawRoundRect(gem, Offset(l, t), Size(w, h), rr, alpha = .12f, style = Stroke(8f * d))
+        // garis tepi gradasi
+        drawRoundRect(gem, Offset(l, t), Size(w, h), rr, alpha = .95f, style = Stroke(1.6f * d))
+    }
+
+    // ---- berkas cahaya di tepi depan sapuan, terpotong bentuk wadah ----
     if (glow > .001f && glow < .999f) {
-        val band = 180f * d
-        val y = t + (h + band) * glow - band
-        val clip = Path().apply { addRoundRect(RoundRect(l, t, r, t + h, rr)) }
-        clipPath(clip) {
-            rotate(-6f, Offset((l + r) / 2f, y + band / 2f)) {
-                drawRect(
-                    Brush.verticalGradient(
-                        listOf(Color.Transparent, pal.p.copy(alpha = .22f * a), Color.Transparent),
-                        startY = y, endY = y + band
-                    ),
-                    Offset(l - 40f * d, y), Size(r - l + 80f * d, band)
-                )
+        val bt = maxOf(front - feather * 1.15f, t)
+        val bb = minOf(front + feather * .25f, t + h)
+        if (bb - bt > 1f) {
+            val clip = Path().apply { addRoundRect(RoundRect(l, t, r, t + h, rr)) }
+            val bandMask = Brush.verticalGradient(
+                0f to none, .72f to Color.Black.copy(alpha = .5f), 1f to none,
+                startY = front - feather * 1.15f, endY = front + feather * .25f
+            )
+            clipPath(clip) {
+                maskedLayer(Rect(l, bt, r, bb), bandMask, a) {
+                    drawRect(gem, Offset(l, bt), Size(w, bb - bt))
+                }
             }
         }
     }
-
-    // dua kilau bintang di selokan kanan (di luar teks), berputar sambil membesar
-    if (spark > .001f && h > 56f * d) {
-        val s = spark.coerceAtLeast(0f)
-        val cx = r - 8f * d
-        val cy = t + 22f * d
-        rotate(s * 90f, Offset(cx, cy)) { drawPath(sparklePath(cx, cy, 7f * d * s), pal.p.copy(alpha = a)) }
-        val cx2 = cx - 1f * d
-        val cy2 = cy + 20f * d
-        rotate(-s * 70f, Offset(cx2, cy2)) { drawPath(sparklePath(cx2, cy2, 4f * d * s), pal.p.copy(alpha = .7f * a)) }
-    }
-}
-
-/** Bintang empat sudut yang melengkung ke dalam (gaya "sparkle" M3 Expressive). */
-private fun sparklePath(cx: Float, cy: Float, r: Float): Path = Path().apply {
-    moveTo(cx, cy - r)
-    quadraticBezierTo(cx, cy, cx + r, cy)
-    quadraticBezierTo(cx, cy, cx, cy + r)
-    quadraticBezierTo(cx, cy, cx - r, cy)
-    quadraticBezierTo(cx, cy, cx, cy - r)
-    close()
 }
 
 /**
