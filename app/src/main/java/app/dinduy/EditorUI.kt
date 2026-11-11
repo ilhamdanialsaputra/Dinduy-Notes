@@ -66,6 +66,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -313,6 +314,105 @@ fun Modifier.selGlow(sr: Pair<Int, Int>?, color: Color, map: (Int) -> Int, layou
     }
 }
 
+/**
+ * Efek salin / potong / tempel (visual saja). Salin: bentuk seleksi "menyedot masuk" (aura menyusut + kilau + pop kecil).
+ * Potong: letupan cahaya (cincin + percikan) di titik potong. Tempel: teks yang masuk menyala lalu mereda dengan kilau ganda.
+ * Antarblok berurutan (blok pertama lebih dulu). Digambar DI BELAKANG teks.
+ */
+@Composable
+fun Modifier.fxGlow(fx: SelFx?, key: String, color: Color, map: (Int) -> Int, layout: () -> TextLayoutResult?): Modifier {
+    val t = remember { Animatable(1f) }
+    val cur = remember { arrayOfNulls<SelFx>(1) }
+    if (fx != null) cur[0] = fx
+    LaunchedEffect(fx?.tick) {
+        val f = fx ?: return@LaunchedEffect
+        t.snapTo(0f)
+        kotlinx.coroutines.delay((f.keys.indexOf(key).coerceAtLeast(0).coerceAtMost(10)) * 70L)
+        t.animateTo(1f, tween(if (f.kind == 2) 650 else 900, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+    }
+    return drawBehind {
+        val f = cur[0] ?: return@drawBehind
+        val tt = t.value
+        if (tt >= 1f || tt <= 0f) return@drawBehind
+        val l = layout() ?: return@drawBehind
+        val n = l.layoutInput.text.length
+        val rg = f.ranges[key]
+        val env = kotlin.math.sin(tt * kotlin.math.PI.toFloat())
+        fun st(w: Float) = androidx.compose.ui.graphics.drawscope.Stroke(width = w, join = androidx.compose.ui.graphics.StrokeJoin.Round)
+        if (f.kind == 2) {   // potong: letupan di titik potong
+            val o = map((rg?.first ?: 0) + 1).coerceIn(0, n)
+            val cr = l.getCursorRect(o)
+            val c = Offset(cr.left, (cr.top + cr.bottom) / 2f)
+            val k = 1f - (1f - tt) * (1f - tt)                      // ease-out
+            val a = 1f - tt
+            drawCircle(color.copy(alpha = .30f * a), radius = 8.dp.toPx() + 54.dp.toPx() * k, center = c)
+            drawCircle(color.copy(alpha = .70f * a), radius = 6.dp.toPx() + 38.dp.toPx() * k, center = c, style = st(2.dp.toPx() * a + .5f))
+            for (i in 0 until 8) {   // percikan
+                val ang = (i * 45f + 18f) * (kotlin.math.PI.toFloat() / 180f)
+                val d = 10.dp.toPx() + 44.dp.toPx() * k
+                drawCircle(color.copy(alpha = .85f * a), radius = 2.6.dp.toPx() * (1f - tt * .7f), center = Offset(c.x + kotlin.math.cos(ang) * d, c.y + kotlin.math.sin(ang) * d))
+            }
+            return@drawBehind
+        }
+        // salin / tempel: bentuk dari rentang (null = seluruh teks kolom)
+        val s = if (rg != null) map(rg.first + 1).coerceIn(0, n) else map(1).coerceIn(0, n)
+        val e = if (rg != null) map(rg.second + 1).coerceIn(0, n) else n
+        if (e <= s) return@drawBehind
+        val ls = l.getLineForOffset(s); val le = l.getLineForOffset(maxOf(s, e - 1))
+        val pad = 1.dp.toPx(); val minW = 6.dp.toPx()
+        val xl = FloatArray(le - ls + 1); val xr = FloatArray(le - ls + 1); val yt = FloatArray(le - ls + 1); val yb = FloatArray(le - ls + 1)
+        for (i in ls..le) {
+            val k = i - ls
+            val xa = if (i == ls) l.getHorizontalPosition(s, true) else l.getLineLeft(i)
+            val xb = if (i == le && e < l.getLineEnd(i)) l.getHorizontalPosition(e, true) else l.getLineRight(i)
+            xl[k] = minOf(xa, xb) - pad; xr[k] = maxOf(maxOf(xa, xb) + pad, minOf(xa, xb) - pad + minW)
+            yt[k] = if (k == 0) l.getLineTop(i) else yb[k - 1]; yb[k] = l.getLineBottom(i)
+        }
+        val pts = ArrayList<Offset>()
+        for (k in xr.indices) { pts.add(Offset(xr[k], yt[k])); pts.add(Offset(xr[k], yb[k])) }
+        for (k in xl.indices.reversed()) { pts.add(Offset(xl[k], yb[k])); pts.add(Offset(xl[k], yt[k])) }
+        val clean = ArrayList<Offset>()
+        for (pt in pts) if (clean.isEmpty() || clean.last() != pt) clean.add(pt)
+        if (clean.size > 1 && clean.first() == clean.last()) clean.removeAt(clean.size - 1)
+        val path = roundedPoly(clean, 8.dp.toPx())
+        val bx0 = xl.min(); val bx1 = xr.max(); val by0 = yt.first(); val by1 = yb.last()
+        val shine = androidx.compose.ui.graphics.lerp(color, Color.White, .7f)
+        val join = androidx.compose.ui.graphics.StrokeJoin.Round
+        fun sweep(q: Float, al: Float, w: Float) {
+            if (q <= 0f || q >= 1f) return
+            val ww = maxOf((bx1 - bx0) * .5f, 90.dp.toPx()) * w
+            val cx = bx0 - ww / 2f + q * (bx1 - bx0 + ww)
+            clipPath(path) {
+                drawRect(
+                    androidx.compose.ui.graphics.Brush.horizontalGradient(
+                        listOf(Color.Transparent, shine.copy(alpha = al * kotlin.math.sin(q * kotlin.math.PI.toFloat())), Color.Transparent), startX = cx - ww / 2f, endX = cx + ww / 2f
+                    ),
+                    topLeft = Offset(bx0, by0), size = androidx.compose.ui.geometry.Size(bx1 - bx0, by1 - by0)
+                )
+            }
+        }
+        if (f.kind == 1) {   // salin: menyedot masuk
+            val inv = 1f - tt
+            val pop = 1f + .035f * kotlin.math.sin(minOf(1f, tt * 2.2f) * kotlin.math.PI.toFloat())
+            scale(pop, Offset((bx0 + bx1) / 2f, (by0 + by1) / 2f)) {
+                drawPath(path, color.copy(alpha = .30f * inv), style = st(24.dp.toPx() * inv))      // aura menyusut ke bentuk
+                drawPath(path, color.copy(alpha = .22f * inv), style = st(11.dp.toPx() * inv))
+                drawPath(path, color.copy(alpha = .30f * env))
+                drawPath(path, color.copy(alpha = .70f * inv), style = st(1.8.dp.toPx()))
+            }
+            sweep((tt * 1.8f).coerceIn(0f, 1f), .9f, 1f)
+            sweep((tt * 1.8f - .25f).coerceIn(0f, 1f), .4f, 1.7f)
+        } else {   // tempel: menyala lalu mereda
+            val dec = (1f - tt) * (1f - tt)
+            drawPath(path, color.copy(alpha = .18f * dec), style = st(22.dp.toPx() * (.4f + .6f * dec)))
+            drawPath(path, color.copy(alpha = .38f * dec))
+            drawPath(path, color.copy(alpha = .75f * dec), style = st(1.8.dp.toPx()))
+            sweep((tt * 1.6f).coerceIn(0f, 1f), .9f, 1f)
+            sweep((tt * 1.6f - .22f).coerceIn(0f, 1f), .4f, 1.7f)
+        }
+    }
+}
+
 fun styled(rt: Rt, text: String, off: Int, pal: Pal, fs: Float): AnnotatedString = buildAnnotatedString {
     append(text)
     val n = text.length
@@ -523,7 +623,7 @@ fun TF(
         // BasicText, bukan material3 Text: Text menggabungkan gaya tema (LocalTextStyle) ke gaya kita, BasicTextField (mode ketik) tidak.
         androidx.compose.foundation.text.BasicText(
             ann,
-            modifier.selGlow(sr, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }, if (sr != null) ed.selSig() else null, if (sr != null) ed.selWave(key) else null).heightIn(min = base.lineHeight.value.dp)
+            modifier.selGlow(sr, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }, if (sr != null) ed.selSig() else null, if (sr != null) ed.selWave(key) else null).fxGlow(ed.fx?.takeIf { key in it.keys }, key, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }).heightIn(min = base.lineHeight.value.dp)
                 .onGloballyPositioned { c ->
                     val cc = ed.contentCoords
                     if (cc != null && cc.isAttached && c.isAttached) {
@@ -634,7 +734,7 @@ fun TF(
         ) {
             BasicTextField(
                 value = v, onValueChange = { ed.onText(key, it) },
-                modifier = modifier.selGlow(sr, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }, if (sr != null) ed.selSig() else null, if (sr != null) ed.selWave(key) else null).focusProperties { canFocus = !ed.ink.on }.focusRequester(fr).trackPos(ed, key)
+                modifier = modifier.selGlow(sr, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }, if (sr != null) ed.selSig() else null, if (sr != null) ed.selWave(key) else null).fxGlow(ed.fx?.takeIf { key in it.keys }, key, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }).focusProperties { canFocus = !ed.ink.on }.focusRequester(fr).trackPos(ed, key)
                     .then(
                         // sheet bawah aktif => field readOnly (kursor bawaan tidak digambar), jadi kursor digambar manual agar tetap terlihat
                         if (foc && ed.sheet != 0) Modifier.drawWithContent {
@@ -654,9 +754,9 @@ fun TF(
                         when {
                             ctrl && e.key == Key.A -> { ed.selectAllKey(key); true }
                             (ctrl && e.key == Key.C) || e.key == Key.Copy ->
-                                if (ed.selOn) { clipM.setText(androidx.compose.ui.text.AnnotatedString(ed.selMd())); true } else false
+                                if (ed.selOn) { ed.fxCopy(); clipM.setText(androidx.compose.ui.text.AnnotatedString(ed.selMd())); true } else false
                             (ctrl && e.key == Key.X) || e.key == Key.Cut ->
-                                if (ed.selOn) { clipM.setText(androidx.compose.ui.text.AnnotatedString(ed.selMd())); ed.selDelete(); true } else false
+                                if (ed.selOn) { ed.fxCut(); clipM.setText(androidx.compose.ui.text.AnnotatedString(ed.selMd())); ed.selDelete(); true } else false
                             (ctrl && e.key == Key.V) || e.key == Key.Paste ->
                                 if (ed.selOn) {
                                     val s = clipM.getText()?.text
@@ -3175,8 +3275,8 @@ fun SelBubble(ed: Ed, vm: AppVM, act: Actions, scrollY: () -> Int) {
                 }
             }
         }
-        Item(0, flags[0], onClick = { act.copyText(ed.selMd()); ed.selDelete() }) { T("Cut", 14f, 700, it, maxLines = 1) }
-        Item(1, flags[1], 2, onClick = { act.copyText(ed.selMd()); vm.show("Copied"); ed.clearSel() }) { T("Copy", 14f, 700, it, maxLines = 1) }
+        Item(0, flags[0], onClick = { ed.fxCut(); act.copyText(ed.selMd()); ed.selDelete() }) { T("Cut", 14f, 700, it, maxLines = 1) }
+        Item(1, flags[1], 2, onClick = { ed.fxCopy(); act.copyText(ed.selMd()); vm.show("Copied"); ed.clearSel() }) { T("Copy", 14f, 700, it, maxLines = 1) }
         Item(2, flags[2], onClick = {
             val s = clip.getText()?.text
             if (!s.isNullOrEmpty()) ed.selPaste(s) else vm.show("Nothing to paste")
