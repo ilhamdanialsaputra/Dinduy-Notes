@@ -224,16 +224,16 @@ fun Modifier.selGlow(sr: Pair<Int, Int>?, color: Color, map: (Int) -> Int, layou
     val settle = remember { Animatable(1f) }   // 1 = efek selesai / tidak tampil
     val last = remember { arrayOfNulls<Pair<Int, Int>>(1) }
     if (sr != null) last[0] = sr
-    LaunchedEffect(sr != null) { prog.animateTo(if (sr != null) 1f else 0f, tween(if (sr != null) 110 else 150)) }
+    LaunchedEffect(sr != null) { if (sr != null) prog.snapTo(1f) else prog.animateTo(0f, tween(150)) }   // muncul: langsung penuh (tanpa fade-in)
     LaunchedEffect(sr) {
         if (sr == null) return@LaunchedEffect
         settle.snapTo(1f)                       // sedang berubah / diseret: tanpa efek tambahan
-        kotlinx.coroutines.delay(220)           // berhenti? (dibatalkan otomatis kalau rentang berubah lagi)
+        kotlinx.coroutines.delay(70)            // berhenti? (dibatalkan otomatis kalau rentang berubah lagi)
         settle.snapTo(0f)
-        settle.animateTo(1f, tween(850, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+        settle.animateTo(1f, tween(650, easing = androidx.compose.animation.core.FastOutSlowInEasing))
     }
     return drawBehind {
-        val p = prog.value
+        val p = if (sr != null) 1f else prog.value   // saat ada seleksi langsung penuh di frame yang sama (tanpa menunggu efek)
         val r = last[0]
         if (p <= .001f || r == null) return@drawBehind
         val l = layout() ?: return@drawBehind
