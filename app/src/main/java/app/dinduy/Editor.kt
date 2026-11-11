@@ -99,8 +99,9 @@ class Fold(val cuts: IntArray, val pn: IntArray, val pl: FloatArray, val cutR: F
 /** Titik di dalam teks (kunci kolom + offset) untuk seleksi lintas blok. */
 data class Pt(val key: String, val off: Int)
 
-/** Efek visual salin (1) / potong (2) / tempel (3): kolom [keys] menggambar efeknya (rentang di [ranges], kosong = seluruh teks kolom). Hanya tampilan. */
-class SelFx(val kind: Int, val keys: List<String>, val ranges: Map<String, Pair<Int, Int>>, val tick: Long)
+/** Efek visual salin (1) / potong (2) / tempel (3) / angkat (4) / jatuh (5) / batal angkat (6): kolom [keys] menggambar efeknya (rentang di [ranges], kosong = seluruh teks kolom).
+ *  [origin] = titik asal teks yang dipindah (letupan kecil, hanya kind 5). [at] = cap waktu: efek sekali-putar, tidak diputar ulang oleh composable yang terpasang belakangan. Hanya tampilan. */
+class SelFx(val kind: Int, val keys: List<String>, val ranges: Map<String, Pair<Int, Int>>, val tick: Long, val origin: Pt? = null, val at: Long = android.os.SystemClock.uptimeMillis())
 
 /** Gambar yang sedang diangkat (tekan-tahan lalu geser). */
 class Mv(val bid: String, val imgId: String, val row: Boolean, val top: Float, val h: Float, val g: Float = -1f)
@@ -445,7 +446,13 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
                 val rt2 = oldRt.edit(without, typing)
                 putRt(key, rt2)
                 tf[key] = TextFieldValue(Z + rt2.t, TextRange(df.p + 1))
-                if (insStr == "\n") enter(key, df.p) else paste(key, df.p, insStr, lastMd.isNotEmpty() && insStr.trimEnd('\n') == lastMd)
+                if (insStr == "\n") enter(key, df.p) else {
+                    val bl0 = blocks
+                    val ids0 = blocks.mapTo(HashSet()) { it.id }
+                    paste(key, df.p, insStr, lastMd.isNotEmpty() && insStr.trimEnd('\n') == lastMd)
+                    pasteArm = null
+                    if (blocks !== bl0) fxPaste(Pt(key, df.p), insStr.trimEnd('\n').length, ids0)   // hanya bila benar-benar menyisip
+                }
                 return
             }
             if (insStr == "\n" && df.p == nt.length - 1 && (oldRt.t.isEmpty() || oldRt.t.endsWith("\n"))) {
@@ -457,6 +464,10 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val rt = oldRt.edit(nt, typing)
         putRt(key, rt)
         tf[key] = v
+        if (df.ins > 0 && pasteArm != null) {   // Ctrl+V tanpa seleksi
+            if (insStr == pasteArm && android.os.SystemClock.uptimeMillis() - pasteArmAt < 800L) fxSet(3, listOf(key), mapOf(key to (df.p to df.p + df.ins)))
+            pasteArm = null
+        }
         typing = rt.flags(v.selection.min - 1, v.selection.max - 1)
         // pengelompokan undo per kalimat
         if (df.ins > 0) {
@@ -2383,24 +2394,48 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
 
     /** Rentang terseleksi pada satu kolom teks, atau null. */
     /** Tanda tangan seleksi (berubah tiap rentang berubah) + urutan blok [key] di dalam seleksi (indeks, jumlah blok): dipakai efek visual seleksi. */
-    fun selSig(): String? = selSpan()?.let { "${it.first.key}:${it.first.off}:${it.second.key}:${it.second.off}" }
+    fun selSig(): String? {
+        val s = selSpan()?.let { "${it.first.key}:${it.first.off}:${it.second.key}:${it.second.off}" }
+        if (s != sigLast) { sigLast = s; sigAt = android.os.SystemClock.uptimeMillis() }   // cap waktu perubahan seleksi (bukan state: tidak memicu recompose)
+        return s
+    }
+    private var sigLast: String? = null
+    private var sigAt = 0L
+    /** Seleksi baru saja berubah? Composable yang baru terpasang dengan seleksi lama tidak memutar efek "settle". */
+    fun selFresh() = android.os.SystemClock.uptimeMillis() - sigAt < 400L
+
     var fx by mutableStateOf<SelFx?>(null)
     private var fxN = 0L
-    /** Salin: efek di seleksi yang sedang ada (panggil SEBELUM seleksi dilepas). */
-    fun fxCopy() {
-        val sg = selSegs(); if (sg.isEmpty()) return
-        fx = SelFx(1, sg.map { it.first }, sg.filter { it.third > it.second }.associate { it.first to (it.second to it.third) }, ++fxN)
+    private var fxOff: Job? = null
+    private var pasteArm: String? = null
+    private var pasteArmAt = 0L
+    /** Satu-satunya pintu efek: pasang [fx], kosongkan otomatis sesudah efek selesai. Aksi kembar (<150ms, jenis sama) diabaikan. */
+    private fun fxSet(kind: Int, keys: List<String>, ranges: Map<String, Pair<Int, Int>>, origin: Pt? = null) {
+        val now = android.os.SystemClock.uptimeMillis()
+        fx?.let { if (it.kind == kind && now - it.at < 150L) return }
+        val f = SelFx(kind, keys, ranges, ++fxN, origin, now)
+        fx = f
+        fxOff?.cancel()
+        fxOff = scope.launch { delay(2200); if (fx === f) fx = null }
     }
+    private fun fxSegs(kind: Int) {
+        val sg = selSegs(); if (sg.isEmpty()) return
+        fxSet(kind, sg.map { it.first }, sg.filter { it.third > it.second }.associate { it.first to (it.second to it.third) })
+    }
+    /** Salin: efek di seleksi yang sedang ada (panggil SEBELUM seleksi dilepas). */
+    fun fxCopy() = fxSegs(1)
     /** Potong: letupan di titik potong (panggil SEBELUM teks dihapus). */
     fun fxCut() {
         val (lo, _) = selSpan() ?: return
-        fx = SelFx(2, listOf(lo.key), mapOf(lo.key to (lo.off to lo.off)), ++fxN)
+        fxSet(2, listOf(lo.key), mapOf(lo.key to (lo.off to lo.off)))
     }
     private fun fxPaste(lo: Pt, len: Int, before: Set<String>) {
         val fresh = blocks.filter { it.id !in before }.map { it.id }
-        fx = if (fresh.isNotEmpty()) SelFx(3, fresh, emptyMap(), ++fxN)
-        else SelFx(3, listOf(lo.key), mapOf(lo.key to (lo.off to lo.off + len)), ++fxN)
+        if (fresh.isNotEmpty()) fxSet(3, fresh, emptyMap())
+        else fxSet(3, listOf(lo.key), mapOf(lo.key to (lo.off to lo.off + len)))
     }
+    /** Ctrl+V tanpa seleksi: catat teks clipboard; penyisipan identik dalam 0,8 dtk di onValueChange dianggap tempel. */
+    fun fxArmPaste(s: String?) { pasteArm = s?.takeIf { it.isNotEmpty() }; pasteArmAt = android.os.SystemClock.uptimeMillis() }
 
     fun selWave(key: String): Pair<Int, Int>? {
         val (lo, hi) = selSpan() ?: return null
@@ -2659,6 +2694,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         tlTarget(p)
         tlAuto()
         buzz?.invoke()
+        fxSegs(4)
         return true
     }
 
@@ -2710,7 +2746,7 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         tlLand = land?.let { Offset(it.left, it.center.y) }
         tl = null; tlDrop = null
         buzz?.invoke()
-        if (valid && to != null && span != null) tlApply(span, to)
+        if (valid && to != null && span != null) tlApply(span, to) else fxSegs(6)   // batal: pudar halus (seleksi tetap)
     }
 
     /** Pindahkan isi seleksi [span] ke [to]: format ikut (tebal, miring, dst; blok utuh bila lintas blok), satu langkah undo. */
@@ -2742,6 +2778,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         commit()
         val n0 = hist.size
         val h0 = this.hi
+        val ids0 = blocks.mapTo(HashSet()) { it.id }
+        val insLen = rt?.t?.length ?: plain.length
         selDelete()
         val tb = blockOfKey(key) ?: return
         val cell = isCellKey(key)
@@ -2776,6 +2814,10 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         }
         // hapus + sisip = SATU langkah undo
         while (this.hi > h0 + 1 && hist.size >= n0) { hist.removeAt(this.hi - 1); this.hi-- }
+        // efek jatuh: SATU efek untuk seluruh pemindahan (tempel di tujuan + letupan kecil di asal); jalur ini tidak memanggil fxPaste/fxCut
+        val fresh = blocks.filter { it.id !in ids0 }.map { it.id }
+        if (fresh.isNotEmpty()) fxSet(5, fresh + lo.key, emptyMap(), lo)
+        else fxSet(5, listOf(key, lo.key).distinct(), mapOf(key to (off to off + insLen)), lo)
         tick++
     }
 
