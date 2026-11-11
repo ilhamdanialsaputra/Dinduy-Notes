@@ -734,6 +734,9 @@ fun TF(
                     // Posisi kursor dipasang SEBELUM fokus diminta: sesi input (keyboard) langsung mulai dengan keadaan final.
                     // Dulu fokus diminta dulu lalu seleksi diubah sesudahnya, jadi keyboard menerima keadaan baru kedua kali = tampak "refresh" dua kali.
                     ed.applyReq(r)
+                    // Sheet (Format / Sisipkan) sedang terbuka: jangan minta fokus sekarang, karena itu membuka keyboard di balik sheet.
+                    // Kursor / seleksi sudah dipasang; fokus dikembalikan oleh Ed.resumeFocus() saat sheet ditutup.
+                    if (ed.sheet != 0) { ed.deferKey = key; return@collect }
                     // Keluar dari mode baca (belum ada keyboard): tunggu satu frame supaya fokus tidak mendahului field terpasang
                     // (sesi IME dimulai ulang = keyboard muncul dua kali). Pindah / hapus blok saat keyboard SUDAH terbuka: jangan menunggu,
                     // karena fokus lama sudah lepas di frame ini; menunggu = keyboard sempat menutup lalu membuka lagi (berkedut).
@@ -2898,7 +2901,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
         }
     }
     val kbNow: () -> Boolean = { imeInsets.getBottom(density) > minKb || kbBox[0] > minKb }
-    SideEffect { ed.kbShow = { kb?.show() } }
+    SideEffect { ed.kbShow = { if (!ed.resumeFocus()) kb?.show() } }
     // Area catatan berhenti tepat di atas keyboard / navbar ATAU di atas sheet (mana yang lebih tinggi). Sheet memesan tempat lewat
     // ed.sheetReserve (dianimasikan oleh DocSheet), jadi saat sheet menggantikan keyboard bagian bawah area tetap di tempat yang sama.
     // Dibaca di fase ukur (bukan komposisi), jadi cukup re-layout, tidak recompose.
