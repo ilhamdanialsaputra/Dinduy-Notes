@@ -194,25 +194,72 @@ fun spanStyle(k: Int, pal: Pal, fs: Float): SpanStyle = when (k) {
     else -> SpanStyle(color = pal.p, fontWeight = FontWeight(700), textDecoration = TextDecoration.Underline)
 }
 
-/** Warna seleksi teks. Bagian yang bertanda stabilo dicampur ke warna stabilonya, jadi stabilo tetap kelihatan. off = awalan tak terlihat. */
+/** Seleksi teks: bagian biasa digambar oleh [selGlow] (rounded + glow + animasi); di sini hanya bagian bertanda stabilo yang dicampur
+ *  ke warna stabilonya supaya stabilo tetap kelihatan. off = awalan tak terlihat. */
 fun AnnotatedString.Builder.addSel(pal: Pal, rt: Rt, a0: Int, b0: Int, off: Int, n: Int) {
     val a = a0.coerceIn(0, n); val b = b0.coerceIn(0, n)
     if (b <= a) return
-    val sel = pal.p.copy(alpha = .32f)
+    val sel = pal.p.copy(alpha = .34f)
     val onMark = Color(
         red = sel.red * sel.alpha + pal.pc.red * (1f - sel.alpha),
         green = sel.green * sel.alpha + pal.pc.green * (1f - sel.alpha),
         blue = sel.blue * sel.alpha + pal.pc.blue * (1f - sel.alpha)
     )
-    var cur = a
     for ((ms, me) in rt.sp.filter { it.k == K.M }.map { (it.s + off).coerceIn(0, n) to (it.e + off).coerceIn(0, n) }.sortedBy { it.first }) {
-        val s = maxOf(ms, cur); val e = minOf(me, b)
-        if (e <= s) continue
-        if (s > cur) addStyle(SpanStyle(background = sel), cur, s)
-        addStyle(SpanStyle(background = onMark), s, e)
-        cur = e
+        val s = maxOf(ms, a); val e = minOf(me, b)
+        if (e > s) addStyle(SpanStyle(background = onMark), s, e)
     }
-    if (cur < b) addStyle(SpanStyle(background = sel), cur, b)
+}
+
+/**
+ * Indikator seleksi gaya Material 3 Expressive: highlight rounded per baris (ujung blok membulat, sambungan antarbaris rapat),
+ * lapisan glow lembut di sekelilingnya, muncul dengan spring (fade + mekar vertikal), berdenyut halus saat rentang berubah,
+ * dan memudar saat seleksi dilepas. Digambar DI BELAKANG teks, jadi keterbacaan tetap. Tidak menyentuh mekanisme seleksi / handle / clipboard.
+ */
+@Composable
+fun Modifier.selGlow(sr: Pair<Int, Int>?, color: Color, map: (Int) -> Int, layout: () -> TextLayoutResult?): Modifier {
+    val prog = remember { Animatable(0f) }
+    val pulse = remember { Animatable(0f) }
+    val last = remember { arrayOfNulls<Pair<Int, Int>>(1) }
+    if (sr != null) last[0] = sr
+    LaunchedEffect(sr != null) {
+        if (sr != null) prog.animateTo(1f, spring(dampingRatio = .62f, stiffness = 380f)) else prog.animateTo(0f, tween(160))
+    }
+    LaunchedEffect(sr) { if (sr != null) { pulse.snapTo(1f); pulse.animateTo(0f, tween(340)) } }
+    return drawBehind {
+        val p = prog.value
+        if (p <= .001f) return@drawBehind
+        val r = last[0] ?: return@drawBehind
+        val l = layout() ?: return@drawBehind
+        val n = l.layoutInput.text.length
+        val s = map(r.first + 1).coerceIn(0, n); val e = map(r.second + 1).coerceIn(0, n)
+        if (e <= s) return@drawBehind
+        val a = p.coerceIn(0f, 1f)
+        val grow = p.coerceIn(0f, 1.15f)
+        val boost = pulse.value * .07f
+        val rad = 7.dp.toPx(); val sq = 2.dp.toPx(); val inset = .5.dp.toPx(); val g = 3.dp.toPx() * grow
+        val ls = l.getLineForOffset(s); val le = l.getLineForOffset(maxOf(s, e - 1))
+        for (i in ls..le) {
+            val xa = if (i == ls) l.getHorizontalPosition(s, true) else l.getLineLeft(i)
+            val xb = if (i == le && e < l.getLineEnd(i)) l.getHorizontalPosition(e, true) else l.getLineRight(i)
+            val x0 = minOf(xa, xb); val x1 = maxOf(xa, xb)
+            if (x1 - x0 < 1f) continue
+            val t0 = l.getLineTop(i) + inset; val b0 = l.getLineBottom(i) - inset
+            val cy = (t0 + b0) / 2f; val hh = (b0 - t0) / 2f * (.72f + .28f * grow)
+            val cl = if (i == ls) rad else sq; val cr = if (i == le) rad else sq
+            fun shape(d: Float) = androidx.compose.ui.graphics.Path().apply {
+                addRoundRect(
+                    androidx.compose.ui.geometry.RoundRect(
+                        x0 - d, cy - hh - d, x1 + d, cy + hh + d,
+                        androidx.compose.ui.geometry.CornerRadius(cl + d, cl + d), androidx.compose.ui.geometry.CornerRadius(cr + d, cr + d),
+                        androidx.compose.ui.geometry.CornerRadius(cr + d, cr + d), androidx.compose.ui.geometry.CornerRadius(cl + d, cl + d)
+                    )
+                )
+            }
+            drawPath(shape(g), color.copy(alpha = .10f * a))
+            drawPath(shape(0f), color.copy(alpha = (.26f + boost) * a))
+        }
+    }
 }
 
 fun styled(rt: Rt, text: String, off: Int, pal: Pal, fs: Float): AnnotatedString = buildAnnotatedString {
@@ -425,7 +472,7 @@ fun TF(
         // BasicText, bukan material3 Text: Text menggabungkan gaya tema (LocalTextStyle) ke gaya kita, BasicTextField (mode ketik) tidak.
         androidx.compose.foundation.text.BasicText(
             ann,
-            modifier.heightIn(min = base.lineHeight.value.dp)
+            modifier.selGlow(sr, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }).heightIn(min = base.lineHeight.value.dp)
                 .onGloballyPositioned { c ->
                     val cc = ed.contentCoords
                     if (cc != null && cc.isAttached && c.isAttached) {
@@ -536,7 +583,7 @@ fun TF(
         ) {
             BasicTextField(
                 value = v, onValueChange = { ed.onText(key, it) },
-                modifier = modifier.focusProperties { canFocus = !ed.ink.on }.focusRequester(fr).trackPos(ed, key)
+                modifier = modifier.selGlow(sr, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }).focusProperties { canFocus = !ed.ink.on }.focusRequester(fr).trackPos(ed, key)
                     .then(
                         // sheet bawah aktif => field readOnly (kursor bawaan tidak digambar), jadi kursor digambar manual agar tetap terlihat
                         if (foc && ed.sheet != 0) Modifier.drawWithContent {
