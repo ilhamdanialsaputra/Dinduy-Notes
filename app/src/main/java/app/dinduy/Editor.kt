@@ -1608,7 +1608,15 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             val vb0 = scrollV + csRefVh - clr0
             if (!(bot <= vb0 + 2f && top >= vt - 2f)) return 0f
         }
-        return when { bot > vb -> bot - vb; top < vt -> top - vt; else -> 0f }
+        // Kursor di BAWAH area terlihat: dasar kursor tepat di atas toolbar. Kursor di ATAS area terlihat:
+        //  - benar-benar di luar layar (pengguna menggulir jauh ke bawah lalu mengetik): samakan dengan kasus di bawah, dasar kursor tepat di atas toolbar
+        //    (dulu kursor diletakkan di tepi ATAS layar = jauh dari toolbar tempat jempol bekerja);
+        //  - hanya tersembunyi sebagian (mis. panah atas ke baris sebelumnya): geser seminimal mungkin.
+        return when {
+            bot > vb -> bot - vb
+            top < vt -> if (bot <= scrollV.toFloat()) bot - vb else top - vt
+            else -> 0f
+        }
     }
     var buzz: (() -> Unit)? = null
     val bpos = HashMap<String, FloatArray>()   // id blok -> [atas, tinggi] di ruang konten
