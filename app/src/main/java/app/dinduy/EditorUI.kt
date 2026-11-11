@@ -2063,16 +2063,24 @@ fun AlignSeg(i0: Int, sel: Int, icons: List<@Composable (Color) -> Unit>, onPick
     SlideSeg(count = icons.size, sel = sel, i = i0, onPick = onPick) { k, c -> icons[k](c) }
 }
 
-/** Chip di bilah alat tabel / kutipan: melompat masuk berurutan menurut [i], menyempit membal saat ditekan. */
+/** Chip di bilah alat tabel / kutipan: melar masuk berurutan menurut [i] (lihat [popIn]); ditekan = melar melebar dan memipih seperti jeli. */
 @Composable
 fun CapChip(i: Int, text: String, bg: Color, fg: Color, shape: Shape, h: Dp = 48.dp, minW: Dp = 0.dp, onClick: () -> Unit) {
     val haptic = LocalHapticFeedback.current
     val src = remember { MutableInteractionSource() }
     val pr by src.collectIsPressedAsState()
-    val sc by animateFloatAsState(if (pr) .9f else 1f, spring(.42f, 620f), label = "ccs")
+    val dock = LocalDockMotion.current
+    val sx by animateFloatAsState(
+        if (pr) (if (dock) 1.07f else .9f) else 1f,
+        if (dock) spring<Float>(.4f, 520f) else spring<Float>(.42f, 620f), label = "ccsx"
+    )
+    val sy by animateFloatAsState(
+        if (pr) (if (dock) .87f else .9f) else 1f,
+        if (dock) spring<Float>(.4f, 520f) else spring<Float>(.42f, 620f), label = "ccsy"
+    )
     Box(
         Modifier.popIn(i, 40L).height(h).widthIn(min = minW)
-            .graphicsLayer { scaleX = sc; scaleY = sc }
+            .graphicsLayer { scaleX = sx; scaleY = sy }
             .clip(shape).background(bg)
             .clickable(interactionSource = src, indication = LocalIndication.current) {
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
