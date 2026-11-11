@@ -230,24 +230,26 @@ private fun roundedPoly(pts: List<Offset>, r: Float): androidx.compose.ui.graphi
 }
 
 /**
- * Indikator seleksi Material You. Seleksi (satu paragraf, beberapa baris) digambar sebagai SATU bentuk utuh, bukan potongan per baris:
- * kotak tonal dengan semua sudut membulat (termasuk sudut cekung di sambungan antarbaris). Saat menyeret, bentuk mengikuti seleksi SEKETIKA.
- * Begitu berhenti (~70ms) muncul efek "settle" ala Gemini pada bentuk yang sama: aura glow mengembang lalu mereda, intensitas naik sebentar,
- * dan kilau menyapu seluruh bentuk dari kiri ke kanan. Digambar DI BELAKANG teks. Tidak menyentuh mekanisme seleksi / handle / clipboard.
+ * Indikator seleksi Material You. Seleksi per blok digambar sebagai SATU bentuk utuh (semua sudut membulat). Saat menyeret, bentuk
+ * mengikuti seleksi SEKETIKA. Begitu berhenti (~70ms) seluruh seleksi (semua blok) "settle" bersama: aura glow berlapis mengembang lalu mereda,
+ * garis tepi bercahaya (rim light) menyala, intensitas warna naik, dan kilau ganda menyapu bentuk dari kiri ke kanan, berurutan dari blok
+ * pertama sampai terakhir. [sig] = tanda tangan seluruh seleksi (supaya semua blok memulai ulang efek bersamaan), [wave] = (urutan blok, jumlah blok).
+ * Digambar DI BELAKANG teks. Tidak menyentuh mekanisme seleksi / handle / clipboard.
  */
 @Composable
-fun Modifier.selGlow(sr: Pair<Int, Int>?, color: Color, map: (Int) -> Int, layout: () -> TextLayoutResult?): Modifier {
+fun Modifier.selGlow(sr: Pair<Int, Int>?, color: Color, map: (Int) -> Int, layout: () -> TextLayoutResult?, sig: Any? = null, wave: Pair<Int, Int>? = null): Modifier {
     val prog = remember { Animatable(0f) }
     val settle = remember { Animatable(1f) }   // 1 = efek selesai / tidak tampil
     val last = remember { arrayOfNulls<Pair<Int, Int>>(1) }
     if (sr != null) last[0] = sr
+    val wIdx = wave?.first ?: 0; val wCnt = wave?.second ?: 1
     LaunchedEffect(sr != null) { if (sr != null) prog.snapTo(1f) else prog.animateTo(0f, tween(150)) }   // muncul: langsung penuh
-    LaunchedEffect(sr) {
+    LaunchedEffect(sig, sr != null) {
         if (sr == null) return@LaunchedEffect
         settle.snapTo(1f)                       // sedang berubah / diseret: tanpa efek tambahan
-        kotlinx.coroutines.delay(70)            // berhenti? (dibatalkan otomatis kalau rentang berubah lagi)
+        kotlinx.coroutines.delay(70)            // berhenti? (dibatalkan otomatis kalau seleksi berubah lagi)
         settle.snapTo(0f)
-        settle.animateTo(1f, tween(650, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+        settle.animateTo(1f, tween(900 + minOf(wCnt, 8) * 110, easing = androidx.compose.animation.core.FastOutSlowInEasing))
     }
     return drawBehind {
         val p = if (sr != null) 1f else prog.value
@@ -261,7 +263,6 @@ fun Modifier.selGlow(sr: Pair<Int, Int>?, color: Color, map: (Int) -> Int, layou
         val fx = if (t >= 1f) 0f else kotlin.math.sin(t * kotlin.math.PI.toFloat())   // 0 -> 1 -> 0
         val ls = l.getLineForOffset(s); val le = l.getLineForOffset(maxOf(s, e - 1))
         val pad = 1.dp.toPx(); val minW = 6.dp.toPx()
-        // kotak per baris (kiri, kanan, atas, bawah); atas = bawah baris sebelumnya supaya tak ada celah antarbaris
         val xl = FloatArray(le - ls + 1); val xr = FloatArray(le - ls + 1); val yt = FloatArray(le - ls + 1); val yb = FloatArray(le - ls + 1)
         for (i in ls..le) {
             val k = i - ls
@@ -272,28 +273,41 @@ fun Modifier.selGlow(sr: Pair<Int, Int>?, color: Color, map: (Int) -> Int, layou
         }
         if (le == ls && xr[0] - xl[0] < 2f) return@drawBehind
         val pts = ArrayList<Offset>()
-        for (k in xr.indices) { pts.add(Offset(xr[k], yt[k])); pts.add(Offset(xr[k], yb[k])) }          // sisi kanan, ke bawah
-        for (k in xl.indices.reversed()) { pts.add(Offset(xl[k], yb[k])); pts.add(Offset(xl[k], yt[k])) } // sisi kiri, ke atas
+        for (k in xr.indices) { pts.add(Offset(xr[k], yt[k])); pts.add(Offset(xr[k], yb[k])) }
+        for (k in xl.indices.reversed()) { pts.add(Offset(xl[k], yb[k])); pts.add(Offset(xl[k], yt[k])) }
         val clean = ArrayList<Offset>()
         for (pt in pts) if (clean.isEmpty() || clean.last() != pt) clean.add(pt)
         if (clean.size > 1 && clean.first() == clean.last()) clean.removeAt(clean.size - 1)
         val path = roundedPoly(clean, 8.dp.toPx())
         val bx0 = xl.min(); val bx1 = xr.max(); val by0 = yt.first(); val by1 = yb.last()
-        if (fx > 0f) {   // aura: bentuk yang sama, digemukkan lewat stroke bulat
-            drawPath(path, color.copy(alpha = .14f * fx), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 10.dp.toPx() * fx, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+        fun st(width: Float, join: androidx.compose.ui.graphics.StrokeJoin) = androidx.compose.ui.graphics.drawscope.Stroke(width = width, join = join)
+        if (fx > 0f) {   // aura berlapis (luar lebar & samar, dalam lebih pekat) + garis tepi bercahaya
+            drawPath(path, color.copy(alpha = .10f * fx), style = st(width = 22.dp.toPx() * fx, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+            drawPath(path, color.copy(alpha = .20f * fx), style = st(width = 11.dp.toPx() * fx, join = androidx.compose.ui.graphics.StrokeJoin.Round))
         }
-        drawPath(path, color.copy(alpha = (.28f + fx * .07f) * p))
-        if (t < 1f) {   // kilau menyapu seluruh bentuk
-            val bw = maxOf((bx1 - bx0) * .4f, 64.dp.toPx())
-            val cx = bx0 - bw / 2f + t * (bx1 - bx0 + bw)
-            val shine = androidx.compose.ui.graphics.lerp(color, Color.White, .55f)
-            clipPath(path) {
-                drawRect(
-                    androidx.compose.ui.graphics.Brush.horizontalGradient(
-                        listOf(Color.Transparent, shine.copy(alpha = .5f * p), Color.Transparent), startX = cx - bw / 2f, endX = cx + bw / 2f
-                    ),
-                    topLeft = Offset(bx0, by0), size = androidx.compose.ui.geometry.Size(bx1 - bx0, by1 - by0)
-                )
+        drawPath(path, color.copy(alpha = (.28f + fx * .12f) * p))
+        if (fx > 0f) drawPath(path, color.copy(alpha = .55f * fx), style = st(width = 1.6.dp.toPx(), join = androidx.compose.ui.graphics.StrokeJoin.Round))
+        if (t < 1f) {   // kilau ganda; berurutan antarblok (blok pertama lebih dulu)
+            val ov = 2f
+            val q = ((t * (wCnt + ov) - wIdx) / ov).coerceIn(0f, 1f)
+            if (q > 0f && q < 1f) {
+                val bw = maxOf((bx1 - bx0) * .5f, 90.dp.toPx())
+                val shine = androidx.compose.ui.graphics.lerp(color, Color.White, .7f)
+                val fade = kotlin.math.sin(q * kotlin.math.PI.toFloat()).coerceIn(0f, 1f)
+                clipPath(path) {
+                    for ((lag, al, w) in listOf(Triple(0f, .85f, 1f), Triple(.35f, .35f, 1.7f))) {
+                        val qq = (q - lag * .35f).coerceIn(0f, 1f)
+                        if (qq <= 0f || qq >= 1f) continue
+                        val ww = bw * w
+                        val cx = bx0 - ww / 2f + qq * (bx1 - bx0 + ww)
+                        drawRect(
+                            androidx.compose.ui.graphics.Brush.horizontalGradient(
+                                listOf(Color.Transparent, shine.copy(alpha = al * fade * p), Color.Transparent), startX = cx - ww / 2f, endX = cx + ww / 2f
+                            ),
+                            topLeft = Offset(bx0, by0), size = androidx.compose.ui.geometry.Size(bx1 - bx0, by1 - by0)
+                        )
+                    }
+                }
             }
         }
     }
@@ -509,7 +523,7 @@ fun TF(
         // BasicText, bukan material3 Text: Text menggabungkan gaya tema (LocalTextStyle) ke gaya kita, BasicTextField (mode ketik) tidak.
         androidx.compose.foundation.text.BasicText(
             ann,
-            modifier.selGlow(sr, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }).heightIn(min = base.lineHeight.value.dp)
+            modifier.selGlow(sr, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }, if (sr != null) ed.selSig() else null, if (sr != null) ed.selWave(key) else null).heightIn(min = base.lineHeight.value.dp)
                 .onGloballyPositioned { c ->
                     val cc = ed.contentCoords
                     if (cc != null && cc.isAttached && c.isAttached) {
@@ -620,7 +634,7 @@ fun TF(
         ) {
             BasicTextField(
                 value = v, onValueChange = { ed.onText(key, it) },
-                modifier = modifier.selGlow(sr, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }).focusProperties { canFocus = !ed.ink.on }.focusRequester(fr).trackPos(ed, key)
+                modifier = modifier.selGlow(sr, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }, if (sr != null) ed.selSig() else null, if (sr != null) ed.selWave(key) else null).focusProperties { canFocus = !ed.ink.on }.focusRequester(fr).trackPos(ed, key)
                     .then(
                         // sheet bawah aktif => field readOnly (kursor bawaan tidak digambar), jadi kursor digambar manual agar tetap terlihat
                         if (foc && ed.sheet != 0) Modifier.drawWithContent {
