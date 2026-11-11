@@ -393,7 +393,7 @@ fun TF(
     val dn = androidx.compose.ui.platform.LocalDensity.current
     var jw by remember { mutableStateOf(0) }       // lebar kolom teks (px), dipakai rata kiri-kanan
     // Sel tabel yang tidak sedang diedit digambar sebagai Text ringan (sama seperti mode baca); BasicTextField hanya dipasang di sel aktif.
-    val activeS = remember(key) { androidx.compose.runtime.derivedStateOf { ed.focus == key || ed.req?.key == key } }
+    val activeS = remember(key) { androidx.compose.runtime.derivedStateOf { val r = ed.req; if (ed.fromRead && r != null) r.key == key else ed.focus == key || r?.key == key } }
     // Blok yang tidak sedang diedit TETAP berupa BasicText ringan (pola yang sama dengan sel tabel). Dulu keluar dari mode baca
     // memasang BasicTextField + VisualTransformation + justify untuk SEMUA blok sekaligus tepat saat keyboard mulai naik
     // (lemot, layar kedut, sesi IME restart = keyboard muncul dua kali). Kini hanya satu kolom yang dipasang.
