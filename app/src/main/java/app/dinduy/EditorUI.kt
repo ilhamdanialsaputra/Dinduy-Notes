@@ -2744,8 +2744,11 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
             Modifier.weight(1f).fillMaxWidth().windowInsetsPadding(areaInsets)
                 .layout { m, c ->
                     // gulir mengikuti ukuran area di frame yang sama (bukan lewat flow yang telat): lihat Ed.followViewport
-                    ed.followViewport(c.maxHeight.toFloat())
+                    // Ukur isi DULU, baru ikuti viewport: batas gulir (ScrollState.maxValue) baru ikut membesar saat isi diukur dengan tinggi area yang baru.
+                    // Dulu gulir dikirim sebelum itu, jadi terpotong oleh batas lama dan sisanya baru dikejar flow 1-5 frame kemudian
+                    // = layar naik bertahap seperti ~20fps saat keyboard terbuka dan kursor ada di bawah.
                     val p = m.measure(c)
+                    ed.followViewport(c.maxHeight.toFloat())
                     layout(p.width, p.height) { p.place(0, 0) }
                 }
                 .onSizeChanged { ed.viewH = it.height.toFloat() }
