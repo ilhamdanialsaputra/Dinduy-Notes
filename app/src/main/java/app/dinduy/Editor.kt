@@ -2778,8 +2778,10 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         val rt: Rt? = if (single) rtOf(lo.key).slice(lo.off, hi.off) else null
         val keepMd = lastMd
         val keepBlocky = lastMdBlocky
-        val md = if (single) "" else selMd()
-        val blocky = !single && lastMdBlocky
+        val structural = !single && !isCellKey(lo.key) && !isCellKey(hi.key)
+        val moved: List<Blk> = if (structural) tlBlocks(selSegs()) else emptyList()
+        val md = if (single || structural) "" else selMd()
+        val blocky = !single && !structural && lastMdBlocky
         val plain = selText()
         lastMd = keepMd; lastMdBlocky = keepBlocky
         val segs = selSegs()
@@ -2797,14 +2799,16 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         }
         if (single) { tlGKey = lo.key; tlGWord = plain; tlGAt = System.currentTimeMillis() } else tlGKey = null
         commit()
-        val n0 = hist.size
-        val h0 = this.hi
+        val base = hist[this.hi]
         val ids0 = blocks.mapTo(HashSet()) { it.id }
         val insLen = rt?.t?.length ?: plain.length
         selDelete()
-        val tb = blockOfKey(key) ?: return
+        if (selOn) return   // penghapusan gagal: jangan menyisipkan lagi (mencegah teks dobel)
+        val tb = blockOfKey(key) ?: blockOfKey(lo.key)?.also { key = lo.key; off = lo.off } ?: return
         val cell = isCellKey(key)
-        if (rt != null) {
+        if (structural && moved.isNotEmpty() && !cell && !tb.isMulti) {
+            placeBlocks(key, off, moved)
+        } else if (rt != null) {
             val t0 = rt.t
             if (t0.indexOf('\n') >= 0 && !tb.isMulti && !cell) typeAt(key, off, t0, false)
             else {
@@ -2834,7 +2838,8 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             }
         }
         // hapus + sisip = SATU langkah undo
-        while (this.hi > h0 + 1 && hist.size >= n0) { hist.removeAt(this.hi - 1); this.hi-- }
+        val bi = hist.indexOfLast { it === base }
+        if (bi >= 0) while (this.hi > bi + 1) { hist.removeAt(this.hi - 1); this.hi-- }
         // efek jatuh: SATU efek untuk seluruh pemindahan (tempel di tujuan + letupan kecil di asal); jalur ini tidak memanggil fxPaste/fxCut
         val fresh = blocks.filter { it.id !in ids0 }.map { it.id }
         if (fresh.isNotEmpty()) fxSet(5, fresh + lo.key, emptyMap(), lo)
@@ -3020,6 +3025,64 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             prev = k
         }
         return sb.toString()
+    }
+
+    /** Salinan blok langsung dari seleksi lintas blok (tanpa lewat Markdown, jadi tidak ada teks yang hilang / bergabung). */
+    private fun tlBlocks(segs: List<Triple<String, Int, Int>>): List<Blk> {
+        val out = ArrayList<Blk>()
+        var i = 0
+        while (i < segs.size) {
+            val (k, s, e) = segs[i]
+            if (isCellKey(k)) {
+                val bid = keyBlock(k)
+                var j = i
+                while (j < segs.size && isCellKey(segs[j].first) && keyBlock(segs[j].first) == bid) j++
+                blocks.firstOrNull { it.id == bid }?.let { out.add(it.copy(id = Blk().id)) }
+                i = j
+                continue
+            }
+            val b = blockOfKey(k)
+            if (b != null) {
+                val rt = rtOf(k)
+                val part = rt.slice(s, e)
+                val whole = s <= 0 && e >= rt.t.length
+                if (part.t.isEmpty() && !whole) { i++; continue }
+                out.add(if (b.isText) b.copy(id = Blk().id, r = part, ik = emptyList()) else Blk(ty = "p", r = part))
+            }
+            i++
+        }
+        return out
+    }
+
+    /** Sisipkan blok [ns] di titik ([key], [pos]) apa adanya (mirip [paste] tetapi tanpa parsing Markdown). */
+    private fun placeBlocks(key: String, pos: Int, ns: List<Blk>) {
+        val i = idx(key)
+        if (i < 0 || ns.isEmpty()) return
+        val b = blocks[i]
+        commit()
+        val l = blocks.toMutableList()
+        val rt = b.r
+        if (b.ty == "img") l.addAll(i + 1, ns)
+        else if (rt.t.isEmpty()) {
+            l.removeAt(i); l.addAll(i, ns)
+        } else if (pos >= rt.t.length) l.addAll(i + 1, ns)
+        else if (pos <= 0) l.addAll(i, ns)
+        else {
+            val right = if (b.ty == "li") Blk(ty = "li", lt = b.lt, d = b.d, r = rt.slice(pos, rt.t.length), ta = b.ta, il = b.il, ir = b.ir, fi = b.fi)
+            else Blk(ty = "p", r = rt.slice(pos, rt.t.length), ta = b.ta, il = b.il, ir = b.ir, fi = b.fi)
+            l[i] = b.copy(r = rt.slice(0, pos), ik = inkRemap(b.ik, rt.t, rt.t.substring(0, pos.coerceIn(0, rt.t.length))))
+            l.addAll(i + 1, ns + right)
+        }
+        blocks = l
+        norm()
+        reseedAll()
+        val last = ns.last()
+        if (last.isText) focusAt(last.id, last.r.t.length)
+        else {
+            val j = idx(last.id)
+            blocks.getOrNull(j + 1)?.let { if (it.isText) focusAt(it.id, 0) }
+        }
+        afterStructural()
     }
 
     /** Markdown yang terakhir disalin dari seleksi (dipakai supaya tempel di catatan ini memulihkan format aslinya). */
