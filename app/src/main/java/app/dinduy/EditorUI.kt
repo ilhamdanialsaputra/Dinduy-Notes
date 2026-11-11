@@ -65,6 +65,7 @@ import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.runtime.rememberUpdatedState
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -212,58 +213,76 @@ fun AnnotatedString.Builder.addSel(pal: Pal, rt: Rt, a0: Int, b0: Int, off: Int,
 }
 
 /**
- * Indikator seleksi ala Gemini + Material You: "pill" tonal berwarna primer dengan sudut membulat penuh, tiap baris menyatu
- * jadi satu bentuk organik. Highlight MENGALIR: tumbuh dari titik awal lalu kedua ujungnya mengikuti rentang baru dengan spring
- * (perluas / ciutkan terasa cair). Warna bergradasi lembut + aura tipis, memudar saat dilepas. Digambar DI BELAKANG teks.
+ * Indikator seleksi Material You. Saat menyeleksi / menyeret: highlight tonal bersudut sedang yang mengikuti seleksi SEKETIKA (tanpa delay).
+ * Begitu pengguna berhenti (rentang diam ~220ms) muncul efek "settle" ala Gemini: kilau (shimmer) menyapu highlight dari kiri ke kanan,
+ * baris demi baris, dibarengi aura glow yang membesar lalu mereda dan intensitas warna yang naik sebentar. Digambar DI BELAKANG teks.
  * Tidak menyentuh mekanisme seleksi / handle / clipboard.
  */
 @Composable
 fun Modifier.selGlow(sr: Pair<Int, Int>?, color: Color, map: (Int) -> Int, layout: () -> TextLayoutResult?): Modifier {
     val prog = remember { Animatable(0f) }
-    val sA = remember { Animatable(0f) }
-    val eA = remember { Animatable(0f) }
+    val settle = remember { Animatable(1f) }   // 1 = efek selesai / tidak tampil
     val last = remember { arrayOfNulls<Pair<Int, Int>>(1) }
     if (sr != null) last[0] = sr
-    LaunchedEffect(sr != null) {
-        if (sr != null) prog.animateTo(1f, spring(dampingRatio = .8f, stiffness = 500f)) else prog.animateTo(0f, tween(180))
-    }
+    LaunchedEffect(sr != null) { prog.animateTo(if (sr != null) 1f else 0f, tween(if (sr != null) 110 else 150)) }
     LaunchedEffect(sr) {
         if (sr == null) return@LaunchedEffect
-        val flow = spring<Float>(dampingRatio = .78f, stiffness = 420f)
-        if (prog.value < .05f) { sA.snapTo(sr.first.toFloat()); eA.snapTo(sr.first.toFloat()) }   // muncul: tumbuh dari titik awal
-        kotlinx.coroutines.coroutineScope {
-            launch { sA.animateTo(sr.first.toFloat(), flow) }
-            launch { eA.animateTo(sr.second.toFloat(), flow) }
-        }
+        settle.snapTo(1f)                       // sedang berubah / diseret: tanpa efek tambahan
+        kotlinx.coroutines.delay(220)           // berhenti? (dibatalkan otomatis kalau rentang berubah lagi)
+        settle.snapTo(0f)
+        settle.animateTo(1f, tween(850, easing = androidx.compose.animation.core.FastOutSlowInEasing))
     }
     return drawBehind {
         val p = prog.value
-        if (p <= .001f || last[0] == null) return@drawBehind
+        val r = last[0]
+        if (p <= .001f || r == null) return@drawBehind
         val l = layout() ?: return@drawBehind
         val n = l.layoutInput.text.length
-        val s = map(sA.value.roundToInt() + 1).coerceIn(0, n); val e = map(eA.value.roundToInt() + 1).coerceIn(0, n)
-        val lo = minOf(s, e); val hi = maxOf(s, e)
-        if (hi <= lo) return@drawBehind
-        val a = p.coerceIn(0f, 1f)
-        val aura = 2.5.dp.toPx() * a
-        val ls = l.getLineForOffset(lo); val le = l.getLineForOffset(maxOf(lo, hi - 1))
+        val s = map(r.first + 1).coerceIn(0, n); val e = map(r.second + 1).coerceIn(0, n)
+        if (e <= s) return@drawBehind
+        val t = settle.value
+        val fx = if (t >= 1f) 0f else kotlin.math.sin(t * kotlin.math.PI.toFloat())   // 0 -> 1 -> 0
+        val ls = l.getLineForOffset(s); val le = l.getLineForOffset(maxOf(s, e - 1))
+        val cnt = le - ls + 1
+        val rad = 6.dp.toPx(); val tight = 1.5.dp.toPx(); val pad = 1.dp.toPx()
+        val al = (.28f + fx * .07f) * p
+        val shine = androidx.compose.ui.graphics.lerp(color, Color.White, .55f)
         for (i in ls..le) {
-            val xa = if (i == ls) l.getHorizontalPosition(lo, true) else l.getLineLeft(i)
-            val xb = if (i == le && hi < l.getLineEnd(i)) l.getHorizontalPosition(hi, true) else l.getLineRight(i)
-            val x0 = minOf(xa, xb) - 1.5.dp.toPx(); val x1 = maxOf(xa, xb) + 1.5.dp.toPx()
-            if (x1 - x0 < 3f) continue
+            val xa = if (i == ls) l.getHorizontalPosition(s, true) else l.getLineLeft(i)
+            val xb = if (i == le && e < l.getLineEnd(i)) l.getHorizontalPosition(e, true) else l.getLineRight(i)
+            val x0 = minOf(xa, xb) - pad; val x1 = maxOf(xa, xb) + pad
+            if (x1 - x0 < 2f) continue
             val t0 = l.getLineTop(i); val b0 = l.getLineBottom(i)
-            val rad = minOf((b0 - t0) / 2f, 12.dp.toPx())
-            fun pill(d: Float) = androidx.compose.ui.graphics.Path().apply {
-                addRoundRect(androidx.compose.ui.geometry.RoundRect(x0 - d, t0 - d, x1 + d, b0 + d, androidx.compose.ui.geometry.CornerRadius(rad + d)))
-            }
-            drawPath(pill(aura), color.copy(alpha = .08f * a))
-            drawPath(
-                pill(0f),
-                androidx.compose.ui.graphics.Brush.horizontalGradient(
-                    listOf(color.copy(alpha = .30f * a), color.copy(alpha = .20f * a)), startX = x0, endX = x1
+            val cl = if (i == ls) rad else tight; val cr = if (i == le) rad else tight
+            fun shape(d: Float) = androidx.compose.ui.graphics.Path().apply {
+                addRoundRect(
+                    androidx.compose.ui.geometry.RoundRect(
+                        x0 - d, t0 - d, x1 + d, b0 + d,
+                        androidx.compose.ui.geometry.CornerRadius(cl + d), androidx.compose.ui.geometry.CornerRadius(cr + d),
+                        androidx.compose.ui.geometry.CornerRadius(cr + d), androidx.compose.ui.geometry.CornerRadius(cl + d)
+                    )
                 )
-            )
+            }
+            if (fx > 0f) drawPath(shape(5.dp.toPx() * fx), color.copy(alpha = .14f * fx * p))   // aura
+            val body = shape(0f)
+            drawPath(body, color.copy(alpha = al))
+            if (t < 1f) {
+                // kilau menyapu baris demi baris: tiap baris punya jendela waktunya sendiri
+                val q = (t * cnt - (i - ls)).coerceIn(0f, 1f)
+                if (q > 0f && q < 1f) {
+                    val bw = maxOf((x1 - x0) * .45f, 56.dp.toPx())
+                    val cx = x0 - bw / 2f + q * (x1 - x0 + bw)
+                    clipPath(body) {
+                        drawRect(
+                            androidx.compose.ui.graphics.Brush.horizontalGradient(
+                                listOf(Color.Transparent, shine.copy(alpha = .55f * p), Color.Transparent),
+                                startX = cx - bw / 2f, endX = cx + bw / 2f
+                            ),
+                            topLeft = Offset(x0, t0), size = androidx.compose.ui.geometry.Size(x1 - x0, b0 - t0)
+                        )
+                    }
+                }
+            }
         }
     }
 }
