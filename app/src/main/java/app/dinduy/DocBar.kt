@@ -1,6 +1,8 @@
 package app.dinduy
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.runtime.CompositionLocalProvider
+import kotlin.math.abs
 import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -261,7 +263,7 @@ private fun DropBtn(on: Boolean, open: Boolean, enabled: Boolean, i: Int = -1, o
  */
 @Composable
 private fun PhotoBtn(open: Boolean, enabled: Boolean, onToggle: () -> Unit, onCamera: () -> Unit, onGallery: () -> Unit) {
-    MorphSwap(open, label = "photo") { o ->
+    MorphSwap(open, dirOf = { _, b -> if (b) 1 else -1 }, label = "photo") { o ->
         if (!o) XBtn(enabled = enabled, onClick = onToggle) { Ic("img", it) }
         else Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
             XBtn(on = true, i = 0, onClick = onCamera) { Ic("cam", it) }
@@ -281,21 +283,49 @@ private const val K_INK = 5
 private const val K_TITLE = 6
 
 /**
- * SATU wadah untuk semua toolbar: ketik, gambar, tabel, kutipan, objek, dan coret. Berpindah toolbar = wadah ini mengubah bentuk
- * (lebar / tinggi mengalir dengan pegas, naik sedikit saat coret), isi lama menciut ke arah tombol yang ditekan dan isi baru
- * melompat masuk. Tidak ada fade. Wadah juga memuat panel Ink dan sub-bilah, jadi tinggi mengalir di dalam wadah yang sama.
+ * SATU wadah untuk semua toolbar: ketik, gambar, tabel, kutipan, objek, dan coret. Berpindah toolbar = wadah ini mengubah bentuk:
+ *  - wadah MELAR ke samping dan memipih seperti jeli, sudutnya sesaat lebih kotak, lalu pulih dengan pegas yang berayun
+ *    (semuanya di lapisan gambar, tidak menyentuh tata letak, jadi tinggi dock yang dibaca layar tidak berubah);
+ *  - isi lama memipih ke satu tepi, isi baru melar masuk dari tepi seberang, elemennya berurutan (lihat [MorphSwap] dan [popIn]);
+ *  - lebar / tinggi mengalir dengan pegas (naik sedikit saat coret). Tidak ada fade. Wadah juga memuat panel Ink dan sub-bilah.
  */
 @Composable
 private fun MorphDock(kind: Int, content: @Composable (Int) -> Unit) {
     val pal = LocalPal.current
     val lift by animateDpAsState(if (kind == K_INK) 30.dp else 8.dp, M3E.spatial(), label = "dklift")
-    val shape = RoundedCornerShape(34.dp)
+    val kick = remember { Animatable(0f) }
+    val first = remember { booleanArrayOf(true) }
+    LaunchedEffect(kind) {
+        if (first[0]) first[0] = false                       // kemunculan pertama dock punya gerak masuk sendiri
+        else {
+            kick.animateTo(1f, tween(110))                   // melar dan memipih
+            kick.animateTo(0f, spring<Float>(dampingRatio = .38f, stiffness = 240f))   // pulih berayun
+        }
+    }
+    val elev = if (pal.dark) 10.dp else 6.dp
     Box(
         Modifier.fillMaxWidth().padding(horizontal = 10.dp).padding(top = 6.dp, bottom = lift.nn()),
         Alignment.BottomCenter
     ) {
-        Box(Modifier.shadow(if (pal.dark) 10.dp else 6.dp, shape).clip(shape).background(pal.c3)) {
-            MorphSwap(kind, originX = { a, b -> if (a == K_INK || b == K_INK) .86f else .5f }, label = "dock") { k -> content(k) }
+        Box(
+            Modifier.graphicsLayer {
+                val k = kick.value
+                scaleX = 1f + .05f * k
+                scaleY = 1f - .06f * k
+                transformOrigin = TransformOrigin(.5f, 1f)
+                shadowElevation = elev.toPx()
+                shape = RoundedCornerShape((34.dp.toPx() - 9.dp.toPx() * abs(k).coerceAtMost(1.5f)).coerceAtLeast(16.dp.toPx()))
+                clip = true
+            }.background(pal.c3)
+        ) {
+            CompositionLocalProvider(LocalDockMotion provides true) {
+                MorphSwap(
+                    kind,
+                    originX = { a, b -> if (a == K_INK || b == K_INK) .86f else if (b > a) 0f else 1f },
+                    dirOf = { a, b -> if (a == K_INK || b == K_INK) 1 else if (b > a) 1 else -1 },
+                    label = "dock"
+                ) { k -> content(k) }
+            }
         }
     }
 }
@@ -464,7 +494,7 @@ fun ToolDock(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean) {
                         exit = shrinkVertically(spring(1f, 620f))
                     ) {
                         Box(Modifier.fillMaxWidth().padding(top = 8.dp), Alignment.Center) {
-                            MorphSwap(subShown, label = "sub") { sub ->
+                            MorphSwap(subShown, dirOf = { a, b -> if (b > a) 1 else -1 }, label = "sub") { sub ->
                                 if (sub == 1) {
                                     val cur = blk?.ta ?: ""
                                     XGroup {
