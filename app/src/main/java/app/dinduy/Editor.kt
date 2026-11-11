@@ -2379,6 +2379,14 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
     }
 
     /** Rentang terseleksi pada satu kolom teks, atau null. */
+    /** Tanda tangan seleksi (berubah tiap rentang berubah) + urutan blok [key] di dalam seleksi (indeks, jumlah blok): dipakai efek visual seleksi. */
+    fun selSig(): String? = selSpan()?.let { "${it.first.key}:${it.first.off}:${it.second.key}:${it.second.off}" }
+    fun selWave(key: String): Pair<Int, Int>? {
+        val (lo, hi) = selSpan() ?: return null
+        val il = ordMap[lo.key] ?: return null; val ih = ordMap[hi.key] ?: return null; val ik = ordMap[key] ?: return null
+        return if (ik < il || ik > ih) null else (ik - il) to (ih - il + 1)
+    }
+
     fun selRangeOf(key: String): Pair<Int, Int>? {
         val (lo, hi) = selSpan() ?: return null
         val ik = ordMap[key] ?: return null
