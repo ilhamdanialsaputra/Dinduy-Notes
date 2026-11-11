@@ -2903,22 +2903,6 @@ fun SelBtn(enabled: Boolean, first: Boolean, last: Boolean, tone: Int, onClick: 
     ) { content(fg) }
 }
 
-/** Ikon "pilih semua": kotak putus-putus dengan kotak penuh di dalamnya (menggantikan teks "Select all" di gelembung seleksi). */
-@Composable
-private fun SelectAllIc(c: Color) {
-    Canvas(Modifier.size(22.dp)) {
-        val u = size.width / 24f
-        drawRoundRect(
-            c, Offset(3f * u, 3f * u), Size(18f * u, 18f * u), CornerRadius(3.5f * u),
-            style = Stroke(
-                2.2f * u,
-                pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(3.4f * u, 3.4f * u), 0f)
-            )
-        )
-        drawRoundRect(c, Offset(8f * u, 8f * u), Size(8f * u, 8f * u), CornerRadius(1.8f * u))
-    }
-}
-
 /**
  * Gelembung Potong / Salin / Tempel yang menempel di seleksi (di atasnya, atau di bawahnya bila tak muat).
  * Muncul/hilang dengan spring (membesar dari sisi yang menghadap seleksi, sedikit memantul), tidak berkedip
@@ -3069,7 +3053,7 @@ fun SelBubble(ed: Ed, vm: AppVM, act: Actions, scrollY: () -> Int) {
             if (!s.isNullOrEmpty()) ed.selPaste(s) else vm.show("Nothing to paste")
         }) { T("Paste", 14f, 700, it, maxLines = 1) }
         Item(3, flags[3], 1, onClick = { ed.selDelete() }) { Ic("del", it, 22.dp) }
-        Item(4, true, onClick = { ed.selAll() }) { SelectAllIc(it) }
+        Item(4, true, onClick = { ed.selAll() }) { T("All", 14f, 700, it, maxLines = 1) }
     }
 }
 
