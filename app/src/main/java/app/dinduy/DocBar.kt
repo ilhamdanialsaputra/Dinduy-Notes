@@ -106,6 +106,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.unit.dp
 import androidx.compose.animation.core.snap
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -263,12 +264,24 @@ private fun DropBtn(on: Boolean, open: Boolean, enabled: Boolean, i: Int = -1, o
  */
 @Composable
 private fun PhotoBtn(open: Boolean, enabled: Boolean, onToggle: () -> Unit, onCamera: () -> Unit, onGallery: () -> Unit) {
-    MorphSwap(open, dirOf = { _, b -> if (b) 1 else -1 }, label = "photo") { o ->
-        if (!o) XBtn(enabled = enabled, onClick = onToggle) { Ic("img", it) }
-        else Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
-            XBtn(i = 0, onClick = onCamera) { Ic("cam", it) }
-            XBtn(i = 1, onClick = onGallery) { Ic("img", it) }
-            XBtn(i = 2, onClick = onToggle) { Ic("x", it) }
+    // Satu tombol foto yang TETAP di tempatnya (jadi tombol galeri di tengah); kamera dan tutup MELEBAR keluar dari kiri dan kanannya,
+    // wadah grup ikut melebar dengan pegas. Tanpa flip, tanpa fade: yang berubah hanya lebar.
+    val grow = spring<IntSize>(dampingRatio = .72f, stiffness = 420f)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        AnimatedVisibility(
+            visible = open,
+            enter = expandHorizontally(grow, expandFrom = Alignment.End),
+            exit = shrinkHorizontally(spring<IntSize>(1f, 560f), shrinkTowards = Alignment.End)
+        ) {
+            Row { XBtn(onClick = onCamera) { Ic("cam", it) }; Spacer(Modifier.width(2.dp)) }
+        }
+        XBtn(enabled = enabled || open, onClick = { if (open) onGallery() else onToggle() }) { Ic("img", it) }
+        AnimatedVisibility(
+            visible = open,
+            enter = expandHorizontally(grow, expandFrom = Alignment.Start),
+            exit = shrinkHorizontally(spring<IntSize>(1f, 560f), shrinkTowards = Alignment.Start)
+        ) {
+            Row { Spacer(Modifier.width(2.dp)); XBtn(onClick = onToggle) { Ic("x", it) } }
         }
     }
 }
