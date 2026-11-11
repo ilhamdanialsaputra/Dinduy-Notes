@@ -902,15 +902,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                         chunks = fr?.chunks?.ifEmpty { null }; fmtErr = fr?.err; fmtOk = fr?.ok ?: 0
                     }
                     applyTranscript(noteId, audId) { n -> Paras.blocks("Transcript $n", paras, chunks) }
-                    val fe = fmtErr
-                    show(
-                        when {
-                            key == null || !pr.gf -> "Transcript added to the note"
-                            fe != null -> "Transcript added. Auto format skipped: " + fe
-                            fmtOk == 0 -> "Transcript added without auto format"
-                            else -> "Transcript added to the note"
-                        }
-                    )
+                    // tanpa snackbar: pil di atas catatan (TranscriptPill) sudah memberi tahu transkrip selesai
                     Bg.done(ctx, "Transcript ready", "Your transcript is now in the note.")
                 }
             } catch (e: CancellationException) {
