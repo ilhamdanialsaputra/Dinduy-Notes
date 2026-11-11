@@ -1815,12 +1815,14 @@ fun HomeCard(
             }
         }
     ) {
-        val first = remember(d.id) { val f = !vm.seen.contains(d.id); vm.seen.add(d.id); f }
+        // animasi masuk hanya untuk kartu di layar pertama (urutan < 8); sisanya langsung tampil, supaya tidak puluhan animasi
+        // berjalan serentak saat app baru dibuka (2 kolom merender semua kartu sekaligus)
+        val first = remember(d.id) { val f = !vm.seen.contains(d.id); vm.seen.add(d.id); f && i < 8 }
         val prog = remember(d.id) { Animatable(if (first) 0f else 1f) }
         LaunchedEffect(d.id) {
             if (first) {
-                delay(minOf(i, 8) * 55L)
-                prog.animateTo(1f, spring(.7f, 350f))
+                delay(i * 35L)
+                prog.animateTo(1f, spring(.8f, 500f))
             }
         }
         SwipeCard(
