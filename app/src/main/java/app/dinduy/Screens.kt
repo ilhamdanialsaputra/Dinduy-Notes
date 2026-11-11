@@ -27,6 +27,7 @@ import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.composed
 import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.unit.round
@@ -624,12 +625,14 @@ fun DrawerItem(icon: String, title: String, selected: Boolean = false, trailing:
     val pr by src.collectIsPressedAsState()
     val r by animateDpAsState(if (pr) 18.dp else 32.dp, spring(.6f, 500f), label = "r")
     val bgA by animateFloatAsState(if (selected) 1f else 0f, spring(.8f, 380f), label = "bg")
+    val box = remember { arrayOfNulls<LayoutCoordinates>(1) }
+    fun mark() { box[0]?.takeIf { it.isAttached }?.let { LabelFx.origin = it.boundsInWindow(); LabelFx.at = System.currentTimeMillis() } }
     Row(
-        Modifier.fillMaxWidth().height(64.dp).clip(RoundedCornerShape(r))
+        Modifier.fillMaxWidth().height(64.dp).onGloballyPositioned { box[0] = it }.clip(RoundedCornerShape(r))
             .background(pal.pc.copy(alpha = bgA))
             .combinedClickable(
-                interactionSource = src, indication = LocalIndication.current, onClick = onClick,
-                onLongClick = if (onLong != null) ({ haptic.performHapticFeedback(HapticFeedbackType.LongPress); onLong() }) else null
+                interactionSource = src, indication = LocalIndication.current, onClick = { mark(); onClick() },
+                onLongClick = if (onLong != null) ({ haptic.performHapticFeedback(HapticFeedbackType.LongPress); mark(); onLong() }) else null
             )
             .padding(start = 26.dp, end = 26.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -677,6 +680,18 @@ fun DrawerContent(vm: AppVM, close: () -> Unit, go: (Scr) -> Unit) {
     }
 }
 
+/** Titik asal morph dialog label: kotak item drawer yang baru diketuk (dicatat DrawerItem). Dipakai sekali, kedaluwarsa 1,5 detik. */
+object LabelFx {
+    var origin: Rect? = null
+    var at = 0L
+}
+
+/**
+ * Dialog label M3 Expressive, ringkas. Wadahnya MORPH dari item drawer yang diketuk (pil -> kartu) dengan satu progres pegas:
+ * bentuk digambar langsung (bukan diskalakan), jadi sudut tidak mulur dan tata letak tidak bergeser. Isi muncul menyusul.
+ * Keyboard: jendela edge-to-edge + imePadding, kartu di tengah area yang tersisa dan bisa digulir bila layar sangat pendek.
+ * Teks bantu / galat memakai satu baris tinggi tetap, jadi tidak ada lompatan tata letak.
+ */
 @Composable
 fun LabelDialogHost(vm: AppVM) {
     val d = vm.lblDlg ?: return
@@ -687,16 +702,26 @@ fun LabelDialogHost(vm: AppVM) {
     var err by remember(d) { mutableStateOf(false) }
     var closing by remember(d) { mutableStateOf(false) }
     val fr = remember(d) { FocusRequester() }
+    val fm = remember(d) { arrayOfNulls<androidx.compose.ui.focus.FocusManager>(1) }
     val scope = rememberCoroutineScope()
-    val prog = remember(d) { Animatable(0f) }      // 0 -> 1: kartu masuk (pegas, sedikit membal)
-    val iconP = remember(d) { Animatable(0f) }     // lencana ikon masuk menyusul sesaat kemudian
+    val prog = remember(d) { Animatable(0f) }      // 0 -> 1: morph wadah (pegas, sedikit membal)
+    val iconP = remember(d) { Animatable(0f) }     // lencana ikon menyusul
+    val org = remember(d) {
+        val o = LabelFx.origin?.takeIf { System.currentTimeMillis() - LabelFx.at < 1500L }
+        LabelFx.origin = null
+        o
+    }
+    var fx by remember(d) { mutableFloatStateOf(0f) }
+    var fy by remember(d) { mutableFloatStateOf(0f) }
+    var placed by remember(d) { mutableStateOf(false) }
 
-    // keluar: kartu mengecil + memudar dulu, baru dialog benar-benar dilepas
+    // keluar: wadah menguncup kembali ke asalnya (keyboard ditutup bersamaan), baru dialog dilepas
     val close: () -> Unit = {
         if (!closing) {
             closing = true
+            fm[0]?.clearFocus()
             scope.launch {
-                prog.animateTo(0f, androidx.compose.animation.core.tween(190, easing = androidx.compose.animation.core.FastOutLinearInEasing))
+                prog.animateTo(0f, spring(1f, 480f))
                 vm.lblDlg = null
             }
         }
@@ -708,10 +733,12 @@ fun LabelDialogHost(vm: AppVM) {
             if (ok) close() else err = true
         }
     }
-    LaunchedEffect(d) {
-        launch { prog.animateTo(1f, spring(.74f, 320f)) }
-        launch { delay(110); iconP.animateTo(1f, spring(.42f, 340f)) }
-        delay(260)
+    // animasi baru mulai setelah kartu terukur, supaya bentuk awal tepat di posisi asal
+    LaunchedEffect(d, placed) {
+        if (!placed) return@LaunchedEffect
+        launch { prog.animateTo(1f, spring(.8f, 360f)) }
+        launch { delay(120); iconP.animateTo(1f, spring(.45f, 380f)) }
+        delay(240)
         try { fr.requestFocus() } catch (e: Exception) { }
     }
 
@@ -719,124 +746,164 @@ fun LabelDialogHost(vm: AppVM) {
         onDismissRequest = close,
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        // scrim digambar sendiri (ikut animasi), jadi redup bawaan jendela dimatikan
         val win = (androidx.compose.ui.platform.LocalView.current.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
-        androidx.compose.runtime.SideEffect { win?.setDimAmount(0f); win?.setWindowAnimations(-1) }
+        val once = remember { BooleanArray(1) }
+        androidx.compose.runtime.SideEffect {
+            win?.setDimAmount(0f); win?.setWindowAnimations(-1)
+            if (win != null && !once[0]) {
+                once[0] = true
+                androidx.core.view.WindowCompat.setDecorFitsSystemWindows(win, false)
+                win.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+            }
+        }
+        fm[0] = LocalFocusManager.current
 
         Box(
             Modifier.fillMaxSize()
-                .labelScrim(prog)
+                .drawBehind { drawRect(Color.Black.copy(alpha = .5f * prog.value.coerceIn(0f, 1f))) }
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { close() }
-                .padding(horizontal = 24.dp),
-            Alignment.Center
+                .windowInsetsPadding(WindowInsets.systemBars)
+                .windowInsetsPadding(WindowInsets.ime)
         ) {
-            val cardShape = RoundedCornerShape(36.dp)
             Column(
-                Modifier.widthIn(max = 380.dp).fillMaxWidth()
-                    .graphicsLayer {
-                        val p = prog.value
-                        val sc = .84f + .16f * p
-                        scaleX = sc; scaleY = sc
-                        alpha = (p * 2.2f).coerceIn(0f, 1f)
-                        translationY = (1f - p) * 36.dp.toPx()
-                    }
-                    .clip(cardShape).background(pal.c3)
-                    .pointerInput(Unit) { detectTapGestures { } }       // ketuk di kartu tidak menutup
-                    .padding(start = 24.dp, end = 24.dp, top = 30.dp, bottom = 24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // lencana ikon: kotak membulat besar, berputar sedikit sambil membal masuk
                 Box(
-                    Modifier.size(68.dp)
-                        .graphicsLayer {
-                            val k = iconP.value
-                            scaleX = k; scaleY = k; rotationZ = (1f - k) * -28f
+                    Modifier.widthIn(max = 320.dp).fillMaxWidth()
+                        .onGloballyPositioned { c ->
+                            val o = c.positionInRoot()
+                            fx = o.x; fy = o.y
+                            if (!placed) placed = true
                         }
-                        .clip(RoundedCornerShape(24.dp)).background(pal.pc),
-                    Alignment.Center
-                ) { Ic("label", pal.opc, 32.dp) }
-                Spacer(Modifier.height(18.dp))
-                Box(Modifier.fillMaxWidth(), Alignment.Center) { T(if (renaming) "Rename label" else "New label", 26f, 900, pal.os) }
-                Spacer(Modifier.height(4.dp))
-                Box(Modifier.fillMaxWidth(), Alignment.Center) {
-                    T(if (renaming) "Notes keep this label" else if (d.forNote != null) "It will be added to this note" else "Use labels to group notes", 14f, 500, pal.osv, maxLines = 1)
-                }
-                Spacer(Modifier.height(22.dp))
-
-                // kolom isian: kapsul tonal, bingkai primer menyala saat fokus
-                val frame by animateColorAsState(
-                    if (err) pal.oec else if (focused) pal.p else Color.Transparent,
-                    androidx.compose.animation.core.tween(180), label = "lfr"
-                )
-                val tint by animateColorAsState(if (focused) pal.p else pal.osv, androidx.compose.animation.core.tween(180), label = "lti")
-                val clearK by animateFloatAsState(if (text.isNotEmpty()) 1f else 0f, spring(.6f, 520f), label = "lcl")
-                val fieldShape = RoundedCornerShape(28.dp)
-                Row(
-                    Modifier.fillMaxWidth().height(60.dp).clip(fieldShape).background(pal.c4)
-                        .border(2.dp, frame, fieldShape).padding(start = 18.dp, end = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .drawBehind {
+                            if (!placed) return@drawBehind
+                            val p = prog.value
+                            val oR = if (org != null) Rect(org.left - fx, org.top - fy, org.right - fx, org.bottom - fy)
+                            else {
+                                val s = 24.dp.toPx()
+                                Rect(size.width / 2f - s, size.height / 2f - s, size.width / 2f + s, size.height / 2f + s)
+                            }
+                            val l = androidx.compose.ui.util.lerp(oR.left, 0f, p)
+                            val t = androidx.compose.ui.util.lerp(oR.top, 0f, p)
+                            val r = androidx.compose.ui.util.lerp(oR.right, size.width, p)
+                            val b = androidx.compose.ui.util.lerp(oR.bottom, size.height, p)
+                            val rad = androidx.compose.ui.util.lerp(minOf(oR.width, oR.height) / 2f, 28.dp.toPx(), p).coerceAtLeast(0f)
+                            drawRoundRect(
+                                androidx.compose.ui.graphics.lerp(pal.pc, pal.c3, (p * 1.4f).coerceIn(0f, 1f)),
+                                topLeft = Offset(l, t), size = Size((r - l).coerceAtLeast(0f), (b - t).coerceAtLeast(0f)),
+                                cornerRadius = CornerRadius(rad)
+                            )
+                        }
+                        .pointerInput(Unit) { detectTapGestures { } }       // ketuk di kartu tidak menutup
                 ) {
-                    Ic("label", tint, 22.dp)
-                    Spacer(Modifier.width(12.dp))
-                    Box(Modifier.weight(1f)) {
-                        BasicTextField(
-                            value = text, onValueChange = { text = it.take(30); err = false },
-                            modifier = Modifier.fillMaxWidth().focusRequester(fr).onFocusChanged { focused = it.isFocused },
-                            textStyle = TextStyle(color = pal.os, fontFamily = LocalFF.current, fontSize = 18.sp, fontWeight = FontWeight(600)),
-                            singleLine = true, cursorBrush = SolidColor(pal.p),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                            keyboardActions = KeyboardActions(onDone = { done() }),
-                            decorationBox = { inner -> Box { if (text.isEmpty()) T("Label name", 18f, 600, pal.osv, maxLines = 1); inner() } }
-                        )
-                    }
-                    Box(
-                        Modifier.size(40.dp).graphicsLayer { scaleX = clearK; scaleY = clearK; alpha = clearK }
-                            .clip(CircleShape)
-                            .clickable(enabled = text.isNotEmpty()) { text = ""; err = false; try { fr.requestFocus() } catch (e: Exception) { } },
-                        Alignment.Center
+                    Column(
+                        Modifier.fillMaxWidth()
+                            .graphicsLayer {
+                                val c = ((prog.value - .4f) / .5f).coerceIn(0f, 1f)
+                                alpha = c
+                                translationY = (1f - c) * 10.dp.toPx()
+                            }
+                            .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 14.dp)
                     ) {
-                        androidx.compose.foundation.Canvas(Modifier.size(12.dp)) {
-                            val sw = 2.2.dp.toPx()
-                            drawLine(pal.osv, Offset(0f, 0f), Offset(size.width, size.height), sw, androidx.compose.ui.graphics.StrokeCap.Round)
-                            drawLine(pal.osv, Offset(size.width, 0f), Offset(0f, size.height), sw, androidx.compose.ui.graphics.StrokeCap.Round)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                Modifier.size(40.dp)
+                                    .graphicsLayer {
+                                        val k = iconP.value
+                                        scaleX = k; scaleY = k; rotationZ = (1f - k) * -30f
+                                    }
+                                    .clip(RoundedCornerShape(14.dp)).background(pal.pc),
+                                Alignment.Center
+                            ) { Ic("label", pal.opc, 22.dp) }
+                            Spacer(Modifier.width(14.dp))
+                            T(if (renaming) "Rename label" else "New label", 20f, 800, pal.os, Modifier.weight(1f), maxLines = 1)
+                        }
+                        Spacer(Modifier.height(16.dp))
+
+                        // isian: kapsul tonal, bingkai primer menyala saat fokus
+                        val frame by animateColorAsState(
+                            if (err) pal.oec else if (focused) pal.p else Color.Transparent,
+                            androidx.compose.animation.core.tween(180), label = "lfr"
+                        )
+                        val tint by animateColorAsState(if (focused) pal.p else pal.osv, androidx.compose.animation.core.tween(180), label = "lti")
+                        val clearK by animateFloatAsState(if (text.isNotEmpty()) 1f else 0f, spring(.6f, 520f), label = "lcl")
+                        val fieldShape = RoundedCornerShape(26.dp)
+                        Row(
+                            Modifier.fillMaxWidth().height(52.dp).clip(fieldShape).background(pal.c4)
+                                .border(2.dp, frame, fieldShape).padding(start = 16.dp, end = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Ic("label", tint, 20.dp)
+                            Spacer(Modifier.width(10.dp))
+                            Box(Modifier.weight(1f)) {
+                                BasicTextField(
+                                    value = text, onValueChange = { text = it.take(30); err = false },
+                                    modifier = Modifier.fillMaxWidth().focusRequester(fr).onFocusChanged { focused = it.isFocused },
+                                    textStyle = TextStyle(color = pal.os, fontFamily = LocalFF.current, fontSize = 17.sp, fontWeight = FontWeight(500)),
+                                    singleLine = true, cursorBrush = SolidColor(pal.p),
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                    keyboardActions = KeyboardActions(onDone = { done() }),
+                                    decorationBox = { inner -> Box { if (text.isEmpty()) T("Label name", 17f, 500, pal.osv, maxLines = 1); inner() } }
+                                )
+                            }
+                            if (text.length >= 22) T("${text.length}/30", 12f, 600, pal.p, Modifier.padding(end = 4.dp))
+                            Box(
+                                Modifier.size(36.dp).graphicsLayer { scaleX = clearK; scaleY = clearK; alpha = clearK }
+                                    .clip(CircleShape)
+                                    .clickable(enabled = text.isNotEmpty()) { text = ""; err = false; try { fr.requestFocus() } catch (e: Exception) { } },
+                                Alignment.Center
+                            ) {
+                                androidx.compose.foundation.Canvas(Modifier.size(11.dp)) {
+                                    val sw = 2.dp.toPx()
+                                    drawLine(pal.osv, Offset(0f, 0f), Offset(size.width, size.height), sw, androidx.compose.ui.graphics.StrokeCap.Round)
+                                    drawLine(pal.osv, Offset(size.width, 0f), Offset(0f, size.height), sw, androidx.compose.ui.graphics.StrokeCap.Round)
+                                }
+                            }
+                        }
+                        // satu baris bantu setinggi tetap: teks diganti tanpa menggeser tata letak
+                        Box(Modifier.fillMaxWidth().padding(top = 6.dp, start = 16.dp, end = 16.dp).height(20.dp), Alignment.CenterStart) {
+                            Crossfade(err, animationSpec = androidx.compose.animation.core.tween(160), label = "lhelp") { e ->
+                                T(
+                                    if (e) "This label already exists"
+                                    else if (renaming) "Notes keep this label"
+                                    else if (d.forNote != null) "Added to this note" else "Group your notes with labels",
+                                    13f, 500, if (e) pal.oec else pal.osv, maxLines = 1
+                                )
+                            }
+                        }
+                        Row(
+                            Modifier.fillMaxWidth().padding(top = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
+                        ) {
+                            LabelDlgBtn("Cancel", Color.Transparent, pal.p, true, Modifier) { close() }
+                            LabelDlgBtn(if (renaming) "Save" else "Create", pal.p, pal.op, text.isNotBlank(), Modifier) { done() }
                         }
                     }
-                }
-                Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.weight(1f)) {
-                        if (err) T("This label already exists", 13f, 600, pal.oec, maxLines = 1)
-                    }
-                    T("${text.length}/30", 13f, 600, if (text.length >= 26) pal.p else pal.osv)
-                }
-                Spacer(Modifier.height(18.dp))
-
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    LabelDlgBtn("Cancel", pal.c4, pal.os, true, Modifier.weight(1f)) { close() }
-                    LabelDlgBtn(if (renaming) "Save" else "Create", pal.p, pal.op, text.isNotBlank(), Modifier.weight(1f)) { done() }
                 }
             }
         }
     }
 }
 
-/** Scrim yang ikut progres animasi kartu (dibaca di fase gambar, jadi tidak memicu recompose tiap frame). */
-private fun Modifier.labelScrim(p: Animatable<Float, androidx.compose.animation.core.AnimationVector1D>): Modifier =
-    this.drawBehind { drawRect(Color.Black.copy(alpha = .52f * p.value.coerceIn(0f, 1f))) }
-
-/** Tombol dialog ala M3 Expressive: kapsul tinggi, sudut menyusut dan badan mengecil saat ditekan. */
+/** Tombol dialog ringkas: kapsul 44dp, sudut menyusut saat ditekan; "text button" (latar transparan) menyala tipis saat ditekan. */
 @Composable
 private fun LabelDlgBtn(text: String, bg: Color, fg: Color, enabled: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val src = remember { MutableInteractionSource() }
     val pr by src.collectIsPressedAsState()
-    val r by animateDpAsState(if (pr) 16.dp else 26.dp, spring(.6f, 520f), label = "lbr")
+    val r by animateDpAsState(if (pr) 14.dp else 22.dp, spring(.6f, 520f), label = "lbr")
     val sc by animateFloatAsState(if (pr) .95f else 1f, spring(.5f, 600f), label = "lbs")
     val al by animateFloatAsState(if (enabled) 1f else .38f, androidx.compose.animation.core.tween(160), label = "lba")
+    val glow by animateFloatAsState(if (pr) 1f else 0f, androidx.compose.animation.core.tween(120), label = "lbg")
+    val fill = if (bg == Color.Transparent) fg.copy(alpha = .14f * glow) else bg
     Box(
-        modifier.height(52.dp).graphicsLayer { scaleX = sc; scaleY = sc; alpha = al }
-            .clip(RoundedCornerShape(r)).background(bg)
-            .clickable(interactionSource = src, indication = null, enabled = enabled, onClick = onClick),
+        modifier.height(44.dp).defaultMinSize(minWidth = 72.dp)
+            .graphicsLayer { scaleX = sc; scaleY = sc; alpha = al }
+            .clip(RoundedCornerShape(r)).background(fill)
+            .clickable(interactionSource = src, indication = null, enabled = enabled, onClick = onClick)
+            .padding(horizontal = 20.dp),
         Alignment.Center
-    ) { T(text, 16f, 800, fg, maxLines = 1) }
+    ) { T(text, 15f, 700, fg, maxLines = 1) }
 }
 
 // ---------- beranda ----------
