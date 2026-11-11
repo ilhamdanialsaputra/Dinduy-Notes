@@ -114,6 +114,9 @@ class Snap(val bl: List<Blk>, val key: String?, val sel: TextRange)
 /** Teks terseleksi yang sedang diangkat (tekan-tahan di atas seleksi): potongan awal untuk pratinjau, jumlah baris, jumlah huruf. */
 class TLift(val text: String, val lines: Int, val chars: Int)
 
+/** Jarak (dp) titik sasaran di atas jari saat teks terangkat. */
+const val TL_LEAD = 52f
+
 fun keyBlock(k: String) = k.substringBefore(':')
 
 /** Skala terkecil isi kutipan (huruf, label, bantalan). */
@@ -2605,7 +2608,9 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
         tlTarget(p)
     }
 
-    private fun tlTarget(p: Offset) {
+    /** Titik sasaran dihitung [TL_LEAD] dp DI ATAS jari, supaya kursor jatuh tidak tertutup jempol. */
+    private fun tlTarget(finger: Offset) {
+        val p = Offset(finger.x, finger.y - TL_LEAD * dens)
         if (ipos.values.any { it.contains(p) }) { tlDrop = null; return }   // foto bukan sasaran
         val h = hitPt(p)
         val span = selSpan()
