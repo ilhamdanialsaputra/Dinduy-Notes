@@ -365,7 +365,7 @@ fun QuickVoice(vm: AppVM, lift: Dp) {
     val fabWdp = with(dens) { fabWpx.toDp() }
     val shape = RoundedCornerShape(32.dp)
 
-    Box(Modifier.fillMaxSize().padding(end = 20.dp, bottom = 44.dp + sab), contentAlignment = Alignment.BottomEnd) {
+    Box(Modifier.fillMaxSize().padding(end = 20.dp, bottom = 24.dp + sab), contentAlignment = Alignment.BottomEnd) {   // harus sama dengan padding bawah Fab() di Screens.kt
         Box(
             Modifier.offset(y = -ly)
                 .onGloballyPositioned { c ->
