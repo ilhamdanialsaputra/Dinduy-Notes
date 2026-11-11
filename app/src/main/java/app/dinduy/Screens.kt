@@ -79,7 +79,6 @@ import androidx.compose.animation.core.tween as tweenSpec
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.layout.LayoutCoordinates
@@ -915,18 +914,27 @@ private class StackShift(
 /** Satu blok isi beranda 2 kolom: judul ("Pinned" / "Others" / "empty") atau satu kelompok kartu. */
 private class HBlock(val head: String?, val ids: List<String>)
 
-/** Keadaan animasi geser satu kartu: posisi tujuan (tx, ty), titik awal (fx, fy) dan waktu mulai (ns). */
-private class Slide(var tx: Int, var ty: Int, var fx: Float, var fy: Float, var t0: Long)
-
-private const val SLIDE_NS = 280_000_000L
-private fun slideProg(now: Long, t0: Long): Float {
-    val p = ((now - t0).toFloat() / SLIDE_NS).coerceIn(0f, 1f)
-    val q = 1f - p
-    return 1f - q * q * q            // ease-out cubic
+/**
+ * Kartu meluncur mulus ke posisi barunya (pengganti animateItem, yang hanya ada di daftar lazy).
+ * Posisi diukur di induk yang sama untuk semua kartu, jadi kartu yang pindah kolom pun meluncur lintas kolom.
+ */
+private fun Modifier.slideTo(): Modifier = composed {
+    val scope = rememberCoroutineScope()
+    var target by remember { mutableStateOf(IntOffset.Zero) }
+    val holder = remember { arrayOfNulls<Animatable<IntOffset, androidx.compose.animation.core.AnimationVector2D>>(1) }
+    this.onPlaced { c ->
+        val t = c.positionInParent().round()
+        // penempatan pertama: langsung di tempatnya (tanpa meluncur dari pojok)
+        if (holder[0] == null) holder[0] = Animatable(t, IntOffset.VectorConverter)
+        target = t
+    }.offset {
+        val a = holder[0]
+        if (a == null) IntOffset.Zero else {
+            if (a.targetValue != target) scope.launch { a.animateTo(target, PlaceSpec) }
+            a.value - target
+        }
+    }
 }
-
-/** Satu kartu yang sudah diukur & ditentukan tempatnya di TwoColLayout. */
-private class Placed(val pl: androidx.compose.ui.layout.Placeable, val id: String, val x: Int, val y: Int, val anim: Boolean)
 
 /**
  * Tata letak beranda 2 kolom dengan kolom EKSPLISIT: tiap kartu punya kolomnya sendiri (laneOf), urutan di dalam kolom mengikuti
@@ -942,13 +950,6 @@ private fun TwoColLayout(
     rects: HashMap<String, IntArray>, lanesOut: HashMap<String, Int>, fresh: HashMap<String, Int>,
     modifier: Modifier = Modifier, content: @Composable (String) -> Unit
 ) {
-    // animasi geser dihitung di sini (bukan lewat modifier per kartu): tempat tujuan diketahui tepat saat tata letak diukur,
-    // jadi kartu yang pindah (tukar posisi / kartu di bawahnya menyesuaikan tinggi) selalu meluncur dari tempat lamanya.
-    val slides = remember { HashMap<String, Slide>() }
-    val tick = remember { mutableLongStateOf(0L) }
-    val running = remember { BooleanArray(1) }
-    val lastChange = remember { LongArray(1) }
-    val scope = rememberCoroutineScope()
     androidx.compose.ui.layout.Layout(
         modifier = modifier,
         content = {
@@ -956,11 +957,14 @@ private fun TwoColLayout(
                 val h = b.head
                 if (h != null) {
                     androidx.compose.runtime.key(h) {
-                        Box(Modifier.layoutId(h), propagateMinConstraints = true) { content(h) }
+                        Box(Modifier.layoutId(h).slideTo(), propagateMinConstraints = true) { content(h) }
                     }
                 } else for (id in b.ids) {
                     androidx.compose.runtime.key(id) {
-                        Box(Modifier.layoutId(id), propagateMinConstraints = true) { content(id) }
+                        Box(
+                            Modifier.layoutId(id).then(if (id == dragId) Modifier else Modifier.slideTo()),
+                            propagateMinConstraints = true
+                        ) { content(id) }
                     }
                 }
             }
@@ -971,16 +975,14 @@ private fun TwoColLayout(
         for (m in ms) { val k = m.layoutId as? String ?: continue; byId[k] = m }
         val colW = ((w - 2 * padS - gap) / 2).coerceAtLeast(0)
         rects.clear(); lanesOut.clear(); fresh.clear()
-        val placed = ArrayList<Placed>(ms.size)
-        val nowN = System.nanoTime()
-        var changed = false
+        val placed = ArrayList<Triple<androidx.compose.ui.layout.Placeable, Int, Int>>(ms.size)
         var y = padTop
         for (b in blocks) {
             val h = b.head
             if (h != null) {
                 val m = byId[h] ?: continue
                 val pl = m.measure(androidx.compose.ui.unit.Constraints.fixedWidth((w - 2 * padS).coerceAtLeast(0)))
-                placed.add(Placed(pl, h, padS, y, true))
+                placed.add(Triple(pl, padS, y))
                 rects[h] = intArrayOf(padS, y, pl.width, pl.height)
                 y += pl.height + gap
             } else {
@@ -995,7 +997,7 @@ private fun TwoColLayout(
                     }
                     lanesOut[id] = ln
                     val x = padS + ln * (colW + gap)
-                    placed.add(Placed(pl, id, x, ly[ln], id != dragId))
+                    placed.add(Triple(pl, x, ly[ln]))
                     rects[id] = intArrayOf(x, ly[ln], pl.width, pl.height)
                     ly[ln] += pl.height + gap
                 }
@@ -1003,41 +1005,8 @@ private fun TwoColLayout(
             }
         }
         val total = maxOf(padTop, y - gap) + padBottom
-        // perbarui tujuan animasi: bila tempat sebuah kartu berubah, posisinya yang sedang terlihat menjadi titik awal
-        for (it in placed) {
-            val sl = slides[it.id]
-            if (sl == null || !it.anim) {
-                slides[it.id] = Slide(it.x, it.y, it.x.toFloat(), it.y.toFloat(), 0L)
-            } else if (sl.tx != it.x || sl.ty != it.y) {
-                val pr = slideProg(nowN, sl.t0)
-                sl.fx = sl.fx + (sl.tx - sl.fx) * pr
-                sl.fy = sl.fy + (sl.ty - sl.fy) * pr
-                sl.tx = it.x; sl.ty = it.y; sl.t0 = nowN
-                changed = true
-            }
-        }
-        if (changed) {
-            lastChange[0] = nowN
-            if (!running[0]) {
-                running[0] = true
-                scope.launch {
-                    try {
-                        while (System.nanoTime() - lastChange[0] < SLIDE_NS + 60_000_000L) withFrameNanos { tick.longValue = it }
-                    } finally { running[0] = false }
-                }
-            }
-        }
         layout(w, total) {
-            tick.longValue            // dibaca supaya penempatan diperbarui tiap frame selama animasi
-            val nowP = System.nanoTime()
-            for (it in placed) {
-                val sl = slides[it.id]
-                if (sl == null || !it.anim) it.pl.place(it.x, it.y)
-                else {
-                    val pr = slideProg(nowP, sl.t0)
-                    it.pl.place((sl.fx + (sl.tx - sl.fx) * pr).toInt(), (sl.fy + (sl.ty - sl.fy) * pr).toInt())
-                }
-            }
+            for ((pl, px, py) in placed) pl.place(px, py)
         }
     }
 }
