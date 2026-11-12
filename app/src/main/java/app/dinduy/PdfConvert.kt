@@ -106,6 +106,8 @@ class CLine(
     var rel = 1f            // ukuran huruf relatif terhadap teks isi
     var gap = false         // ada jarak kosong lebih besar di atasnya (awal paragraf)
     var indent = false
+    var xe = 0f             // posisi kanan baris (pt)
+    var short = false       // baris pendek (kemungkinan akhir paragraf)
     var noise = false       // kandidat nomor halaman / header-footer berulang (petunjuk untuk Groq; yang diputuskan x dibuang)
 }
 
@@ -196,7 +198,7 @@ private class LineGrab : PDFTextStripper() {
             ranges(a, b, itf, K.I, sp)
             var nw = 0
             for (i in a until b) if (sb[i] != ' ' && sb[i] != '¦') nw++
-            out.add(CLine(sb.substring(a, b), sp, sz, x0, y0, nw > 0 && bc * 10 >= nw * 9, pg))
+            out.add(CLine(sb.substring(a, b), sp, sz, x0, y0, nw > 0 && bc * 10 >= nw * 9, pg).also { it.xe = lastEnd })
         }
         sb.setLength(0); bf.clear(); itf.clear()
         sz = 0f; lastEnd = -1f
@@ -242,6 +244,10 @@ private fun extract(ctx: Context, file: File, check: () -> Unit, progress: (Int,
     val body = ((sizeW.maxByOrNull { it.value }?.key ?: 20) / 2f).coerceAtLeast(4f)
     val margin = (xW.maxByOrNull { it.value }?.key ?: 0) * 3f
 
+    val xes = raw.filter { it.t.length > 25 }.map { it.xe }.sorted()
+    val right = if (xes.isEmpty()) raw.maxOf { it.xe } else xes[(xes.size * 9 / 10).coerceAtMost(xes.size - 1)]
+    for (l in raw) l.short = (l.xe - margin) < 0.72f * (right - margin)
+
     // jarak baris tipikal (median), lalu tandai awal paragraf
     val dys = ArrayList<Float>()
     for (i in 1 until raw.size) {
@@ -277,58 +283,99 @@ private fun extract(ctx: Context, file: File, check: () -> Unit, progress: (Int,
     return Extracted(raw, title)
 }
 
-// ---------------------------------------------------------------- potongan, perintah ke Groq, hasil
+// ---------------------------------------------------------------- unit paragraf, potongan, perintah ke Groq
 
 private const val BUDGET = 5000
 
-/** Potong baris (selain noise) jadi bagian-bagian ~BUDGET huruf, lebih suka berhenti di awal paragraf. */
-private fun makeChunks(lines: List<CLine>): List<IntArray> {
+private val RX_GLYPH = Regex("^[•●▪◦·∙‣⁃■□○◆►▶]\\s*")
+private val RX_ASCII = Regex("^[-–—*+]\\s+")
+private val RX_NUM = Regex("^\\(?(\\d{1,3})[.)]\\s+")
+private val RX_LET = Regex("^\\(?([A-Za-z])[.)]\\s+")
+private val TERM = Regex("[.!?…:;\"”’)\\]]$")
+
+private fun isMarker(t: String) = RX_GLYPH.containsMatchIn(t) || RX_ASCII.containsMatchIn(t) || RX_NUM.containsMatchIn(t)
+
+/**
+ * Gabungkan baris-baris PDF jadi "unit" (kandidat paragraf / judul / butir) dengan aturan lokal yang hati-hati:
+ * baris menyambung ke atasnya kecuali ada tanda awal blok baru. Groq lalu menilai tiap unit utuh (bukan baris lepas),
+ * jadi paragraf tidak terpotong dan paragraf biasa tidak salah jadi judul.
+ */
+private fun makeUnits(lines: List<CLine>): List<IntArray> {
+    val out = ArrayList<IntArray>()
+    var cur = ArrayList<Int>()
+    for (i in lines.indices) {
+        val l = lines[i]
+        if (cur.isEmpty()) { cur.add(i); continue }
+        val p = lines[cur[cur.size - 1]]
+        val ends = TERM.containsMatchIn(p.t)
+        val first = l.t.firstOrNull()
+        val newU = when {
+            l.noise || p.noise -> true
+            l.t.contains('¦') || p.t.contains('¦') -> true
+            isMarker(l.t) -> true
+            kotlin.math.abs(l.rel - p.rel) > 0.12f -> true
+            p.short && !ends && p.bold && !l.bold -> true
+            l.gap && (ends || p.short) -> true
+            ends && p.short && (first != null && first.isUpperCase() || l.indent) -> true
+            l.indent && ends -> true
+            else -> false
+        }
+        if (newU) { out.add(cur.toIntArray()); cur = ArrayList() }
+        cur.add(i)
+    }
+    if (cur.isNotEmpty()) out.add(cur.toIntArray())
+    return out
+}
+
+private fun unitText(lines: List<CLine>, u: IntArray): String = u.joinToString(" ") { lines[it].t }
+
+/** Kelompokkan unit jadi potongan ~BUDGET huruf (yang dikirim ke Groq hanya awal tiap unit, jadi hemat token). */
+private fun makeChunks(lines: List<CLine>, units: List<IntArray>): List<IntArray> {
     val out = ArrayList<IntArray>()
     var cur = ArrayList<Int>()
     var n = 0
-    for (i in lines.indices) {
-        val len = lines[i].t.length + 8
-        if (cur.isNotEmpty() && (n + len > BUDGET || cur.size >= 150)) {
-            var cut = cur.size
-            val lo = max(1, cur.size * 65 / 100)
-            for (j in cur.size - 1 downTo lo) if (lines[cur[j]].gap) { cut = j; break }
-            out.add(cur.subList(0, cut).toIntArray())
-            cur = ArrayList(cur.subList(cut, cur.size))
-            n = cur.sumOf { lines[it].t.length + 8 }
+    for (k in units.indices) {
+        val len = minOf(unitText(lines, units[k]).length, 240) + 12
+        if (cur.isNotEmpty() && (n + len > BUDGET || cur.size >= 60)) {
+            out.add(cur.toIntArray()); cur = ArrayList(); n = 0
         }
-        cur.add(i); n += len
+        cur.add(k); n += len
     }
     if (cur.isNotEmpty()) out.add(cur.toIntArray())
     return out
 }
 
 private const val SYS =
-    "You label lines of text extracted from a PDF so they can be rebuilt as clean Markdown. You NEVER rewrite, fix, or repeat the text.\n" +
-        "Input: numbered lines like `N tags| text`. Tags: L = font much larger than body, M = somewhat larger, S = smaller, b = whole line bold, " +
-        "¶ = blank gap above (likely new paragraph), > = indented, E = candidate page number or repeated header/footer. A ¦ inside text marks a wide gap between table columns.\n" +
-        "Output: one entry `N code` for every line that STARTS a new block, ascending. Lines you do not list continue the previous block.\n" +
-        "Codes: h1 h2 h3 h4 (headings; h1 = title), p paragraph, li bullet item (li2 li3 = nested), ol numbered or lettered item (ol2 ol3 = nested), " +
-        "q block quote, c code, t table row (only when columns are clearly separated by ¦, one row per line), x page number, running header/footer, or other page furniture (it will be deleted).\n" +
-        "Rules: a wrapped list item or paragraph: list only its first line. A paragraph cut by a page break: do not start a new block for its second half. " +
-        "Do not list a line that merely continues a sentence.\n" +
-        "Example input:\n1 L| Chapter One\n2 ¶| The study began in 1990 and\n3 | continued for years.\n4 ¶| - first point\n5 | - second point\n" +
-        "Example output:\n1 h1\n2 p\n4 li\n5 li\n" +
-        "Reply with entries only."
+    "You classify units of text extracted from a PDF so they can be rebuilt as clean Markdown. You NEVER rewrite or repeat the text.\n" +
+        "Input: numbered units like `N tags| text` (long units are shortened with …). Each unit is a candidate paragraph, heading, list item, or table row. " +
+        "Tags: L = font much larger than body, M = somewhat larger, S = smaller, b = bold, ¶ = blank gap above, > = indented, " +
+        "E = candidate page number or repeated header/footer, n = number of PDF lines. A ¦ in text marks a wide gap between table columns.\n" +
+        "Output: one entry `N code` per unit, in order. Codes: h1 h2 h3 h4 = heading (h1 = document title; headings are short, usually have no final period, " +
+        "and are NOT sentences of body text), p = normal paragraph, li = bullet item (li2 li3 nested), ol = numbered or lettered item (ol2 ol3 nested), " +
+        "q = block quote, c = code, t = table row (columns separated by ¦), x = page number / running header / footer / page furniture (deleted), " +
+        "+ = this unit is the continuation of the previous unit (the paragraph was wrongly split, e.g. by a page break).\n" +
+        "Most units are p. Use a heading only when clearly a title or section heading. Reply with entries only.\n" +
+        "Example:\n1 L| Chapter One\n2 ¶ n3| The study began in 1990 and continued for years …\n3 | 12\n4 E| 12\n5 | lazily forgotten by the end.\n6 ¶ n1| 1. First point\n" +
+        "Output:\n1 h1\n2 p\n3 x\n4 x\n5 +\n6 ol"
 
-private val RX_CODE = Regex("^(\\d{1,4})\\s*[:.\\-=)]?\\s*(h[1-4]|li[1-3]?|ol[1-3]?|p|q|c|t|x)\\b", RegexOption.IGNORE_CASE)
+private val RX_CODE = Regex("^(\\d{1,4})\\s*[:.\\-=)]?\\s*(h[1-4]|li[1-3]?|ol[1-3]?|p|q|c|t|x|\\+)(?![A-Za-z0-9])", RegexOption.IGNORE_CASE)
 
-private fun promptOf(lines: List<CLine>, idx: IntArray, prev: String?): String {
+private fun promptOf(lines: List<CLine>, units: List<IntArray>, uidx: IntArray, prev: String?): String {
     val sb = StringBuilder()
-    if (prev != null) sb.append("(previous block was ").append(prev).append(")\n")
-    for (k in idx.indices) {
-        val l = lines[idx[k]]
+    if (prev != null) sb.append("(the unit before the first one was ").append(prev).append(")\n")
+    for (k in uidx.indices) {
+        val u = units[uidx[k]]
+        val l = lines[u[0]]
         sb.append(k + 1).append(' ')
         if (l.rel >= 1.45f) sb.append('L') else if (l.rel >= 1.15f) sb.append('M') else if (l.rel <= 0.88f) sb.append('S')
-        if (l.bold) sb.append('b')
+        if (u.all { lines[it].bold }) sb.append('b')
         if (l.noise) sb.append('E')
         if (l.gap) sb.append('¶')
         if (l.indent) sb.append('>')
-        sb.append("| ").append(l.t.replace("¦", " ¦ ")).append('\n')
+        if (u.size > 1) sb.append('n').append(u.size)
+        var t = unitText(lines, u).replace("¦", " ¦ ")
+        if (t.length > 240) t = t.substring(0, 170) + " … " + t.substring(t.length - 50)
+        sb.append("| ").append(t).append('\n')
     }
     return sb.toString()
 }
@@ -348,33 +395,25 @@ private fun parseCodes(raw: String, m: Int): String? {
         sb.append(n).append(' ').append(mm.groupValues[2].lowercase()).append(';')
         last = n; cnt++
     }
-    if (cnt == 0 && m > 3) return null
+    if (cnt * 2 < m) return null   // jawaban terlalu sedikit: dianggap gagal
     return sb.toString()
 }
 
-private val RX_GLYPH = Regex("^[•●▪◦·∙‣⁃■□○◆►▶]\\s*")
-private val RX_ASCII = Regex("^[-–—*+]\\s+")
-private val RX_NUM = Regex("^\\(?(\\d{1,3})[.)]\\s+")
-private val RX_LET = Regex("^\\(?([A-Za-z])[.)]\\s+")
-
-/** Aturan lokal bila Groq tidak bisa dipakai untuk satu potongan (teks tetap utuh, hanya penataannya lebih sederhana). */
-private fun heurCodes(lines: List<CLine>, idx: IntArray): String {
-    val sb = StringBuilder()
-    for (k in idx.indices) {
-        val l = lines[idx[k]]
-        val c: String? = when {
-            l.noise -> "x"
-            RX_GLYPH.containsMatchIn(l.t) || RX_ASCII.containsMatchIn(l.t) -> "li"
-            RX_NUM.containsMatchIn(l.t) -> "ol"
-            l.rel >= 1.45f && l.t.length < 100 -> "h1"
-            l.rel >= 1.15f && l.t.length < 100 -> "h2"
-            l.bold && l.gap && l.t.length < 80 -> "h3"
-            l.gap || k == 0 -> "p"
-            else -> null
-        }
-        if (c != null) sb.append(k + 1).append(' ').append(c).append(';')
+/** Tebakan lokal untuk satu unit (dipakai bila Groq gagal, atau tidak menyebut unit itu). Teks tetap utuh. */
+private fun heurUnit(lines: List<CLine>, u: IntArray): String {
+    val l = lines[u[0]]
+    val t = unitText(lines, u)
+    val sentence = Regex("[.!?]$").containsMatchIn(t)
+    return when {
+        l.noise -> "x"
+        t.contains('¦') -> "t"
+        RX_GLYPH.containsMatchIn(t) || RX_ASCII.containsMatchIn(t) -> "li"
+        RX_NUM.containsMatchIn(t) -> "ol"
+        l.rel >= 1.45f && t.length < 100 && !sentence -> "h1"
+        l.rel >= 1.15f && t.length < 100 && !sentence -> "h2"
+        u.all { lines[it].bold } && t.length < 90 && !sentence -> "h3"
+        else -> "p"
     }
-    return sb.toString()
 }
 
 // ---------------------------------------------------------------- perakitan blok Markdown native
@@ -451,17 +490,17 @@ private fun emit(o: OpenB, out: MutableList<Blk>) {
     }
 }
 
-private fun assemble(lines: List<CLine>, chunks: List<IntArray>, done: List<String?>): List<Blk> {
-    val code = arrayOfNulls<String>(lines.size)
+private fun assemble(lines: List<CLine>, units: List<IntArray>, chunks: List<IntArray>, done: List<String?>): List<Blk> {
+    val code = Array(units.size) { heurUnit(lines, units[it]) }
     for (c in chunks.indices) {
-        val idx = chunks[c]
-        val s = done.getOrNull(c) ?: "~"
-        val str = if (s == "~") heurCodes(lines, idx) else s
+        val uidx = chunks[c]
+        val str = done.getOrNull(c) ?: "~"
+        if (str == "~") continue
         for (e in str.split(';')) {
             val sp = e.trim().split(' ')
             if (sp.size != 2) continue
             val n = sp[0].toIntOrNull() ?: continue
-            if (n in 1..idx.size) code[idx[n - 1]] = sp[1]
+            if (n in 1..uidx.size) code[uidx[n - 1]] = sp[1]
         }
     }
     val out = ArrayList<Blk>()
@@ -470,26 +509,22 @@ private fun assemble(lines: List<CLine>, chunks: List<IntArray>, done: List<Stri
         cur?.let { emit(it, out) }
         cur = null
     }
-    for (i in lines.indices) {
-        val l = lines[i]
-        // nomor halaman / header / footer dibuang (atas keputusan Groq; bila tak diberi kode, kandidat lokal ikut dibuang)
-        if (code[i] == "x" || (l.noise && code[i] == null)) continue
-        val c = code[i]
+    for (k in units.indices) {
+        val u = units[k]
+        val c = code[k]
+        if (c == "x") continue   // nomor halaman / header / footer dibuang atas keputusan Groq
         val o = cur
+        if (c == "+" && o != null) { for (i in u) o.ls.add(lines[i]); continue }
         if (c == "t" && o != null && o.kind == "t") {
             o.rows.add(o.ls.size)
-            o.ls.add(l)
+            for (i in u) o.ls.add(lines[i])
             continue
         }
-        if (c != null || o == null) {
-            close()
-            val no = OpenB(c ?: "p")
-            if (no.kind == "t") no.rows.add(0)
-            no.ls.add(l)
-            cur = no
-        } else {
-            o.ls.add(l)
-        }
+        close()
+        val no = OpenB(if (c == "+") "p" else c)
+        if (no.kind == "t") no.rows.add(0)
+        for (i in u) no.ls.add(lines[i])
+        cur = no
     }
     close()
     if (out.isEmpty()) out.add(Blk())
@@ -730,7 +765,8 @@ object PdfConv {
         st.msg = ""
         val lines = ex.lines
         if (lines.none { !it.noise }) throw Pause("This PDF has no extractable text (it may be a scan), so it can't be converted.")
-        val chunks = makeChunks(lines)
+        val units = makeUnits(lines)
+        val chunks = makeChunks(lines, units)
         val done = ArrayList<String?>()
         if (ck0.n == chunks.size && ck0.done.size == chunks.size) done.addAll(ck0.done) else repeat(chunks.size) { done.add(null) }
         st.total = chunks.size
@@ -753,7 +789,7 @@ object PdfConv {
                 return
             }
             val prev = if (i > 0) done[i - 1]?.trimEnd(';')?.substringAfterLast(' ')?.takeIf { it.isNotEmpty() && it != "~" } else null
-            val codes = planChunk(key, models, promptOf(lines, chunks[i], prev), chunks[i].size, st)
+            val codes = planChunk(key, models, promptOf(lines, units, chunks[i], prev), chunks[i].size, st)
             done[i] = codes
             withContext(Dispatchers.IO) { saveCk(ctx, ConvCk(id, ck0.src, chunks.size, done.toList())) }
             st.done = done.count { it != null }
@@ -761,7 +797,7 @@ object PdfConv {
         }
 
         st.msg = "Finishing…"
-        val blocks = withContext(Dispatchers.Default) { assemble(lines, chunks, done) }
+        val blocks = withContext(Dispatchers.Default) { assemble(lines, units, chunks, done) }
         withContext(Dispatchers.Main) {
             vm.upd(id) { it.copy(bl = blocks, x = plainOf(blocks), u = System.currentTimeMillis()) }
         }
@@ -770,7 +806,10 @@ object PdfConv {
         map.remove(id)
         jobs.remove(id)
         Bg.done(ctx, "Note ready", title)
-        if (vm.nav.stack.none { it is Scr.Note && it.id == id }) vm.show("Your converted note is ready")
+        val fb = done.count { it == "~" }
+        val tail = if (fb > 0) " ($fb of ${done.size} parts used basic formatting)" else ""
+        if (vm.nav.stack.none { it is Scr.Note && it.id == id }) vm.show("Your converted note is ready" + tail)
+        else if (fb > 0) vm.show("Done" + tail)
     }
 }
 
