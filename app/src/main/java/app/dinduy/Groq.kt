@@ -22,7 +22,7 @@ data class TSeg(val st: Double, val en: Double, val tx: String)
 class Chunk(val paras: List<String>, val md: String?)
 
 /** Pesan galat yang aman ditampilkan (tidak pernah memuat API key). */
-class GroqException(msg: String, val code: Int = 0) : IOException(msg)
+class GroqException(msg: String, val code: Int = 0, val wait: Int = 0) : IOException(msg)
 
 /**
  * Klien Groq (Speech-to-Text). Aturan keamanan:
@@ -321,6 +321,59 @@ object Groq {
             c.outputStream.use { o: OutputStream -> o.write(body) }
             val r = finish(c)
             if (r.code !in 200..299) throw GroqException(explain(r), r.code)
+            val o = J.parseToJsonElement(r.body).jsonObject
+            return o["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content
+        } catch (e: GroqException) {
+            throw e
+        } catch (e: IOException) {
+            throw GroqException(NET)
+        } catch (e: Exception) {
+            return null
+        } finally {
+            live = null
+            c.disconnect()
+        }
+    }
+
+    /** Model obrolan untuk menata struktur PDF (tanpa model penalaran gpt-oss supaya jatah token tidak habis untuk berpikir). */
+    fun layoutModels(key: String): List<String> {
+        val all = chatModels(key)
+        return all.filter { !it.contains("gpt-oss") }.ifEmpty { all }
+    }
+
+    private fun waitFromMsg(body: String): Int {
+        val m = Regex("try again in ((\\d+)h)?((\\d+)m(?!s))?(([\\d.]+)s)?").find(body) ?: return 0
+        val h = m.groupValues[2].toIntOrNull() ?: 0
+        val mi = m.groupValues[4].toIntOrNull() ?: 0
+        val s = m.groupValues[6].toDoubleOrNull() ?: 0.0
+        return h * 3600 + mi * 60 + kotlin.math.ceil(s).toInt()
+    }
+
+    /** Satu panggilan obrolan (suhu 0). Pada 429, GroqException.wait = detik tunggu dari Groq (0 bila tidak diketahui). */
+    fun chatOnce(key: String, model: String, system: String, user: String, maxTokens: Int): String? {
+        val body = buildJsonObject {
+            put("model", model)
+            put("temperature", 0.0)
+            put("max_tokens", maxTokens)
+            put("messages", JsonArray(listOf(
+                buildJsonObject { put("role", "system"); put("content", system) },
+                buildJsonObject { put("role", "user"); put("content", user) }
+            )))
+        }.toString().toByteArray(Charsets.UTF_8)
+        val c = open("/chat/completions", key, "POST")
+        live = c
+        try {
+            c.doOutput = true
+            c.setRequestProperty("Content-Type", "application/json")
+            c.setFixedLengthStreamingMode(body.size)
+            c.outputStream.use { o: OutputStream -> o.write(body) }
+            val ra = c.getHeaderField("retry-after")
+            val r = finish(c)
+            if (r.code !in 200..299) {
+                var w = ra?.trim()?.toDoubleOrNull()?.let { kotlin.math.ceil(it).toInt() } ?: 0
+                if (r.code == 429 && w == 0) w = waitFromMsg(r.body)
+                throw GroqException(explain(r), r.code, w)
+            }
             val o = J.parseToJsonElement(r.body).jsonObject
             return o["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content
         } catch (e: GroqException) {

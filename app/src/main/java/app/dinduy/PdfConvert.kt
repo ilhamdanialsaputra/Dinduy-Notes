@@ -1,0 +1,986 @@
+package app.dinduy
+
+import android.app.Application
+import android.content.Context
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewModelScope
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.text.PDFTextStripper
+import com.tom_roush.pdfbox.text.TextPosition
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import java.io.File
+import kotlin.math.max
+
+// =====================================================================================
+//  Convert to Note: PDF (teks asli) -> catatan Markdown native Dinduy.
+//
+//  Cara kerja (sengaja begini supaya 100% setia dan hemat token Groq gratisan):
+//   1. Teks PDF diekstrak lokal (PDFBox) per baris, lengkap dengan tebal / miring dari jenis huruf PDF.
+//   2. Groq TIDAK PERNAH menulis ulang teks. Ia hanya menerima baris bernomor lalu membalas "daftar jenis blok"
+//      sangat singkat (mis. "12 h2", "13 p", "20 li"). Kode-lah yang merakit catatan dari teks asli,
+//      jadi tidak mungkin ada kalimat yang berubah, hilang, atau bertambah.
+//   3. Dokumen dipotong bertahap (~5000 huruf per permintaan). Tiap potongan disimpan sebagai checkpoint, jadi
+//      kalau kena batas pemakaian Groq / koneksi putus / aplikasi dimatikan, proses bisa dilanjutkan (Try again).
+//   4. Kalau Groq gagal untuk satu potongan, potongan itu ditata dengan aturan lokal (teks tetap utuh).
+// =====================================================================================
+
+// ---------------------------------------------------------------- ekstraksi baris
+
+class CLine(
+    val t: String,          // teks baris; '¦' (menggantikan satu spasi) = jarak lebar antar kolom
+    val sp: List<Sp>,       // tebal / miring dari jenis huruf PDF
+    val sz: Float,          // ukuran huruf (pt)
+    val x: Float,           // posisi kiri (pt)
+    val y: Float,           // posisi atas (pt)
+    val bold: Boolean,      // seluruh baris tebal
+    val page: Int
+) {
+    var rel = 1f            // ukuran huruf relatif terhadap teks isi
+    var gap = false         // ada jarak kosong lebih besar di atasnya (awal paragraf)
+    var indent = false
+    var noise = false       // kandidat nomor halaman / header-footer berulang (petunjuk untuk Groq; yang diputuskan x dibuang)
+}
+
+private class LineGrab : PDFTextStripper() {
+    val out = ArrayList<CLine>()
+    private val sb = StringBuilder()
+    private val bf = ArrayList<Boolean>()
+    private val itf = ArrayList<Boolean>()
+    private var sz = 0f
+    private var x0 = 0f
+    private var y0 = 0f
+    private var lastEnd = -1f
+    private var pg = 0
+
+    init { setSortByPosition(true) }
+
+    private fun styleOf(tp: TextPosition): Pair<Boolean, Boolean> {
+        var b = false
+        var i = false
+        try {
+            val f = tp.font
+            val n = (f?.name ?: "").lowercase()
+            b = n.contains("bold") || n.contains("black") || n.contains("heavy") || n.contains("semibold") || n.contains("demi")
+            i = n.contains("italic") || n.contains("oblique")
+            val d = f?.fontDescriptor
+            if (d != null) {
+                if (d.isItalic) i = true
+                if (d.isForceBold || d.fontWeight >= 700f) b = true
+            }
+        } catch (e: Throwable) { }
+        return b to i
+    }
+
+    override fun writeString(text: String, textPositions: MutableList<TextPosition>) {
+        if (textPositions.isEmpty()) return
+        val first = textPositions[0]
+        if (sb.isEmpty()) {
+            x0 = first.xDirAdj
+            y0 = first.yDirAdj
+            pg = currentPageNo - 1
+        } else if (lastEnd >= 0f && sb[sb.length - 1] == ' ') {
+            val s = if (first.fontSizeInPt > 0f) first.fontSizeInPt else 10f
+            if (first.xDirAdj - lastEnd > max(10f, s * 1.6f)) sb.setCharAt(sb.length - 1, '¦')
+        }
+        for (tp in textPositions) {
+            val u = tp.unicode ?: continue
+            val st = styleOf(tp)
+            for (ch in u) { sb.append(ch); bf.add(st.first); itf.add(st.second) }
+            if (tp.fontSizeInPt > sz) sz = tp.fontSizeInPt
+        }
+        val last = textPositions[textPositions.size - 1]
+        lastEnd = last.xDirAdj + last.widthDirAdj
+    }
+
+    override fun writeWordSeparator() { sb.append(' '); bf.add(false); itf.add(false) }
+
+    override fun writeLineSeparator() { flushLine() }
+
+    override fun writePageEnd() {
+        flushLine()
+        super.writePageEnd()
+    }
+
+    private fun ranges(a: Int, b: Int, f: List<Boolean>, k: Int, into: MutableList<Sp>): Int {
+        var s = -1
+        var lastNw = -1
+        var cover = 0
+        for (i in a until b) {
+            val c = sb[i]
+            if (c == ' ' || c == '¦') continue
+            if (f[i]) { if (s < 0) s = i; cover++ }
+            else if (s >= 0) { into.add(Sp(s - a, lastNw + 1 - a, k)); s = -1 }
+            lastNw = i
+        }
+        if (s >= 0) into.add(Sp(s - a, lastNw + 1 - a, k))
+        return cover
+    }
+
+    private fun flushLine() {
+        if (sb.isEmpty()) return
+        var a = 0
+        var b = sb.length
+        while (a < b && (sb[a] == ' ' || sb[a] == '¦')) a++
+        while (b > a && (sb[b - 1] == ' ' || sb[b - 1] == '¦')) b--
+        if (b > a) {
+            val sp = ArrayList<Sp>()
+            val bc = ranges(a, b, bf, K.B, sp)
+            ranges(a, b, itf, K.I, sp)
+            var nw = 0
+            for (i in a until b) if (sb[i] != ' ' && sb[i] != '¦') nw++
+            out.add(CLine(sb.substring(a, b), sp, sz, x0, y0, nw > 0 && bc * 10 >= nw * 9, pg))
+        }
+        sb.setLength(0); bf.clear(); itf.clear()
+        sz = 0f; lastEnd = -1f
+    }
+}
+
+private class Extracted(val lines: List<CLine>, val title: String?)
+
+private val RX_PGNUM = Regex("^(page|halaman|hal\\.?|hlm\\.?)?\\s*\\d{1,4}(\\s*(of|dari|/)\\s*\\d{1,4})?$", RegexOption.IGNORE_CASE)
+
+/** Ekstrak seluruh teks PDF jadi baris-baris. Dipanggil di thread IO. */
+private fun extract(ctx: Context, file: File, check: () -> Unit, progress: (Int, Int) -> Unit): Extracted {
+    PDFBoxResourceLoader.init(ctx)
+    val raw = ArrayList<CLine>()
+    var title: String? = null
+    val d = PDDocument.load(file)
+    try {
+        val n = d.numberOfPages
+        try { title = d.documentInformation?.title } catch (e: Throwable) { }
+        for (p in 0 until n) {
+            check()
+            val g = LineGrab()
+            g.startPage = p + 1
+            g.endPage = p + 1
+            try { g.getText(d) } catch (e: Throwable) { }
+            raw.addAll(g.out)
+            if (p % 8 == 0 || p == n - 1) progress(p + 1, n)
+        }
+    } finally {
+        try { d.close() } catch (e: Throwable) { }
+    }
+    if (raw.isEmpty()) return Extracted(raw, title)
+
+    // ukuran isi = ukuran huruf yang paling banyak hurufnya; margin kiri = posisi x yang paling sering
+    val sizeW = HashMap<Int, Int>()
+    val xW = HashMap<Int, Int>()
+    for (l in raw) {
+        val k = (l.sz * 2f).toInt()
+        sizeW[k] = (sizeW[k] ?: 0) + l.t.length
+        val xk = (l.x / 3f).toInt()
+        xW[xk] = (xW[xk] ?: 0) + l.t.length
+    }
+    val body = ((sizeW.maxByOrNull { it.value }?.key ?: 20) / 2f).coerceAtLeast(4f)
+    val margin = (xW.maxByOrNull { it.value }?.key ?: 0) * 3f
+
+    // jarak baris tipikal (median), lalu tandai awal paragraf
+    val dys = ArrayList<Float>()
+    for (i in 1 until raw.size) {
+        if (raw[i].page != raw[i - 1].page) continue
+        val dy = raw[i].y - raw[i - 1].y
+        if (dy > 0f && dy < body * 5f) dys.add(dy)
+    }
+    dys.sort()
+    val pitch = if (dys.isEmpty()) body * 1.25f else dys[dys.size / 2]
+    for (i in raw.indices) {
+        val l = raw[i]
+        l.rel = l.sz / body
+        l.indent = l.x - margin > body * 1.2f
+        if (i > 0 && raw[i - 1].page == l.page) l.gap = (l.y - raw[i - 1].y) > pitch * 1.35f
+    }
+
+    // nomor halaman dan header / footer berulang: 2 baris pertama dan terakhir tiap halaman
+    val byPage = HashMap<Int, ArrayList<Int>>()
+    for (i in raw.indices) byPage.getOrPut(raw[i].page) { ArrayList() }.add(i)
+    val rep = HashMap<String, Int>()
+    fun edge(ix: ArrayList<Int>): List<Int> = (ix.take(2) + ix.takeLast(2)).distinct()
+    for ((_, ix) in byPage) for (i in edge(ix)) {
+        val key = raw[i].t.replace(Regex("\\d+"), "#").lowercase()
+        rep[key] = (rep[key] ?: 0) + 1
+    }
+    val pages = byPage.size
+    for ((_, ix) in byPage) for (i in edge(ix)) {
+        val l = raw[i]
+        val key = l.t.replace(Regex("\\d+"), "#").lowercase()
+        val repeated = pages >= 4 && (rep[key] ?: 0) >= max(4, pages * 3 / 10) && l.t.length < 120
+        if (RX_PGNUM.matches(l.t.trim()) || repeated) l.noise = true
+    }
+    return Extracted(raw, title)
+}
+
+// ---------------------------------------------------------------- potongan, perintah ke Groq, hasil
+
+private const val BUDGET = 5000
+
+/** Potong baris (selain noise) jadi bagian-bagian ~BUDGET huruf, lebih suka berhenti di awal paragraf. */
+private fun makeChunks(lines: List<CLine>): List<IntArray> {
+    val out = ArrayList<IntArray>()
+    var cur = ArrayList<Int>()
+    var n = 0
+    for (i in lines.indices) {
+        val len = lines[i].t.length + 8
+        if (cur.isNotEmpty() && (n + len > BUDGET || cur.size >= 150)) {
+            var cut = cur.size
+            val lo = max(1, cur.size * 65 / 100)
+            for (j in cur.size - 1 downTo lo) if (lines[cur[j]].gap) { cut = j; break }
+            out.add(cur.subList(0, cut).toIntArray())
+            cur = ArrayList(cur.subList(cut, cur.size))
+            n = cur.sumOf { lines[it].t.length + 8 }
+        }
+        cur.add(i); n += len
+    }
+    if (cur.isNotEmpty()) out.add(cur.toIntArray())
+    return out
+}
+
+private const val SYS =
+    "You label lines of text extracted from a PDF so they can be rebuilt as clean Markdown. You NEVER rewrite, fix, or repeat the text.\n" +
+        "Input: numbered lines like `N tags| text`. Tags: L = font much larger than body, M = somewhat larger, S = smaller, b = whole line bold, " +
+        "¶ = blank gap above (likely new paragraph), > = indented, E = candidate page number or repeated header/footer. A ¦ inside text marks a wide gap between table columns.\n" +
+        "Output: one entry `N code` for every line that STARTS a new block, ascending. Lines you do not list continue the previous block.\n" +
+        "Codes: h1 h2 h3 h4 (headings; h1 = title), p paragraph, li bullet item (li2 li3 = nested), ol numbered or lettered item (ol2 ol3 = nested), " +
+        "q block quote, c code, t table row (only when columns are clearly separated by ¦, one row per line), x page number, running header/footer, or other page furniture (it will be deleted).\n" +
+        "Rules: a wrapped list item or paragraph: list only its first line. A paragraph cut by a page break: do not start a new block for its second half. " +
+        "Do not list a line that merely continues a sentence.\n" +
+        "Example input:\n1 L| Chapter One\n2 ¶| The study began in 1990 and\n3 | continued for years.\n4 ¶| - first point\n5 | - second point\n" +
+        "Example output:\n1 h1\n2 p\n4 li\n5 li\n" +
+        "Reply with entries only."
+
+private val RX_CODE = Regex("^(\\d{1,4})\\s*[:.\\-=)]?\\s*(h[1-4]|li[1-3]?|ol[1-3]?|p|q|c|t|x)\\b", RegexOption.IGNORE_CASE)
+
+private fun promptOf(lines: List<CLine>, idx: IntArray, prev: String?): String {
+    val sb = StringBuilder()
+    if (prev != null) sb.append("(previous block was ").append(prev).append(")\n")
+    for (k in idx.indices) {
+        val l = lines[idx[k]]
+        sb.append(k + 1).append(' ')
+        if (l.rel >= 1.45f) sb.append('L') else if (l.rel >= 1.15f) sb.append('M') else if (l.rel <= 0.88f) sb.append('S')
+        if (l.bold) sb.append('b')
+        if (l.noise) sb.append('E')
+        if (l.gap) sb.append('¶')
+        if (l.indent) sb.append('>')
+        sb.append("| ").append(l.t.replace("¦", " ¦ ")).append('\n')
+    }
+    return sb.toString()
+}
+
+/** Entri valid dari jawaban Groq ("n kode;n kode"), atau null bila jawabannya tidak bisa dipakai. */
+private fun parseCodes(raw: String, m: Int): String? {
+    val sb = StringBuilder()
+    var last = 0
+    var cnt = 0
+    for (ln0 in raw.lines()) {
+        var ln = ln0.trim()
+        if (ln.startsWith("```") || ln.isEmpty()) continue
+        ln = ln.removePrefix("-").removePrefix("*").trim()
+        val mm = RX_CODE.find(ln) ?: continue
+        val n = mm.groupValues[1].toIntOrNull() ?: continue
+        if (n < 1 || n > m || n <= last) continue
+        sb.append(n).append(' ').append(mm.groupValues[2].lowercase()).append(';')
+        last = n; cnt++
+    }
+    if (cnt == 0 && m > 3) return null
+    return sb.toString()
+}
+
+private val RX_GLYPH = Regex("^[•●▪◦·∙‣⁃■□○◆►▶]\\s*")
+private val RX_ASCII = Regex("^[-–—*+]\\s+")
+private val RX_NUM = Regex("^\\(?(\\d{1,3})[.)]\\s+")
+private val RX_LET = Regex("^\\(?([A-Za-z])[.)]\\s+")
+
+/** Aturan lokal bila Groq tidak bisa dipakai untuk satu potongan (teks tetap utuh, hanya penataannya lebih sederhana). */
+private fun heurCodes(lines: List<CLine>, idx: IntArray): String {
+    val sb = StringBuilder()
+    for (k in idx.indices) {
+        val l = lines[idx[k]]
+        val c: String? = when {
+            l.noise -> "x"
+            RX_GLYPH.containsMatchIn(l.t) || RX_ASCII.containsMatchIn(l.t) -> "li"
+            RX_NUM.containsMatchIn(l.t) -> "ol"
+            l.rel >= 1.45f && l.t.length < 100 -> "h1"
+            l.rel >= 1.15f && l.t.length < 100 -> "h2"
+            l.bold && l.gap && l.t.length < 80 -> "h3"
+            l.gap || k == 0 -> "p"
+            else -> null
+        }
+        if (c != null) sb.append(k + 1).append(' ').append(c).append(';')
+    }
+    return sb.toString()
+}
+
+// ---------------------------------------------------------------- perakitan blok Markdown native
+
+private class OpenB(val kind: String) {
+    val ls = ArrayList<CLine>()
+    val rows = ArrayList<Int>()   // tabel: indeks awal tiap baris tabel di [ls]
+}
+
+private fun joinRt(ls: List<CLine>, stripBold: Boolean): Rt {
+    val sb = StringBuilder()
+    val sp = ArrayList<Sp>()
+    for (l in ls) {
+        if (sb.isNotEmpty()) {
+            val hy = sb[sb.length - 1] == '-' && sb.length >= 2 && sb[sb.length - 2].isLetter() &&
+                l.t.isNotEmpty() && l.t[0].isLowerCase()
+            if (!hy) sb.append(' ')
+        }
+        val off = sb.length
+        sb.append(l.t.replace('¦', ' '))   // sama panjang, jadi posisi tebal / miring tetap pas
+        for (s in l.sp) sp.add(Sp(s.s + off, s.e + off, s.k))
+    }
+    val t = sb.toString()
+    return Rt(t, normSp(sp.filter { !(stripBold && it.k == K.B) }, t.length))
+}
+
+private fun emit(o: Open, out: MutableList<Blk>) {
+    if (o.ls.isEmpty()) return
+    val k = o.kind
+    when {
+        k.startsWith("h") -> out.add(Blk(ty = "h", lv = (k.substring(1).toIntOrNull() ?: 2).coerceIn(1, 4), r = joinRt(o.ls, true)))
+        k.startsWith("li") || k.startsWith("ol") -> {
+            val depth = ((k.substring(2).toIntOrNull() ?: 1) - 1).coerceIn(0, 3)
+            var rt = joinRt(o.ls, false)
+            if (k.startsWith("li")) {
+                val m = RX_GLYPH.find(rt.t) ?: RX_ASCII.find(rt.t)
+                if (m != null) rt = rt.slice(m.range.last + 1, rt.t.length)
+                out.add(Blk(ty = "li", lt = "b", d = depth, r = rt))
+            } else {
+                val mn = RX_NUM.find(rt.t)
+                val ml = if (mn == null) RX_LET.find(rt.t) else null
+                if (mn != null) {
+                    val st = mn.groupValues[1].toIntOrNull() ?: 0
+                    out.add(Blk(ty = "li", lt = "o", d = depth, st = st, r = rt.slice(mn.range.last + 1, rt.t.length)))
+                } else if (ml != null) {
+                    val st = Character.toLowerCase(ml.groupValues[1][0]) - 'a' + 1
+                    out.add(Blk(ty = "li", lt = "a", d = depth, st = st, r = rt.slice(ml.range.last + 1, rt.t.length)))
+                } else out.add(Blk(ty = "li", lt = "o", d = depth, r = rt))
+            }
+        }
+        k == "q" -> out.add(Blk(ty = "q", k = "quote", r = joinRt(o.ls, false)))
+        k == "c" -> out.add(Blk(ty = "code", r = Rt(o.ls.joinToString("\n") { it.t.replace('¦', ' ') })))
+        k == "t" -> {
+            val starts = if (o.rows.isEmpty()) listOf(0) else o.rows
+            val rows = ArrayList<String>()
+            for (i in starts.indices) {
+                val a = starts[i]
+                val b = if (i + 1 < starts.size) starts[i + 1] else o.ls.size
+                rows.add(o.ls.subList(a, b).joinToString(" ") { it.t })
+            }
+            val cells = rows.map { r -> r.split('¦').map { it.trim() } }
+            val cols = cells.maxOfOrNull { it.size } ?: 0
+            if (rows.size >= 2 && cols in 2..12) {
+                out.add(Blk(
+                    ty = "tbl",
+                    tb = cells.map { c -> (0 until cols).map { Rt(c.getOrElse(it) { "" }) } },
+                    ca = List(cols) { "left" }
+                ))
+            } else {
+                for (r in rows) out.add(Blk(ty = "p", r = Rt(r.replace('¦', ' '))))
+            }
+        }
+        else -> out.add(Blk(ty = "p", r = joinRt(o.ls, false)))
+    }
+}
+
+private fun assemble(lines: List<CLine>, chunks: List<IntArray>, done: List<String?>): List<Blk> {
+    val code = arrayOfNulls<String>(lines.size)
+    for (c in chunks.indices) {
+        val idx = chunks[c]
+        val s = done.getOrNull(c) ?: "~"
+        val str = if (s == "~") heurCodes(lines, idx) else s
+        for (e in str.split(';')) {
+            val sp = e.trim().split(' ')
+            if (sp.size != 2) continue
+            val n = sp[0].toIntOrNull() ?: continue
+            if (n in 1..idx.size) code[idx[n - 1]] = sp[1]
+        }
+    }
+    val out = ArrayList<Blk>()
+    var cur: OpenB? = null
+    fun close() {
+        cur?.let { emit(it, out) }
+        cur = null
+    }
+    for (i in lines.indices) {
+        val l = lines[i]
+        // nomor halaman / header / footer dibuang (atas keputusan Groq; bila tak diberi kode, kandidat lokal ikut dibuang)
+        if (code[i] == "x" || (l.noise && code[i] == null)) continue
+        val c = code[i]
+        val o = cur
+        if (c == "t" && o != null && o.kind == "t") {
+            o.rows.add(o.ls.size)
+            o.ls.add(l)
+            continue
+        }
+        if (c != null || o == null) {
+            close()
+            val no = OpenB(c ?: "p")
+            if (no.kind == "t") no.rows.add(0)
+            no.ls.add(l)
+            cur = no
+        } else {
+            o.ls.add(l)
+        }
+    }
+    close()
+    if (out.isEmpty()) out.add(Blk())
+    if (out.last().isObj || out.last().isMulti) out.add(Blk())
+    return out
+}
+
+// ---------------------------------------------------------------- status dan pengendali
+
+class ConvState {
+    var phase by mutableIntStateOf(0)    // 0 menyiapkan, 1 menata, 2 berhenti (kesalahan / menunggu Try again)
+    var done by mutableIntStateOf(0)
+    var total by mutableIntStateOf(0)
+    var msg by mutableStateOf("")
+    var model by mutableStateOf("")
+}
+
+@Serializable
+class ConvCk(val nid: String, val src: String, val n: Int = 0, val done: List<String?> = emptyList())
+
+private class Pause(msg: String) : Exception(msg)
+
+object PdfConv {
+    /** Catatan yang sedang / pernah berhenti di tengah konversi. Ada di sini = layar skeleton tampil. */
+    val map = mutableStateMapOf<String, ConvState>()
+    /** Hanya selama animasi geser masuk: id PDF asal yang masih terlihat di bawah halaman baru. */
+    val under = mutableStateMapOf<String, String>()
+    private val jobs = HashMap<String, Job>()
+    private val cool = HashMap<String, Long>()
+    private var restored = false
+
+    fun has(id: String): Boolean = map.containsKey(id)
+
+    private fun dir(ctx: Context) = File(ctx.filesDir, "conv").apply { mkdirs() }
+    private fun ckFile(ctx: Context, id: String) = File(dir(ctx), "$id.json")
+
+    private fun saveCk(ctx: Context, ck: ConvCk) {
+        try {
+            val f = ckFile(ctx, ck.nid)
+            val tmp = File(dir(ctx), ck.nid + ".tmp")
+            tmp.writeText(J.encodeToString(ConvCk.serializer(), ck))
+            if (!tmp.renameTo(f)) { f.delete(); tmp.renameTo(f) }
+        } catch (e: Exception) { }
+    }
+
+    private fun loadCk(ctx: Context, id: String): ConvCk? = try {
+        J.decodeFromString(ConvCk.serializer(), ckFile(ctx, id).readText())
+    } catch (e: Exception) { null }
+
+    /** Setelah aplikasi dimatikan di tengah konversi: tampilkan lagi sebagai berhenti (Try again). Aman dipanggil berkali-kali. */
+    fun restore(vm: AppVM) {
+        if (restored) return
+        restored = true
+        val ctx = vm.getApplication<Application>()
+        val fs = dir(ctx).listFiles() ?: return
+        for (f in fs) {
+            if (!f.name.endsWith(".json")) { if (f.name.endsWith(".tmp")) f.delete(); continue }
+            val id = f.name.removeSuffix(".json")
+            val ck = loadCk(ctx, id)
+            if (ck == null || vm.note(id) == null) { f.delete(); continue }
+            if (map.containsKey(id)) continue
+            val s = ConvState()
+            s.phase = 2
+            s.total = ck.n
+            s.done = ck.done.count { it != null }
+            s.msg = "The conversion was interrupted. Tap Try again to continue where it stopped."
+            map[id] = s
+        }
+    }
+
+    /** Notifikasi berjalan (dipakai AppVM.bgSnap). Null bila tidak ada konversi yang sedang jalan. */
+    fun snap(): Bg.Snap? {
+        val s = map.values.firstOrNull { it.phase < 2 } ?: return null
+        val p = if (s.total > 0) (s.done * 100 / s.total).coerceIn(0, 99) else -1
+        val txt = if (s.total > 0) "Part " + (s.done + 1).coerceAtMost(s.total) + " of " + s.total else "Reading PDF…"
+        return Bg.Snap("Converting PDF to note", txt, p, false, false)
+    }
+
+    /** Mulai konversi PDF [srcId]. Membuat catatan baru, pindah ke sana (geser masuk), lalu bekerja di latar belakang. */
+    fun begin(vm: AppVM, srcId: String): Boolean {
+        val src = vm.note(srcId) ?: return false
+        if (map.values.any { it.phase < 2 }) {
+            vm.show("Another PDF is still being converted")
+            return false
+        }
+        val ctx = vm.getApplication<Application>()
+        val t = System.currentTimeMillis()
+        val id = uid()
+        val n = Note(id = id, t = src.t, x = "Converting PDF…", u = t, c = t, lb = listOfNotNull(vm.filter))
+        vm.docs.add(0, n)
+        vm.save()
+        saveCk(ctx, ConvCk(id, src.pdf))
+        val st = ConvState()
+        map[id] = st
+        under[id] = srcId
+        // ganti layar PDF (dan menu titik tiganya) dengan catatan baru; halaman baru bergeser masuk di atas PDF
+        val stack = vm.nav.stack
+        if (stack.isNotEmpty() && stack[stack.size - 1] is Scr.NoteMenu) stack.removeAt(stack.size - 1)
+        if (stack.isNotEmpty() && stack[stack.size - 1] is Scr.Note) stack.removeAt(stack.size - 1)
+        vm.nav.noteId = id
+        vm.nav.pendingTitle = false
+        vm.openId = id
+        stack.add(Scr.Note(id))
+        run(vm, id)
+        return true
+    }
+
+    fun resume(vm: AppVM, id: String) {
+        val st = map[id] ?: return
+        if (st.phase < 2) return
+        if (map.values.any { it !== st && it.phase < 2 }) {
+            vm.show("Another PDF is still being converted")
+            return
+        }
+        run(vm, id)
+    }
+
+    /** Hentikan dan hapus catatan hasil konversi. PDF asli tidak disentuh. */
+    fun cancel(vm: AppVM, id: String) {
+        val ctx = vm.getApplication<Application>()
+        jobs.remove(id)?.cancel()
+        Groq.abort()
+        map[id]?.let { it.msg = "Canceled" }
+        vm.nav.pop()
+        vm.viewModelScope.launch {
+            delay(600)   // tunggu animasi tutup selesai
+            map.remove(id)
+            under.remove(id)
+            withContext(Dispatchers.IO) { try { ckFile(ctx, id).delete() } catch (e: Exception) { } }
+            vm.docs.removeAll { it.id == id }
+            vm.save()
+        }
+    }
+
+    private fun run(vm: AppVM, id: String) {
+        val st = map[id] ?: return
+        st.phase = 0
+        st.msg = ""
+        jobs[id]?.cancel()
+        jobs[id] = vm.viewModelScope.launch {
+            try {
+                work(vm, id, st)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Pause) {
+                st.phase = 2
+                st.msg = e.message ?: "The conversion stopped."
+                Bg.done(vm.getApplication<Application>(), "Conversion paused", "Open the note to continue.")
+            } catch (e: Throwable) {
+                st.phase = 2
+                st.msg = "Something went wrong (" + (e.message ?: e.javaClass.simpleName) + "). Your PDF is untouched."
+                Bg.done(vm.getApplication<Application>(), "Conversion failed", "Open the note to try again.")
+            }
+        }
+        vm.bgSync()
+    }
+
+    private fun enMsg(e: GroqException): String = when (e.code) {
+        401 -> "Groq rejected the API key. Replace it in Voice transcription settings, then tap Try again."
+        403 -> "Groq denied access (the key has no permission, or your region is blocked)."
+        else -> if (e.code == 0) "Can't reach Groq. Check your internet connection, then tap Try again." else (e.message ?: "Groq error")
+    }
+
+    private fun limitMsg(sec: Long): String {
+        val w = when {
+            sec < 90 -> "a minute"
+            sec < 3600 -> "about " + (sec / 60 + 1) + " min"
+            else -> "about " + ((sec + 1799) / 3600) + " h"
+        }
+        return "Groq's free limit is reached for now. Your progress is saved. Tap Try again in $w."
+    }
+
+    private suspend fun waitSec(st: ConvState, sec: Int, why: String) {
+        var left = sec
+        while (left > 0) {
+            st.msg = "$why. Waiting " + left + "s…"
+            delay(1000)
+            left--
+        }
+        st.msg = ""
+    }
+
+    /** Minta Groq menentukan jenis blok untuk satu potongan. Mengembalikan "n kode;..." atau "~" (pakai aturan lokal). */
+    private suspend fun planChunk(key: String, models: List<String>, user: String, nLines: Int, st: ConvState): String {
+        val maxTok = (nLines * 7 + 60).coerceIn(120, 1400)
+        val skip = HashSet<String>()
+        var net = 0
+        var rl = 0
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            val now = System.currentTimeMillis()
+            val avail = models.filter { it !in skip }
+            if (avail.isEmpty()) return "~"
+            val m = avail.firstOrNull { (cool[it] ?: 0L) <= now }
+            if (m == null) {
+                val soon = avail.minOf { cool[it] ?: 0L }
+                throw Pause(limitMsg((soon - now) / 1000L))
+            }
+            st.model = m.substringAfterLast('/')
+            try {
+                val raw = withContext(Dispatchers.IO) { Groq.chatOnce(key, m, SYS, user, maxTok) }
+                val p = if (raw == null) null else parseCodes(raw, nLines)
+                if (p != null) return p
+                skip.add(m)   // model ini tidak mengikuti format: coba model lain, atau aturan lokal
+            } catch (e: GroqException) {
+                when {
+                    e.code == 429 -> {
+                        val w = if (e.wait > 0) e.wait else 3
+                        rl++
+                        if (w <= 75 && rl <= 6) waitSec(st, w, "Rate limit reached")
+                        else cool[m] = System.currentTimeMillis() + (if (w > 75) w else 120) * 1000L
+                    }
+                    e.code == 401 || e.code == 403 -> throw Pause(enMsg(e))
+                    e.code == 413 -> skip.add(m)
+                    else -> {
+                        net++
+                        if (net > 4) throw Pause(enMsg(e))
+                        waitSec(st, 2 shl net, "Connection problem")
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun work(vm: AppVM, id: String, st: ConvState) {
+        val ctx = vm.getApplication<Application>()
+        val ck0 = withContext(Dispatchers.IO) { loadCk(ctx, id) }
+            ?: throw Pause("The conversion data is missing. Cancel, then start again from the PDF.")
+        val pdf = PdfFiles.file(ctx, ck0.src)
+        if (!pdf.exists()) throw Pause("The original PDF is missing, so it can't be converted.")
+        val key = withContext(Dispatchers.IO) { vm.vault.load() }
+            ?: throw Pause("Groq API key not found. Add it in Voice transcription settings, then tap Try again.")
+
+        st.msg = "Reading PDF…"
+        val ex = withContext(Dispatchers.IO) {
+            extract(ctx, pdf, { ensureActive() }) { p, n -> st.msg = "Reading PDF… page $p of $n" }
+        }
+        st.msg = ""
+        val lines = ex.lines
+        if (lines.none { !it.noise }) throw Pause("This PDF has no extractable text (it may be a scan), so it can't be converted.")
+        val chunks = makeChunks(lines)
+        val done = ArrayList<String?>()
+        if (ck0.n == chunks.size && ck0.done.size == chunks.size) done.addAll(ck0.done) else repeat(chunks.size) { done.add(null) }
+        st.total = chunks.size
+        st.done = done.count { it != null }
+
+        val models = try {
+            withContext(Dispatchers.IO) { Groq.layoutModels(key) }
+        } catch (e: GroqException) {
+            throw Pause(enMsg(e))
+        }
+        if (models.isEmpty()) throw Pause("No Groq chat model is available for this key.")
+
+        st.phase = 1
+        for (i in chunks.indices) {
+            if (done[i] != null) continue
+            currentCoroutineContext().ensureActive()
+            if (vm.note(id) == null) {   // catatan dihapus saat konversi berjalan
+                withContext(Dispatchers.IO) { try { ckFile(ctx, id).delete() } catch (e: Exception) { } }
+                map.remove(id); jobs.remove(id)
+                return
+            }
+            val prev = if (i > 0) done[i - 1]?.trimEnd(';')?.substringAfterLast(' ')?.takeIf { it.isNotEmpty() && it != "~" } else null
+            val codes = planChunk(key, models, promptOf(lines, chunks[i], prev), chunks[i].size, st)
+            done[i] = codes
+            withContext(Dispatchers.IO) { saveCk(ctx, ConvCk(id, ck0.src, chunks.size, done.toList())) }
+            st.done = done.count { it != null }
+            delay(900)   // jaga RPM Groq gratisan
+        }
+
+        st.msg = "Finishing…"
+        val blocks = withContext(Dispatchers.Default) { assemble(lines, chunks, done) }
+        withContext(Dispatchers.Main) {
+            vm.upd(id) { it.copy(bl = blocks, x = plainOf(blocks), u = System.currentTimeMillis()) }
+        }
+        withContext(Dispatchers.IO) { try { ckFile(ctx, id).delete() } catch (e: Exception) { } }
+        val title = vm.note(id)?.t ?: ""
+        map.remove(id)
+        jobs.remove(id)
+        Bg.done(ctx, "Note ready", title)
+        if (vm.nav.stack.none { it is Scr.Note && it.id == id }) vm.show("Your converted note is ready")
+    }
+}
+
+// ---------------------------------------------------------------- UI
+
+@Composable
+fun GroqKeyDialog(vm: AppVM, onDismiss: () -> Unit, onDone: () -> Unit) {
+    val pal = LocalPal.current
+    var key by remember { mutableStateOf("") }
+    var sent by remember { mutableStateOf(false) }
+    val fr = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        if (vm.gqState != 1) { vm.gqState = 0; vm.gqMsg = "" }
+        delay(150)
+        try { fr.requestFocus() } catch (e: Exception) { }
+    }
+    LaunchedEffect(sent, vm.gqState, vm.gqSet) { if (sent && vm.gqState == 2 && vm.gqSet) onDone() }
+    AlertDialog(
+        onDismissRequest = { if (vm.gqState != 1) onDismiss() },
+        containerColor = pal.c3,
+        title = { T("Groq API key", 22f, 900, pal.os) },
+        text = {
+            Column {
+                T("Needed once for Convert to Note. Get a free key at console.groq.com/keys. It is stored encrypted on this phone.", 14f, 400, pal.osv, lh = 1.3f)
+                Spacer(Modifier.height(14.dp))
+                BasicTextField(
+                    value = key, onValueChange = { if (it.length <= 200) key = it }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(pal.c4).focusRequester(fr),
+                    textStyle = TextStyle(color = pal.os, fontFamily = LocalFF.current, fontSize = 16.sp, fontWeight = FontWeight(600)),
+                    cursorBrush = SolidColor(pal.p),
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { if (key.isNotBlank() && vm.gqState != 1) { sent = true; vm.saveGroqKey(key) } }),
+                    decorationBox = { inner ->
+                        Box(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp)) {
+                            if (key.isEmpty()) T("gsk_…", 16f, 500, pal.osv)
+                            inner()
+                        }
+                    }
+                )
+                if (vm.gqState != 0 && vm.gqMsg.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    T(vm.gqMsg, 14f, 500, if (vm.gqState == 3) Color(0xFFD93025) else pal.osv, lh = 1.3f)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = key.isNotBlank() && vm.gqState != 1,
+                onClick = { sent = true; vm.saveGroqKey(key) }
+            ) { T(if (vm.gqState == 1) "Checking…" else "Save", 16f, 900, pal.p) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { T("Cancel", 16f, 700, pal.osv) } }
+    )
+}
+
+private sealed class SK {
+    class H(val w: Float) : SK()
+    class P(val n: Int) : SK()
+    class L(val n: Int) : SK()
+    class Q(val n: Int) : SK()
+    class Tb(val r: Int) : SK()
+}
+
+private val SKEL = listOf(
+    SK.H(.62f), SK.P(3), SK.P(2), SK.H(.4f), SK.L(3), SK.P(3), SK.Q(2), SK.H(.5f), SK.Tb(3), SK.P(3), SK.L(2), SK.P(2)
+)
+
+@Composable
+private fun SkBar(frac: Float, h: Dp, sh: State<Float>, c1: Color, c2: Color, modifier: Modifier = Modifier) {
+    Box(
+        modifier.fillMaxWidth(frac).height(h).clip(RoundedCornerShape(h / 2.4f)).drawBehind {
+            drawRect(c1)
+            val w = size.width
+            val x = (sh.value * 2f - .5f) * w
+            drawRect(Brush.horizontalGradient(listOf(Color.Transparent, c2, Color.Transparent), startX = x - w * .5f, endX = x + w * .5f))
+        }
+    )
+}
+
+@Composable
+private fun SkBlock(b: SK, sh: State<Float>, c1: Color, c2: Color) {
+    val g = 9.dp
+    when (b) {
+        is SK.H -> SkBar(b.w, 26.dp, sh, c1, c2)
+        is SK.P -> Column(verticalArrangement = Arrangement.spacedBy(g)) {
+            for (i in 0 until b.n) SkBar(if (i == b.n - 1) .6f else 1f, 14.dp, sh, c1, c2)
+        }
+        is SK.L -> Column(verticalArrangement = Arrangement.spacedBy(g)) {
+            for (i in 0 until b.n) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(Modifier.width(8.dp).height(8.dp).clip(RoundedCornerShape(4.dp)).background(c1))
+                SkBar(if (i % 2 == 0) .85f else .7f, 14.dp, sh, c1, c2)
+            }
+        }
+        is SK.Q -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(Modifier.width(4.dp).height(14.dp * b.n + g * (b.n - 1)).clip(RoundedCornerShape(2.dp)).background(c1))
+            Column(verticalArrangement = Arrangement.spacedBy(g)) {
+                for (i in 0 until b.n) SkBar(if (i == b.n - 1) .55f else .95f, 14.dp, sh, c1, c2)
+            }
+        }
+        is SK.Tb -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (r in 0 until b.r) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (c in 0 until 3) Box(Modifier.weight(1f)) { SkBar(1f, if (r == 0) 20.dp else 16.dp, sh, c1, c2) }
+            }
+        }
+    }
+}
+
+/**
+ * Layar "sedang mengonversi" di atas catatan hasil konversi. Menampilkan judul + skeleton teks Markdown yang tersusun bertahap,
+ * lalu memudar begitu hasilnya masuk (isi catatan sudah tersusun di bawahnya). Bergeser masuk dari kanan seperti halaman lain.
+ */
+@Composable
+fun PdfConvOverlay(vm: AppVM, id: String) {
+    val st = PdfConv.map[id]
+    val hold = remember(id) { arrayOfNulls<ConvState>(1) }
+    if (st != null) hold[0] = st
+    val keep = st ?: hold[0]
+    val fade by animateFloatAsState(if (st != null) 1f else 0f, tween(420), label = "cvf")
+    if (keep != null && (st != null || fade > .01f)) ConvBody(vm, id, keep, fade, st != null)
+}
+
+@Composable
+private fun ConvBody(vm: AppVM, id: String, s: ConvState, fadeA: Float, busy: Boolean) {
+    val pal = LocalPal.current
+    val note = vm.note(id)
+    val slide = remember(id) { Animatable(if (PdfConv.under.containsKey(id)) 0f else 1f) }
+    LaunchedEffect(id) {
+        if (slide.value < 1f) {
+            slide.animateTo(1f, tween(340, easing = EmphDecel))
+            PdfConv.under.remove(id)
+        }
+    }
+    DisposableEffect(id) {
+        onDispose {
+            val p = PdfConv.map[id]?.phase
+            if (p != null && p < 2) vm.show("Still converting in the background. We'll let you know when it's ready.")
+        }
+    }
+    var keyDlg by remember { mutableStateOf(false) }
+    var askCancel by remember { mutableStateOf(false) }
+    val tr = rememberInfiniteTransition(label = "sk")
+    val sh = tr.animateFloat(0f, 1f, infiniteRepeatable(tween(1400), RepeatMode.Restart), label = "sh")
+    var shown by remember { mutableIntStateOf(1) }
+    LaunchedEffect(Unit) {
+        while (shown < SKEL.size) { delay(420); shown++ }
+    }
+    val frac = if (s.total > 0) s.done.toFloat() / s.total else 0f
+    val pf by animateFloatAsState(frac, tween(450), label = "pf")
+
+    Box(
+        Modifier.fillMaxSize()
+            .graphicsLayer { translationX = (1f - slide.value) * size.width; alpha = fadeA }
+            .background(pal.bg)
+            .then(if (busy) Modifier.pointerInput(Unit) { } else Modifier)
+    ) {
+        Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 20.dp)) {
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconBtn("back", pal.os, { vm.nav.pop() }, size = 44.dp)
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    T(note?.t?.ifBlank { null } ?: "PDF", 22f, 800, pal.os)
+                    T("Converting to a Markdown note", 13f, 500, pal.osv)
+                }
+            }
+            Column(Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
+                for (i in SKEL.indices) {
+                    AnimatedVisibility(
+                        visible = i < shown,
+                        enter = fadeIn(tween(320)) + expandVertically(spring(.85f, 380f), expandFrom = Alignment.Top)
+                    ) { SkBlock(SKEL[i], sh, pal.c4, pal.c3) }
+                }
+            }
+            Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 16.dp, top = 8.dp)) {
+                Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(pal.c4)) {
+                    Box(Modifier.fillMaxWidth(pf.coerceIn(0f, 1f)).fillMaxHeight().clip(RoundedCornerShape(3.dp)).background(pal.p))
+                }
+                Spacer(Modifier.height(10.dp))
+                val line = when {
+                    s.phase == 2 -> s.msg
+                    s.msg.isNotEmpty() -> s.msg
+                    s.phase == 0 -> "Preparing…"
+                    else -> "Structuring · part " + (s.done + 1).coerceAtMost(s.total.coerceAtLeast(1)) + " of " + s.total
+                }
+                T(line, 15f, 600, pal.os, lh = 1.3f)
+                if (s.phase < 2) {
+                    T(
+                        (if (s.model.isNotEmpty() && s.phase == 1) "Model: " + s.model + ". " else "") +
+                            "You can leave this note. It keeps going in the background.",
+                        13f, 400, pal.osv, Modifier.padding(top = 2.dp), lh = 1.3f
+                    )
+                }
+                Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (s.phase == 2 && busy) {
+                        TextButton(onClick = { if (vm.gqSet) PdfConv.resume(vm, id) else keyDlg = true }) { T("Try again", 16f, 900, pal.p) }
+                    }
+                    if (busy) TextButton(onClick = { askCancel = true }) { T("Cancel conversion", 16f, 700, pal.osv) }
+                }
+            }
+        }
+    }
+    if (keyDlg) GroqKeyDialog(vm, { keyDlg = false }) { keyDlg = false; PdfConv.resume(vm, id) }
+    if (askCancel) {
+        AlertDialog(
+            onDismissRequest = { askCancel = false },
+            containerColor = pal.c3,
+            title = { T("Stop converting?", 22f, 900, pal.os) },
+            text = { T("The new note will be deleted. Your PDF stays untouched.", 15f, 400, pal.osv, lh = 1.3f) },
+            confirmButton = { TextButton(onClick = { askCancel = false; PdfConv.cancel(vm, id) }) { T("Stop", 16f, 900, pal.p) } },
+            dismissButton = { TextButton(onClick = { askCancel = false }) { T("Keep going", 16f, 700, pal.osv) } }
+        )
+    }
+}

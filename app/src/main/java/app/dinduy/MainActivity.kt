@@ -746,9 +746,14 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     ) {
                     NoteLayer(vm, on = inNote, morph = vm.morph, under = top is Scr.NoteMenu || top is Scr.NoteLabels || top is Scr.PdfExport || top is Scr.Cover || modelsOnNote) {
                         val id = nav.noteId
-                        if (id != null && vm.note(id)?.pdf?.isNotEmpty() == true) {
+                        androidx.compose.runtime.remember { PdfConv.restore(vm) }
+                        // selama animasi geser masuk catatan hasil konversi, PDF asalnya masih terlihat di bawahnya
+                        val pid = if (id != null) (PdfConv.under[id] ?: id) else null
+                        if (pid != null && vm.note(pid)?.pdf?.isNotEmpty() == true) {
                             SideEffect { vm.ed = null }
-                            PdfScreen(vm, id, act)
+                            PdfScreen(vm, pid, act)
+                        } else if (id != null && PdfConv.has(id)) {
+                            SideEffect { vm.ed = null }
                         } else if (id != null) {
                             val sc = rememberCoroutineScope()
                             val ed = remember(id) {
@@ -765,6 +770,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
                             SideEffect { vm.ed = ed }
                             NoteScreen(vm, ed, act)
                         }
+                        if (id != null) PdfConvOverlay(vm, id)
                     }
                     }
 

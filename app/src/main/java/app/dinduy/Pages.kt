@@ -302,8 +302,9 @@ fun PageScaffold(title: String, sub: String?, onBack: () -> Unit, content: @Comp
 
 /** Baris aksi di grup kartu bersambung (sama dengan SActionRow, plus mode berbahaya dan panah). */
 @Composable
-fun MRow(pos: Int, icon: String, title: String, sub: String? = null, danger: Boolean = false, chevron: Boolean = false, onClick: () -> Unit) {
+fun MRow(pos: Int, icon: String, title: String, sub: String? = null, danger: Boolean = false, chevron: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
     val pal = LocalPal.current
+    Box(Modifier.graphicsLayer { alpha = if (enabled) 1f else .45f }) {
     SCard(pos, onClick, PaddingValues(horizontal = 20.dp, vertical = 14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(16.dp)) {
             Box(Modifier.size(44.dp).clip(CircleShape).background(if (danger) pal.ec else pal.pc), Alignment.Center) {
@@ -315,6 +316,7 @@ fun MRow(pos: Int, icon: String, title: String, sub: String? = null, danger: Boo
             }
             if (chevron) Ic("chr", pal.osv, 24.dp)
         }
+    }
     }
 }
 

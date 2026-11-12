@@ -673,6 +673,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             }
             return Bg.Snap("Transcription in progress", if (trInfo.isNotEmpty()) st + " " + trInfo else st, -1, false, false)
         }
+        PdfConv.snap()?.let { return it }
         return null
     }
 
