@@ -1241,7 +1241,7 @@ object PdfConv {
                 val raw = withContext(Dispatchers.IO) { Groq.chatOnce(key, m, sys, user, maxTok, temp) }
                 val p = if (raw == null) null else accept(raw)
                 if (p != null) return p
-                why = if (raw == null) "empty or unreadable reply from " + st.model else "unexpected reply (" + clip(raw, 90) + ")"
+                why = st.model + ": " + (if (raw == null) "no reply" else if (raw.isBlank()) "empty reply" else "unexpected reply (" + clip(raw, 90) + ")")
                 val t = (tries[m] ?: 0) + 1
                 tries[m] = t
                 if (t >= 2) skip.add(m)
@@ -1298,7 +1298,7 @@ object PdfConv {
                     throw Pause("")
                 }
                 if (models.isEmpty()) throw Pause("")
-                val r = planChunk(key, models, SYS, promptOf(an.units, an.clu), an.clu.size * 6 + 40, st) { parseCodes(it, an.clu.size) }
+                val r = planChunk(key, models, SYS, promptOf(an.units, an.clu), max(1000, an.clu.size * 10 + 400), st) { parseCodes(it.replace(Regex("(?s)<think>.*?</think>"), ""), an.clu.size) }
                 if (r == "~") fb = true else dec = decodeCodes(r)
             } catch (e: Pause) {
                 if (e.fatal) throw e
