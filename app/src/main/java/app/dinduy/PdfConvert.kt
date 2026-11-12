@@ -14,7 +14,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -78,39 +77,67 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import java.io.File
+import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 
 // =====================================================================================
-//  Convert to Note: PDF (teks asli) -> catatan Markdown native Dinduy.
+//  Convert to Note: PDF (teks asli) -> catatan native Dinduy (paragraf, judul, daftar, tabel).
 //
-//  Cara kerja (sengaja begini supaya 100% setia dan hemat token Groq gratisan):
-//   1. Teks PDF diekstrak lokal (PDFBox) per baris, lengkap dengan tebal / miring dari jenis huruf PDF.
-//   2. Groq TIDAK PERNAH menulis ulang teks. Ia hanya menerima baris bernomor lalu membalas "daftar jenis blok"
-//      sangat singkat (mis. "12 h2", "13 p", "20 li"). Kode-lah yang merakit catatan dari teks asli,
-//      jadi tidak mungkin ada kalimat yang berubah, hilang, atau bertambah.
-//   3. Dokumen dipotong bertahap (~5000 huruf per permintaan). Tiap potongan disimpan sebagai checkpoint, jadi
-//      kalau kena batas pemakaian Groq / koneksi putus / aplikasi dimatikan, proses bisa dilanjutkan (Try again).
-//   4. Kalau Groq gagal untuk satu potongan, potongan itu ditata dengan aturan lokal (teks tetap utuh).
+//  Prinsip (v2): LOKAL DULU, Groq SEKEDAR JURI untuk yang benar-benar ambigu.
+//   1. Teks diekstrak lokal (PDFBox) per baris + posisi tiap sel. Halaman dua kolom dipisah, header/footer/nomor
+//      halaman dibuang, ligatur dan tanda sambung diperbaiki.
+//   2. Tabel dikenali dari geometri (kolom sejajar), daftar dari penanda + indentasi, paragraf dari jarak baris,
+//      judul dari ukuran huruf SELURUH dokumen. Semua pasti, tanpa Groq.
+//   3. Hanya baris pendek yang ambigu (mis. tebal ukuran isi, HURUF BESAR, rata tengah) yang dikelompokkan per
+//      GAYA HURUF. Groq menerima beberapa contoh tiap gaya dalam SATU permintaan kecil dan menjawab "id kode".
+//      Seluruh baris bergaya sama otomatis mendapat keputusan sama = konsisten.
+//   4. Groq tidak pernah menulis ulang teks. Catatan dirakit dari teks asli, jadi kata tidak mungkin berubah.
+//   5. Bila Groq gagal / kena limit, gaya yang ambigu diputuskan aturan lokal. Konversi tetap selesai.
+//  Hasil hanya berisi: paragraf, judul, daftar, tabel (tanpa kutipan / kode / garis / gambar sisipan).
 // =====================================================================================
 
-// ---------------------------------------------------------------- ekstraksi baris
+// ---------------------------------------------------------------- model baris
 
 class CLine(
-    val t: String,          // teks baris; '¦' (menggantikan satu spasi) = jarak lebar antar kolom
-    val sp: List<Sp>,       // tebal / miring dari jenis huruf PDF
-    val sz: Float,          // ukuran huruf (pt)
-    val x: Float,           // posisi kiri (pt)
-    val y: Float,           // posisi atas (pt)
-    val bold: Boolean,      // seluruh baris tebal
-    val page: Int
+    val t: String,           // teks baris; '¦' (menggantikan satu spasi) = jarak lebar antar sel
+    val sp: List<Sp>,        // tebal / miring dari jenis huruf PDF
+    val sz: Float,           // ukuran huruf (pt)
+    val x: Float,            // posisi kiri (pt)
+    val y: Float,            // posisi atas (pt)
+    val page: Int,
+    val cs: FloatArray       // pasangan [awal, akhir] tiap sel; ukuran = 2 * jumlah sel
 ) {
-    var rel = 1f            // ukuran huruf relatif terhadap teks isi
-    var gap = false         // ada jarak kosong lebih besar di atasnya (awal paragraf)
+    var xe = 0f
+    var bold = false
+    var ital = false
+    var rel = 1f
+    var gap = false          // jarak kosong di atasnya lebih besar dari biasa
     var indent = false
-    var hl = 0              // tingkat judul menurut ukuran huruf SELURUH dokumen (1-3), 4 = baris tebal pendek (mungkin judul kecil)
-    var xe = 0f             // posisi kanan baris (pt)
-    var short = false       // baris pendek (kemungkinan akhir paragraf)
-    var noise = false       // kandidat nomor halaman / header-footer berulang (petunjuk untuk Groq; yang diputuskan x dibuang)
+    var center = false
+    var short = false
+    var noise = false        // nomor halaman / header / footer berulang (dibuang)
+    var foot = false         // catatan kaki (huruf kecil di bagian bawah halaman)
+    var col = 0              // 0 lebar penuh, 1 kolom kiri, 2 kolom kanan
+    var lm = 0f
+    var rm = 0f
+    var mk = 0               // penanda butir: 1 simbol, 2 angka, 3 huruf
+    val cells: Int get() = cs.size / 2
+}
+
+private fun fixChar(c: Char, start: Boolean): String = when {
+    c == 'ﬁ' -> "fi"
+    c == 'ﬂ' -> "fl"
+    c == 'ﬀ' -> "ff"
+    c == 'ﬃ' -> "ffi"
+    c == 'ﬄ' -> "ffl"
+    c == 'ﬅ' || c == 'ﬆ' -> "st"
+    c == '¦' -> "|"
+    c == ' ' || c == ' ' || c == ' ' || c == ' ' || c == ' ' || c == ' ' -> " "
+    c == '­' || c == '​' || c == '‌' || c == '‍' || c == '﻿' -> ""
+    c in ''..'' -> if (start) "•" else ""
+    c < ' ' -> ""
+    else -> c.toString()
 }
 
 private class LineGrab : PDFTextStripper() {
@@ -118,6 +145,7 @@ private class LineGrab : PDFTextStripper() {
     private val sb = StringBuilder()
     private val bf = ArrayList<Boolean>()
     private val itf = ArrayList<Boolean>()
+    private val bounds = ArrayList<Float>()
     private var sz = 0f
     private var x0 = 0f
     private var y0 = 0f
@@ -152,12 +180,17 @@ private class LineGrab : PDFTextStripper() {
             pg = currentPageNo - 1
         } else if (lastEnd >= 0f && sb[sb.length - 1] == ' ') {
             val s = if (first.fontSizeInPt > 0f) first.fontSizeInPt else 10f
-            if (first.xDirAdj - lastEnd > max(8f, s * 1.1f)) sb.setCharAt(sb.length - 1, '¦')
+            if (first.xDirAdj - lastEnd > max(8f, s * 1.1f)) {
+                sb.setCharAt(sb.length - 1, '¦')
+                bounds.add(lastEnd); bounds.add(first.xDirAdj)
+            }
         }
         for (tp in textPositions) {
             val u = tp.unicode ?: continue
             val st = styleOf(tp)
-            for (ch in u) { sb.append(ch); bf.add(st.first); itf.add(st.second) }
+            for (ch in u) {
+                for (c2 in fixChar(ch, sb.isEmpty())) { sb.append(c2); bf.add(st.first); itf.add(st.second) }
+            }
             if (tp.fontSizeInPt > sz) sz = tp.fontSizeInPt
         }
         val last = textPositions[textPositions.size - 1]
@@ -173,48 +206,164 @@ private class LineGrab : PDFTextStripper() {
         super.writePageEnd()
     }
 
-    private fun ranges(a: Int, b: Int, f: List<Boolean>, k: Int, into: MutableList<Sp>): Int {
+    private fun ranges(a: Int, b: Int, f: List<Boolean>, k: Int, into: MutableList<Sp>) {
         var s = -1
         var lastNw = -1
-        var cover = 0
         for (i in a until b) {
             val c = sb[i]
             if (c == ' ' || c == '¦') continue
-            if (f[i]) { if (s < 0) s = i; cover++ }
+            if (f[i]) { if (s < 0) s = i }
             else if (s >= 0) { into.add(Sp(s - a, lastNw + 1 - a, k)); s = -1 }
             lastNw = i
         }
         if (s >= 0) into.add(Sp(s - a, lastNw + 1 - a, k))
-        return cover
     }
 
     private fun flushLine() {
-        if (sb.isEmpty()) return
+        if (sb.isEmpty()) { bounds.clear(); return }
         var a = 0
         var b = sb.length
         while (a < b && (sb[a] == ' ' || sb[a] == '¦')) a++
         while (b > a && (sb[b - 1] == ' ' || sb[b - 1] == '¦')) b--
         if (b > a) {
             val sp = ArrayList<Sp>()
-            val bc = ranges(a, b, bf, K.B, sp)
+            ranges(a, b, bf, K.B, sp)
             ranges(a, b, itf, K.I, sp)
-            var nw = 0
-            for (i in a until b) if (sb[i] != ' ' && sb[i] != '¦') nw++
-            out.add(CLine(sb.substring(a, b), sp, sz, x0, y0, nw > 0 && bc * 10 >= nw * 9, pg).also { it.xe = lastEnd })
+            val cs = FloatArray(bounds.size + 2)
+            cs[0] = x0
+            for (k in bounds.indices) cs[k + 1] = bounds[k]
+            cs[cs.size - 1] = lastEnd
+            val l = CLine(sb.substring(a, b), sp, sz, x0, y0, pg, cs)
+            l.xe = lastEnd
+            out.add(l)
         }
-        sb.setLength(0); bf.clear(); itf.clear()
+        sb.setLength(0); bf.clear(); itf.clear(); bounds.clear()
         sz = 0f; lastEnd = -1f
     }
 }
 
-private class Extracted(val lines: List<CLine>, val title: String?)
+private class Extracted(val lines: List<CLine>, val title: String?, val body: Float, val pitch: Float)
 
 private val RX_PGNUM = Regex("^(page|halaman|hal\\.?|hlm\\.?)?\\s*\\d{1,4}(\\s*(of|dari|/)\\s*\\d{1,4})?$", RegexOption.IGNORE_CASE)
+private val RX_DIG = Regex("\\d+")
+private val RX_GLYPH = Regex("^[•●▪◦·∙‣⁃■□○◆►▶➢➤✓✔]\\s*")
+private val RX_ASCII = Regex("^[-–—*+]\\s+")
+private val RX_NUM = Regex("^\\(?(\\d{1,3})[.)]\\s+")
+private val RX_LET = Regex("^\\(?([A-Za-z])[.)]\\s+")
+private val TERM = Regex("[.!?…:;\"”’)\\]]$")
+private val RX_SENT = Regex("[.!?…][\"”’)\\]]?$")
+private val LEAD = Regex("(\\.\\s?){4,}|…{2,}")
+private val RX_HDR = Regex("^((\\d+(\\.\\d+){0,3}\\.?)\\s+\\S|(bab|chapter|bagian|section|lampiran|appendix|pasal|part)\\s+[\\dIVXLC]+\\b)", RegexOption.IGNORE_CASE)
+private val RX_HNUM = Regex("^(\\d+(\\.\\d+)*\\.?|[IVX]+\\.)\\s+\\S")
+private val RX_NUMC = Regex("^[-+−(]?\\s*(Rp\\.?|\\u0024|€|£)?\\s*\\d[\\d.,\\s]*\\s*(%|\\)|x|jt|rb)?$", RegexOption.IGNORE_CASE)
+private val RX_TOCN = Regex("^(\\d{1,4}|[ivxlcdm]{1,6})$", RegexOption.IGNORE_CASE)
 
-/** Ekstrak seluruh teks PDF jadi baris-baris. Dipanggil di thread IO. */
+private fun cover(l: CLine, k: Int): Float {
+    var tot = 0
+    var hit = 0
+    for (i in l.t.indices) {
+        val c = l.t[i]
+        if (c == ' ' || c == '¦') continue
+        tot++
+        if (l.sp.any { it.k == k && it.s <= i && it.e > i }) hit++
+    }
+    return if (tot == 0) 0f else hit.toFloat() / tot
+}
+
+private fun modeX(ls: List<CLine>): Float {
+    val w = HashMap<Int, Int>()
+    for (l in ls) { val k = Math.round(l.x / 3f); w[k] = (w[k] ?: 0) + l.t.length }
+    return (w.maxByOrNull { it.value }?.key ?: 0) * 3f
+}
+
+private fun edgeX(ls: List<CLine>): Float? {
+    val xs = ls.filter { it.t.length > 25 }.map { it.xe }.sorted()
+    if (xs.size < 5) return null
+    return xs[(xs.size * 9 / 10).coerceAtMost(xs.size - 1)]
+}
+
+// ---------------------------------------------------------------- halaman dua kolom
+
+private fun gapAt(l: CLine, g: Float): Int {
+    for (i in 0 until l.cells - 1) if (l.cs[2 * i + 1] <= g + 1f && l.cs[2 * i + 2] >= g - 1f) return i
+    return -1
+}
+
+/** Potong baris di sel [k0]..[k1] (inklusif), lengkap dengan gaya dan posisinya. */
+private fun sub(l: CLine, k0: Int, k1: Int): CLine {
+    val parts = l.t.split('¦')
+    var a = 0
+    for (k in 0 until k0) a += parts[k].length + 1
+    var b = a
+    for (k in k0..k1) b += parts[k].length + (if (k < k1) 1 else 0)
+    val sp = ArrayList<Sp>()
+    for (s in l.sp) {
+        val s0 = max(s.s, a)
+        val e0 = min(s.e, b)
+        if (e0 > s0) sp.add(Sp(s0 - a, e0 - a, s.k))
+    }
+    val cs = l.cs.copyOfRange(2 * k0, 2 * k1 + 2)
+    val n = CLine(l.t.substring(a, b), sp, l.sz, cs[0], l.y, l.page, cs)
+    n.xe = cs[cs.size - 1]
+    return n
+}
+
+/** Dua kolom: bacaan kiri dulu baru kanan; baris selebar halaman (judul, abstrak) memisahkan blok. */
+private fun splitCols(ls: List<CLine>, pw: Float): List<CLine> {
+    if (ls.size < 14 || pw < 100f) return ls
+    var bg = -1f
+    var bs = Int.MIN_VALUE
+    var g = pw * .36f
+    while (g <= pw * .64f) {
+        var left = 0; var right = 0; var cross = 0; var split = 0; var wide = 0
+        for (l in ls) {
+            if (l.xe <= g + 1f) left++
+            else if (l.x >= g - 1f) right++
+            else {
+                val i = gapAt(l, g)
+                if (i < 0) cross++
+                else {
+                    split++
+                    if (l.cs[2 * i + 1] - l.x >= pw * .15f && l.xe - l.cs[2 * i + 2] >= pw * .15f) wide++
+                }
+            }
+        }
+        if (cross * 10 <= ls.size && wide >= 5 && wide * 10 >= split * 6 && left + split >= 6 && right + split >= 6) {
+            val sc = wide * 100 - cross
+            if (sc > bs) { bs = sc; bg = g }
+        }
+        g += 3f
+    }
+    if (bg < 0f) return ls
+    val out = ArrayList<CLine>(ls.size + 8)
+    val lq = ArrayList<CLine>()
+    val rq = ArrayList<CLine>()
+    fun flush() { out.addAll(lq); out.addAll(rq); lq.clear(); rq.clear() }
+    for (l in ls) {
+        if (l.xe <= bg + 1f) { l.col = 1; lq.add(l) }
+        else if (l.x >= bg - 1f) { l.col = 2; rq.add(l) }
+        else {
+            val i = gapAt(l, bg)
+            if (i < 0) { flush(); l.col = 0; out.add(l) }
+            else {
+                val a = sub(l, 0, i)
+                val b = sub(l, i + 1, l.cells - 1)
+                a.col = 1; b.col = 2
+                lq.add(a); rq.add(b)
+            }
+        }
+    }
+    flush()
+    return out
+}
+
+// ---------------------------------------------------------------- ekstraksi + statistik dokumen
+
 private fun extract(ctx: Context, file: File, check: () -> Unit, progress: (Int, Int) -> Unit): Extracted {
     PDFBoxResourceLoader.init(ctx)
-    val raw = ArrayList<CLine>()
+    val pages = ArrayList<List<CLine>>()
+    val pws = ArrayList<Float>()
+    val phs = ArrayList<Float>()
     var title: String? = null
     val d = PDDocument.load(file)
     try {
@@ -222,475 +371,501 @@ private fun extract(ctx: Context, file: File, check: () -> Unit, progress: (Int,
         try { title = d.documentInformation?.title } catch (e: Throwable) { }
         for (p in 0 until n) {
             check()
+            var w = 0f
+            var h = 0f
+            try { val bx = d.getPage(p).mediaBox; w = bx.width; h = bx.height } catch (e: Throwable) { }
             val g = LineGrab()
             g.startPage = p + 1
             g.endPage = p + 1
             try { g.getText(d) } catch (e: Throwable) { }
-            raw.addAll(g.out)
-            if (p % 8 == 0 || p == n - 1) progress(p + 1, n)
+            pages.add(g.out); pws.add(w); phs.add(h)
+            if (p % 4 == 0 || p == n - 1) progress(p + 1, n)
         }
     } finally {
         try { d.close() } catch (e: Throwable) { }
     }
-    if (raw.isEmpty()) return Extracted(raw, title)
+    val raw = ArrayList<CLine>()
+    for (p in pages.indices) raw.addAll(splitCols(pages[p], pws[p]))
+    if (raw.isEmpty()) return Extracted(raw, title, 10f, 12f)
+    for (l in raw) { l.bold = cover(l, K.B) >= .9f; l.ital = cover(l, K.I) >= .9f }
 
-    // ukuran isi = ukuran huruf yang paling banyak hurufnya; margin kiri = posisi x yang paling sering
-    val sizeW = HashMap<Int, Int>()
-    val xW = HashMap<Int, Int>()
-    for (l in raw) {
-        val k = (l.sz * 2f).toInt()
-        sizeW[k] = (sizeW[k] ?: 0) + l.t.length
-        val xk = (l.x / 3f).toInt()
-        xW[xk] = (xW[xk] ?: 0) + l.t.length
+    // nomor halaman dan header / footer berulang
+    val byPage = LinkedHashMap<Int, ArrayList<Int>>()
+    for (i in raw.indices) byPage.getOrPut(raw[i].page) { ArrayList() }.add(i)
+    fun key(l: CLine) = RX_DIG.replace(l.t, "#").lowercase()
+    fun edge(ix: ArrayList<Int>): List<Int> {
+        val h = phs.getOrElse(raw[ix[0]].page) { 0f }
+        val set = LinkedHashSet<Int>()
+        set.addAll(ix.take(2)); set.addAll(ix.takeLast(2))
+        if (h > 0f) for (i in ix) { val y = raw[i].y; if (y < h * .07f || y > h * .93f) set.add(i) }
+        return set.toList()
     }
+    val rep = HashMap<String, Int>()
+    for ((_, ix) in byPage) for (k in edge(ix).map { key(raw[it]) }.toSet()) rep[k] = (rep[k] ?: 0) + 1
+    val np = byPage.size
+    for ((_, ix) in byPage) for (i in edge(ix)) {
+        val l = raw[i]
+        val repeated = np >= 4 && (rep[key(l)] ?: 0) >= max(3, np * 3 / 10) && l.t.length < 120
+        if (RX_PGNUM.matches(l.t.trim()) || repeated) l.noise = true
+    }
+    val L = raw.filter { !it.noise }
+    if (L.isEmpty()) return Extracted(raw, title, 10f, 12f)
+
+    // ukuran isi
+    val sizeW = HashMap<Int, Int>()
+    for (l in L) { val k = Math.round(l.sz * 2f); sizeW[k] = (sizeW[k] ?: 0) + l.t.length }
     val body = ((sizeW.maxByOrNull { it.value }?.key ?: 20) / 2f).coerceAtLeast(4f)
-    val margin = (xW.maxByOrNull { it.value }?.key ?: 0) * 3f
+    for (l in L) l.rel = l.sz / body
 
-    val xes = raw.filter { it.t.length > 25 }.map { it.xe }.sorted()
-    val right = if (xes.isEmpty()) raw.maxOf { it.xe } else xes[(xes.size * 9 / 10).coerceAtMost(xes.size - 1)]
-    for (l in raw) l.short = (l.xe - margin) < 0.72f * (right - margin)
+    // margin kiri / kanan per (halaman, kolom); halaman yang terlalu sedikit teks memakai nilai seluruh dokumen
+    val grp = HashMap<Int, ArrayList<CLine>>()
+    val gcol = HashMap<Int, ArrayList<CLine>>()
+    for (l in L) {
+        grp.getOrPut(l.page * 3 + l.col) { ArrayList() }.add(l)
+        gcol.getOrPut(l.col) { ArrayList() }.add(l)
+    }
+    val gl = HashMap<Int, Float>()
+    val gr = HashMap<Int, Float>()
+    for ((c, ls) in gcol) { gl[c] = modeX(ls); gr[c] = edgeX(ls) ?: ls.maxOf { it.xe } }
+    val kl = HashMap<Int, Float>()
+    val kr = HashMap<Int, Float>()
+    for ((k, ls) in grp) {
+        val c = k % 3
+        if (ls.sumOf { it.t.length } >= 300) { kl[k] = modeX(ls); kr[k] = edgeX(ls) ?: gr[c]!! }
+        else { kl[k] = gl[c]!!; kr[k] = gr[c]!! }
+    }
+    for (l in L) { val k = l.page * 3 + l.col; l.lm = kl[k]!!; l.rm = kr[k]!! }
 
-    // jarak baris tipikal (median), lalu tandai awal paragraf
+    // jarak baris tipikal
     val dys = ArrayList<Float>()
-    for (i in 1 until raw.size) {
-        if (raw[i].page != raw[i - 1].page) continue
-        val dy = raw[i].y - raw[i - 1].y
-        if (dy > 0f && dy < body * 5f) dys.add(dy)
+    for (i in 1 until L.size) {
+        val a = L[i - 1]
+        val b = L[i]
+        if (a.page == b.page && a.col == b.col) { val dy = b.y - a.y; if (dy > 0f && dy < body * 5f) dys.add(dy) }
     }
     dys.sort()
     val pitch = if (dys.isEmpty()) body * 1.25f else dys[dys.size / 2]
-    for (i in raw.indices) {
-        val l = raw[i]
-        l.rel = l.sz / body
-        l.indent = l.x - margin > body * 1.2f
-        if (i > 0 && raw[i - 1].page == l.page) l.gap = (l.y - raw[i - 1].y) > pitch * 1.35f
+
+    val ymin = HashMap<Int, Float>()
+    val ymax = HashMap<Int, Float>()
+    for (l in L) { ymin[l.page] = min(ymin[l.page] ?: l.y, l.y); ymax[l.page] = max(ymax[l.page] ?: l.y, l.y) }
+
+    for (i in L.indices) {
+        val l = L[i]
+        val p: CLine? = if (i > 0) L[i - 1] else null
+        val same = p != null && p.page == l.page && p.col == l.col
+        l.gap = p != null && same && (l.y - p.y) > pitch * 1.35f
+        l.indent = l.x - l.lm > body * 1.2f
+        l.short = l.rm - l.lm > 0f && (l.xe - l.lm) < .72f * (l.rm - l.lm)
+        val mid = (l.x + l.xe) / 2f
+        l.center = l.x - l.lm > body * 1.5f && l.rm - l.xe > body * 1.5f && abs(mid - (l.lm + l.rm) / 2f) < body * 1.2f
+        val y0 = ymin[l.page] ?: l.y
+        val y1 = ymax[l.page] ?: l.y
+        l.foot = l.rel < .88f && l.y > y0 + .55f * (y1 - y0)
+        var mk = if (RX_GLYPH.containsMatchIn(l.t) || RX_ASCII.containsMatchIn(l.t)) 1 else if (RX_NUM.containsMatchIn(l.t)) 2 else 0
+        // angka di tengah kalimat bukan butir
+        if (mk == 2 && p != null && same && !TERM.containsMatchIn(p.t) && !p.short && p.mk == 0) mk = 0
+        l.mk = mk
     }
-
-    // tingkat judul ditentukan sekali untuk seluruh dokumen (ukuran huruf terbesar = H1, dst), supaya konsisten antar potongan
-    val endSent = Regex("[.!?]$")
-    val hs = raw.filter { it.rel >= 1.15f && it.t.length < 120 && !endSent.containsMatchIn(it.t) }
-        .map { (it.sz * 2f).toInt() }.distinct().sortedDescending().take(3)
-    for (l in raw) {
-        if (l.t.length >= 120 || endSent.containsMatchIn(l.t)) continue
-        if (l.rel >= 1.15f) { val k = hs.indexOf((l.sz * 2f).toInt()); if (k >= 0) l.hl = k + 1 }
-        else if (l.bold && l.t.length < 90 && l.rel > 0.92f) l.hl = 4
-    }
-
-    // nomor halaman dan header / footer berulang: 2 baris pertama dan terakhir tiap halaman
-    val byPage = HashMap<Int, ArrayList<Int>>()
-    for (i in raw.indices) byPage.getOrPut(raw[i].page) { ArrayList() }.add(i)
-    val rep = HashMap<String, Int>()
-    fun edge(ix: ArrayList<Int>): List<Int> = (ix.take(2) + ix.takeLast(2)).distinct()
-    for ((_, ix) in byPage) for (i in edge(ix)) {
-        val key = raw[i].t.replace(Regex("\\d+"), "#").lowercase()
-        rep[key] = (rep[key] ?: 0) + 1
-    }
-    val pages = byPage.size
-    for ((_, ix) in byPage) for (i in edge(ix)) {
-        val l = raw[i]
-        val key = l.t.replace(Regex("\\d+"), "#").lowercase()
-        val repeated = pages >= 4 && (rep[key] ?: 0) >= max(4, pages * 3 / 10) && l.t.length < 120
-        if (RX_PGNUM.matches(l.t.trim()) || repeated) l.noise = true
-    }
-    return Extracted(raw, title)
-}
-
-// ---------------------------------------------------------------- unit paragraf, potongan, perintah ke Groq
-
-private const val BUDGET = 5000
-
-private val RX_GLYPH = Regex("^[•●▪◦·∙‣⁃■□○◆►▶]\\s*")
-private val RX_ASCII = Regex("^[-–—*+]\\s+")
-private val RX_NUM = Regex("^\\(?(\\d{1,3})[.)]\\s+")
-private val RX_LET = Regex("^\\(?([A-Za-z])[.)]\\s+")
-private val TERM = Regex("[.!?…:;\"”’)\\]]$")
-
-private fun isMarker(t: String) = RX_GLYPH.containsMatchIn(t) || RX_ASCII.containsMatchIn(t) || RX_NUM.containsMatchIn(t)
-
-/**
- * Gabungkan baris-baris PDF jadi "unit" (kandidat paragraf / judul / butir) dengan aturan lokal yang hati-hati:
- * baris menyambung ke atasnya kecuali ada tanda awal blok baru. Groq lalu menilai tiap unit utuh (bukan baris lepas),
- * jadi paragraf tidak terpotong dan paragraf biasa tidak salah jadi judul.
- */
-private fun makeUnits(lines: List<CLine>): List<IntArray> {
-    val out = ArrayList<IntArray>()
-    var cur = ArrayList<Int>()
-    for (i in lines.indices) {
-        val l = lines[i]
-        if (cur.isEmpty()) { cur.add(i); continue }
-        val p = lines[cur[cur.size - 1]]
-        val ends = TERM.containsMatchIn(p.t)
-        val first = l.t.firstOrNull()
-        val newU = when {
-            l.noise || p.noise -> true
-            l.t.contains('¦') || p.t.contains('¦') -> true
-            isMarker(l.t) -> true
-            kotlin.math.abs(l.rel - p.rel) > 0.12f -> true
-            p.short && !ends && p.bold && !l.bold -> true
-            l.gap && (ends || p.short) -> true
-            ends && p.short && (first != null && first.isUpperCase() || l.indent) -> true
-            l.indent && ends -> true
-            else -> false
-        }
-        if (newU) { out.add(cur.toIntArray()); cur = ArrayList() }
-        cur.add(i)
-    }
-    if (cur.isNotEmpty()) out.add(cur.toIntArray())
-    return out
-}
-
-private fun unitText(lines: List<CLine>, u: IntArray): String = u.joinToString(" ") { lines[it].t }
-
-/** Kelompokkan unit jadi potongan. Mode Best: ~1600 huruf teks penuh per potongan (Groq menulis Markdown); mode Fast: hanya awal tiap unit dikirim. */
-private fun makeChunks(lines: List<CLine>, units: List<IntArray>, full: Boolean): List<IntArray> {
-    val out = ArrayList<IntArray>()
-    var cur = ArrayList<Int>()
-    var n = 0
-    val budget = if (full) 3000 else BUDGET
-    val cap = if (full) 80 else 60
-    fun len(k: Int) = (if (full) unitText(lines, units[k]).length else minOf(unitText(lines, units[k]).length, 240)) + 12
-    for (k in units.indices) {
-        val l = len(k)
-        if (cur.isNotEmpty() && (n + l > budget || cur.size >= cap)) {
-            // lebih suka memotong setelah unit yang berakhir kalimat, supaya paragraf tidak terbelah antar potongan
-            var cut = cur.size
-            val lo = max(1, cur.size * 6 / 10)
-            for (j in cur.size - 1 downTo lo) {
-                val prevU = units[cur[j - 1]]
-                if (TERM.containsMatchIn(lines[prevU[prevU.size - 1]].t)) { cut = j; break }
+    // butir huruf (a. b. c.) hanya bila ada tetangga berurutan di margin yang sama
+    val cand = ArrayList<Int>()
+    for (i in L.indices) if (L[i].mk == 0 && RX_LET.containsMatchIn(L[i].t)) cand.add(i)
+    if (cand.size in 2..4000) {
+        for (a in cand) {
+            val ca = RX_LET.find(L[a].t)!!.groupValues[1][0]
+            for (b in cand) {
+                if (b == a || abs(b - a) > 60) continue
+                val cb = RX_LET.find(L[b].t)!!.groupValues[1][0]
+                if (abs(L[a].x - L[b].x) <= 4f && (cb.code == ca.code + 1 || cb.code == ca.code - 1)) { L[a].mk = 3; break }
             }
-            out.add(cur.subList(0, cut).toIntArray())
-            cur = ArrayList(cur.subList(cut, cur.size))
-            n = cur.sumOf { len(it) }
         }
-        cur.add(k); n += l
     }
-    if (cur.isNotEmpty()) out.add(cur.toIntArray())
+    return Extracted(raw, title, body, pitch)
+}
+
+// ---------------------------------------------------------------- unit, tabel
+
+private class U(val ls: List<CLine>) {
+    var tb: Blk? = null
+    var rows: List<String>? = null
+    var role = '?'              // P H L X (teks), T tabel, R daftar isi, ? belum diputuskan
+    var pg0 = ls.firstOrNull()?.page ?: 0
+    var pg1 = ls.lastOrNull()?.page ?: 0
+}
+
+private fun unitText(u: U): String = u.ls.joinToString(" ") { it.t.replace('¦', ' ') }
+
+private fun isCaps(t: String): Boolean {
+    var n = 0
+    for (c in t) { if (c.isLowerCase()) return false; if (c.isLetter()) n++ }
+    return n >= 3
+}
+
+private fun sentEnd(t: String) = RX_SENT.containsMatchIn(t.trimEnd())
+
+private class Tab(val blk: Blk?, val toc: List<String>?, val end: Int)
+
+/** Tabel dari geometri: baris berjarak lebar yang kolomnya sejajar. Sel yang membungkus ke baris bawah digabung. */
+private fun tryTable(L: List<CLine>, i0: Int, pitch: Float): Tab? {
+    val f = L[i0]
+    val rows = ArrayList<CLine>()
+    var j = i0
+    while (j < L.size) {
+        val l = L[j]
+        if (l.page != f.page || l.col != f.col) break
+        if (j > i0 && l.y - L[j - 1].y > pitch * 2.6f) break
+        if (l.cells < 2) {
+            if (l.cells == 1 && rows.isNotEmpty() && l.t.length < 60 && l.mk == 0 && l.y - L[j - 1].y <= pitch * 1.6f) { rows.add(l); j++; continue }
+            break
+        }
+        rows.add(l); j++
+    }
+    val strict = rows.filter { it.cells >= 2 }
+    if (strict.size < 2) return null
+    val freq = HashMap<Int, Int>()
+    for (r in strict) freq[r.cells] = (freq[r.cells] ?: 0) + 1
+    var m = 0
+    var mc = -1
+    for ((k, v) in freq) if (v > mc || (v == mc && k > m)) { m = k; mc = v }
+    val full = strict.filter { it.cells == m }
+    if (full.size < 2 || m > 12) return null
+
+    // pita kolom dari baris yang jumlah selnya paling umum
+    val iv = ArrayList<FloatArray>()
+    for (r in full) for (c in 0 until m) iv.add(floatArrayOf(r.cs[2 * c], r.cs[2 * c + 1]))
+    val bands = ArrayList<FloatArray>()
+    for (a in iv.sortedBy { it[0] }) {
+        val b = bands.lastOrNull()
+        if (b != null && a[0] <= b[1]) { if (a[1] > b[1]) b[1] = a[1] } else bands.add(floatArrayOf(a[0], a[1]))
+    }
+    if (bands.size < 2 || bands.size > 12) return null
+    fun near(v: List<Float>): Float {
+        val s = v.sorted()
+        val med = s[s.size / 2]
+        return v.count { abs(it - med) <= 7f }.toFloat() / v.size
+    }
+    for (b in bands) {
+        val st = ArrayList<Float>(); val en = ArrayList<Float>(); val ce = ArrayList<Float>()
+        for (r in full) for (c in 0 until m) {
+            val s = r.cs[2 * c]; val e = r.cs[2 * c + 1]; val mid = (s + e) / 2f
+            if (mid >= b[0] && mid <= b[1]) { st.add(s); en.add(e); ce.add(mid) }
+        }
+        if (st.size < 2) return null
+        if (max(near(st), max(near(en), near(ce))) < .75f) return null   // bukan kolom sejajar (mis. spasi rata kanan-kiri)
+    }
+    fun bandOf(s: Float, e: Float): Int {
+        var best = -1
+        var bo = 0f
+        for (k in bands.indices) { val o = min(e, bands[k][1]) - max(s, bands[k][0]); if (o > bo) { bo = o; best = k } }
+        if (best < 0) {
+            val mid = (s + e) / 2f
+            best = bands.indices.minByOrNull { abs((bands[it][0] + bands[it][1]) / 2f - mid) } ?: 0
+        }
+        return best
+    }
+    val tr = ArrayList<Array<String>>()
+    var used = 0
+    for (r in rows) {
+        if (r.cells >= 2) {
+            val parts = r.t.split('¦')
+            if (parts.size != r.cells) return null
+            val row = Array(bands.size) { "" }
+            for (c in 0 until r.cells) {
+                val k = bandOf(r.cs[2 * c], r.cs[2 * c + 1])
+                val p = parts[c].trim()
+                row[k] = if (row[k].isEmpty()) p else row[k] + " " + p
+            }
+            tr.add(row); used++
+        } else {
+            if (tr.isEmpty()) break
+            val k = bandOf(r.cs[0], r.cs[1])
+            val t0 = r.t.trim()
+            val ok = abs(r.cs[0] - bands[k][0]) <= 8f && (k > 0 || t0.firstOrNull()?.isLowerCase() == true)
+            if (!ok) break
+            val last = tr[tr.size - 1]
+            last[k] = if (last[k].isEmpty()) t0 else last[k] + " " + t0
+            used++
+        }
+    }
+    if (tr.size < 2) return null
+    val nc = bands.size
+    if (nc == 2 && tr.all { RX_TOCN.matches(it[1].trim()) }) {
+        return Tab(null, tr.map { it[0] + " … " + it[1].trim() }, i0 + used)   // daftar isi, bukan tabel
+    }
+    val al = List(nc) { c ->
+        val v = tr.drop(1).map { it[c].trim() }.filter { it.isNotEmpty() }
+        if (v.isNotEmpty() && v.count { RX_NUMC.matches(it) } * 4 >= v.size * 3) "right" else "left"
+    }
+    return Tab(Blk(ty = "tbl", tb = tr.map { r -> r.map { Rt(it) } }, ca = al), null, i0 + used)
+}
+
+/** Apakah [l] memulai unit baru (paragraf / judul / butir) setelah [p]. */
+private fun startsNew(p: CLine, l: CLine): Boolean {
+    if (l.mk != 0) return true
+    if (abs(l.rel - p.rel) > .12f) return true
+    if (LEAD.containsMatchIn(l.t) || LEAD.containsMatchIn(p.t)) return true
+    val ends = TERM.containsMatchIn(p.t)
+    val first = l.t.firstOrNull()
+    val pHead = p.bold && p.short
+    if (l.page != p.page || l.col != p.col) {
+        val cont = !pHead && !l.indent && !(ends && p.short) &&
+            (first?.isLowerCase() == true || (!ends && !p.short))
+        return !cont
+    }
+    if (p.center != l.center) return true
+    if (l.gap && (ends || p.short || pHead || p.bold)) return true
+    if (ends && p.short) return true
+    if (l.indent && ends) return true
+    if (p.bold && l.bold && RX_HNUM.containsMatchIn(l.t)) return true
+    if (p.bold && !l.bold && p.t.length < 100) return true
+    if (!p.bold && l.bold && l.short && l.t.length < 100) return true
+    return false
+}
+
+private fun makeUnits(L: List<CLine>, pitch: Float): List<U> {
+    val out = ArrayList<U>()
+    var cur = ArrayList<CLine>()
+    val foot = ArrayList<CLine>()
+    fun closeCur() {
+        if (cur.isNotEmpty()) { out.add(U(cur)); cur = ArrayList() }
+        if (foot.isNotEmpty()) {
+            var f = ArrayList<CLine>()
+            for (l in foot) {
+                val pv = f.lastOrNull()
+                if (pv != null && (l.mk != 0 || l.gap || (TERM.containsMatchIn(pv.t) && pv.short))) { out.add(U(f)); f = ArrayList() }
+                f.add(l)
+            }
+            if (f.isNotEmpty()) out.add(U(f))
+            foot.clear()
+        }
+    }
+    var i = 0
+    while (i < L.size) {
+        val l = L[i]
+        if (l.cells >= 2) {
+            val tb = tryTable(L, i, pitch)
+            closeCur()
+            if (tb != null) {
+                val u = U(ArrayList(L.subList(i, tb.end)))
+                if (tb.blk != null) { u.tb = tb.blk; u.role = 'T' } else { u.rows = tb.toc; u.role = 'R' }
+                out.add(u)
+                i = tb.end
+            } else { out.add(U(listOf(l))); i++ }
+            continue
+        }
+        if (l.foot) {
+            if (cur.isEmpty()) out.add(U(listOf(l))) else foot.add(l)
+            i++; continue
+        }
+        if (cur.isEmpty()) { cur.add(l); i++; continue }
+        if (startsNew(cur[cur.size - 1], l)) closeCur()
+        cur.add(l)
+        i++
+    }
+    closeCur()
     return out
 }
+
+/** Tabel yang berlanjut di halaman berikutnya (kolom sama) disatukan; baris judul yang diulang dibuang. */
+private fun stitch(us: List<U>): List<U> {
+    val out = ArrayList<U>()
+    for (u in us) {
+        val p = out.lastOrNull()
+        val a = p?.tb
+        val b = u.tb
+        if (p != null && a != null && b != null && a.tb.isNotEmpty() && b.tb.isNotEmpty() &&
+            a.tb[0].size == b.tb[0].size && u.pg0 == p.pg1 + 1
+        ) {
+            val dup = a.tb[0].map { it.t.trim() } == b.tb[0].map { it.t.trim() }
+            val m = U(p.ls + u.ls)
+            m.tb = a.copy(tb = a.tb + b.tb.drop(if (dup) 1 else 0))
+            m.role = 'T'; m.pg0 = p.pg0; m.pg1 = u.pg1
+            out[out.size - 1] = m
+        } else out.add(u)
+    }
+    return out
+}
+
+// ---------------------------------------------------------------- peran unit: pasti (lokal) atau ambigu (klaster)
+
+private fun localRole(u: U): Char {
+    val f = u.ls[0]
+    val t = unitText(u)
+    val n = u.ls.size
+    val len = t.length
+    val se = sentEnd(t)
+    val boldAll = u.ls.all { it.bold }
+    val head = (boldAll && len < 100 && !se) || (f.rel >= 1.15f && len < 120 && !se)
+    when (f.mk) {
+        1, 3 -> return 'L'
+        2 -> return if (head && n <= 2) 'H' else 'L'
+    }
+    if (f.foot || f.rel < .9f) return 'P'
+    if (f.rel >= 1.25f && n <= 3 && len <= 150 && !se) return 'H'
+    if (len < 100 && !se && (boldAll || f.rel > 1.04f) && RX_HDR.containsMatchIn(t)) return 'H'
+    if (n >= 3 || len >= 160 || se) return 'P'
+    val amb = len < 110 && (f.rel >= 1.05f || boldAll || isCaps(t) || f.center)
+    return if (amb) '?' else 'P'
+}
+
+private fun fallbackRole(u: U): Char {
+    val f = u.ls[0]
+    return if (f.rel >= 1.08f || u.ls.all { it.bold } || isCaps(unitText(u))) 'H' else 'P'
+}
+
+private class Clu(val key: String) {
+    var id = 0
+    val us = ArrayList<Int>()
+}
+
+private class An(val units: List<U>, val clu: List<Clu>)
+
+private fun clusterKey(u: U): String {
+    val f = u.ls[0]
+    return Math.round(f.sz * 2f).toString() + (if (u.ls.all { it.bold }) "b" else "") + (if (u.ls.all { it.ital }) "i" else "") +
+        (if (isCaps(unitText(u))) "C" else "") + (if (f.center) "c" else "") + (if (f.gap) "g" else "") + (if (f.indent) ">" else "")
+}
+
+private fun analyze(ex: Extracted): An {
+    val L = ex.lines.filter { !it.noise }
+    val units = stitch(makeUnits(L, ex.pitch))
+    val map = LinkedHashMap<String, Clu>()
+    for (ui in units.indices) {
+        val u = units[ui]
+        if (u.role == 'T' || u.role == 'R') continue
+        val r = localRole(u)
+        u.role = r
+        if (r == '?') map.getOrPut(clusterKey(u)) { Clu(clusterKey(u)) }.us.add(ui)
+    }
+    val clu = map.values.sortedByDescending { it.us.size }.take(40).sortedBy { it.us[0] }
+    clu.forEachIndexed { i, c -> c.id = i + 1 }
+    return An(units, clu)
+}
+
+// ---------------------------------------------------------------- Groq: satu permintaan kecil per dokumen
 
 private const val SYS =
-    "You classify units of text extracted from a PDF so they can be rebuilt as clean Markdown. You NEVER rewrite or repeat the text.\n" +
-        "Input: numbered units like `N tags| text` (long units are shortened with …). Each unit is a candidate paragraph, heading, list item, or table row. " +
-        "Tags: L = font much larger than body, M = somewhat larger, S = smaller, b = bold, ¶ = blank gap above, > = indented, " +
-        "E = candidate page number or repeated header/footer, n = number of PDF lines. A ¦ in text marks a wide gap between table columns.\n" +
-        "Output: one entry `N code` per unit, in order. Codes: h1 h2 h3 h4 = heading (h1 = document title; headings are short, usually have no final period, " +
-        "and are NOT sentences of body text), p = normal paragraph, li = bullet item (li2 li3 nested), ol = numbered or lettered item (ol2 ol3 nested), " +
-        "q = block quote, c = code, t = table row (columns separated by ¦), x = page number / running header / footer / page furniture (deleted), " +
-        "+ = this unit is the continuation of the previous unit (the paragraph was wrongly split, e.g. by a page break).\n" +
-        "Most units are p. Use a heading only when clearly a title or section heading. Reply with entries only.\n" +
-        "Example:\n1 L| Chapter One\n2 ¶ n3| The study began in 1990 and continued for years …\n3 | 12\n4 E| 12\n5 | lazily forgotten by the end.\n6 ¶ n1| 1. First point\n" +
-        "Output:\n1 h1\n2 p\n3 x\n4 x\n5 +\n6 ol"
+    "You label text-style clusters of a PDF so it can be rebuilt as a clean note. You never rewrite text.\n" +
+        "Each cluster groups short text units that share one font style: size relative to body text (1.0x), b = bold, i = italic, CAPS, ctr = centered, gap = blank space above, n = number of units. " +
+        "A few samples follow, each as `text ⇒ start of the next unit`.\n" +
+        "Answer ONE code per cluster:\n" +
+        "H = heading or title (a short label that introduces the text after it)\n" +
+        "P = normal text (caption, author, name, date, field label, sentence fragment, anything that is not a heading)\n" +
+        "L = list item\n" +
+        "X = junk to delete, only if clearly page furniture (running header or footer, watermark, stray page number)\n" +
+        "When unsure choose P. Reply exactly one line per cluster as `id code`, nothing else.\n" +
+        "Example:\n1 H\n2 P\n3 X"
 
-private val RX_CODE = Regex("^(\\d{1,4})\\s*[:.\\-=)]?\\s*(h[1-4]|li[1-3]?|ol[1-3]?|p|q|c|t|x|\\+)(?![A-Za-z0-9])", RegexOption.IGNORE_CASE)
+private val RX_CODE = Regex("^(\\d{1,3})\\s*[:.\\-=)]?\\s*([HPLX])(?![A-Za-z])", RegexOption.IGNORE_CASE)
 
-private fun promptOf(lines: List<CLine>, units: List<IntArray>, uidx: IntArray, prev: String?): String {
+private fun clip(s: String, n: Int): String {
+    val t = s.replace('\n', ' ').trim()
+    return if (t.length <= n) t else t.substring(0, n - 1) + "…"
+}
+
+private fun promptOf(units: List<U>, clu: List<Clu>): String {
     val sb = StringBuilder()
-    if (prev != null) sb.append("(the unit before the first one was ").append(prev).append(")\n")
-    for (k in uidx.indices) {
-        val u = units[uidx[k]]
-        val l = lines[u[0]]
-        sb.append(k + 1).append(' ')
-        if (l.rel >= 1.45f) sb.append('L') else if (l.rel >= 1.15f) sb.append('M') else if (l.rel <= 0.88f) sb.append('S')
-        if (u.all { lines[it].bold }) sb.append('b')
-        if (l.noise) sb.append('E')
-        if (l.gap) sb.append('¶')
-        if (l.indent) sb.append('>')
-        if (u.size > 1) sb.append('n').append(u.size)
-        var t = unitText(lines, u).replace("¦", " ¦ ")
-        if (t.length > 240) t = t.substring(0, 170) + " … " + t.substring(t.length - 50)
-        sb.append("| ").append(t).append('\n')
+    for (c in clu) {
+        val u0 = units[c.us[0]]
+        val f = u0.ls[0]
+        sb.append(c.id).append(' ').append(Math.round(f.rel * 10f) / 10f).append('x')
+        if (u0.ls.all { it.bold }) sb.append(" b")
+        if (u0.ls.all { it.ital }) sb.append(" i")
+        if (isCaps(unitText(u0))) sb.append(" CAPS")
+        if (f.center) sb.append(" ctr")
+        if (f.gap) sb.append(" gap")
+        sb.append(" n=").append(c.us.size).append('\n')
+        for (k in linkedSetOf(0, c.us.size / 2, c.us.size - 1)) {
+            val ui = c.us[k]
+            val nx = units.getOrNull(ui + 1)
+            val nt = when {
+                nx == null -> "(end)"
+                nx.tb != null || nx.rows != null -> "[table]"
+                else -> clip(unitText(nx), 35)
+            }
+            sb.append("- ").append(clip(unitText(units[ui]), 70)).append(" ⇒ ").append(nt).append('\n')
+        }
     }
     return sb.toString()
 }
 
-/** Entri valid dari jawaban Groq ("n kode;n kode"), atau null bila jawabannya tidak bisa dipakai. */
+/** "id kode;" yang valid dari jawaban Groq, atau null bila terlalu sedikit yang bisa dipakai. */
 private fun parseCodes(raw: String, m: Int): String? {
     val sb = StringBuilder()
-    var last = 0
-    var cnt = 0
+    val seen = HashSet<Int>()
     for (ln0 in raw.lines()) {
-        var ln = ln0.trim()
-        if (ln.startsWith("```") || ln.isEmpty()) continue
-        ln = ln.removePrefix("-").removePrefix("*").trim()
+        val ln = ln0.trim().removePrefix("-").removePrefix("*").trim()
         val mm = RX_CODE.find(ln) ?: continue
         val n = mm.groupValues[1].toIntOrNull() ?: continue
-        if (n < 1 || n > m || n <= last) continue
-        sb.append(n).append(' ').append(mm.groupValues[2].lowercase()).append(';')
-        last = n; cnt++
+        if (n < 1 || n > m || !seen.add(n)) continue
+        sb.append(n).append(' ').append(mm.groupValues[2].uppercase()).append(';')
     }
-    if (cnt * 2 < m) return null   // jawaban terlalu sedikit: dianggap gagal
-    return sb.toString()
+    return if (seen.size * 5 < m * 3) null else sb.toString()
 }
 
-private const val SYS_MD =
-    "You are a Markdown typesetter. The user sends units of text extracted from a PDF (each unit is a paragraph, heading, list item or table row, separated by blank lines; consecutive table rows are on consecutive lines). " +
-        "Rebuild them as clean, consistent, well-structured Markdown WITHOUT changing a single word.\n" +
-        "Rules:\n" +
-        "- Keep every word, number and symbol in the same order. Never add, remove, rephrase, translate, fix spelling, or summarize. No commentary, no code fences.\n" +
-        "- A unit is normally one paragraph on ONE line. Keep paragraphs on one long line (no hard wraps), separated by one blank line. If a unit clearly continues the previous one (a sentence cut in the middle), join them into one paragraph.\n" +
-        "- Heading tags: ⟦H1⟧ ⟦H2⟧ ⟦H3⟧ at a unit start give the heading level decided for the whole document: output # / ## / ### accordingly (unless the unit is obviously not a heading). ⟦H4?⟧ is only a weak hint: use #### only if it is clearly a short heading label. Units without a tag are NOT headings. NEVER output the tags.\n" +
-        "- Lists: `- ` for bullets, `1. ` for numbered items (keep the original number); drop the original bullet glyph. Nested items are indented by 2 spaces.\n" +
-        "- Block quote `> ` only for clearly quoted passages.\n" +
-        "- Tables: rows whose columns are separated by ¦ (a wide gap) and line up from row to row become ONE Markdown pipe table: header row, then a `| --- | --- |` separator, then the rows. Cells keep their original words; a cell wrapped over several rows becomes one cell. Remove the ¦ marks.\n" +
-        "- Keep **bold** and *italic* markers and backslash escapes exactly as given.\n" +
-        "- CONSISTENCY: the user may show the end of the previous output in <previous_output_end>. Continue in exactly the same conventions: the same heading levels, and the same style for items of the same kind (for example every entry of a reference list or bibliography uses the same format: all bullets or all plain paragraphs, matching what came before). If the previous output ended inside a table and the new units continue it, output the continuing rows as a pipe table with the same number of columns (repeat the original header row first).\n" +
-        "Output only the Markdown for the units inside <units>; never repeat <previous_output_end>."
-
-private val RX_TAG = Regex("⟦[^⟧]*⟧")
-private val RX_WORD = Regex("[\\p{L}\\p{N}]+")
-
-private fun wordsOf(s: String): List<String> = RX_WORD.findAll(RX_TAG.replace(s, " ").lowercase()).map { it.value }.toList()
-
-private fun unfenceMd(s: String): String {
-    var t = s.trim()
-    if (t.startsWith("```")) {
-        t = t.substringAfter("\n", "")
-        t = t.trimEnd().removeSuffix("```")
+private fun decodeCodes(s: String): Map<Int, Char> {
+    val m = HashMap<Int, Char>()
+    for (e in s.split(';')) {
+        val p = e.trim().split(' ')
+        if (p.size == 2) { val n = p[0].toIntOrNull(); if (n != null && p[1].isNotEmpty()) m[n] = p[1][0] }
     }
-    return t.trim()
+    return m
 }
 
-/** Satu baris PDF dengan penanda **tebal** dan *miring* dari jenis huruf; karakter yang berarti di Markdown di-escape. */
-private fun styled(l: CLine): String {
-    val t = l.t
-    val spans = ArrayList<Sp>()
-    for (s in l.sp) {
-        if (s.k == K.B && l.bold) continue   // baris tebal penuh biasanya judul; cukup jadi petunjuk ⟦b⟧
-        spans.add(s)
-    }
-    val keep = spans.filter { i ->
-        i.k != K.I || spans.none { b -> b.k == K.B && b.s < i.e && b.e > i.s && !(b.s <= i.s && b.e >= i.e) && !(i.s <= b.s && i.e >= b.e) }
-    }
-    val open = HashMap<Int, StringBuilder>()
-    val close = HashMap<Int, StringBuilder>()
-    for (s in keep) {
-        val m = if (s.k == K.B) "**" else "*"
-        open.getOrPut(s.s) { StringBuilder() }.append(m)
-        close.getOrPut(s.e) { StringBuilder() }.append(m)
-    }
-    val sb = StringBuilder()
-    for (i in 0..t.length) {
-        close[i]?.let { sb.append(it) }
-        open[i]?.let { sb.append(it) }
-        if (i < t.length) {
-            val c = t[i]
-            if (c == '¦') sb.append(" ¦ ")
-            else {
-                if (c == '*' || c == '_' || c == '`' || c == '|' || c == '~') sb.append('\\')
-                sb.append(c)
-            }
-        }
-    }
-    return sb.toString()
-}
+// ---------------------------------------------------------------- perakitan blok
 
-/** Teks sumber satu potongan untuk mode Best: satu unit (paragraf) per baris. Nomor halaman / header-footer berulang sudah dibuang. */
-private fun rawOf(lines: List<CLine>, units: List<IntArray>, uidx: IntArray): String {
-    val sb = StringBuilder()
-    var prevTable = false
-    for (k in uidx) {
-        val u = units[k].filter { !lines[it].noise }
-        if (u.isEmpty()) continue
-        val first = lines[u[0]]
-        val tbl = u.any { lines[it].t.contains('¦') }
-        val t = StringBuilder()
-        var prev: CLine? = null
-        for (i in u) {
-            val l = lines[i]
-            val p = prev
-            if (p != null) {
-                val hy = p.t.length >= 2 && p.t.last() == '-' && p.t[p.t.length - 2].isLetter() &&
-                    l.t.isNotEmpty() && l.t[0].isLowerCase() && !p.t.contains('¦') && !l.t.contains('¦')
-                if (!hy) t.append(' ')
-            }
-            t.append(styled(l))
-            prev = l
-        }
-        if (sb.isNotEmpty()) sb.append(if (tbl && prevTable) "\n" else "\n\n")
-        val tag = when (first.hl) { 1 -> "⟦H1⟧ "; 2 -> "⟦H2⟧ "; 3 -> "⟦H3⟧ "; 4 -> "⟦H4?⟧ "; else -> "" }
-        sb.append(tag).append(t)
-        prevTable = tbl
-    }
-    return sb.toString()
-}
-
-/** Ujung keluaran potongan sebelumnya (maks ~700 huruf, mulai di awal baris) sebagai konteks gaya untuk potongan berikutnya. */
-private fun tailOf(md: String): String {
-    if (md.length <= 700) return md
-    val t = md.takeLast(700)
-    val nl = t.indexOf('\n')
-    return if (nl in 0..250) t.substring(nl + 1) else t
-}
-
-/** Tebakan lokal untuk satu unit (dipakai bila Groq gagal, atau tidak menyebut unit itu). Teks tetap utuh. */
-private fun heurUnit(lines: List<CLine>, u: IntArray): String {
-    val l = lines[u[0]]
-    val t = unitText(lines, u)
-    val sentence = Regex("[.!?]$").containsMatchIn(t)
-    return when {
-        l.noise -> "x"
-        t.contains('¦') -> "t"
-        RX_GLYPH.containsMatchIn(t) || RX_ASCII.containsMatchIn(t) -> "li"
-        RX_NUM.containsMatchIn(t) -> "ol"
-        l.rel >= 1.45f && t.length < 100 && !sentence -> "h1"
-        l.rel >= 1.15f && t.length < 100 && !sentence -> "h2"
-        u.all { lines[it].bold } && t.length < 90 && !sentence -> "h3"
-        else -> "p"
-    }
-}
-
-// ---------------------------------------------------------------- perakitan blok Markdown native
-
-private class OpenB(val kind: String) {
-    val ls = ArrayList<CLine>()
-    val rows = ArrayList<Int>()   // tabel: indeks awal tiap baris tabel di [ls]
-}
-
-private fun joinRt(ls: List<CLine>, stripBold: Boolean): Rt {
+private fun joinRt(ls: List<CLine>): Rt {
     val sb = StringBuilder()
     val sp = ArrayList<Sp>()
     for (l in ls) {
+        val txt = l.t.replace('¦', ' ')
         if (sb.isNotEmpty()) {
-            val hy = sb[sb.length - 1] == '-' && sb.length >= 2 && sb[sb.length - 2].isLetter() &&
-                l.t.isNotEmpty() && l.t[0].isLowerCase()
-            if (!hy) sb.append(' ')
+            val n = sb.length
+            var hy = false
+            if (n >= 3 && sb[n - 1] == '-' && sb[n - 2].isLetter() && txt.isNotEmpty() && txt[0].isLowerCase()) {
+                var a = n - 2
+                while (a >= 0 && sb[a].isLetter()) a--
+                hy = (n - 2 - a) >= 2 && (a < 0 || sb[a] != '-')   // "inter-" + "national"; bukan "state-of-the-" + "art"
+            }
+            if (hy) {
+                sb.setLength(n - 1)
+                for (k in sp.indices) if (sp[k].e > n - 1) sp[k] = sp[k].copy(e = n - 1)
+            } else sb.append(' ')
         }
         val off = sb.length
-        sb.append(l.t.replace('¦', ' '))   // sama panjang, jadi posisi tebal / miring tetap pas
+        sb.append(txt)
         for (s in l.sp) sp.add(Sp(s.s + off, s.e + off, s.k))
     }
     val t = sb.toString()
-    return Rt(t, normSp(sp.filter { !(stripBold && it.k == K.B) }, t.length))
+    return Rt(t, normSp(sp.filter { it.e > it.s }, t.length))
 }
 
-private fun emit(o: OpenB, out: MutableList<Blk>) {
-    if (o.ls.isEmpty()) return
-    val k = o.kind
-    when {
-        k.startsWith("h") -> out.add(Blk(ty = "h", lv = (k.substring(1).toIntOrNull() ?: 2).coerceIn(1, 4), r = joinRt(o.ls, true)))
-        k.startsWith("li") || k.startsWith("ol") -> {
-            val depth = ((k.substring(2).toIntOrNull() ?: 1) - 1).coerceIn(0, 3)
-            var rt = joinRt(o.ls, false)
-            if (k.startsWith("li")) {
-                val m = RX_GLYPH.find(rt.t) ?: RX_ASCII.find(rt.t)
-                if (m != null) rt = rt.slice(m.range.last + 1, rt.t.length)
-                out.add(Blk(ty = "li", lt = "b", d = depth, r = rt))
-            } else {
-                val mn = RX_NUM.find(rt.t)
-                val ml = if (mn == null) RX_LET.find(rt.t) else null
-                if (mn != null) {
-                    val st = mn.groupValues[1].toIntOrNull() ?: 0
-                    out.add(Blk(ty = "li", lt = "o", d = depth, st = st, r = rt.slice(mn.range.last + 1, rt.t.length)))
-                } else if (ml != null) {
-                    val st = Character.toLowerCase(ml.groupValues[1][0]) - 'a' + 1
-                    out.add(Blk(ty = "li", lt = "a", d = depth, st = st, r = rt.slice(ml.range.last + 1, rt.t.length)))
-                } else out.add(Blk(ty = "li", lt = "o", d = depth, r = rt))
-            }
+/** Judul tanpa tebal; paragraf / butir yang seluruhnya tebal atau miring tanpa penekanan sebagian. */
+private fun tidy(rt: Rt, head: Boolean): Rt {
+    val n = rt.t.length
+    if (n == 0) return rt
+    val keep = rt.sp.filter { s ->
+        when {
+            head && s.k == K.B -> false
+            (s.k == K.B || s.k == K.I) && (s.e - s.s) * 10 >= n * 9 -> false
+            else -> true
         }
-        k == "q" -> out.add(Blk(ty = "q", k = "quote", r = joinRt(o.ls, false)))
-        k == "c" -> out.add(Blk(ty = "code", r = Rt(o.ls.joinToString("\n") { it.t.replace('¦', ' ') })))
-        k == "t" -> {
-            val starts = if (o.rows.isEmpty()) listOf(0) else o.rows
-            val rows = ArrayList<String>()
-            for (i in starts.indices) {
-                val a = starts[i]
-                val b = if (i + 1 < starts.size) starts[i + 1] else o.ls.size
-                rows.add(o.ls.subList(a, b).joinToString(" ") { it.t })
-            }
-            val cells = rows.map { r -> r.split('¦').map { it.trim() } }
-            val cols = cells.maxOfOrNull { it.size } ?: 0
-            if (rows.size >= 2 && cols in 2..12) {
-                out.add(Blk(
-                    ty = "tbl",
-                    tb = cells.map { c -> (0 until cols).map { Rt(c.getOrElse(it) { "" }) } },
-                    ca = List(cols) { "left" }
-                ))
-            } else {
-                for (r in rows) out.add(Blk(ty = "p", r = Rt(r.replace('¦', ' '))))
-            }
-        }
-        else -> out.add(Blk(ty = "p", r = joinRt(o.ls, false)))
     }
+    return Rt(rt.t, normSp(keep, n))
 }
 
-private fun unitBlocks(lines: List<CLine>, units: List<IntArray>, uidx: IntArray, str: String?): List<Blk> {
-    val code = Array(uidx.size) { heurUnit(lines, units[uidx[it]]) }
-    if (str != null && str != "~" && !str.startsWith("M:")) {
-        for (e in str.split(';')) {
-            val sp = e.trim().split(' ')
-            if (sp.size != 2) continue
-            val n = sp[0].toIntOrNull() ?: continue
-            if (n in 1..uidx.size) code[n - 1] = sp[1]
-        }
-    }
-    val out = ArrayList<Blk>()
-    var cur: OpenB? = null
-    fun close() {
-        cur?.let { emit(it, out) }
-        cur = null
-    }
-    for (k in uidx.indices) {
-        val u = units[uidx[k]]
-        val c = code[k]
-        if (c == "x") continue   // nomor halaman / header / footer dibuang
-        val o = cur
-        if (c == "+" && o != null) { for (i in u) o.ls.add(lines[i]); continue }
-        if (c == "t" && o != null && o.kind == "t") {
-            o.rows.add(o.ls.size)
-            for (i in u) o.ls.add(lines[i])
-            continue
-        }
-        close()
-        val no = OpenB(if (c == "+") "p" else c)
-        if (no.kind == "t") no.rows.add(0)
-        for (i in u) no.ls.add(lines[i])
-        cur = no
-    }
-    close()
-    return out
-}
-
-/** Markdown hasil Groq -> blok native Dinduy. Paragraf dijadikan satu baris (tanpa enter paksa dari pemenggalan PDF). */
-private fun mdBlocks(text: String): List<Blk> {
-    val out = ArrayList<Blk>()
-    for (b in md(text)) {
-        if (b.ty == "p" || b.ty == "li" || b.ty == "h") {
-            val t = b.r.t.replace('\n', ' ')
-            if (b.ty == "p" && t.isBlank()) continue
-            out.add(b.copy(r = b.r.copy(t = t)))
-        } else out.add(b)
-    }
-    return out
-}
-
-/** Paragraf yang terbelah di batas potongan disambung lagi. */
-private fun appendMerged(out: MutableList<Blk>, bl: List<Blk>) {
-    var rest = bl
+private fun addP(out: MutableList<Blk>, b: Blk) {
     val last = out.lastOrNull()
-    val first = bl.firstOrNull()
-    // tabel yang berlanjut di potongan berikutnya disatukan lagi
-    if (last != null && first != null && last.ty == "tbl" && first.ty == "tbl" &&
-        last.tb.isNotEmpty() && first.tb.isNotEmpty() && last.tb[0].size == first.tb[0].size
-    ) {
-        val dup = first.tb[0].map { it.t.trim() } == last.tb[0].map { it.t.trim() }
-        out[out.size - 1] = last.copy(tb = last.tb + first.tb.drop(if (dup) 1 else 0))
-        out.addAll(bl.drop(1))
-        return
-    }
-    if (last != null && first != null && last.ty == "p" && first.ty == "p" &&
-        last.r.t.isNotBlank() && first.r.t.isNotBlank() &&
-        !TERM.containsMatchIn(last.r.t.trimEnd()) && first.r.t.trimStart().first().isLowerCase()
-    ) {
-        out[out.size - 1] = last.copy(r = last.r + Rt(" ") + first.r)
-        rest = bl.drop(1)
-    }
-    out.addAll(rest)
+    val ft = b.r.t.trimStart()
+    if (last != null && last.ty == "p" && last.r.t.isNotBlank() && !TERM.containsMatchIn(last.r.t.trimEnd()) &&
+        ft.isNotEmpty() && ft.first().isLowerCase()
+    ) out[out.size - 1] = last.copy(r = last.r + Rt(" ") + b.r)
+    else out.add(b)
 }
 
 private val RX_BIB = Regex("^(daftar pustaka|daftar referensi|referensi|references|bibliography|sumber pustaka|pustaka)\\b", RegexOption.IGNORE_CASE)
 
-/** Daftar pustaka dibuat seragam: semua butir pakai poin, atau semuanya paragraf polos, mengikuti mayoritas. */
+/** Daftar pustaka seragam: semua butir poin, atau semuanya paragraf polos, mengikuti mayoritas. */
 private fun normBib(out: MutableList<Blk>) {
     var i = 0
     while (i < out.size) {
@@ -713,12 +888,73 @@ private fun normBib(out: MutableList<Blk>) {
     }
 }
 
-private fun assemble(lines: List<CLine>, units: List<IntArray>, chunks: List<IntArray>, done: List<String?>): List<Blk> {
+private fun assemble(an: An, dec: Map<Int, Char>?): List<Blk> {
+    val us = an.units
+    // keputusan klaster -> semua unit bergaya sama mendapat peran yang sama
+    for (c in an.clu) {
+        val code = dec?.get(c.id)
+        for (ui in c.us) {
+            val u = us[ui]
+            val t = unitText(u)
+            u.role = when (code) {
+                'H' -> if (sentEnd(t) && t.length > 80) 'P' else 'H'
+                'L' -> 'L'
+                'X' -> if (c.us.size >= 3 && t.length < 60) 'X' else 'P'
+                'P' -> 'P'
+                else -> fallbackRole(u)
+            }
+        }
+    }
+    for (u in us) if (u.role == '?') u.role = fallbackRole(u)
+
+    // tingkat judul ditentukan sekali untuk seluruh dokumen dari gaya huruf (besar -> kecil)
+    fun hsig(u: U): Triple<Int, Boolean, Boolean> =
+        Triple(Math.round(u.ls[0].sz), u.ls.all { it.bold }, isCaps(unitText(u)))
+    val sigs = us.filter { it.role == 'H' }.map { hsig(it) }.distinct()
+        .sortedWith(compareByDescending<Triple<Int, Boolean, Boolean>> { it.first }.thenByDescending { it.second }.thenByDescending { it.third })
+    val lvl = HashMap<Triple<Int, Boolean, Boolean>, Int>()
+    sigs.forEachIndexed { i, s -> lvl[s] = (i + 1).coerceAtMost(4) }
+
+    // kedalaman butir dari indentasi (dikelompokkan di seluruh dokumen)
+    val dx = us.filter { it.role == 'L' }.map { (it.ls[0].x - it.ls[0].lm).coerceAtLeast(0f) }.sorted()
+    val reps = ArrayList<Float>()
+    for (v in dx) if (reps.isEmpty() || v - reps[reps.size - 1] > 6f) reps.add(v)
+    fun depthOf(u: U): Int {
+        val v = (u.ls[0].x - u.ls[0].lm).coerceAtLeast(0f)
+        var d = 0
+        for (k in reps.indices) if (v >= reps[k] - 3f) d = k
+        return d.coerceIn(0, 3)
+    }
+
     val out = ArrayList<Blk>()
-    for (c in chunks.indices) {
-        val s = done.getOrNull(c)
-        val bl = if (s != null && s.startsWith("M:")) mdBlocks(s.substring(2)) else unitBlocks(lines, units, chunks[c], s)
-        appendMerged(out, bl)
+    for (u in us) {
+        when (u.role) {
+            'T' -> u.tb?.let { out.add(it) }
+            'R' -> u.rows?.forEach { out.add(Blk(ty = "p", r = Rt(it))) }
+            'H' -> {
+                val rt = tidy(joinRt(u.ls), true)
+                if (rt.t.isNotBlank()) out.add(Blk(ty = "h", lv = lvl[hsig(u)] ?: 2, r = rt))
+            }
+            'L' -> {
+                var rt = joinRt(u.ls)
+                val f = u.ls[0]
+                var lt = "b"
+                var st = 0
+                val mg = RX_GLYPH.find(rt.t) ?: RX_ASCII.find(rt.t)
+                val mn = if (mg == null) RX_NUM.find(rt.t) else null
+                val ml = if (mg == null && mn == null && f.mk == 3) RX_LET.find(rt.t) else null
+                if (mg != null) rt = rt.slice(mg.range.last + 1, rt.t.length)
+                else if (mn != null) { lt = "o"; st = mn.groupValues[1].toIntOrNull() ?: 0; rt = rt.slice(mn.range.last + 1, rt.t.length) }
+                else if (ml != null) { lt = "a"; st = Character.toLowerCase(ml.groupValues[1][0]) - 'a' + 1; rt = rt.slice(ml.range.last + 1, rt.t.length) }
+                rt = tidy(rt, false)
+                if (rt.t.isNotBlank()) out.add(Blk(ty = "li", lt = lt, d = depthOf(u), st = st, r = rt))
+            }
+            'P' -> {
+                var rt = tidy(joinRt(u.ls), false)
+                if (LEAD.containsMatchIn(rt.t)) rt = Rt(rt.t.replace(Regex("\\s*(\\.\\s?){4,}\\s*|\\s*…{2,}\\s*"), " … ").trim())
+                if (rt.t.isNotBlank()) addP(out, Blk(ty = "p", r = rt))
+            }
+        }
     }
     normBib(out)
     if (out.isEmpty()) out.add(Blk())
@@ -736,10 +972,11 @@ class ConvState {
     var model by mutableStateOf("")
 }
 
+/** Titik pulih bila aplikasi dimatikan di tengah konversi. [n], [done], [mode] tidak dipakai lagi (tetap ada agar berkas lama terbaca). */
 @Serializable
 class ConvCk(val nid: String, val src: String, val n: Int = 0, val done: List<String?> = emptyList(), val mode: Int = 1)
 
-private class Pause(msg: String) : Exception(msg)
+private class Pause(msg: String, val fatal: Boolean = false) : Exception(msg)
 
 object PdfConv {
     /** Catatan yang sedang / pernah berhenti di tengah konversi. Ada di sini = layar skeleton tampil. */
@@ -782,9 +1019,7 @@ object PdfConv {
             if (map.containsKey(id)) continue
             val s = ConvState()
             s.phase = 2
-            s.total = ck.n
-            s.done = ck.done.count { it != null }
-            s.msg = "The conversion was interrupted. Tap Try again to continue where it stopped."
+            s.msg = "The conversion was interrupted. Tap Try again to start it again."
             map[id] = s
         }
     }
@@ -793,12 +1028,12 @@ object PdfConv {
     fun snap(): Bg.Snap? {
         val s = map.values.firstOrNull { it.phase < 2 } ?: return null
         val p = if (s.total > 0) (s.done * 100 / s.total).coerceIn(0, 99) else -1
-        val txt = if (s.total > 0) "Part " + (s.done + 1).coerceAtMost(s.total) + " of " + s.total else "Reading PDF…"
+        val txt = if (s.msg.isNotEmpty()) s.msg else "Reading PDF…"
         return Bg.Snap("Converting PDF to note", txt, p, false, false)
     }
 
     /** Mulai konversi PDF [srcId]. Membuat catatan baru, pindah ke sana (geser masuk), lalu bekerja di latar belakang. */
-    fun begin(vm: AppVM, srcId: String, mode: Int = 1): Boolean {
+    fun begin(vm: AppVM, srcId: String): Boolean {
         val src = vm.note(srcId) ?: return false
         if (map.values.any { it.phase < 2 }) {
             vm.show("Another PDF is still being converted")
@@ -810,7 +1045,7 @@ object PdfConv {
         val n = Note(id = id, t = src.t, x = "Converting PDF…", u = t, c = t, lb = listOfNotNull(vm.filter))
         vm.docs.add(0, n)
         vm.save()
-        saveCk(ctx, ConvCk(id, src.pdf, mode = mode))
+        saveCk(ctx, ConvCk(id, src.pdf))
         val st = ConvState()
         map[id] = st
         under[id] = srcId
@@ -888,7 +1123,7 @@ object PdfConv {
             sec < 3600 -> "about " + (sec / 60 + 1) + " min"
             else -> "about " + ((sec + 1799) / 3600) + " h"
         }
-        return "Groq's free limit is reached for now. Your progress is saved. Tap Try again in $w."
+        return "Groq's free limit is reached for now. Tap Try again in $w."
     }
 
     private suspend fun waitSec(st: ConvState, sec: Int, why: String) {
@@ -901,7 +1136,7 @@ object PdfConv {
         st.msg = ""
     }
 
-    /** Satu potongan: panggil Groq (dengan model cadangan dan penanganan limit) sampai [accept] menerima jawabannya. "~" = pakai aturan lokal. */
+    /** Satu permintaan Groq (model cadangan + penanganan limit) sampai [accept] menerima jawabannya. "~" = pakai aturan lokal. */
     private suspend fun planChunk(
         key: String, models: List<String>, sys: String, user: String, maxTok: Int, st: ConvState,
         accept: (String) -> String?
@@ -928,7 +1163,7 @@ object PdfConv {
                 if (p != null) return p
                 val t = (tries[m] ?: 0) + 1
                 tries[m] = t
-                if (t >= 2) skip.add(m)   // model ini dua kali tidak setia / tidak sesuai format: coba model lain, atau aturan lokal
+                if (t >= 2) skip.add(m)
             } catch (e: GroqException) {
                 when {
                     e.code == 429 -> {
@@ -937,7 +1172,7 @@ object PdfConv {
                         if (w <= 75 && rl <= 6) waitSec(st, w, "Rate limit reached")
                         else cool[m] = System.currentTimeMillis() + (if (w > 75) w else 120) * 1000L
                     }
-                    e.code == 401 || e.code == 403 -> throw Pause(enMsg(e))
+                    e.code == 401 || e.code == 403 -> throw Pause(enMsg(e), true)
                     e.code == 413 -> skip.add(m)
                     else -> {
                         net++
@@ -952,68 +1187,51 @@ object PdfConv {
     private suspend fun work(vm: AppVM, id: String, st: ConvState) {
         val ctx = vm.getApplication<Application>()
         val ck0 = withContext(Dispatchers.IO) { loadCk(ctx, id) }
-            ?: throw Pause("The conversion data is missing. Cancel, then start again from the PDF.")
+            ?: throw Pause("The conversion data is missing. Cancel, then start again from the PDF.", true)
         val pdf = PdfFiles.file(ctx, ck0.src)
-        if (!pdf.exists()) throw Pause("The original PDF is missing, so it can't be converted.")
+        if (!pdf.exists()) throw Pause("The original PDF is missing, so it can't be converted.", true)
         val key = withContext(Dispatchers.IO) { vm.vault.load() }
-            ?: throw Pause("Groq API key not found. Add it in Voice transcription settings, then tap Try again.")
+            ?: throw Pause("Groq API key not found. Add it in Voice transcription settings, then tap Try again.", true)
 
         st.msg = "Reading PDF…"
         val ex = withContext(Dispatchers.IO) {
-            extract(ctx, pdf, { ensureActive() }) { p, n -> st.msg = "Reading PDF… page $p of $n" }
+            extract(ctx, pdf, { ensureActive() }) { p, n -> st.total = n + 2; st.done = p; st.msg = "Reading PDF… page $p of $n" }
         }
-        st.msg = ""
-        val lines = ex.lines
-        if (lines.none { !it.noise }) throw Pause("This PDF has no extractable text (it may be a scan), so it can't be converted.")
-        val units = makeUnits(lines)
-        val full = ck0.mode == 1
-        val chunks = makeChunks(lines, units, full)
-        val done = ArrayList<String?>()
-        if (ck0.n == chunks.size && ck0.done.size == chunks.size) done.addAll(ck0.done) else repeat(chunks.size) { done.add(null) }
-        st.total = chunks.size
-        st.done = done.count { it != null }
-
-        val models = try {
-            withContext(Dispatchers.IO) { Groq.layoutModels(key) }
-        } catch (e: GroqException) {
-            throw Pause(enMsg(e))
-        }
-        if (models.isEmpty()) throw Pause("No Groq chat model is available for this key.")
+        if (ex.lines.none { !it.noise }) throw Pause("This PDF has no extractable text (it may be a scan), so it can't be converted.", true)
 
         st.phase = 1
-        for (i in chunks.indices) {
-            if (done[i] != null) continue
-            currentCoroutineContext().ensureActive()
-            if (vm.note(id) == null) {   // catatan dihapus saat konversi berjalan
-                withContext(Dispatchers.IO) { try { ckFile(ctx, id).delete() } catch (e: Exception) { } }
-                map.remove(id); jobs.remove(id)
-                return
-            }
-            val codes: String
-            if (full) {
-                val raw = rawOf(lines, units, chunks[i])
-                if (raw.isBlank()) codes = "~"
-                else {
-                    val want = wordsOf(raw)
-                    val tail = if (i > 0) done[i - 1]?.takeIf { it.startsWith("M:") }?.let { tailOf(it.substring(2)) } else null
-                    val user = (if (tail != null) "<previous_output_end>\n$tail\n</previous_output_end>\n" else "") + "<units>\n$raw\n</units>"
-                    codes = planChunk(key, models, SYS_MD, user, (raw.length / 2 + 400).coerceIn(600, 3600), st) { out ->
-                        val m = unfenceMd(out)
-                        if (m.isNotBlank() && wordsOf(m) == want) "M:$m" else null
-                    }
+        st.msg = "Analyzing layout…"
+        val an = withContext(Dispatchers.Default) { analyze(ex) }
+        st.done = st.total - 1
+
+        var dec: Map<Int, Char>? = null
+        var fb = false
+        if (an.clu.isNotEmpty()) {
+            st.msg = "Checking headings…"
+            try {
+                val models = try {
+                    withContext(Dispatchers.IO) { Groq.layoutModels(key) }
+                } catch (e: GroqException) {
+                    if (e.code == 401 || e.code == 403) throw Pause(enMsg(e), true)
+                    throw Pause("")
                 }
-            } else {
-                val prev = if (i > 0) done[i - 1]?.trimEnd(';')?.substringAfterLast(' ')?.takeIf { it.isNotEmpty() && it != "~" && !it.startsWith("M:") } else null
-                codes = planChunk(key, models, SYS, promptOf(lines, units, chunks[i], prev), (chunks[i].size * 7 + 60).coerceIn(120, 1400), st) { parseCodes(it, chunks[i].size) }
+                if (models.isEmpty()) throw Pause("")
+                val r = planChunk(key, models, SYS, promptOf(an.units, an.clu), an.clu.size * 6 + 40, st) { parseCodes(it, an.clu.size) }
+                if (r == "~") fb = true else dec = decodeCodes(r)
+            } catch (e: Pause) {
+                if (e.fatal) throw e
+                fb = true
             }
-            done[i] = codes
-            withContext(Dispatchers.IO) { saveCk(ctx, ConvCk(id, ck0.src, chunks.size, done.toList(), ck0.mode)) }
-            st.done = done.count { it != null }
-            delay(900)   // jaga RPM Groq gratisan
         }
 
         st.msg = "Finishing…"
-        val blocks = withContext(Dispatchers.Default) { assemble(lines, units, chunks, done) }
+        st.done = st.total
+        val blocks = withContext(Dispatchers.Default) { assemble(an, dec) }
+        if (vm.note(id) == null) {   // catatan dihapus saat konversi berjalan
+            withContext(Dispatchers.IO) { try { ckFile(ctx, id).delete() } catch (e: Exception) { } }
+            map.remove(id); jobs.remove(id)
+            return
+        }
         withContext(Dispatchers.Main) {
             vm.upd(id) { it.copy(bl = blocks, x = plainOf(blocks), u = System.currentTimeMillis()) }
         }
@@ -1022,10 +1240,9 @@ object PdfConv {
         map.remove(id)
         jobs.remove(id)
         Bg.done(ctx, "Note ready", title)
-        val fb = done.count { it == "~" }
-        val tail = if (fb > 0) " ($fb of ${done.size} parts used basic formatting)" else ""
-        if (vm.nav.stack.none { it is Scr.Note && it.id == id }) vm.show("Your converted note is ready" + tail)
-        else if (fb > 0) vm.show("Done" + tail)
+        val tail = if (fb) ". Groq was busy, so a few headings were guessed locally" else ""
+        if (vm.nav.stack.none { it is Scr.Note && it.id == id }) vm.show("Your converted note is ready$tail")
+        else if (fb) vm.show("Done$tail")
     }
 }
 
@@ -1208,7 +1425,7 @@ private fun ConvBody(vm: AppVM, id: String, s: ConvState, fadeA: Float, busy: Bo
                     s.phase == 2 -> s.msg
                     s.msg.isNotEmpty() -> s.msg
                     s.phase == 0 -> "Preparing…"
-                    else -> "Structuring · part " + (s.done + 1).coerceAtMost(s.total.coerceAtLeast(1)) + " of " + s.total
+                    else -> "Structuring…"
                 }
                 T(line, 15f, 600, pal.os, lh = 1.3f)
                 if (s.phase < 2) {
@@ -1238,32 +1455,4 @@ private fun ConvBody(vm: AppVM, id: String, s: ConvState, fadeA: Float, busy: Bo
             dismissButton = { TextButton(onClick = { askCancel = false }) { T("Keep going", 16f, 700, pal.osv) } }
         )
     }
-}
-
-@Composable
-fun ConvModeDialog(onDismiss: () -> Unit, onPick: (Int) -> Unit) {
-    val pal = LocalPal.current
-    @Composable
-    fun Opt(title: String, sub: String, mode: Int) {
-        Column(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(pal.c4)
-                .clickable { onPick(mode) }.padding(horizontal = 18.dp, vertical = 14.dp)
-        ) {
-            T(title, 16f, 800, pal.os)
-            T(sub, 13f, 400, pal.osv, Modifier.padding(top = 2.dp), lh = 1.3f)
-        }
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = pal.c3,
-        title = { T("Convert to Note", 22f, 900, pal.os) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Opt("Best quality", "Groq lays out the text itself: tidy paragraphs, headings, lists and tables. Every result is checked word by word. Uses more of your free Groq limit, so a long book can take a few days (it resumes where it stopped).", 1)
-                Opt("Fast", "Groq only labels each paragraph. Much lighter on the free limit, but tables and spacing are less polished.", 0)
-            }
-        },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { T("Cancel", 16f, 700, pal.osv) } }
-    )
 }
