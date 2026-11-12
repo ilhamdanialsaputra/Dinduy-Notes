@@ -282,6 +282,23 @@ private fun edgeX(ls: List<CLine>): Float? {
     return xs[(xs.size * 9 / 10).coerceAtMost(xs.size - 1)]
 }
 
+/** Simbol / nomor butir yang terpisah jarak lebar dari teksnya ("•      teks") bukan kolom tabel: gabungkan. */
+private fun mergeMarker(l: CLine): CLine {
+    if (l.cells < 2) return l
+    val i = l.t.indexOf('¦')
+    if (i <= 0) return l
+    val head = l.t.substring(0, i).trim()
+    val hs = "$head "
+    val ok = head.length <= 4 && (RX_GLYPH.matches(head) || RX_ASCII.containsMatchIn(hs) || RX_NUM.containsMatchIn(hs) || RX_LET.containsMatchIn(hs))
+    if (!ok) return l
+    val cs = FloatArray(l.cs.size - 2)
+    cs[0] = l.cs[0]
+    for (k in 3 until l.cs.size) cs[k - 2] = l.cs[k]
+    val n = CLine(l.t.substring(0, i) + " " + l.t.substring(i + 1), l.sp, l.sz, l.x, l.y, l.page, cs)
+    n.xe = l.xe
+    return n
+}
+
 // ---------------------------------------------------------------- halaman dua kolom
 
 private fun gapAt(l: CLine, g: Float): Int {
@@ -385,7 +402,7 @@ private fun extract(ctx: Context, file: File, check: () -> Unit, progress: (Int,
         try { d.close() } catch (e: Throwable) { }
     }
     val raw = ArrayList<CLine>()
-    for (p in pages.indices) raw.addAll(splitCols(pages[p], pws[p]))
+    for (p in pages.indices) raw.addAll(splitCols(pages[p].map { mergeMarker(it) }, pws[p]))
     if (raw.isEmpty()) return Extracted(raw, title, 10f, 12f)
     for (l in raw) { l.bold = cover(l, K.B) >= .9f; l.ital = cover(l, K.I) >= .9f }
 
@@ -563,9 +580,18 @@ private fun tryTable(L: List<CLine>, i0: Int, pitch: Float): Tab? {
         }
         return best
     }
+    // jarak antarbaris: baris yang sangat dekat dengan baris di atasnya = lanjutan sel yang membungkus
+    val sd = ArrayList<Float>()
+    for (q in 1 until rows.size) { val dd = rows[q].y - rows[q - 1].y; if (dd > 0f) sd.add(dd) }
+    sd.sort()
+    val intra = if (sd.isEmpty()) pitch else sd[sd.size / 4]
+    val varied = sd.isNotEmpty() && sd[sd.size - 1] >= sd[0] * 1.25f
     val tr = ArrayList<Array<String>>()
     var used = 0
-    for (r in rows) {
+    for (qi in rows.indices) {
+        val r = rows[qi]
+        val dy = if (qi > 0) r.y - rows[qi - 1].y else 0f
+        val tight = dy <= intra * 1.25f
         if (r.cells >= 2) {
             val parts = r.t.split('¦')
             if (parts.size != r.cells) return null
@@ -575,14 +601,20 @@ private fun tryTable(L: List<CLine>, i0: Int, pitch: Float): Tab? {
                 val p = parts[c].trim()
                 row[k] = if (row[k].isEmpty()) p else row[k] + " " + p
             }
-            tr.add(row); used++
+            val cont = tr.isNotEmpty() && (if (varied) tight else row[0].isEmpty())
+            if (cont) {
+                val last = tr[tr.size - 1]
+                for (k in row.indices) if (row[k].isNotEmpty()) last[k] = if (last[k].isEmpty()) row[k] else last[k] + " " + row[k]
+            } else tr.add(row)
+            used++
         } else {
             if (tr.isEmpty()) break
             val k = bandOf(r.cs[0], r.cs[1])
             val t0 = r.t.trim()
-            val ok = abs(r.cs[0] - bands[k][0]) <= 8f && (k > 0 || t0.firstOrNull()?.isLowerCase() == true)
-            if (!ok) break
             val last = tr[tr.size - 1]
+            val ok = abs(r.cs[0] - bands[k][0]) <= 8f && (!varied || tight) &&
+                (k > 0 || t0.firstOrNull()?.isLowerCase() == true || !TERM.containsMatchIn(last[0].trimEnd()))
+            if (!ok) break
             last[k] = if (last[k].isEmpty()) t0 else last[k] + " " + t0
             used++
         }
@@ -600,7 +632,8 @@ private fun tryTable(L: List<CLine>, i0: Int, pitch: Float): Tab? {
 }
 
 /** Apakah [l] memulai unit baru (paragraf / judul / butir) setelah [p]. */
-private fun startsNew(p: CLine, l: CLine): Boolean {
+private fun startsNew(cur: List<CLine>, l: CLine): Boolean {
+    val p = cur[cur.size - 1]
     if (l.mk != 0) return true
     if (abs(l.rel - p.rel) > .12f) return true
     if (LEAD.containsMatchIn(l.t) || LEAD.containsMatchIn(p.t)) return true
@@ -612,10 +645,13 @@ private fun startsNew(p: CLine, l: CLine): Boolean {
             (first?.isLowerCase() == true || (!ends && !p.short))
         return !cont
     }
+    // judul / blok rata tengah: baris baru kecuali baris sebelumnya hampir penuh (judul yang membungkus)
+    if (p.center && l.center) return (p.xe - p.x) < .55f * (p.rm - p.lm)
     if (p.center != l.center) return true
+    // daftar pustaka (hanging indent): baris kembali ke margin setelah baris menjorok = entri baru
+    if (cur.size >= 2 && cur[1].x - cur[0].x > 8f && l.x < cur[1].x - 6f) return true
     if (l.gap && (ends || p.short || pHead || p.bold)) return true
     if (ends && p.short) return true
-    if (l.indent && ends) return true
     if (p.bold && l.bold && RX_HNUM.containsMatchIn(l.t)) return true
     if (p.bold && !l.bold && p.t.length < 100) return true
     if (!p.bold && l.bold && l.short && l.t.length < 100) return true
@@ -658,7 +694,7 @@ private fun makeUnits(L: List<CLine>, pitch: Float): List<U> {
             i++; continue
         }
         if (cur.isEmpty()) { cur.add(l); i++; continue }
-        if (startsNew(cur[cur.size - 1], l)) closeCur()
+        if (startsNew(cur, l)) closeCur()
         cur.add(l)
         i++
     }
@@ -688,6 +724,8 @@ private fun stitch(us: List<U>): List<U> {
 
 // ---------------------------------------------------------------- peran unit: pasti (lokal) atau ambigu (klaster)
 
+private val RX_CAP = Regex("^(tabel|table|gambar|figure|grafik|bagan|diagram)\\s+[\\dIVX]+([.:]\\d+)*", RegexOption.IGNORE_CASE)
+
 private fun localRole(u: U): Char {
     val f = u.ls[0]
     val t = unitText(u)
@@ -696,11 +734,13 @@ private fun localRole(u: U): Char {
     val se = sentEnd(t)
     val boldAll = u.ls.all { it.bold }
     val head = (boldAll && len < 100 && !se) || (f.rel >= 1.15f && len < 120 && !se)
+    if (RX_CAP.containsMatchIn(t) && f.rel < 1.25f) return 'P'   // keterangan tabel / gambar
     when (f.mk) {
-        1, 3 -> return 'L'
-        2 -> return if (head && n <= 2) 'H' else 'L'
+        1 -> return 'L'
+        2, 3 -> return if (head && n <= 2) 'H' else 'L'
     }
     if (f.foot || f.rel < .9f) return 'P'
+    if (boldAll && f.center && !se && len < 300) return 'H'
     if (f.rel >= 1.25f && n <= 3 && len <= 150 && !se) return 'H'
     if (len < 100 && !se && (boldAll || f.rel > 1.04f) && RX_HDR.containsMatchIn(t)) return 'H'
     if (n >= 3 || len >= 160 || se) return 'P'
@@ -888,6 +928,26 @@ private fun normBib(out: MutableList<Blk>) {
     }
 }
 
+private data class HS(val sz: Int, val b: Boolean, val i: Boolean, val c: Boolean, val cls: Int)
+
+private val RX_N_BAB = Regex("^(bab|chapter)\\b", RegexOption.IGNORE_CASE)
+private val RX_N_ROM = Regex("^[IVXL]+\\.\\s")
+private val RX_N_LET = Regex("^[A-Za-z][.)]\\s")
+private val RX_N_3 = Regex("^\\d+\\.\\d+\\.\\d+")
+private val RX_N_2 = Regex("^\\d+\\.\\d+")
+private val RX_N_1 = Regex("^\\d+[.)]\\s")
+
+/** Urutan tingkat penomoran judul: BAB < I. < A. < 1. < 1.1 < 1.1.1 < tanpa nomor. */
+private fun numClass(t: String): Int = when {
+    RX_N_BAB.containsMatchIn(t) -> 0
+    RX_N_ROM.containsMatchIn(t) -> 1
+    RX_N_LET.containsMatchIn(t) -> 2
+    RX_N_3.containsMatchIn(t) -> 5
+    RX_N_2.containsMatchIn(t) -> 4
+    RX_N_1.containsMatchIn(t) -> 3
+    else -> 9
+}
+
 private fun assemble(an: An, dec: Map<Int, Char>?): List<Blk> {
     val us = an.units
     // keputusan klaster -> semua unit bergaya sama mendapat peran yang sama
@@ -908,11 +968,13 @@ private fun assemble(an: An, dec: Map<Int, Char>?): List<Blk> {
     for (u in us) if (u.role == '?') u.role = fallbackRole(u)
 
     // tingkat judul ditentukan sekali untuk seluruh dokumen dari gaya huruf (besar -> kecil)
-    fun hsig(u: U): Triple<Int, Boolean, Boolean> =
-        Triple(Math.round(u.ls[0].sz), u.ls.all { it.bold }, isCaps(unitText(u)))
+    fun hsig(u: U): HS {
+        val t = unitText(u)
+        return HS(Math.round(u.ls[0].sz), u.ls.all { it.bold }, u.ls.all { it.ital }, isCaps(t), numClass(t))
+    }
     val sigs = us.filter { it.role == 'H' }.map { hsig(it) }.distinct()
-        .sortedWith(compareByDescending<Triple<Int, Boolean, Boolean>> { it.first }.thenByDescending { it.second }.thenByDescending { it.third })
-    val lvl = HashMap<Triple<Int, Boolean, Boolean>, Int>()
+        .sortedWith(compareByDescending<HS> { it.sz }.thenByDescending { it.b }.thenByDescending { it.c }.thenBy { it.i }.thenBy { it.cls })
+    val lvl = HashMap<HS, Int>()
     sigs.forEachIndexed { i, s -> lvl[s] = (i + 1).coerceAtMost(4) }
 
     // kedalaman butir dari indentasi (dikelompokkan di seluruh dokumen)
@@ -950,7 +1012,8 @@ private fun assemble(an: An, dec: Map<Int, Char>?): List<Blk> {
                 if (rt.t.isNotBlank()) out.add(Blk(ty = "li", lt = lt, d = depthOf(u), st = st, r = rt))
             }
             'P' -> {
-                var rt = tidy(joinRt(u.ls), false)
+                val cap = RX_CAP.containsMatchIn(u.ls[0].t)
+                var rt = if (cap) joinRt(u.ls) else tidy(joinRt(u.ls), false)
                 if (LEAD.containsMatchIn(rt.t)) rt = Rt(rt.t.replace(Regex("\\s*(\\.\\s?){4,}\\s*|\\s*…{2,}\\s*"), " … ").trim())
                 if (rt.t.isNotBlank()) addP(out, Blk(ty = "p", r = rt))
             }
