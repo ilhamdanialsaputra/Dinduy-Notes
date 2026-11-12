@@ -107,6 +107,7 @@ class CLine(
     var rel = 1f            // ukuran huruf relatif terhadap teks isi
     var gap = false         // ada jarak kosong lebih besar di atasnya (awal paragraf)
     var indent = false
+    var hl = 0              // tingkat judul menurut ukuran huruf SELURUH dokumen (1-3), 4 = baris tebal pendek (mungkin judul kecil)
     var xe = 0f             // posisi kanan baris (pt)
     var short = false       // baris pendek (kemungkinan akhir paragraf)
     var noise = false       // kandidat nomor halaman / header-footer berulang (petunjuk untuk Groq; yang diputuskan x dibuang)
@@ -265,6 +266,16 @@ private fun extract(ctx: Context, file: File, check: () -> Unit, progress: (Int,
         if (i > 0 && raw[i - 1].page == l.page) l.gap = (l.y - raw[i - 1].y) > pitch * 1.35f
     }
 
+    // tingkat judul ditentukan sekali untuk seluruh dokumen (ukuran huruf terbesar = H1, dst), supaya konsisten antar potongan
+    val endSent = Regex("[.!?]$")
+    val hs = raw.filter { it.rel >= 1.15f && it.t.length < 120 && !endSent.containsMatchIn(it.t) }
+        .map { (it.sz * 2f).toInt() }.distinct().sortedDescending().take(3)
+    for (l in raw) {
+        if (l.t.length >= 120 || endSent.containsMatchIn(l.t)) continue
+        if (l.rel >= 1.15f) { val k = hs.indexOf((l.sz * 2f).toInt()); if (k >= 0) l.hl = k + 1 }
+        else if (l.bold && l.t.length < 90 && l.rel > 0.92f) l.hl = 4
+    }
+
     // nomor halaman dan header / footer berulang: 2 baris pertama dan terakhir tiap halaman
     val byPage = HashMap<Int, ArrayList<Int>>()
     for (i in raw.indices) byPage.getOrPut(raw[i].page) { ArrayList() }.add(i)
@@ -335,8 +346,8 @@ private fun makeChunks(lines: List<CLine>, units: List<IntArray>, full: Boolean)
     val out = ArrayList<IntArray>()
     var cur = ArrayList<Int>()
     var n = 0
-    val budget = if (full) 1600 else BUDGET
-    val cap = if (full) 40 else 60
+    val budget = if (full) 3000 else BUDGET
+    val cap = if (full) 80 else 60
     fun len(k: Int) = (if (full) unitText(lines, units[k]).length else minOf(unitText(lines, units[k]).length, 240)) + 12
     for (k in units.indices) {
         val l = len(k)
@@ -413,16 +424,18 @@ private fun parseCodes(raw: String, m: Int): String? {
 }
 
 private const val SYS_MD =
-    "You are a Markdown typesetter. The user sends text extracted from a PDF, one PDF line per line. Rebuild it as clean, well-structured Markdown WITHOUT changing a single word.\n" +
+    "You are a Markdown typesetter. The user sends units of text extracted from a PDF (each unit is a paragraph, heading, list item or table row, separated by blank lines; consecutive table rows are on consecutive lines). " +
+        "Rebuild them as clean, consistent, well-structured Markdown WITHOUT changing a single word.\n" +
         "Rules:\n" +
         "- Keep every word, number and symbol in the same order. Never add, remove, rephrase, translate, fix spelling, or summarize. No commentary, no code fences.\n" +
-        "- Join the lines of one paragraph into ONE long line (no hard wraps). Separate paragraphs with one blank line. A paragraph cut by a page break is still ONE paragraph.\n" +
-        "- Headings (#, ##, ###) only for real titles and section headings: short, not sentences of body text. Hint tags at line starts (⟦L⟧ much larger font, ⟦M⟧ larger, ⟦S⟧ smaller, ⟦b⟧ bold line, ⟦>⟧ indented) describe the PDF layout. NEVER output the tags.\n" +
-        "- Lists: `- ` for bullets and `1. ` for numbered items (keep the original number); drop the original bullet glyph. Nested items are indented by 2 spaces.\n" +
+        "- A unit is normally one paragraph on ONE line. Keep paragraphs on one long line (no hard wraps), separated by one blank line. If a unit clearly continues the previous one (a sentence cut in the middle), join them into one paragraph.\n" +
+        "- Heading tags: ⟦H1⟧ ⟦H2⟧ ⟦H3⟧ at a unit start give the heading level decided for the whole document: output # / ## / ### accordingly (unless the unit is obviously not a heading). ⟦H4?⟧ is only a weak hint: use #### only if it is clearly a short heading label. Units without a tag are NOT headings. NEVER output the tags.\n" +
+        "- Lists: `- ` for bullets, `1. ` for numbered items (keep the original number); drop the original bullet glyph. Nested items are indented by 2 spaces.\n" +
         "- Block quote `> ` only for clearly quoted passages.\n" +
-        "- Tables: when consecutive lines form columns (a ¦ marks a wide gap between columns, and the columns line up from line to line), output a Markdown pipe table with a header row and a `| --- | --- |` separator row. Each cell keeps its original words; a cell wrapped over several lines becomes one cell. Remove the ¦ marks.\n" +
+        "- Tables: rows whose columns are separated by ¦ (a wide gap) and line up from row to row become ONE Markdown pipe table: header row, then a `| --- | --- |` separator, then the rows. Cells keep their original words; a cell wrapped over several rows becomes one cell. Remove the ¦ marks.\n" +
         "- Keep **bold** and *italic* markers and backslash escapes exactly as given.\n" +
-        "Output only the Markdown."
+        "- CONSISTENCY: the user may show the end of the previous output in <previous_output_end>. Continue in exactly the same conventions: the same heading levels, and the same style for items of the same kind (for example every entry of a reference list or bibliography uses the same format: all bullets or all plain paragraphs, matching what came before). If the previous output ended inside a table and the new units continue it, output the continuing rows as a pipe table with the same number of columns (repeat the original header row first).\n" +
+        "Output only the Markdown for the units inside <units>; never repeat <previous_output_end>."
 
 private val RX_TAG = Regex("⟦[^⟧]*⟧")
 private val RX_WORD = Regex("[\\p{L}\\p{N}]+")
@@ -472,29 +485,42 @@ private fun styled(l: CLine): String {
     return sb.toString()
 }
 
-/** Teks sumber satu potongan untuk mode Best. Nomor halaman / header-footer berulang sudah dibuang; tanda hubung akhir baris disambung. */
+/** Teks sumber satu potongan untuk mode Best: satu unit (paragraf) per baris. Nomor halaman / header-footer berulang sudah dibuang. */
 private fun rawOf(lines: List<CLine>, units: List<IntArray>, uidx: IntArray): String {
-    val out = ArrayList<String>()
-    var prev: CLine? = null
-    for (k in uidx) for (i in units[k]) {
-        val l = lines[i]
-        if (l.noise) continue
-        val p = prev
-        val hy = p != null && p.t.length >= 2 && p.t.last() == '-' && p.t[p.t.length - 2].isLetter() &&
-            l.t.isNotEmpty() && l.t[0].isLowerCase() && !p.t.contains('¦') && !l.t.contains('¦')
-        if (hy && out.isNotEmpty()) {
-            out[out.size - 1] = out[out.size - 1] + styled(l)
-        } else {
-            if (l.gap) out.add("")
-            val tg = StringBuilder()
-            if (l.rel >= 1.45f) tg.append('L') else if (l.rel >= 1.15f) tg.append('M') else if (l.rel <= 0.88f) tg.append('S')
-            if (l.bold) tg.append('b')
-            if (l.indent) tg.append('>')
-            out.add((if (tg.isNotEmpty()) "⟦$tg⟧ " else "") + styled(l))
+    val sb = StringBuilder()
+    var prevTable = false
+    for (k in uidx) {
+        val u = units[k].filter { !lines[it].noise }
+        if (u.isEmpty()) continue
+        val first = lines[u[0]]
+        val tbl = u.any { lines[it].t.contains('¦') }
+        val t = StringBuilder()
+        var prev: CLine? = null
+        for (i in u) {
+            val l = lines[i]
+            val p = prev
+            if (p != null) {
+                val hy = p.t.length >= 2 && p.t.last() == '-' && p.t[p.t.length - 2].isLetter() &&
+                    l.t.isNotEmpty() && l.t[0].isLowerCase() && !p.t.contains('¦') && !l.t.contains('¦')
+                if (!hy) t.append(' ')
+            }
+            t.append(styled(l))
+            prev = l
         }
-        prev = l
+        if (sb.isNotEmpty()) sb.append(if (tbl && prevTable) "\n" else "\n\n")
+        val tag = when (first.hl) { 1 -> "⟦H1⟧ "; 2 -> "⟦H2⟧ "; 3 -> "⟦H3⟧ "; 4 -> "⟦H4?⟧ "; else -> "" }
+        sb.append(tag).append(t)
+        prevTable = tbl
     }
-    return out.joinToString("\n")
+    return sb.toString()
+}
+
+/** Ujung keluaran potongan sebelumnya (maks ~700 huruf, mulai di awal baris) sebagai konteks gaya untuk potongan berikutnya. */
+private fun tailOf(md: String): String {
+    if (md.length <= 700) return md
+    val t = md.takeLast(700)
+    val nl = t.indexOf('\n')
+    return if (nl in 0..250) t.substring(nl + 1) else t
 }
 
 /** Tebakan lokal untuk satu unit (dipakai bila Groq gagal, atau tidak menyebut unit itu). Teks tetap utuh. */
@@ -643,6 +669,15 @@ private fun appendMerged(out: MutableList<Blk>, bl: List<Blk>) {
     var rest = bl
     val last = out.lastOrNull()
     val first = bl.firstOrNull()
+    // tabel yang berlanjut di potongan berikutnya disatukan lagi
+    if (last != null && first != null && last.ty == "tbl" && first.ty == "tbl" &&
+        last.tb.isNotEmpty() && first.tb.isNotEmpty() && last.tb[0].size == first.tb[0].size
+    ) {
+        val dup = first.tb[0].map { it.t.trim() } == last.tb[0].map { it.t.trim() }
+        out[out.size - 1] = last.copy(tb = last.tb + first.tb.drop(if (dup) 1 else 0))
+        out.addAll(bl.drop(1))
+        return
+    }
     if (last != null && first != null && last.ty == "p" && first.ty == "p" &&
         last.r.t.isNotBlank() && first.r.t.isNotBlank() &&
         !TERM.containsMatchIn(last.r.t.trimEnd()) && first.r.t.trimStart().first().isLowerCase()
@@ -653,6 +688,31 @@ private fun appendMerged(out: MutableList<Blk>, bl: List<Blk>) {
     out.addAll(rest)
 }
 
+private val RX_BIB = Regex("^(daftar pustaka|daftar referensi|referensi|references|bibliography|sumber pustaka|pustaka)\\b", RegexOption.IGNORE_CASE)
+
+/** Daftar pustaka dibuat seragam: semua butir pakai poin, atau semuanya paragraf polos, mengikuti mayoritas. */
+private fun normBib(out: MutableList<Blk>) {
+    var i = 0
+    while (i < out.size) {
+        val h = out[i]
+        if (h.ty == "h" && RX_BIB.containsMatchIn(h.r.t.trim())) {
+            var j = i + 1
+            while (j < out.size && !(out[j].ty == "h" && out[j].lv <= h.lv)) j++
+            val ents = (i + 1 until j).filter { (out[it].ty == "p" && out[it].r.t.isNotBlank()) || (out[it].ty == "li" && out[it].lt == "b") }
+            val nLi = ents.count { out[it].ty == "li" }
+            if (ents.size >= 3) {
+                val asLi = nLi * 2 > ents.size
+                for (e in ents) {
+                    val b = out[e]
+                    if (asLi && b.ty == "p") out[e] = Blk(ty = "li", lt = "b", d = 0, r = b.r)
+                    else if (!asLi && b.ty == "li") out[e] = Blk(ty = "p", r = b.r)
+                }
+            }
+            i = j
+        } else i++
+    }
+}
+
 private fun assemble(lines: List<CLine>, units: List<IntArray>, chunks: List<IntArray>, done: List<String?>): List<Blk> {
     val out = ArrayList<Blk>()
     for (c in chunks.indices) {
@@ -660,6 +720,7 @@ private fun assemble(lines: List<CLine>, units: List<IntArray>, chunks: List<Int
         val bl = if (s != null && s.startsWith("M:")) mdBlocks(s.substring(2)) else unitBlocks(lines, units, chunks[c], s)
         appendMerged(out, bl)
     }
+    normBib(out)
     if (out.isEmpty()) out.add(Blk())
     if (out.last().isObj || out.last().isMulti) out.add(Blk())
     return out
@@ -934,7 +995,9 @@ object PdfConv {
                 if (raw.isBlank()) codes = "~"
                 else {
                     val want = wordsOf(raw)
-                    codes = planChunk(key, models, SYS_MD, raw, (raw.length / 2 + 400).coerceIn(600, 3600), st) { out ->
+                    val tail = if (i > 0) done[i - 1]?.takeIf { it.startsWith("M:") }?.let { tailOf(it.substring(2)) } else null
+                    val user = (if (tail != null) "<previous_output_end>\n$tail\n</previous_output_end>\n" else "") + "<units>\n$raw\n</units>"
+                    codes = planChunk(key, models, SYS_MD, user, (raw.length / 2 + 400).coerceIn(600, 3600), st) { out ->
                         val m = unfenceMd(out)
                         if (m.isNotBlank() && wordsOf(m) == want) "M:$m" else null
                     }
