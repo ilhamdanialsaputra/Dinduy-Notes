@@ -350,10 +350,10 @@ object Groq {
     }
 
     /** Satu panggilan obrolan (suhu 0). Pada 429, GroqException.wait = detik tunggu dari Groq (0 bila tidak diketahui). */
-    fun chatOnce(key: String, model: String, system: String, user: String, maxTokens: Int): String? {
+    fun chatOnce(key: String, model: String, system: String, user: String, maxTokens: Int, temperature: Double = 0.0): String? {
         val body = buildJsonObject {
             put("model", model)
-            put("temperature", 0.0)
+            put("temperature", temperature)
             put("max_tokens", maxTokens)
             put("messages", JsonArray(listOf(
                 buildJsonObject { put("role", "system"); put("content", system) },
