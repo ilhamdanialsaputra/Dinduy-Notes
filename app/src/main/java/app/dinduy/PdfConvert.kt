@@ -1049,6 +1049,7 @@ object PdfConv {
     private val jobs = HashMap<String, Job>()
     private val cool = HashMap<String, Long>()
     private var restored = false
+    private var why = ""
 
     fun has(id: String): Boolean = map.containsKey(id)
 
@@ -1224,6 +1225,7 @@ object PdfConv {
                 val raw = withContext(Dispatchers.IO) { Groq.chatOnce(key, m, sys, user, maxTok, temp) }
                 val p = if (raw == null) null else accept(raw)
                 if (p != null) return p
+                why = if (raw == null) "empty or unreadable reply from " + st.model else "unexpected reply (" + clip(raw, 50) + ")"
                 val t = (tries[m] ?: 0) + 1
                 tries[m] = t
                 if (t >= 2) skip.add(m)
@@ -1236,7 +1238,7 @@ object PdfConv {
                         else cool[m] = System.currentTimeMillis() + (if (w > 75) w else 120) * 1000L
                     }
                     e.code == 401 || e.code == 403 -> throw Pause(enMsg(e), true)
-                    e.code == 413 -> skip.add(m)
+                    e.code == 413 -> { why = "request too large for " + st.model; skip.add(m) }
                     else -> {
                         net++
                         if (net > 4) throw Pause(enMsg(e))
@@ -1269,6 +1271,7 @@ object PdfConv {
 
         var dec: Map<Int, Char>? = null
         var fb = false
+        why = ""
         if (an.clu.isNotEmpty()) {
             st.msg = "Checking headings…"
             try {
@@ -1283,6 +1286,7 @@ object PdfConv {
                 if (r == "~") fb = true else dec = decodeCodes(r)
             } catch (e: Pause) {
                 if (e.fatal) throw e
+                why = e.message ?: ""
                 fb = true
             }
         }
@@ -1303,7 +1307,7 @@ object PdfConv {
         map.remove(id)
         jobs.remove(id)
         Bg.done(ctx, "Note ready", title)
-        val tail = if (fb) ". Groq was busy, so a few headings were guessed locally" else ""
+        val tail = if (fb) ". Groq failed (" + (if (why.isBlank()) "unknown" else why) + "), so a few headings were guessed locally" else ""
         if (vm.nav.stack.none { it is Scr.Note && it.id == id }) vm.show("Your converted note is ready$tail")
         else if (fb) vm.show("Done$tail")
     }
