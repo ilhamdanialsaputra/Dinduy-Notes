@@ -796,7 +796,15 @@ private const val SYS =
         "When unsure choose P. Reply exactly one line per cluster as `id code`, nothing else.\n" +
         "Example:\n1 H\n2 P\n3 X"
 
-private val RX_CODE = Regex("^(\\d{1,3})\\s*[:.\\-=)]?\\s*([HPLX])(?![A-Za-z])", RegexOption.IGNORE_CASE)
+private val RX_CODE = Regex("^\\D{0,12}?(\\d{1,3})\\s*[:.\\-=)>→]*\\s*\\(?(heading|title|paragraph|normal|text|list|delete|junk|[HPLX])(?![A-Za-z])", RegexOption.IGNORE_CASE)
+private val RX_ONLY = Regex("^\\W*(heading|title|paragraph|normal|text|list|delete|junk|[HPLX])(?![A-Za-z])", RegexOption.IGNORE_CASE)
+
+private fun codeOf(w: String): Char = when (w.lowercase()) {
+    "h", "heading", "title" -> 'H'
+    "l", "list" -> 'L'
+    "x", "delete", "junk" -> 'X'
+    else -> 'P'
+}
 
 private fun clip(s: String, n: Int): String {
     val t = s.replace('\n', ' ').trim()
@@ -829,18 +837,26 @@ private fun promptOf(units: List<U>, clu: List<Clu>): String {
     return sb.toString()
 }
 
-/** "id kode;" yang valid dari jawaban Groq, atau null bila terlalu sedikit yang bisa dipakai. */
+/** "id kode;" dari jawaban Groq. Toleran: markdown, "Cluster 1:", kata penuh, atau hanya deretan kode berurutan. Null bila terlalu sedikit yang terbaca. */
 private fun parseCodes(raw: String, m: Int): String? {
+    val lines = raw.replace("*", "").replace("`", "").replace("#", "").lines().map { it.trim() }.filter { it.isNotEmpty() }
     val sb = StringBuilder()
     val seen = HashSet<Int>()
-    for (ln0 in raw.lines()) {
-        val ln = ln0.trim().removePrefix("-").removePrefix("*").trim()
-        val mm = RX_CODE.find(ln) ?: continue
+    for (ln in lines) {
+        val mm = RX_CODE.find(ln.removePrefix("-").trim()) ?: continue
         val n = mm.groupValues[1].toIntOrNull() ?: continue
         if (n < 1 || n > m || !seen.add(n)) continue
-        sb.append(n).append(' ').append(mm.groupValues[2].uppercase()).append(';')
+        sb.append(n).append(' ').append(codeOf(mm.groupValues[2])).append(';')
     }
-    return if (seen.size * 5 < m * 3) null else sb.toString()
+    if (seen.size * 5 >= m * 3) return sb.toString()
+    // jawaban hanya deretan kode tanpa nomor: pakai urutan
+    val only = lines.mapNotNull { RX_ONLY.find(it)?.groupValues?.get(1) }
+    if (only.size == m) {
+        val o = StringBuilder()
+        only.forEachIndexed { i, w -> o.append(i + 1).append(' ').append(codeOf(w)).append(';') }
+        return o.toString()
+    }
+    return null
 }
 
 private fun decodeCodes(s: String): Map<Int, Char> {
@@ -1225,7 +1241,7 @@ object PdfConv {
                 val raw = withContext(Dispatchers.IO) { Groq.chatOnce(key, m, sys, user, maxTok, temp) }
                 val p = if (raw == null) null else accept(raw)
                 if (p != null) return p
-                why = if (raw == null) "empty or unreadable reply from " + st.model else "unexpected reply (" + clip(raw, 50) + ")"
+                why = if (raw == null) "empty or unreadable reply from " + st.model else "unexpected reply (" + clip(raw, 90) + ")"
                 val t = (tries[m] ?: 0) + 1
                 tries[m] = t
                 if (t >= 2) skip.add(m)
