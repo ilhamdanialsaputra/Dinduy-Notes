@@ -948,6 +948,7 @@ private fun TwoColLayout(
     blocks: List<HBlock>, laneOf: (String) -> Int?, dragId: String?,
     padS: Int, padTop: Int, padBottom: Int, gap: Int,
     rects: HashMap<String, IntArray>, lanesOut: HashMap<String, Int>, fresh: HashMap<String, Int>,
+    rebalance: Boolean = true,
     modifier: Modifier = Modifier, content: @Composable (String) -> Unit
 ) {
     val flatKeys = ArrayList<String>().also { l -> for (b in blocks) { val h = b.head; if (h != null) l.add(h) else l.addAll(b.ids) } }
@@ -1010,26 +1011,28 @@ private fun TwoColLayout(
                     hh[v] += items[k].second.height + gap
                     fresh[items[k].first] = v
                 }
-                // seimbangkan ulang (mis. setelah catatan dihapus): kalau satu kolom jauh lebih pendek, pindahkan kartu paling bawah
-                // dari kolom yang lebih tinggi ke kolom yang lebih pendek selama itu memperkecil selisih tinggi. Hasilnya disimpan (fresh).
-                if (dragId == null && n >= 2) {
+                // seimbangkan ulang (mis. setelah catatan dihapus). Dihitung dulu di salinan (dry-run): kartu baru benar-benar
+                // dipindah kalau hasil akhirnya memang lebih seimbang. Jadi tidak ada kartu yang pindah lalu balik lagi ke tempat asal.
+                // Hanya kartu paling bawah di kolom yang lebih tinggi yang dicoba; kalau tidak muat, berhenti.
+                if (dragId == null && rebalance && n >= 2 && items.all { it.second.height > 0 }) {
+                    val plan = lane.copyOf()
                     val bh = intArrayOf(0, 0)
-                    for (k in 0 until n) bh[lane[k]] += items[k].second.height + gap
+                    for (k in 0 until n) bh[plan[k]] += items[k].second.height + gap
+                    val startDiff = kotlin.math.abs(bh[0] - bh[1])
                     var guard = n
                     while (guard-- > 0) {
                         val tall = if (bh[0] >= bh[1]) 0 else 1
-                        val short = 1 - tall
-                        val diff = bh[tall] - bh[short]
+                        val diff = bh[tall] - bh[1 - tall]
                         var pick = -1
-                        for (k in n - 1 downTo 0) {
-                            if (lane[k] != tall) continue
-                            if (items[k].second.height + gap < diff) { pick = k; break }
-                        }
+                        for (k in n - 1 downTo 0) if (plan[k] == tall) { pick = k; break }
                         if (pick < 0) break
                         val eff = items[pick].second.height + gap
-                        lane[pick] = short
-                        bh[tall] -= eff; bh[short] += eff
-                        fresh[items[pick].first] = short
+                        if (eff >= diff) break
+                        plan[pick] = 1 - tall
+                        bh[tall] -= eff; bh[1 - tall] += eff
+                    }
+                    if (kotlin.math.abs(bh[0] - bh[1]) < startDiff) {
+                        for (k in 0 until n) if (plan[k] != lane[k]) { lane[k] = plan[k]; fresh[items[k].first] = plan[k] }
                     }
                 }
                 val ly = intArrayOf(y, y)
@@ -1609,6 +1612,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                         blocks = blocks, laneOf = laneOf, dragId = nd.id,
                         padS = padS, padTop = padTop, padBottom = padBottom, gap = padS,
                         rects = rects, lanesOut = lanesCur, fresh = lanesNew,
+                        rebalance = composeN >= live.size,
                         modifier = Modifier.fillMaxWidth().onGloballyPositioned {
                             // kartu yang baru dapat kolom (baru dibuat / baru diedit): simpan, supaya kolomnya tidak berubah lagi
                             if (nd.id == null && useLanes && !vm.searchOn && lanesNew.isNotEmpty()) {
