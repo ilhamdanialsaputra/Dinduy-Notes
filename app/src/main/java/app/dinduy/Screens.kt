@@ -1010,6 +1010,28 @@ private fun TwoColLayout(
                     hh[v] += items[k].second.height + gap
                     fresh[items[k].first] = v
                 }
+                // seimbangkan ulang (mis. setelah catatan dihapus): kalau satu kolom jauh lebih pendek, pindahkan kartu paling bawah
+                // dari kolom yang lebih tinggi ke kolom yang lebih pendek selama itu memperkecil selisih tinggi. Hasilnya disimpan (fresh).
+                if (dragId == null && n >= 2) {
+                    val bh = intArrayOf(0, 0)
+                    for (k in 0 until n) bh[lane[k]] += items[k].second.height + gap
+                    var guard = n
+                    while (guard-- > 0) {
+                        val tall = if (bh[0] >= bh[1]) 0 else 1
+                        val short = 1 - tall
+                        val diff = bh[tall] - bh[short]
+                        var pick = -1
+                        for (k in n - 1 downTo 0) {
+                            if (lane[k] != tall) continue
+                            if (items[k].second.height + gap < diff) { pick = k; break }
+                        }
+                        if (pick < 0) break
+                        val eff = items[pick].second.height + gap
+                        lane[pick] = short
+                        bh[tall] -= eff; bh[short] += eff
+                        fresh[items[pick].first] = short
+                    }
+                }
                 val ly = intArrayOf(y, y)
                 for (k in 0 until n) {
                     val (id, pl) = items[k]
