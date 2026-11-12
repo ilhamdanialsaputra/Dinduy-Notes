@@ -401,7 +401,7 @@ private fun joinRt(ls: List<CLine>, stripBold: Boolean): Rt {
     return Rt(t, normSp(sp.filter { !(stripBold && it.k == K.B) }, t.length))
 }
 
-private fun emit(o: Open, out: MutableList<Blk>) {
+private fun emit(o: OpenB, out: MutableList<Blk>) {
     if (o.ls.isEmpty()) return
     val k = o.kind
     when {
