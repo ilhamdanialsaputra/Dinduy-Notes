@@ -14,6 +14,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -150,7 +151,7 @@ private class LineGrab : PDFTextStripper() {
             pg = currentPageNo - 1
         } else if (lastEnd >= 0f && sb[sb.length - 1] == ' ') {
             val s = if (first.fontSizeInPt > 0f) first.fontSizeInPt else 10f
-            if (first.xDirAdj - lastEnd > max(10f, s * 1.6f)) sb.setCharAt(sb.length - 1, '¦')
+            if (first.xDirAdj - lastEnd > max(8f, s * 1.1f)) sb.setCharAt(sb.length - 1, '¦')
         }
         for (tp in textPositions) {
             val u = tp.unicode ?: continue
@@ -329,17 +330,29 @@ private fun makeUnits(lines: List<CLine>): List<IntArray> {
 
 private fun unitText(lines: List<CLine>, u: IntArray): String = u.joinToString(" ") { lines[it].t }
 
-/** Kelompokkan unit jadi potongan ~BUDGET huruf (yang dikirim ke Groq hanya awal tiap unit, jadi hemat token). */
-private fun makeChunks(lines: List<CLine>, units: List<IntArray>): List<IntArray> {
+/** Kelompokkan unit jadi potongan. Mode Best: ~1600 huruf teks penuh per potongan (Groq menulis Markdown); mode Fast: hanya awal tiap unit dikirim. */
+private fun makeChunks(lines: List<CLine>, units: List<IntArray>, full: Boolean): List<IntArray> {
     val out = ArrayList<IntArray>()
     var cur = ArrayList<Int>()
     var n = 0
+    val budget = if (full) 1600 else BUDGET
+    val cap = if (full) 40 else 60
+    fun len(k: Int) = (if (full) unitText(lines, units[k]).length else minOf(unitText(lines, units[k]).length, 240)) + 12
     for (k in units.indices) {
-        val len = minOf(unitText(lines, units[k]).length, 240) + 12
-        if (cur.isNotEmpty() && (n + len > BUDGET || cur.size >= 60)) {
-            out.add(cur.toIntArray()); cur = ArrayList(); n = 0
+        val l = len(k)
+        if (cur.isNotEmpty() && (n + l > budget || cur.size >= cap)) {
+            // lebih suka memotong setelah unit yang berakhir kalimat, supaya paragraf tidak terbelah antar potongan
+            var cut = cur.size
+            val lo = max(1, cur.size * 6 / 10)
+            for (j in cur.size - 1 downTo lo) {
+                val prevU = units[cur[j - 1]]
+                if (TERM.containsMatchIn(lines[prevU[prevU.size - 1]].t)) { cut = j; break }
+            }
+            out.add(cur.subList(0, cut).toIntArray())
+            cur = ArrayList(cur.subList(cut, cur.size))
+            n = cur.sumOf { len(it) }
         }
-        cur.add(k); n += len
+        cur.add(k); n += l
     }
     if (cur.isNotEmpty()) out.add(cur.toIntArray())
     return out
@@ -397,6 +410,91 @@ private fun parseCodes(raw: String, m: Int): String? {
     }
     if (cnt * 2 < m) return null   // jawaban terlalu sedikit: dianggap gagal
     return sb.toString()
+}
+
+private const val SYS_MD =
+    "You are a Markdown typesetter. The user sends text extracted from a PDF, one PDF line per line. Rebuild it as clean, well-structured Markdown WITHOUT changing a single word.\n" +
+        "Rules:\n" +
+        "- Keep every word, number and symbol in the same order. Never add, remove, rephrase, translate, fix spelling, or summarize. No commentary, no code fences.\n" +
+        "- Join the lines of one paragraph into ONE long line (no hard wraps). Separate paragraphs with one blank line. A paragraph cut by a page break is still ONE paragraph.\n" +
+        "- Headings (#, ##, ###) only for real titles and section headings: short, not sentences of body text. Hint tags at line starts (⟦L⟧ much larger font, ⟦M⟧ larger, ⟦S⟧ smaller, ⟦b⟧ bold line, ⟦>⟧ indented) describe the PDF layout. NEVER output the tags.\n" +
+        "- Lists: `- ` for bullets and `1. ` for numbered items (keep the original number); drop the original bullet glyph. Nested items are indented by 2 spaces.\n" +
+        "- Block quote `> ` only for clearly quoted passages.\n" +
+        "- Tables: when consecutive lines form columns (a ¦ marks a wide gap between columns, and the columns line up from line to line), output a Markdown pipe table with a header row and a `| --- | --- |` separator row. Each cell keeps its original words; a cell wrapped over several lines becomes one cell. Remove the ¦ marks.\n" +
+        "- Keep **bold** and *italic* markers and backslash escapes exactly as given.\n" +
+        "Output only the Markdown."
+
+private val RX_TAG = Regex("⟦[^⟧]*⟧")
+private val RX_WORD = Regex("[\\p{L}\\p{N}]+")
+
+private fun wordsOf(s: String): List<String> = RX_WORD.findAll(RX_TAG.replace(s, " ").lowercase()).map { it.value }.toList()
+
+private fun unfenceMd(s: String): String {
+    var t = s.trim()
+    if (t.startsWith("```")) {
+        t = t.substringAfter("\n", "")
+        t = t.trimEnd().removeSuffix("```")
+    }
+    return t.trim()
+}
+
+/** Satu baris PDF dengan penanda **tebal** dan *miring* dari jenis huruf; karakter yang berarti di Markdown di-escape. */
+private fun styled(l: CLine): String {
+    val t = l.t
+    val spans = ArrayList<Sp>()
+    for (s in l.sp) {
+        if (s.k == K.B && l.bold) continue   // baris tebal penuh biasanya judul; cukup jadi petunjuk ⟦b⟧
+        spans.add(s)
+    }
+    val keep = spans.filter { i ->
+        i.k != K.I || spans.none { b -> b.k == K.B && b.s < i.e && b.e > i.s && !(b.s <= i.s && b.e >= i.e) && !(i.s <= b.s && i.e >= b.e) }
+    }
+    val open = HashMap<Int, StringBuilder>()
+    val close = HashMap<Int, StringBuilder>()
+    for (s in keep) {
+        val m = if (s.k == K.B) "**" else "*"
+        open.getOrPut(s.s) { StringBuilder() }.append(m)
+        close.getOrPut(s.e) { StringBuilder() }.append(m)
+    }
+    val sb = StringBuilder()
+    for (i in 0..t.length) {
+        close[i]?.let { sb.append(it) }
+        open[i]?.let { sb.append(it) }
+        if (i < t.length) {
+            val c = t[i]
+            if (c == '¦') sb.append(" ¦ ")
+            else {
+                if (c == '*' || c == '_' || c == '`' || c == '|' || c == '~') sb.append('\\')
+                sb.append(c)
+            }
+        }
+    }
+    return sb.toString()
+}
+
+/** Teks sumber satu potongan untuk mode Best. Nomor halaman / header-footer berulang sudah dibuang; tanda hubung akhir baris disambung. */
+private fun rawOf(lines: List<CLine>, units: List<IntArray>, uidx: IntArray): String {
+    val out = ArrayList<String>()
+    var prev: CLine? = null
+    for (k in uidx) for (i in units[k]) {
+        val l = lines[i]
+        if (l.noise) continue
+        val p = prev
+        val hy = p != null && p.t.length >= 2 && p.t.last() == '-' && p.t[p.t.length - 2].isLetter() &&
+            l.t.isNotEmpty() && l.t[0].isLowerCase() && !p.t.contains('¦') && !l.t.contains('¦')
+        if (hy && out.isNotEmpty()) {
+            out[out.size - 1] = out[out.size - 1] + styled(l)
+        } else {
+            if (l.gap) out.add("")
+            val tg = StringBuilder()
+            if (l.rel >= 1.45f) tg.append('L') else if (l.rel >= 1.15f) tg.append('M') else if (l.rel <= 0.88f) tg.append('S')
+            if (l.bold) tg.append('b')
+            if (l.indent) tg.append('>')
+            out.add((if (tg.isNotEmpty()) "⟦$tg⟧ " else "") + styled(l))
+        }
+        prev = l
+    }
+    return out.joinToString("\n")
 }
 
 /** Tebakan lokal untuk satu unit (dipakai bila Groq gagal, atau tidak menyebut unit itu). Teks tetap utuh. */
@@ -490,17 +588,14 @@ private fun emit(o: OpenB, out: MutableList<Blk>) {
     }
 }
 
-private fun assemble(lines: List<CLine>, units: List<IntArray>, chunks: List<IntArray>, done: List<String?>): List<Blk> {
-    val code = Array(units.size) { heurUnit(lines, units[it]) }
-    for (c in chunks.indices) {
-        val uidx = chunks[c]
-        val str = done.getOrNull(c) ?: "~"
-        if (str == "~") continue
+private fun unitBlocks(lines: List<CLine>, units: List<IntArray>, uidx: IntArray, str: String?): List<Blk> {
+    val code = Array(uidx.size) { heurUnit(lines, units[uidx[it]]) }
+    if (str != null && str != "~" && !str.startsWith("M:")) {
         for (e in str.split(';')) {
             val sp = e.trim().split(' ')
             if (sp.size != 2) continue
             val n = sp[0].toIntOrNull() ?: continue
-            if (n in 1..uidx.size) code[uidx[n - 1]] = sp[1]
+            if (n in 1..uidx.size) code[n - 1] = sp[1]
         }
     }
     val out = ArrayList<Blk>()
@@ -509,10 +604,10 @@ private fun assemble(lines: List<CLine>, units: List<IntArray>, chunks: List<Int
         cur?.let { emit(it, out) }
         cur = null
     }
-    for (k in units.indices) {
-        val u = units[k]
+    for (k in uidx.indices) {
+        val u = units[uidx[k]]
         val c = code[k]
-        if (c == "x") continue   // nomor halaman / header / footer dibuang atas keputusan Groq
+        if (c == "x") continue   // nomor halaman / header / footer dibuang
         val o = cur
         if (c == "+" && o != null) { for (i in u) o.ls.add(lines[i]); continue }
         if (c == "t" && o != null && o.kind == "t") {
@@ -527,6 +622,44 @@ private fun assemble(lines: List<CLine>, units: List<IntArray>, chunks: List<Int
         cur = no
     }
     close()
+    return out
+}
+
+/** Markdown hasil Groq -> blok native Dinduy. Paragraf dijadikan satu baris (tanpa enter paksa dari pemenggalan PDF). */
+private fun mdBlocks(text: String): List<Blk> {
+    val out = ArrayList<Blk>()
+    for (b in md(text)) {
+        if (b.ty == "p" || b.ty == "li" || b.ty == "h") {
+            val t = b.r.t.replace('\n', ' ')
+            if (b.ty == "p" && t.isBlank()) continue
+            out.add(b.copy(r = b.r.copy(t = t)))
+        } else out.add(b)
+    }
+    return out
+}
+
+/** Paragraf yang terbelah di batas potongan disambung lagi. */
+private fun appendMerged(out: MutableList<Blk>, bl: List<Blk>) {
+    var rest = bl
+    val last = out.lastOrNull()
+    val first = bl.firstOrNull()
+    if (last != null && first != null && last.ty == "p" && first.ty == "p" &&
+        last.r.t.isNotBlank() && first.r.t.isNotBlank() &&
+        !TERM.containsMatchIn(last.r.t.trimEnd()) && first.r.t.trimStart().first().isLowerCase()
+    ) {
+        out[out.size - 1] = last.copy(r = last.r + Rt(" ") + first.r)
+        rest = bl.drop(1)
+    }
+    out.addAll(rest)
+}
+
+private fun assemble(lines: List<CLine>, units: List<IntArray>, chunks: List<IntArray>, done: List<String?>): List<Blk> {
+    val out = ArrayList<Blk>()
+    for (c in chunks.indices) {
+        val s = done.getOrNull(c)
+        val bl = if (s != null && s.startsWith("M:")) mdBlocks(s.substring(2)) else unitBlocks(lines, units, chunks[c], s)
+        appendMerged(out, bl)
+    }
     if (out.isEmpty()) out.add(Blk())
     if (out.last().isObj || out.last().isMulti) out.add(Blk())
     return out
@@ -543,7 +676,7 @@ class ConvState {
 }
 
 @Serializable
-class ConvCk(val nid: String, val src: String, val n: Int = 0, val done: List<String?> = emptyList())
+class ConvCk(val nid: String, val src: String, val n: Int = 0, val done: List<String?> = emptyList(), val mode: Int = 1)
 
 private class Pause(msg: String) : Exception(msg)
 
@@ -604,7 +737,7 @@ object PdfConv {
     }
 
     /** Mulai konversi PDF [srcId]. Membuat catatan baru, pindah ke sana (geser masuk), lalu bekerja di latar belakang. */
-    fun begin(vm: AppVM, srcId: String): Boolean {
+    fun begin(vm: AppVM, srcId: String, mode: Int = 1): Boolean {
         val src = vm.note(srcId) ?: return false
         if (map.values.any { it.phase < 2 }) {
             vm.show("Another PDF is still being converted")
@@ -616,7 +749,7 @@ object PdfConv {
         val n = Note(id = id, t = src.t, x = "Converting PDF…", u = t, c = t, lb = listOfNotNull(vm.filter))
         vm.docs.add(0, n)
         vm.save()
-        saveCk(ctx, ConvCk(id, src.pdf))
+        saveCk(ctx, ConvCk(id, src.pdf, mode = mode))
         val st = ConvState()
         map[id] = st
         under[id] = srcId
@@ -707,10 +840,13 @@ object PdfConv {
         st.msg = ""
     }
 
-    /** Minta Groq menentukan jenis blok untuk satu potongan. Mengembalikan "n kode;..." atau "~" (pakai aturan lokal). */
-    private suspend fun planChunk(key: String, models: List<String>, user: String, nLines: Int, st: ConvState): String {
-        val maxTok = (nLines * 7 + 60).coerceIn(120, 1400)
+    /** Satu potongan: panggil Groq (dengan model cadangan dan penanganan limit) sampai [accept] menerima jawabannya. "~" = pakai aturan lokal. */
+    private suspend fun planChunk(
+        key: String, models: List<String>, sys: String, user: String, maxTok: Int, st: ConvState,
+        accept: (String) -> String?
+    ): String {
         val skip = HashSet<String>()
+        val tries = HashMap<String, Int>()
         var net = 0
         var rl = 0
         while (true) {
@@ -725,10 +861,13 @@ object PdfConv {
             }
             st.model = m.substringAfterLast('/')
             try {
-                val raw = withContext(Dispatchers.IO) { Groq.chatOnce(key, m, SYS, user, maxTok) }
-                val p = if (raw == null) null else parseCodes(raw, nLines)
+                val temp = if ((tries[m] ?: 0) == 0) 0.0 else 0.3
+                val raw = withContext(Dispatchers.IO) { Groq.chatOnce(key, m, sys, user, maxTok, temp) }
+                val p = if (raw == null) null else accept(raw)
                 if (p != null) return p
-                skip.add(m)   // model ini tidak mengikuti format: coba model lain, atau aturan lokal
+                val t = (tries[m] ?: 0) + 1
+                tries[m] = t
+                if (t >= 2) skip.add(m)   // model ini dua kali tidak setia / tidak sesuai format: coba model lain, atau aturan lokal
             } catch (e: GroqException) {
                 when {
                     e.code == 429 -> {
@@ -766,7 +905,8 @@ object PdfConv {
         val lines = ex.lines
         if (lines.none { !it.noise }) throw Pause("This PDF has no extractable text (it may be a scan), so it can't be converted.")
         val units = makeUnits(lines)
-        val chunks = makeChunks(lines, units)
+        val full = ck0.mode == 1
+        val chunks = makeChunks(lines, units, full)
         val done = ArrayList<String?>()
         if (ck0.n == chunks.size && ck0.done.size == chunks.size) done.addAll(ck0.done) else repeat(chunks.size) { done.add(null) }
         st.total = chunks.size
@@ -788,10 +928,23 @@ object PdfConv {
                 map.remove(id); jobs.remove(id)
                 return
             }
-            val prev = if (i > 0) done[i - 1]?.trimEnd(';')?.substringAfterLast(' ')?.takeIf { it.isNotEmpty() && it != "~" } else null
-            val codes = planChunk(key, models, promptOf(lines, units, chunks[i], prev), chunks[i].size, st)
+            val codes: String
+            if (full) {
+                val raw = rawOf(lines, units, chunks[i])
+                if (raw.isBlank()) codes = "~"
+                else {
+                    val want = wordsOf(raw)
+                    codes = planChunk(key, models, SYS_MD, raw, (raw.length / 2 + 400).coerceIn(600, 3600), st) { out ->
+                        val m = unfenceMd(out)
+                        if (m.isNotBlank() && wordsOf(m) == want) "M:$m" else null
+                    }
+                }
+            } else {
+                val prev = if (i > 0) done[i - 1]?.trimEnd(';')?.substringAfterLast(' ')?.takeIf { it.isNotEmpty() && it != "~" && !it.startsWith("M:") } else null
+                codes = planChunk(key, models, SYS, promptOf(lines, units, chunks[i], prev), (chunks[i].size * 7 + 60).coerceIn(120, 1400), st) { parseCodes(it, chunks[i].size) }
+            }
             done[i] = codes
-            withContext(Dispatchers.IO) { saveCk(ctx, ConvCk(id, ck0.src, chunks.size, done.toList())) }
+            withContext(Dispatchers.IO) { saveCk(ctx, ConvCk(id, ck0.src, chunks.size, done.toList(), ck0.mode)) }
             st.done = done.count { it != null }
             delay(900)   // jaga RPM Groq gratisan
         }
@@ -1022,4 +1175,32 @@ private fun ConvBody(vm: AppVM, id: String, s: ConvState, fadeA: Float, busy: Bo
             dismissButton = { TextButton(onClick = { askCancel = false }) { T("Keep going", 16f, 700, pal.osv) } }
         )
     }
+}
+
+@Composable
+fun ConvModeDialog(onDismiss: () -> Unit, onPick: (Int) -> Unit) {
+    val pal = LocalPal.current
+    @Composable
+    fun Opt(title: String, sub: String, mode: Int) {
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(pal.c4)
+                .clickable { onPick(mode) }.padding(horizontal = 18.dp, vertical = 14.dp)
+        ) {
+            T(title, 16f, 800, pal.os)
+            T(sub, 13f, 400, pal.osv, Modifier.padding(top = 2.dp), lh = 1.3f)
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = pal.c3,
+        title = { T("Convert to Note", 22f, 900, pal.os) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Opt("Best quality", "Groq lays out the text itself: tidy paragraphs, headings, lists and tables. Every result is checked word by word. Uses more of your free Groq limit, so a long book can take a few days (it resumes where it stopped).", 1)
+                Opt("Fast", "Groq only labels each paragraph. Much lighter on the free limit, but tables and spacing are less polished.", 0)
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { T("Cancel", 16f, 700, pal.osv) } }
+    )
 }
