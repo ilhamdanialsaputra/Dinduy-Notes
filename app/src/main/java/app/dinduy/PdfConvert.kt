@@ -547,29 +547,33 @@ private fun tryTable(L: List<CLine>, i0: Int, pitch: Float): Tab? {
     val full = strict.filter { it.cells == m }
     if (full.size < 2 || m > 12) return null
 
-    // pita kolom dari baris yang jumlah selnya paling umum
-    val iv = ArrayList<FloatArray>()
-    for (r in full) for (c in 0 until m) iv.add(floatArrayOf(r.cs[2 * c], r.cs[2 * c + 1]))
-    val bands = ArrayList<FloatArray>()
-    for (a in iv.sortedBy { it[0] }) {
-        val b = bands.lastOrNull()
-        if (b != null && a[0] <= b[1]) { if (a[1] > b[1]) b[1] = a[1] } else bands.add(floatArrayOf(a[0], a[1]))
-    }
-    if (bands.size < 2 || bands.size > 12) return null
+    // pita kolom dari baris yang jumlah selnya paling umum; baris judul (sering rata tengah) boleh tidak sejajar
     fun near(v: List<Float>): Float {
-        val s = v.sorted()
-        val med = s[s.size / 2]
+        val sv = v.sorted()
+        val med = sv[sv.size / 2]
         return v.count { abs(it - med) <= 7f }.toFloat() / v.size
     }
-    for (b in bands) {
-        val st = ArrayList<Float>(); val en = ArrayList<Float>(); val ce = ArrayList<Float>()
-        for (r in full) for (c in 0 until m) {
-            val s = r.cs[2 * c]; val e = r.cs[2 * c + 1]; val mid = (s + e) / 2f
-            if (mid >= b[0] && mid <= b[1]) { st.add(s); en.add(e); ce.add(mid) }
+    fun bandsOf(src: List<CLine>): List<FloatArray>? {
+        val iv = ArrayList<FloatArray>()
+        for (r in src) for (c in 0 until m) iv.add(floatArrayOf(r.cs[2 * c], r.cs[2 * c + 1]))
+        val bs = ArrayList<FloatArray>()
+        for (a in iv.sortedBy { it[0] }) {
+            val b = bs.lastOrNull()
+            if (b != null && a[0] <= b[1]) { if (a[1] > b[1]) b[1] = a[1] } else bs.add(floatArrayOf(a[0], a[1]))
         }
-        if (st.size < 2) return null
-        if (max(near(st), max(near(en), near(ce))) < .75f) return null   // bukan kolom sejajar (mis. spasi rata kanan-kiri)
+        if (bs.size < 2 || bs.size > 12) return null
+        for (b in bs) {
+            val st = ArrayList<Float>(); val en = ArrayList<Float>(); val ce = ArrayList<Float>()
+            for (r in src) for (c in 0 until m) {
+                val s0 = r.cs[2 * c]; val e0 = r.cs[2 * c + 1]; val mid = (s0 + e0) / 2f
+                if (mid >= b[0] && mid <= b[1]) { st.add(s0); en.add(e0); ce.add(mid) }
+            }
+            if (st.size < 2) return null
+            if (max(near(st), max(near(en), near(ce))) < .75f) return null
+        }
+        return bs
     }
+    val bands = bandsOf(full) ?: (if (full.size >= 3) bandsOf(full.drop(1)) else null) ?: return null
     fun bandOf(s: Float, e: Float): Int {
         var best = -1
         var bo = 0f
@@ -632,10 +636,15 @@ private fun tryTable(L: List<CLine>, i0: Int, pitch: Float): Tab? {
 }
 
 /** Apakah [l] memulai unit baru (paragraf / judul / butir) setelah [p]. */
+private val RX_BABONLY = Regex("^(bab|chapter|bagian)\\s+[IVXLC\\d]+$", RegexOption.IGNORE_CASE)
+private val RX_REF = Regex("^\\p{Lu}[\\p{L}'’\\-]+(\\s\\p{Lu}[\\p{L}'’\\-]+)?,\\s+(\\p{Lu}\\.|&)")
+
 private fun startsNew(cur: List<CLine>, l: CLine): Boolean {
     val p = cur[cur.size - 1]
     if (l.mk != 0) return true
     if (abs(l.rel - p.rel) > .12f) return true
+    if (cur.size == 1 && RX_BABONLY.matches(p.t.trim())) return false          // "BAB I" + "PENDAHULUAN" = satu judul
+    if (RX_REF.containsMatchIn(l.t) && p.t.trimEnd().endsWith(".")) return true   // entri daftar pustaka baru ("Nama, A. (2020)...")
     if (LEAD.containsMatchIn(l.t) || LEAD.containsMatchIn(p.t)) return true
     val ends = TERM.containsMatchIn(p.t)
     val first = l.t.firstOrNull()
@@ -740,7 +749,7 @@ private fun localRole(u: U): Char {
         2, 3 -> return if (head && n <= 2) 'H' else 'L'
     }
     if (f.foot || f.rel < .9f) return 'P'
-    if (boldAll && f.center && !se && len < 300) return 'H'
+    if (boldAll && !se && len < 300 && n <= 6) return 'H'   // blok tebal tanpa titik akhir = judul
     if (f.rel >= 1.25f && n <= 3 && len <= 150 && !se) return 'H'
     if (len < 100 && !se && (boldAll || f.rel > 1.04f) && RX_HDR.containsMatchIn(t)) return 'H'
     if (n >= 3 || len >= 160 || se) return 'P'
@@ -947,7 +956,7 @@ private fun normBib(out: MutableList<Blk>) {
 private data class HS(val sz: Int, val b: Boolean, val i: Boolean, val c: Boolean, val cls: Int)
 
 private val RX_N_BAB = Regex("^(bab|chapter)\\b", RegexOption.IGNORE_CASE)
-private val RX_N_ROM = Regex("^[IVXL]+\\.\\s")
+private val RX_N_ROM = Regex("^[IVXL]{2,}\\.\\s")
 private val RX_N_LET = Regex("^[A-Za-z][.)]\\s")
 private val RX_N_3 = Regex("^\\d+\\.\\d+\\.\\d+")
 private val RX_N_2 = Regex("^\\d+\\.\\d+")
@@ -961,6 +970,7 @@ private fun numClass(t: String): Int = when {
     RX_N_3.containsMatchIn(t) -> 5
     RX_N_2.containsMatchIn(t) -> 4
     RX_N_1.containsMatchIn(t) -> 3
+    isCaps(t) -> 0   // judul HURUF BESAR tanpa nomor (DAFTAR PUSTAKA, judul dokumen) sejajar dengan BAB
     else -> 9
 }
 
@@ -993,16 +1003,25 @@ private fun assemble(an: An, dec: Map<Int, Char>?): List<Blk> {
     val lvl = HashMap<HS, Int>()
     sigs.forEachIndexed { i, s -> lvl[s] = (i + 1).coerceAtMost(4) }
 
-    // kedalaman butir dari indentasi (dikelompokkan di seluruh dokumen)
-    val dx = us.filter { it.role == 'L' }.map { (it.ls[0].x - it.ls[0].lm).coerceAtLeast(0f) }.sorted()
-    val reps = ArrayList<Float>()
-    for (v in dx) if (reps.isEmpty() || v - reps[reps.size - 1] > 6f) reps.add(v)
-    fun depthOf(u: U): Int {
-        val v = (u.ls[0].x - u.ls[0].lm).coerceAtLeast(0f)
-        var d = 0
-        for (k in reps.indices) if (v >= reps[k] - 3f) d = k
-        return d.coerceIn(0, 3)
+    // kedalaman butir dari indentasi, dihitung per deret butir berurutan (bullet di bawah daftar bernomor tetap tingkat 1)
+    val depth = HashMap<U, Int>()
+    var di = 0
+    while (di < us.size) {
+        if (us[di].role != 'L') { di++; continue }
+        var dj = di
+        while (dj < us.size && us[dj].role == 'L') dj++
+        val vs = (di until dj).map { (us[it].ls[0].x - us[it].ls[0].lm).coerceAtLeast(0f) }.sorted()
+        val reps = ArrayList<Float>()
+        for (v in vs) if (reps.isEmpty() || v - reps[reps.size - 1] > 6f) reps.add(v)
+        for (k in di until dj) {
+            val v = (us[k].ls[0].x - us[k].ls[0].lm).coerceAtLeast(0f)
+            var d = 0
+            for (q in reps.indices) if (v >= reps[q] - 3f) d = q
+            depth[us[k]] = d.coerceIn(0, 3)
+        }
+        di = dj
     }
+    fun depthOf(u: U): Int = depth[u] ?: 0
 
     val out = ArrayList<Blk>()
     for (u in us) {
