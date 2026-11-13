@@ -810,6 +810,33 @@ private fun headerRow(above: List<CLine>, first: CLine, bands: List<FloatArray>,
     return n to row
 }
 
+private const val PART_MAX = 600
+
+/** Pecah daftar blok menjadi beberapa bagian (sekitar [PART_MAX] blok), dipotong di judul bab terdekat. */
+private fun splitParts(bl: List<Blk>): List<List<Blk>> {
+    if (bl.size <= PART_MAX * 4 / 3) return listOf(bl)
+    val res = ArrayList<List<Blk>>()
+    var st = 0
+    while (bl.size - st > PART_MAX * 4 / 3) {
+        val lo = st + PART_MAX * 6 / 10
+        val hi = st + PART_MAX * 12 / 10
+        var cut = -1
+        var bestLv = 99
+        var bestD = Int.MAX_VALUE
+        for (i in lo..hi) {
+            val b = bl[i]
+            if (b.ty != "h") continue
+            val d = abs(i - (st + PART_MAX))
+            if (b.lv < bestLv || (b.lv == bestLv && d < bestD)) { cut = i; bestLv = b.lv; bestD = d }
+        }
+        if (cut < 0) cut = st + PART_MAX
+        res.add(bl.subList(st, cut).toList())
+        st = cut
+    }
+    res.add(bl.subList(st, bl.size).toList())
+    return res
+}
+
 /** Apakah [l] memulai unit baru (paragraf / judul / butir) setelah [p]. */
 private val RX_BABONLY = Regex("^(bab|chapter|bagian)\\s+[IVXLC\\d]+$", RegexOption.IGNORE_CASE)
 private val RX_REF = Regex("^\\p{Lu}[\\p{L}'’\\-]+(\\s\\p{Lu}[\\p{L}'’\\-]+)?,\\s+(\\p{Lu}\\.|&)")
@@ -1547,8 +1574,22 @@ object PdfConv {
             map.remove(id); jobs.remove(id)
             return
         }
+        // editor merender semua blok sekaligus: buku tebal dipecah per bab menjadi beberapa catatan supaya tidak crash
+        val parts = splitParts(blocks)
         withContext(Dispatchers.Main) {
-            vm.upd(id) { it.copy(bl = blocks, x = plainOf(blocks), u = System.currentTimeMillis()) }
+            val now = System.currentTimeMillis()
+            val base = vm.note(id)?.t ?: ""
+            if (parts.size == 1) {
+                vm.upd(id) { it.copy(bl = blocks, x = plainOf(blocks), u = now) }
+            } else {
+                val lb = vm.note(id)?.lb ?: emptyList()
+                for (k in parts.size - 1 downTo 1) {
+                    val pb = parts[k]
+                    vm.docs.add(0, Note(id = uid(), t = base + " (" + (k + 1) + "/" + parts.size + ")", bl = pb, x = plainOf(pb), u = now - k, c = now, lb = lb))
+                }
+                vm.save()
+                vm.upd(id) { it.copy(t = base + " (1/" + parts.size + ")", bl = parts[0], x = plainOf(parts[0]), u = now) }
+            }
         }
         withContext(Dispatchers.IO) { try { ckFile(ctx, id).delete() } catch (e: Exception) { } }
         val title = vm.note(id)?.t ?: ""
@@ -1556,7 +1597,8 @@ object PdfConv {
         jobs.remove(id)
         Bg.done(ctx, "Note ready", title)
         val tail = if (fb) ". Groq failed (" + (if (why.isBlank()) "unknown" else why) + "), so a few headings were guessed locally" else ""
-        if (vm.nav.stack.none { it is Scr.Note && it.id == id }) vm.show("Your converted note is ready$tail")
+        val sp = if (parts.size > 1) ", split into " + parts.size + " notes" else ""
+        if (vm.nav.stack.none { it is Scr.Note && it.id == id }) vm.show("Your converted note is ready$sp$tail")
         else if (fb) vm.show("Done$tail")
     }
 }
