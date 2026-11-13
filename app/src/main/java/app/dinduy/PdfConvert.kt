@@ -122,6 +122,9 @@ class CLine(
     var lm = 0f
     var rm = 0f
     var mk = 0               // penanda butir: 1 simbol, 2 angka, 3 huruf
+    var wp = IntArray(0)     // indeks awal tiap kata di [t]
+    var wa = FloatArray(0)   // x awal tiap kata
+    var wb = FloatArray(0)   // x akhir tiap kata
     val cells: Int get() = cs.size / 2
 }
 
@@ -146,6 +149,9 @@ private class LineGrab : PDFTextStripper() {
     private val bf = ArrayList<Boolean>()
     private val itf = ArrayList<Boolean>()
     private val bounds = ArrayList<Float>()
+    private val wps = ArrayList<Int>()
+    private val wxa = ArrayList<Float>()
+    private val wxb = ArrayList<Float>()
     private var sz = 0f
     private var x0 = 0f
     private var y0 = 0f
@@ -185,6 +191,7 @@ private class LineGrab : PDFTextStripper() {
                 bounds.add(lastEnd); bounds.add(first.xDirAdj)
             }
         }
+        val ws = sb.length
         for (tp in textPositions) {
             val u = tp.unicode ?: continue
             val st = styleOf(tp)
@@ -195,6 +202,7 @@ private class LineGrab : PDFTextStripper() {
         }
         val last = textPositions[textPositions.size - 1]
         lastEnd = last.xDirAdj + last.widthDirAdj
+        if (sb.length > ws) { wps.add(ws); wxa.add(first.xDirAdj); wxb.add(lastEnd) }
     }
 
     override fun writeWordSeparator() { sb.append(' '); bf.add(false); itf.add(false) }
@@ -220,7 +228,7 @@ private class LineGrab : PDFTextStripper() {
     }
 
     private fun flushLine() {
-        if (sb.isEmpty()) { bounds.clear(); return }
+        if (sb.isEmpty()) { bounds.clear(); wps.clear(); wxa.clear(); wxb.clear(); return }
         var a = 0
         var b = sb.length
         while (a < b && (sb[a] == ' ' || sb[a] == '¦')) a++
@@ -235,9 +243,13 @@ private class LineGrab : PDFTextStripper() {
             cs[cs.size - 1] = lastEnd
             val l = CLine(sb.substring(a, b), sp, sz, x0, y0, pg, cs)
             l.xe = lastEnd
+            val nw = wps.size
+            l.wp = IntArray(nw) { wps[it] - a }
+            l.wa = FloatArray(nw) { wxa[it] }
+            l.wb = FloatArray(nw) { wxb[it] }
             out.add(l)
         }
-        sb.setLength(0); bf.clear(); itf.clear(); bounds.clear()
+        sb.setLength(0); bf.clear(); itf.clear(); bounds.clear(); wps.clear(); wxa.clear(); wxb.clear()
         sz = 0f; lastEnd = -1f
     }
 }
@@ -296,6 +308,7 @@ private fun mergeMarker(l: CLine): CLine {
     for (k in 3 until l.cs.size) cs[k - 2] = l.cs[k]
     val n = CLine(l.t.substring(0, i) + " " + l.t.substring(i + 1), l.sp, l.sz, l.x, l.y, l.page, cs)
     n.xe = l.xe
+    n.wp = l.wp; n.wa = l.wa; n.wb = l.wb
     return n
 }
 
@@ -374,6 +387,69 @@ private fun splitCols(ls: List<CLine>, pw: Float): List<CLine> {
     return out
 }
 
+/** Potong baris di jarak antarkata nomor [cuts] (jadi '¦') dan hitung ulang posisi sel. */
+private fun recut(l: CLine, cuts: Set<Int>): CLine {
+    val sb = StringBuilder(l.t)
+    for (k in cuts) { val i = l.wp[k] - 1; if (i in 0 until sb.length && sb[i] == ' ') sb.setCharAt(i, '¦') }
+    val cl = ArrayList<Float>()
+    var st = l.wa[0]
+    for (k in 1 until l.wp.size) {
+        val i = l.wp[k] - 1
+        if (i in 0 until sb.length && sb[i] == '¦') { cl.add(st); cl.add(l.wb[k - 1]); st = l.wa[k] }
+    }
+    cl.add(st); cl.add(l.wb[l.wp.size - 1])
+    val n = CLine(sb.toString(), l.sp, l.sz, l.x, l.y, l.page, cl.toFloatArray())
+    n.xe = l.xe; n.col = l.col; n.wp = l.wp; n.wa = l.wa; n.wb = l.wb
+    return n
+}
+
+/**
+ * Tabel dengan jarak antarkolom sempit: kolom yang sudah terbukti (talang jarak lebar yang sama di >= 3 baris) dipakai
+ * untuk memotong baris tetangga yang jaraknya lebih sempit, jadi judul dan baris tabel yang "tidak kelihatan" ikut masuk.
+ */
+private fun reseg(raw: List<CLine>): List<CLine> {
+    val out = ArrayList<CLine>(raw)
+    for (iter in 0 until 3) {
+        val groups = HashMap<Int, ArrayList<Int>>()
+        for (i in out.indices) groups.getOrPut(out[i].page * 3 + out[i].col) { ArrayList() }.add(i)
+        var changed = false
+        for ((_, ix) in groups) {
+            val ent = ArrayList<FloatArray>()
+            for (i in ix) { val l = out[i]; for (c in 0 until l.cells - 1) ent.add(floatArrayOf((l.cs[2 * c + 1] + l.cs[2 * c + 2]) / 2f, l.y)) }
+            if (ent.size < 3) continue
+            ent.sortBy { it[0] }
+            var s0 = 0
+            while (s0 < ent.size) {
+                var e0 = s0 + 1
+                while (e0 < ent.size && ent[e0][0] - ent[s0][0] <= 4f) e0++
+                if (e0 - s0 >= 3) {
+                    val mids = (s0 until e0).map { ent[it][0] }.sorted()
+                    val gx = mids[mids.size / 2]
+                    val ys = (s0 until e0).map { ent[it][1] }
+                    val ylo = ys.minOrNull() ?: 0f
+                    val yhi = ys.maxOrNull() ?: 0f
+                    for (i in ix) {
+                        val l = out[i]
+                        if (l.wp.size < 2) continue
+                        val win = l.sz * 1.9f
+                        if (l.y < ylo - win || l.y > yhi + win) continue
+                        for (k in 0 until l.wp.size - 1) {
+                            if (l.wb[k] <= gx + 1.5f && l.wa[k + 1] >= gx - 1.5f && l.wa[k + 1] - l.wb[k] >= 2.5f) {
+                                val ci = l.wp[k + 1] - 1
+                                if (ci in 0 until l.t.length && l.t[ci] == ' ') { out[i] = recut(l, setOf(k + 1)); changed = true }
+                                break
+                            }
+                        }
+                    }
+                }
+                s0 = e0
+            }
+        }
+        if (!changed) break
+    }
+    return out
+}
+
 // ---------------------------------------------------------------- ekstraksi + statistik dokumen
 
 private fun extract(ctx: Context, file: File, check: () -> Unit, progress: (Int, Int) -> Unit): Extracted {
@@ -401,8 +477,9 @@ private fun extract(ctx: Context, file: File, check: () -> Unit, progress: (Int,
     } finally {
         try { d.close() } catch (e: Throwable) { }
     }
-    val raw = ArrayList<CLine>()
-    for (p in pages.indices) raw.addAll(splitCols(pages[p].map { mergeMarker(it) }, pws[p]))
+    val raw0 = ArrayList<CLine>()
+    for (p in pages.indices) raw0.addAll(splitCols(pages[p].map { mergeMarker(it) }, pws[p]))
+    val raw = reseg(raw0)
     if (raw.isEmpty()) return Extracted(raw, title, 10f, 12f)
     for (l in raw) { l.bold = cover(l, K.B) >= .9f; l.ital = cover(l, K.I) >= .9f }
 
@@ -650,13 +727,19 @@ private fun startsNew(cur: List<CLine>, l: CLine): Boolean {
     val first = l.t.firstOrNull()
     val pHead = p.bold && p.short
     if (l.page != p.page || l.col != p.col) {
-        val cont = !pHead && !l.indent && !(ends && p.short) &&
+        val ind = l.indent && cur[0].mk == 0   // lanjutan butir yang menjorok bukan awal paragraf
+        val cont = !pHead && !ind && !(ends && p.short) &&
             (first?.isLowerCase() == true || (!ends && !p.short))
         return !cont
     }
     // judul / blok rata tengah: baris baru kecuali baris sebelumnya hampir penuh (judul yang membungkus)
     if (p.center && l.center) return (p.xe - p.x) < .55f * (p.rm - p.lm)
     if (p.center != l.center) return true
+    // baris-baris pendek yang berdiri sendiri (sampul, alamat): tiap baris satu unit
+    if (p.bold && l.bold && p.short && isCaps(p.t)) return true
+    val wpf = (p.xe - p.x) / max(1f, p.rm - p.lm)
+    val wlf = (l.xe - l.x) / max(1f, l.rm - l.lm)
+    if (p.mk == 0 && cur[0].mk == 0 && wpf < .5f && wlf < .6f) return true
     // daftar pustaka (hanging indent): baris kembali ke margin setelah baris menjorok = entri baru
     if (cur.size >= 2 && cur[1].x - cur[0].x > 8f && l.x < cur[1].x - 6f) return true
     if (l.gap && (ends || p.short || pHead || p.bold)) return true
