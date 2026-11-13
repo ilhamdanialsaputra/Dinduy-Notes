@@ -1925,7 +1925,6 @@ fun PdfMenuPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
     val pinned = d?.p == true
     val archived = d?.a == true
     var renaming by remember { mutableStateOf(false) }
-    var keyDlg by remember { mutableStateOf(false) }
     val mode = if (PdfBus.mode < 0) ctx.getSharedPreferences("dinduy", 0).getInt("pdfmode", 0) else PdfBus.mode
     val fname = (d?.t?.ifBlank { null } ?: "Document").replace(Regex("[\\\\/:*?\"<>|]"), "_") + ".pdf"
     val file = d?.let { PdfFiles.file(ctx, it.pdf) }
@@ -1976,14 +1975,6 @@ fun PdfMenuPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
             MRow(POS_TOP, "search", "Search in PDF", if (PdfBus.hasText) "Find and highlight any word" else "Not available: this PDF is a scan") {
                 if (PdfBus.hasText) { nav.pop(); PdfBus.find++ } else vm.show("This PDF is a scan, so there's no text to search")
             }
-            MRow(
-                POS_MID, "rows", "Convert to Note",
-                if (PdfBus.hasText) "Rebuild this PDF as a clean, structured note" else "Not available: this PDF is a scan",
-                enabled = PdfBus.hasText
-            ) {
-                if (!PdfBus.hasText) vm.show("This PDF is a scan, so it can't be converted")
-                else if (vm.gqSet) PdfConv.begin(vm, id) else keyDlg = true
-            }
             MRow(POS_MID, "pin", if (pinned) "Unpin" else "Pin", "Pinned notes show at the top") {
                 vm.mark(listOf(id), if (pinned) "Unpinned" else "Pinned") { it.copy(p = !pinned) }
             }
@@ -2007,7 +1998,6 @@ fun PdfMenuPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
             }
         }
     }
-    if (keyDlg) GroqKeyDialog(vm, { keyDlg = false }) { keyDlg = false; PdfConv.begin(vm, id) }
     if (renaming) {
         val init = d?.t ?: ""
         var tf by remember { mutableStateOf(TextFieldValue(init, TextRange(init.length))) }
