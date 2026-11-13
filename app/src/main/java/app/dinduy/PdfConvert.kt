@@ -403,46 +403,81 @@ private fun recut(l: CLine, cuts: Set<Int>): CLine {
     return n
 }
 
+private fun isMarkerText(head: String): Boolean {
+    if (head.isEmpty() || head.length > 4) return false
+    val hs = "$head "
+    return RX_GLYPH.matches(head) || RX_ASCII.containsMatchIn(hs) || RX_NUM.containsMatchIn(hs) || RX_LET.containsMatchIn(hs)
+}
+
+private fun crosses(l: CLine, gx: Float): Boolean {
+    for (k in l.wp.indices) if (l.wa[k] < gx - 1f && l.wb[k] > gx + 1f) return true
+    return false
+}
+
 /**
- * Tabel dengan jarak antarkolom sempit: kolom yang sudah terbukti (talang jarak lebar yang sama di >= 3 baris) dipakai
- * untuk memotong baris tetangga yang jaraknya lebih sempit, jadi judul dan baris tabel yang "tidak kelihatan" ikut masuk.
+ * Kolom tabel yang jaraknya sempit atau tidak sama persis di tiap baris (rata kanan / tengah): cari SALURAN KOSONG vertikal,
+ * yaitu posisi x yang jatuh di jarak antarkata pada >= 3 baris dan hampir tidak dilintasi kata di antara baris-baris itu.
+ * Baris di sekitarnya (judul, baris pendek) dipotong di saluran yang sama, jadi seluruh tabel terbaca utuh.
  */
 private fun reseg(raw: List<CLine>): List<CLine> {
     val out = ArrayList<CLine>(raw)
+    val W = 1600
     for (iter in 0 until 3) {
         val groups = HashMap<Int, ArrayList<Int>>()
         for (i in out.indices) groups.getOrPut(out[i].page * 3 + out[i].col) { ArrayList() }.add(i)
         var changed = false
         for ((_, ix) in groups) {
-            val ent = ArrayList<FloatArray>()
-            for (i in ix) { val l = out[i]; for (c in 0 until l.cells - 1) ent.add(floatArrayOf((l.cs[2 * c + 1] + l.cs[2 * c + 2]) / 2f, l.y)) }
-            if (ent.size < 3) continue
-            ent.sortBy { it[0] }
-            var s0 = 0
-            while (s0 < ent.size) {
-                var e0 = s0 + 1
-                while (e0 < ent.size && ent[e0][0] - ent[s0][0] <= 4f) e0++
-                if (e0 - s0 >= 3) {
-                    val mids = (s0 until e0).map { ent[it][0] }.sorted()
-                    val gx = mids[mids.size / 2]
-                    val ys = (s0 until e0).map { ent[it][1] }
-                    val ylo = ys.minOrNull() ?: 0f
-                    val yhi = ys.maxOrNull() ?: 0f
-                    for (i in ix) {
-                        val l = out[i]
-                        if (l.wp.size < 2) continue
-                        val win = l.sz * 1.9f
-                        if (l.y < ylo - win || l.y > yhi + win) continue
-                        for (k in 0 until l.wp.size - 1) {
-                            if (l.wb[k] <= gx + 1.5f && l.wa[k + 1] >= gx - 1.5f && l.wa[k + 1] - l.wb[k] >= 2.5f) {
-                                val ci = l.wp[k + 1] - 1
-                                if (ci in 0 until l.t.length && l.t[ci] == ' ') { out[i] = recut(l, setOf(k + 1)); changed = true }
-                                break
+            if (ix.size < 3) continue
+            val ents = ArrayList<FloatArray>()   // [awal, akhir, y]
+            val arr = IntArray(W + 2)
+            for (i in ix) {
+                val l = out[i]
+                val thr = max(6f, l.sz * .55f)
+                for (k in 0 until l.wp.size - 1) {
+                    val gs = l.wb[k]
+                    val ge = l.wa[k + 1]
+                    if (ge - gs < thr) continue
+                    ents.add(floatArrayOf(gs, ge, l.y))
+                    val a0 = max(0, gs.toInt())
+                    val b0 = min(W, ge.toInt() + 1)
+                    for (x in a0..b0) arr[x]++
+                }
+            }
+            if (ents.size < 3) continue
+            var x = 0
+            while (x <= W) {
+                if (arr[x] < 3) { x++; continue }
+                var y = x
+                var mx = 0
+                while (y <= W && arr[y] >= 3) { if (arr[y] > mx) mx = arr[y]; y++ }
+                var p0 = -1
+                var p1 = -1
+                for (z in x until y) if (arr[z] == mx) { if (p0 < 0) p0 = z; p1 = z }
+                val gx = (p0 + p1) / 2f + .5f
+                x = y
+                var ylo = Float.MAX_VALUE
+                var yhi = -Float.MAX_VALUE
+                for (e in ents) if (e[0] <= gx && e[1] >= gx) { ylo = min(ylo, e[2]); yhi = max(yhi, e[2]) }
+                if (ylo > yhi) continue
+                var tot = 0
+                var cr = 0
+                for (i in ix) { val l = out[i]; if (l.y < ylo - .5f || l.y > yhi + .5f) continue; tot++; if (crosses(l, gx)) cr++ }
+                if (tot < 3 || cr * 8 > tot) continue
+                for (i in ix) {
+                    val l = out[i]
+                    if (l.wp.size < 2) continue
+                    val win = l.sz * 1.9f
+                    if (l.y < ylo - win || l.y > yhi + win) continue
+                    for (k in 0 until l.wp.size - 1) {
+                        if (l.wb[k] <= gx + 1f && l.wa[k + 1] >= gx - 1f && l.wa[k + 1] - l.wb[k] >= 2.5f) {
+                            val ci = l.wp[k + 1] - 1
+                            if (ci in 0 until l.t.length && l.t[ci] == ' ' && !isMarkerText(l.t.substring(0, ci).trim())) {
+                                out[i] = recut(l, setOf(k + 1)); changed = true
                             }
+                            break
                         }
                     }
                 }
-                s0 = e0
             }
         }
         if (!changed) break
@@ -609,7 +644,7 @@ private fun tryTable(L: List<CLine>, i0: Int, pitch: Float): Tab? {
         if (l.page != f.page || l.col != f.col) break
         if (j > i0 && l.y - L[j - 1].y > pitch * 2.6f) break
         if (l.cells < 2) {
-            if (l.cells == 1 && rows.isNotEmpty() && l.t.length < 60 && l.mk == 0 && l.y - L[j - 1].y <= pitch * 1.6f) { rows.add(l); j++; continue }
+            if (l.cells == 1 && rows.isNotEmpty() && l.mk == 0 && l.y - L[j - 1].y <= pitch * 1.6f) { rows.add(l); j++; continue }
             break
         }
         rows.add(l); j++
@@ -618,9 +653,10 @@ private fun tryTable(L: List<CLine>, i0: Int, pitch: Float): Tab? {
     if (strict.size < 2) return null
     val freq = HashMap<Int, Int>()
     for (r in strict) freq[r.cells] = (freq[r.cells] ?: 0) + 1
+    // jumlah sel baris penuh = yang terbesar yang muncul >= 2 kali (baris lanjutan punya sel lebih sedikit)
     var m = 0
-    var mc = -1
-    for ((k, v) in freq) if (v > mc || (v == mc && k > m)) { m = k; mc = v }
+    for ((k, v) in freq) if (v >= 2 && k > m) m = k
+    if (m == 0) { var mc = -1; for ((k, v) in freq) if (v > mc || (v == mc && k > m)) { m = k; mc = v } }
     val full = strict.filter { it.cells == m }
     if (full.size < 2 || m > 12) return null
 
@@ -694,7 +730,7 @@ private fun tryTable(L: List<CLine>, i0: Int, pitch: Float): Tab? {
             val t0 = r.t.trim()
             val last = tr[tr.size - 1]
             val ok = abs(r.cs[0] - bands[k][0]) <= 8f && (!varied || tight) &&
-                (k > 0 || t0.firstOrNull()?.isLowerCase() == true || !TERM.containsMatchIn(last[0].trimEnd()))
+                (k > 0 || t0.firstOrNull()?.isUpperCase() != true)
             if (!ok) break
             last[k] = if (last[k].isEmpty()) t0 else last[k] + " " + t0
             used++
@@ -736,9 +772,9 @@ private fun startsNew(cur: List<CLine>, l: CLine): Boolean {
     if (p.center && l.center) return (p.xe - p.x) < .55f * (p.rm - p.lm)
     if (p.center != l.center) return true
     // baris-baris pendek yang berdiri sendiri (sampul, alamat): tiap baris satu unit
-    if (p.bold && l.bold && p.short && isCaps(p.t)) return true
     val wpf = (p.xe - p.x) / max(1f, p.rm - p.lm)
     val wlf = (l.xe - l.x) / max(1f, l.rm - l.lm)
+    if (p.bold && l.bold && wpf < .68f && isCaps(p.t)) return true
     if (p.mk == 0 && cur[0].mk == 0 && wpf < .5f && wlf < .6f) return true
     // daftar pustaka (hanging indent): baris kembali ke margin setelah baris menjorok = entri baru
     if (cur.size >= 2 && cur[1].x - cur[0].x > 8f && l.x < cur[1].x - 6f) return true
