@@ -64,6 +64,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewModelScope
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.text.TextPosition
@@ -493,7 +494,8 @@ private fun extract(ctx: Context, file: File, check: () -> Unit, progress: (Int,
     val pws = ArrayList<Float>()
     val phs = ArrayList<Float>()
     var title: String? = null
-    val d = PDDocument.load(file)
+    // buku tebal: simpan struktur PDF di file sementara, bukan di heap (kalau tidak, OOM -> aplikasi tertutup)
+    val d = try { PDDocument.load(file, MemoryUsageSetting.setupTempFileOnly()) } catch (e: Throwable) { PDDocument.load(file) }
     try {
         val n = d.numberOfPages
         try { title = d.documentInformation?.title } catch (e: Throwable) { }
@@ -508,6 +510,7 @@ private fun extract(ctx: Context, file: File, check: () -> Unit, progress: (Int,
             try { g.getText(d) } catch (e: Throwable) { }
             pages.add(g.out); pws.add(w); phs.add(h)
             if (p % 4 == 0 || p == n - 1) progress(p + 1, n)
+            if (p % 40 == 39) System.gc()
         }
     } finally {
         try { d.close() } catch (e: Throwable) { }
