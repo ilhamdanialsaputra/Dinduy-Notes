@@ -632,7 +632,7 @@ private fun isCaps(t: String): Boolean {
 
 private fun sentEnd(t: String) = RX_SENT.containsMatchIn(t.trimEnd())
 
-private class Tab(val blk: Blk?, val toc: List<String>?, val end: Int)
+private class Tab(val blk: Blk?, val toc: List<String>?, val end: Int, val bands: List<FloatArray>? = null)
 
 /** Tabel dari geometri: baris berjarak lebar yang kolomnya sejajar. Sel yang membungkus ke baris bawah digabung. */
 private fun tryTable(L: List<CLine>, i0: Int, pitch: Float): Tab? {
@@ -745,7 +745,66 @@ private fun tryTable(L: List<CLine>, i0: Int, pitch: Float): Tab? {
         val v = tr.drop(1).map { it[c].trim() }.filter { it.isNotEmpty() }
         if (v.isNotEmpty() && v.count { RX_NUMC.matches(it) } * 4 >= v.size * 3) "right" else "left"
     }
-    return Tab(Blk(ty = "tbl", tb = tr.map { r -> r.map { Rt(it) } }, ca = al), null, i0 + used)
+    return Tab(Blk(ty = "tbl", tb = tr.map { r -> r.map { Rt(it) } }, ca = al), null, i0 + used, bands)
+}
+
+private fun bandIdx(bands: List<FloatArray>, s: Float, e: Float): Int {
+    var best = -1
+    var bo = 0f
+    for (k in bands.indices) { val o = min(e, bands[k][1]) - max(s, bands[k][0]); if (o > bo) { bo = o; best = k } }
+    if (best < 0) {
+        val mid = (s + e) / 2f
+        best = bands.indices.minByOrNull { abs((bands[it][0] + bands[it][1]) / 2f - mid) } ?: 0
+    }
+    return best
+}
+
+private fun wordText(l: CLine, k: Int): String {
+    val a = l.wp[k]
+    val b = if (k + 1 < l.wp.size) l.wp[k + 1] - 1 else l.t.length
+    return if (a in 0..b && b <= l.t.length) l.t.substring(a, b).trim() else ""
+}
+
+/**
+ * Baris judul tabel yang tertinggal di atas tabel (jarak antarkolomnya terlalu sempit untuk dikenali sebagai sel):
+ * tiap kata harus masuk satu kolom dan tidak ada kata yang melintasi celah antarkolom. Mengembalikan (jumlah baris, sel-sel judul).
+ */
+private fun headerRow(above: List<CLine>, first: CLine, bands: List<FloatArray>, pitch: Float): Pair<Int, Array<String>>? {
+    var n = 0
+    var multi = false
+    var nxt = first
+    var j = above.size - 1
+    while (j >= 0 && n < 3) {
+        val c = above[j]
+        if (c.page != nxt.page || c.col != nxt.col || nxt.y - c.y > pitch * 1.8f || c.wp.isEmpty() || c.mk != 0) break
+        if (RX_CAP.containsMatchIn(c.t)) break
+        val used = HashSet<Int>()
+        var bad = false
+        for (k in c.wp.indices) {
+            val mid = (c.wa[k] + c.wb[k]) / 2f
+            if (mid < bands[0][0] - 6f || mid > bands[bands.size - 1][1] + 6f) { bad = true; break }
+            used.add(bandIdx(bands, c.wa[k], c.wb[k]))
+        }
+        if (bad) break
+        val lo = used.minOrNull() ?: 0
+        val hi = used.maxOrNull() ?: 0
+        var ok = true
+        for (g in lo until hi) { val gx = (bands[g][1] + bands[g + 1][0]) / 2f; if (crosses(c, gx)) ok = false }
+        if (!ok) break
+        if (hi > lo) multi = true
+        n++; nxt = c; j--
+    }
+    if (n == 0 || !multi) return null
+    val row = Array(bands.size) { "" }
+    for (q in above.size - n until above.size) {
+        val c = above[q]
+        for (k in c.wp.indices) {
+            val b = bandIdx(bands, c.wa[k], c.wb[k])
+            val w = wordText(c, k)
+            if (w.isNotEmpty()) row[b] = if (row[b].isEmpty()) w else row[b] + " " + w
+        }
+    }
+    return n to row
 }
 
 /** Apakah [l] memulai unit baru (paragraf / judul / butir) setelah [p]. */
@@ -762,6 +821,9 @@ private fun startsNew(cur: List<CLine>, l: CLine): Boolean {
     val ends = TERM.containsMatchIn(p.t)
     val first = l.t.firstOrNull()
     val pHead = p.bold && p.short
+    // baris berawalan huruf kecil: hampir pasti lanjutan (dalam butir daftar selalu, di mana pun tanpa tanda akhir kalimat)
+    if (first?.isLowerCase() == true && !(p.center && l.center) && !pHead &&
+        (cur[0].mk != 0 || !ends)) return false
     if (l.page != p.page || l.col != p.col) {
         val ind = l.indent && cur[0].mk == 0   // lanjutan butir yang menjorok bukan awal paragraf
         val cont = !pHead && !ind && !(ends && p.short) &&
@@ -770,7 +832,7 @@ private fun startsNew(cur: List<CLine>, l: CLine): Boolean {
     }
     // judul / blok rata tengah: baris baru kecuali baris sebelumnya hampir penuh (judul yang membungkus)
     if (p.center && l.center) return (p.xe - p.x) < .55f * (p.rm - p.lm)
-    if (p.center != l.center) return true
+    if (p.center && !l.center && (p.xe - p.x) < .85f * (p.rm - p.lm)) return true   // judul rata tengah lalu teks biasa
     // baris-baris pendek yang berdiri sendiri (sampul, alamat): tiap baris satu unit
     val wpf = (p.xe - p.x) / max(1f, p.rm - p.lm)
     val wlf = (l.xe - l.x) / max(1f, l.rm - l.lm)
@@ -808,12 +870,41 @@ private fun makeUnits(L: List<CLine>, pitch: Float): List<U> {
         val l = L[i]
         if (l.cells >= 2) {
             val tb = tryTable(L, i, pitch)
+            var blk = tb?.blk
+            var e = tb?.end ?: (i + 1)
+            val bd = tb?.bands
+            if (tb != null && blk != null && bd != null) {
+                // judul tabel yang jaraknya terlalu sempit dan tertinggal di atas
+                val hr = headerRow(cur, l, bd, pitch)
+                if (hr != null) {
+                    repeat(hr.first) { cur.removeAt(cur.size - 1) }
+                    blk = blk.copy(tb = listOf(hr.second.map { Rt(it) }) + blk.tb)
+                }
+                // sel terakhir yang lanjut di halaman berikutnya
+                var cb: Blk = blk
+                while (e < L.size) {
+                    val c = L[e]
+                    val pv = L[e - 1]
+                    val newPage = c.page == pv.page + 1
+                    if (c.cells != 1 || c.col != pv.col) break
+                    if (e == tb.end) { if (!newPage) break } else if (c.page != pv.page || c.y - pv.y > pitch * 1.6f) break
+                    val k = bandIdx(bd, c.cs[0], c.cs[1])
+                    val t0 = c.t.trim()
+                    if (abs(c.cs[0] - bd[k][0]) > 8f || (k == 0 && t0.firstOrNull()?.isUpperCase() == true) || RX_CAP.containsMatchIn(t0)) break
+                    val rws = cb.tb.toMutableList()
+                    val last = rws[rws.size - 1]
+                    rws[rws.size - 1] = last.mapIndexed { ix, rt -> if (ix == k) Rt(if (rt.t.isEmpty()) t0 else rt.t + " " + t0) else rt }
+                    cb = cb.copy(tb = rws)
+                    e++
+                }
+                blk = cb
+            }
             closeCur()
             if (tb != null) {
-                val u = U(ArrayList(L.subList(i, tb.end)))
-                if (tb.blk != null) { u.tb = tb.blk; u.role = 'T' } else { u.rows = tb.toc; u.role = 'R' }
+                val u = U(ArrayList(L.subList(i, e)))
+                if (blk != null) { u.tb = blk; u.role = 'T' } else { u.rows = tb.toc; u.role = 'R' }
                 out.add(u)
-                i = tb.end
+                i = e
             } else { out.add(U(listOf(l))); i++ }
             continue
         }
