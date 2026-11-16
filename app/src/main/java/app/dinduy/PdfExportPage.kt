@@ -4,6 +4,21 @@ import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.positionChanged
+import kotlinx.coroutines.launch
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -137,6 +152,76 @@ private fun fmtSize(b: Long): String =
     if (b >= 1_048_576L) String.format(java.util.Locale.US, "%.1f MB", b / 1048576f) else "${max(1L, (b + 512L) / 1024L)} KB"
 
 // ------------------------------------------------------------------ komponen
+
+/** Garis progres bergelombang M3 Expressive: gelombang mengalir sepanjang bagian yang sudah dibaca; lebih tinggi saat menyusun ulang. */
+@Composable
+private fun WavyProgress(progress: Float, busy: Boolean, modifier: Modifier) {
+    val pal = LocalPal.current
+    val tr = rememberInfiniteTransition(label = "wv")
+    val ph by tr.animateFloat(0f, 2f * PI.toFloat(), infiniteRepeatable(tween(1500, easing = LinearEasing)), label = "wvp")
+    val amp by animateDpAsState(if (busy) 4.dp else 2.dp, spring(.6f, 400f), label = "wva")
+    val pr by animateFloatAsState(progress.coerceIn(0f, 1f), spring(1f, 400f), label = "wvg")
+    val trackC = pal.c4
+    val actC = pal.p
+    Canvas(modifier.height(14.dp)) {
+        val w = this.size.width
+        val cy = this.size.height / 2f
+        val sw = 4.dp.toPx()
+        val a = amp.toPx()
+        val wl = 24.dp.toPx()
+        val endX = (w * pr).coerceIn(sw, w)
+        if (endX < w - sw) drawLine(trackC, Offset(endX + sw, cy), Offset(w - sw / 2f, cy), sw, StrokeCap.Round)
+        val path = Path()
+        path.moveTo(0f, cy + a * kotlin.math.sin(-ph))
+        var x = 0f
+        val step = 2.dp.toPx()
+        while (x <= endX) {
+            path.lineTo(x, cy + a * kotlin.math.sin(x / wl * 2f * PI.toFloat() - ph))
+            x += step
+        }
+        drawPath(path, actC, style = Stroke(sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+/** Tombol panah halaman sebelumnya / berikutnya di kapsul mengambang: ditekan = sudut bulat penuh + menyempit membal. */
+@Composable
+private fun NavArrow(next: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val pal = LocalPal.current
+    val haptic = LocalHapticFeedback.current
+    val src = remember { MutableInteractionSource() }
+    val pr by src.collectIsPressedAsState()
+    val r by animateDpAsState(if (pr && enabled) 20.dp else 14.dp, spring(.5f, 700f), label = "nar")
+    val sc by animateFloatAsState(if (pr && enabled) .84f else 1f, spring(.42f, 620f), label = "nas")
+    val fg = if (enabled) pal.os else pal.osv.copy(alpha = .4f)
+    Box(
+        Modifier.size(40.dp).graphicsLayer { scaleX = sc; scaleY = sc }
+            .clip(RoundedCornerShape(r)).background(if (enabled) pal.c4 else Color.Transparent)
+            .clickable(interactionSource = src, indication = LocalIndication.current, enabled = enabled) {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onClick()
+            },
+        Alignment.Center
+    ) {
+        Canvas(Modifier.size(18.dp)) {
+            val w = this.size.width
+            val h = this.size.height
+            val a = if (next) 6.dp.toPx() else w - 6.dp.toPx()
+            val b = if (next) w - 6.dp.toPx() else 6.dp.toPx()
+            val path = Path().apply { moveTo(a, 3.dp.toPx()); lineTo(b, h / 2f); lineTo(a, h - 3.dp.toPx()) }
+            drawPath(path, fg, style = Stroke(2.4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+        }
+    }
+}
+
+/** Kapsul info kecil (jumlah halaman, ukuran kertas, ukuran berkas). */
+@Composable
+private fun InfoPill(text: String) {
+    val pal = LocalPal.current
+    Box(Modifier.clip(RoundedCornerShape(12.dp)).background(pal.c4).padding(horizontal = 12.dp, vertical = 6.dp)) {
+        T(text, 12f, 600, pal.osv, maxLines = 1)
+    }
+}
+
 
 /**
  * Penanda memuat M3 Expressive: kue bergelombang yang berputar dan menarik-napas (bulat <-> bergelombang). Tidak ada gerak pudar,
@@ -329,15 +414,41 @@ private fun PdfPageItem(view: PdfView, index: Int, wDp: Float, wPx: Int) {
             try { view.render(index, wPx)?.asImageBitmap() } catch (e: Throwable) { null }
         }
     }
-    val shape = RoundedCornerShape(10.dp)
+    // masuk dengan pegas bertingkat (hanya sekali per halaman, tidak diulang saat digulir kembali)
+    var shown by rememberSaveable(index) { mutableStateOf(false) }
+    LaunchedEffect(index) { if (!shown) { delay(minOf(index, 3) * 70L); shown = true } }
+    val es by animateFloatAsState(if (shown) 1f else 0f, spring(.72f, 380f), label = "pge")
+    val shape = RoundedCornerShape(16.dp)
+    val tr = rememberInfiniteTransition(label = "shm")
+    val sx by tr.animateFloat(-1f, 2f, infiniteRepeatable(tween(1400, easing = LinearEasing)), label = "shx")
     Box(
         Modifier.width(wDp.dp).aspectRatio(PdfExport.PW.toFloat() / PdfExport.PH)
-            .shadow(if (pal.dark) 2.dp else 4.dp, shape).clip(shape).background(Color.White),
+            .graphicsLayer {
+                val s = .92f + .08f * es
+                scaleX = s; scaleY = s; alpha = es
+                translationY = (1f - es) * 40.dp.toPx()
+            }
+            .shadow(if (pal.dark) 3.dp else 5.dp, shape).clip(shape).background(Color.White),
         Alignment.Center
     ) {
         val b = bmp
-        if (b != null) Image(b, null, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
-        else PdfLoader(36.dp, pal.p)
+        val ia by animateFloatAsState(if (b != null) 1f else 0f, tween(280), label = "pgi")
+        if (b == null) {
+            Box(Modifier.fillMaxSize().drawBehind {
+                val w = this.size.width
+                drawRect(Brush.linearGradient(
+                    listOf(Color(0xFFF4F4F4), Color(0xFFE7E7E7), Color(0xFFF4F4F4)),
+                    Offset(sx * w, 0f), Offset(sx * w + w * .8f, this.size.height)
+                ))
+            })
+            PdfLoader(36.dp, pal.p)
+        } else {
+            Image(b, null, Modifier.fillMaxSize().graphicsLayer { alpha = ia }, contentScale = ContentScale.FillBounds)
+            Box(
+                Modifier.align(Alignment.BottomEnd).padding(10.dp).clip(RoundedCornerShape(10.dp))
+                    .background(Color(0x99000000)).padding(horizontal = 9.dp, vertical = 3.dp)
+            ) { T("${index + 1}", 11f, 700, Color.White, maxLines = 1) }
+        }
     }
 }
 
@@ -438,18 +549,62 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
         }
     }
 
+    // zoom (cubit dua jari / ketuk dua kali), progres baca, bilah atas yang berubah warna saat digulir
+    var zT by remember { mutableFloatStateOf(1f) }
+    val zA by animateFloatAsState(zT, spring(1f, 700f), label = "zoom")
+    val renderPx = if (zT > 1.4f) min(wPx * 2, 2400) else wPx
+    val hs = rememberScrollState()
+    val scope = rememberCoroutineScope()
+    val pages = info?.pages ?: 0
+    val scrolled by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 6 } }
+    val barBg by animateColorAsState(if (scrolled) pal.c2 else pal.bg, tween(220), label = "bar")
+    val progress by remember {
+        derivedStateOf {
+            val li = listState.layoutInfo
+            val f = li.visibleItemsInfo.firstOrNull()
+            when {
+                f == null -> 0f
+                !listState.canScrollForward -> 1f
+                else -> ((f.index + (-f.offset).coerceAtLeast(0).toFloat() / (f.size + 1)) / max(1, li.totalItemsCount)).coerceIn(0f, 1f)
+            }
+        }
+    }
+    val dim by animateFloatAsState(if (busy) .6f else 1f, tween(200), label = "dim")
+    var pgBump by remember { mutableStateOf(false) }
+    LaunchedEffect(pages) { if (pages > 0) { pgBump = true; delay(120); pgBump = false } }
+    val pgPop by animateFloatAsState(if (pgBump) 1.15f else 1f, spring(.35f, 500f), label = "pgp")
+    var ptBump by remember { mutableStateOf(false) }
+    LaunchedEffect(pt) { ptBump = true; delay(110); ptBump = false }
+    val ptPop by animateFloatAsState(if (ptBump) 1.1f else 1f, spring(.35f, 520f), label = "ptp")
+    LaunchedEffect(curPage) { if (info != null) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
+
     Box(Modifier.fillMaxSize().background(pal.bg)) {
         Column(Modifier.fillMaxSize()) {
             // ---- bilah atas
             Row(
-                Modifier.fillMaxWidth().height(sat + 68.dp).padding(top = sat, start = 8.dp, end = 20.dp),
+                Modifier.fillMaxWidth().background(barBg).height(sat + 68.dp).padding(top = sat, start = 8.dp, end = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconBtn("back", pal.os, { nav.pop() })
                 Column(Modifier.padding(start = 8.dp).weight(1f)) {
-                    T("Export PDF", 22f, 400, pal.os, maxLines = 1)
+                    T("Export PDF", 24f, 500, pal.os, maxLines = 1)
                     T(name, 13f, 400, pal.osv, maxLines = 1)
                 }
+                this@Row.AnimatedVisibility(
+                    visible = pages > 0,
+                    enter = scaleIn(spring(.5f, 520f), .6f),
+                    exit = scaleOut(spring(1f, 700f), .6f)
+                ) {
+                    Box(
+                        Modifier.graphicsLayer { scaleX = pgPop; scaleY = pgPop }.height(36.dp)
+                            .clip(RoundedCornerShape(14.dp)).background(pal.pc).padding(horizontal = 14.dp),
+                        Alignment.Center
+                    ) { T(cnt(pages, "page"), 13f, 700, pal.opc, maxLines = 1) }
+                }
+            }
+            // progres baca bergelombang
+            Box(Modifier.fillMaxWidth().background(barBg).padding(horizontal = 20.dp)) {
+                WavyProgress(progress, busy, Modifier.fillMaxWidth())
             }
 
             // ---- pratinjau
@@ -457,14 +612,42 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
                 val v = view
                 val inf = info
                 if (v != null && inf != null) {
-                    LazyColumn(
-                        Modifier.fillMaxSize(),
-                        state = listState,
-                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 84.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                    val contentW = (wDp * zA + 32f).dp
+                    Box(
+                        Modifier.fillMaxSize()
+                            .pointerInput(Unit) {
+                                // cubit dua jari = zoom 1x..3x (lewat Initial supaya gulir 1 jari tidak terganggu)
+                                awaitEachGesture {
+                                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                    do {
+                                        val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                        if (ev.changes.count { it.pressed } >= 2) {
+                                            val zm = ev.calculateZoom()
+                                            if (zm != 1f) zT = (zT * zm).coerceIn(1f, 3f)
+                                            ev.changes.forEach { if (it.positionChanged()) it.consume() }
+                                        }
+                                    } while (ev.changes.any { it.pressed })
+                                }
+                            }
+                            .pointerInput(Unit) {
+                                detectTapGestures(onDoubleTap = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    zT = if (zT > 1.05f) 1f else 2f
+                                })
+                            },
+                        Alignment.TopCenter
                     ) {
-                        items(inf.pages) { i -> PdfPageItem(v, i, wDp, wPx) }
+                        Box(Modifier.fillMaxHeight().horizontalScroll(hs)) {
+                            LazyColumn(
+                                Modifier.width(contentW).fillMaxHeight().graphicsLayer { alpha = dim },
+                                state = listState,
+                                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
+                                verticalArrangement = Arrangement.spacedBy(14.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                items(inf.pages) { i -> PdfPageItem(v, i, wDp * zA, renderPx) }
+                            }
+                        }
                     }
                 } else if (failed) {
                     Column(Modifier.fillMaxSize().padding(32.dp), Arrangement.Center, Alignment.CenterHorizontally) {
@@ -479,8 +662,10 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
                         Chip("Try again", pal.p, pal.op, CircleShape, h = 52.dp, minW = 150.dp) { attempt++ }
                     }
                 } else {
+                    val mt = rememberInfiniteTransition(label = "prep")
+                    val mr by mt.animateFloat(34f, 52f, infiniteRepeatable(tween(1400, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "prr")
                     Column(Modifier.fillMaxSize().padding(32.dp), Arrangement.Center, Alignment.CenterHorizontally) {
-                        Box(Modifier.size(104.dp).clip(CircleShape).background(pal.pc), Alignment.Center) {
+                        Box(Modifier.size(104.dp).clip(RoundedCornerShape(mr.dp)).background(pal.pc), Alignment.Center) {
                             PdfLoader(60.dp, pal.p)
                         }
                         T("Preparing your PDF", 18f, 600, pal.os, Modifier.padding(top = 20.dp))
@@ -488,9 +673,8 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
                     }
                 }
 
-                // kapsul mengambang: nomor halaman + penanda "sedang menyusun ulang"
-                val pages = info?.pages ?: 0
-                val pillOn = view != null && (busy || pages > 1)
+                // kapsul mengambang: panah halaman + nomor halaman / "Updating" + chip zoom
+                val pillOn = view != null && (busy || pages > 1 || zT != 1f)
                 val pv by animateFloatAsState(if (pillOn) 1f else 0f, spring(.6f, 520f), label = "pill")
                 if (pv > .01f) {
                     val cap = RoundedCornerShape(30.dp)
@@ -502,18 +686,33 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
                                 scaleY = sc
                                 translationY = (1f - pv) * 80.dp.toPx()
                             }
-                            .shadow(if (pal.dark) 8.dp else 5.dp, cap).clip(cap).background(pal.c3)
+                            .shadow(if (pal.dark) 8.dp else 6.dp, cap).clip(cap).background(pal.c3)
                             .border(1.dp, pal.ol.copy(alpha = .22f), cap)
                             .animateContentSize(spring(.8f, 420f))
-                            .height(44.dp).padding(horizontal = 16.dp),
+                            .height(52.dp).padding(horizontal = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (busy) {
-                            PdfLoader(22.dp, pal.p)
-                            Spacer(Modifier.width(10.dp))
-                            T("Updating", 14f, 600, pal.os, maxLines = 1)
-                        } else {
-                            T("${(curPage + 1).coerceAtMost(max(pages, 1))} / $pages", 14f, 700, pal.os, maxLines = 1)
+                        NavArrow(false, !busy && curPage > 0) { scope.launch { listState.animateScrollToItem(curPage - 1) } }
+                        Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            if (busy) {
+                                PdfLoader(22.dp, pal.p)
+                                Spacer(Modifier.width(10.dp))
+                                T("Updating", 14f, 600, pal.os, maxLines = 1)
+                            } else {
+                                T("${(curPage + 1).coerceAtMost(max(pages, 1))} / $pages", 14f, 700, pal.os, maxLines = 1)
+                            }
+                        }
+                        NavArrow(true, !busy && curPage < pages - 1) { scope.launch { listState.animateScrollToItem(curPage + 1) } }
+                        this@Row.AnimatedVisibility(
+                            visible = zT != 1f,
+                            enter = scaleIn(spring(.5f, 520f), .5f) + expandHorizontally(spring(.7f, 480f)),
+                            exit = scaleOut(spring(1f, 700f), .5f) + shrinkHorizontally(spring(1f, 700f))
+                        ) {
+                            Row {
+                                Spacer(Modifier.width(4.dp))
+                                Chip("${(zT * 100f).roundToInt()}%", pal.pc, pal.opc, CircleShape, h = 40.dp) { zT = 1f }
+                                Spacer(Modifier.width(2.dp))
+                            }
                         }
                     }
                 }
@@ -578,7 +777,7 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
                         val pillTarget = 32.dp + 24.dp + (9.5f * ptTxt.count { it != '.' } + 4.5f * ptTxt.count { it == '.' }).dp
                         val pillW by animateDpAsState(pillTarget, spring(.7f, 520f), label = "ptw")
                         Box(
-                            Modifier.width(pillW).height(40.dp).clip(CircleShape).background(pal.p),
+                            Modifier.width(pillW).height(40.dp).graphicsLayer { scaleX = ptPop; scaleY = ptPop }.clip(CircleShape).background(pal.p),
                             Alignment.Center
                         ) { T("$ptTxt pt", 16f, 700, pal.op, Modifier.wrapContentWidth(Alignment.CenterHorizontally, unbounded = true), maxLines = 1) }
                     }
@@ -598,12 +797,16 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
                         }
                         // ringkasan hasil
                         val sizeTxt = remember(info) { info?.let { fmtSize(it.file.length()) } }
-                        val summary = when {
-                            failed -> "Couldn't create the PDF at this size. Try another size."
-                            info != null && sizeTxt != null -> cnt(info!!.pages, "page") + " · A4 · " + sizeTxt
-                            else -> "Preparing…"
+                        if (info != null && sizeTxt != null && !failed) {
+                            Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                InfoPill(cnt(info!!.pages, "page")); InfoPill("A4"); InfoPill(sizeTxt)
+                            }
+                        } else {
+                            T(
+                                if (failed) "Couldn't create the PDF at this size. Try another size." else "Preparing…",
+                                13f, 500, pal.osv, Modifier.padding(top = 8.dp), lh = 1.3f
+                            )
                         }
-                        T(summary, 13f, 500, pal.osv, Modifier.padding(top = 2.dp), lh = 1.3f)
                         if (hasInk) {
                             T("Drawings keep their size. Only the text changes.", 13f, 400, pal.osv, Modifier.padding(top = 2.dp), lh = 1.3f)
                         }
