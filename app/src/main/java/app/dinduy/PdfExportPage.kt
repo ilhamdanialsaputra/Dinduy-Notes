@@ -549,11 +549,7 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
         }
     }
 
-    // zoom (cubit dua jari / ketuk dua kali), progres baca, bilah atas yang berubah warna saat digulir
-    var zT by remember { mutableFloatStateOf(1f) }
-    val zA by animateFloatAsState(zT, spring(1f, 700f), label = "zoom")
-    val renderPx = if (zT > 1.4f) min(wPx * 2, 2400) else wPx
-    val hs = rememberScrollState()
+    // progres baca, bilah atas yang berubah warna saat digulir
     val scope = rememberCoroutineScope()
     val pages = info?.pages ?: 0
     val scrolled by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 6 } }
@@ -612,42 +608,14 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
                 val v = view
                 val inf = info
                 if (v != null && inf != null) {
-                    val contentW = (wDp * zA + 32f).dp
-                    Box(
-                        Modifier.fillMaxSize()
-                            .pointerInput(Unit) {
-                                // cubit dua jari = zoom 1x..3x (lewat Initial supaya gulir 1 jari tidak terganggu)
-                                awaitEachGesture {
-                                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                                    do {
-                                        val ev = awaitPointerEvent(PointerEventPass.Initial)
-                                        if (ev.changes.count { it.pressed } >= 2) {
-                                            val zm = ev.calculateZoom()
-                                            if (zm != 1f) zT = (zT * zm).coerceIn(1f, 3f)
-                                            ev.changes.forEach { if (it.positionChanged()) it.consume() }
-                                        }
-                                    } while (ev.changes.any { it.pressed })
-                                }
-                            }
-                            .pointerInput(Unit) {
-                                detectTapGestures(onDoubleTap = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    zT = if (zT > 1.05f) 1f else 2f
-                                })
-                            },
-                        Alignment.TopCenter
+                    LazyColumn(
+                        Modifier.fillMaxSize().graphicsLayer { alpha = dim },
+                        state = listState,
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Box(Modifier.fillMaxHeight().horizontalScroll(hs)) {
-                            LazyColumn(
-                                Modifier.width(contentW).fillMaxHeight().graphicsLayer { alpha = dim },
-                                state = listState,
-                                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
-                                verticalArrangement = Arrangement.spacedBy(14.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                items(inf.pages) { i -> PdfPageItem(v, i, wDp * zA, renderPx) }
-                            }
-                        }
+                        items(inf.pages) { i -> PdfPageItem(v, i, wDp, wPx) }
                     }
                 } else if (failed) {
                     Column(Modifier.fillMaxSize().padding(32.dp), Arrangement.Center, Alignment.CenterHorizontally) {
@@ -673,8 +641,8 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
                     }
                 }
 
-                // kapsul mengambang: panah halaman + nomor halaman / "Updating" + chip zoom
-                val pillOn = view != null && (busy || pages > 1 || zT != 1f)
+                // kapsul mengambang: panah halaman + nomor halaman / "Updating"
+                val pillOn = view != null && (busy || pages > 1)
                 val pv by animateFloatAsState(if (pillOn) 1f else 0f, spring(.6f, 520f), label = "pill")
                 if (pv > .01f) {
                     val cap = RoundedCornerShape(30.dp)
@@ -703,17 +671,6 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
                             }
                         }
                         NavArrow(true, !busy && curPage < pages - 1) { scope.launch { listState.animateScrollToItem(curPage + 1) } }
-                        this@Row.AnimatedVisibility(
-                            visible = zT != 1f,
-                            enter = scaleIn(spring(.5f, 520f), .5f) + expandHorizontally(spring(.7f, 480f)),
-                            exit = scaleOut(spring(1f, 700f), .5f) + shrinkHorizontally(spring(1f, 700f))
-                        ) {
-                            Row {
-                                Spacer(Modifier.width(4.dp))
-                                Chip("${(zT * 100f).roundToInt()}%", pal.pc, pal.opc, CircleShape, h = 40.dp) { zT = 1f }
-                                Spacer(Modifier.width(2.dp))
-                            }
-                        }
                     }
                 }
             }
