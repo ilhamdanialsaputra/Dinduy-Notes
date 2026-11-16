@@ -182,6 +182,10 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.animation.SizeTransform
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.ui.graphics.Brush
 
 // =====================================================================================
@@ -554,7 +558,7 @@ private const val HDL_HIT = 36f
 private fun posAtPage(ui: PdfUi, index: Int, W: Float, pos: Offset, dens: Float, miss: (Int) -> Unit = {}): PPos? {
     var p = index; var y = pos.y
     if (!ui.paged) {
-        val gap = 8f * dens
+        val gap = 6f * dens
         while (p < ui.doc.count - 1 && y > ui.doc.ratioOf(p) * W) { y -= ui.doc.ratioOf(p) * W + gap; p++ }
         while (y < 0f && p > 0) { p--; y += ui.doc.ratioOf(p) * W + gap }
     }
@@ -912,7 +916,7 @@ private fun Modifier.curlTouch(
 @Composable
 // active = false: halaman ini tidak memasang gestur apa pun (seleksi / coret). Dipakai mode 3D: library PageCurl menumpuk halaman
 // sebelum / sesudahnya di atas halaman aktif, sehingga sentuhan jatuh ke halaman yang salah (seleksi muncul di halaman tak terlihat).
-private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Modifier = Modifier, active: Boolean = true, corner: Dp = 0.dp) {
+private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Modifier = Modifier, active: Boolean = true) {
     val dens = LocalDensity.current.density
     val wPx = (widthDp.value * dens * mul).roundToInt()
     val bk = bucket(wPx)
@@ -959,7 +963,6 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
         modifier
             .onSizeChanged { sizePx = it }
             .onGloballyPositioned { if (active) ui.pageCoords[index] = it }
-            .clip(RoundedCornerShape(corner))
             .background(if (ui.dark) Color.Black else Color.White)
             .then(if (!active) Modifier else Modifier.pointerInput(ui.inkOn, ui.tool, ui.ts, index) {
                 if (!ui.inkOn) return@pointerInput
@@ -1480,8 +1483,22 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                 val off = top - list.layoutInfo.viewportSize.height * .3f
                 if (off > 0f) list.scrollBy(off)
             }
+            val fs = remember { PdfFast() }
+            val fsJob = remember { arrayOfNulls<Job>(1) }
+            val fsLast = remember { intArrayOf(-1) }
+            fun fastSeek(nf: Float) {
+                val pos = nf * (count - 1)
+                val i = pos.toInt().coerceIn(0, count - 1)
+                if (i != fsLast[0]) { fsLast[0] = i; hapScr.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
+                fsJob[0]?.cancel()
+                fsJob[0] = scope.launch {
+                    val itemH = vwDp.value * zoom * ui.doc.ratioOf(i) * dens
+                    list.scrollToItem(i, ((pos - i) * itemH).roundToInt())
+                }
+            }
             Box(
                 Modifier.fillMaxSize().clipToBounds()
+                    .fastTouch(fs) { fastSeek(it) }
                     .pinch(
                         onPinch = { z, pan, c -> applyZoom((zoom * z).coerceIn(1f, 5f), c.x, c.y, pan.x, pan.y) },
                         onEnd = { },
@@ -1509,12 +1526,13 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                     userScrollEnabled = !ui.drawing,   // menyeret pegangan seleksi / menggoreskan pena: daftar tidak boleh ikut bergulir
                     modifier = Modifier.requiredWidth(contentW).fillMaxHeight().graphicsLayer { translationX = vwPx * (zoom - 1f) / 2f - hx },
                     contentPadding = PaddingValues(top = topPad, bottom = botPad),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     items(count, key = { it }) { i ->
-                        PdfPage(ui, i, contentW, 1f, Modifier.width(contentW).height(contentW * ui.doc.ratioOf(i)), corner = 8.dp)
+                        PdfPage(ui, i, contentW, 1f, Modifier.width(contentW).height(contentW * ui.doc.ratioOf(i)))
                     }
                 }
+                PdfFastScrollUi(ui, fs, list, count, topPad, botPad)
             }
         } else if (curlMode) {
             // ---------------- mode halaman 3D: efek balik halaman melengkung (library PageCurl) ----------------
@@ -1671,74 +1689,64 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                             ui, p, w, mul,
                             Modifier.width(w).height(w * ui.doc.ratioOf(p)).graphicsLayer {
                                 if (here) { scaleX = pz; scaleY = pz; translationX = pan.x; translationY = pan.y }
-                            },
-                            corner = 12.dp
+                            }
                         )
                     }
                 }
             }
         }
 
-        // ---------------- bilah atas: kapsul tonal melayang (M3 Expressive). Tombol berubah bentuk saat ditekan / aktif;
-        // tombol cari membuat bilah cari tumbuh dari ikonnya, yang lain menyingkir ----------------
+        // ---------------- bilah atas: hitam polos (seperti semula). Turun / naik dengan pegas; tombol berubah bentuk saat ditekan / aktif;
+        // tombol cari membuat bilah cari tumbuh dari ikonnya sementara judul menggeser keluar, yang lain menyingkir ----------------
         val spRaw by androidx.compose.animation.core.animateFloatAsState(if (findOn) 1f else 0f, spring(.85f, 520f), label = "find")
         // spring bisa overshoot (>1 atau <0): padding/lebar negatif membuat app force close, jadi dikunci 0..1
         val sp = spRaw.coerceIn(0f, 1f)
+        val white = Color.White
         AnimatedVisibility(
             bars || findOn, Modifier.align(Alignment.TopCenter),
-            enter = fadeIn(spring(stiffness = 600f)) + androidx.compose.animation.slideInVertically(spring(.7f, 520f)) { -it / 2 },
-            exit = fadeOut(spring(stiffness = 700f)) + androidx.compose.animation.slideOutVertically(spring(1f, 700f)) { -it / 2 }
+            enter = fadeIn(spring(stiffness = 600f)) + androidx.compose.animation.slideInVertically(spring(.72f, 520f)) { -it / 3 },
+            exit = fadeOut(spring(stiffness = 800f)) + androidx.compose.animation.slideOutVertically(spring(1f, 800f)) { -it / 3 }
         ) {
-            Box(Modifier.fillMaxWidth()) {
-                Box(
-                    Modifier.fillMaxWidth().height(sat + 88.dp)
-                        .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = .72f), Color.Transparent)))
-                )
-                Box(
-                    Modifier.fillMaxWidth().padding(top = sat + 8.dp, start = 8.dp, end = 8.dp).height(56.dp)
-                        .shadow(10.dp, RoundedCornerShape(28.dp)).clip(RoundedCornerShape(28.dp)).background(pal.c3)
-                        .padding(horizontal = 6.dp)
+            Box(Modifier.fillMaxWidth().background(Color.Black).padding(top = sat).height(60.dp).padding(horizontal = 6.dp)) {
+                Row(
+                    Modifier.fillMaxSize().graphicsLayer { alpha = (1f - sp * 2f).coerceIn(0f, 1f) },
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        Modifier.fillMaxSize().graphicsLayer { alpha = (1f - sp * 2f).coerceIn(0f, 1f) },
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        PdfBtn({ vm.nav.pop() }, tonal = true) { Ic("back", it, 22.dp) }
-                        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                            T(note.t.ifBlank { "PDF" }, 16f, 700, pal.os, maxLines = 1)
-                            T("Page ${page + 1} of $count", 12f, 500, pal.osv, maxLines = 1)
-                        }
-                        PdfBtn({ if (hasText) findOn = true else vm.show("This PDF is a scan, so there's no text to search") }) {
-                            Ic("search", if (hasText) it else it.copy(alpha = .38f), 22.dp)
-                        }
-                        PdfBtn({ ui.inkOn = !ui.inkOn }, selected = ui.inkOn) { InkToolIcon(0, it) }
-                        PdfBtn({ vm.nav.push(Scr.NoteMenu(id)) }) { Ic("more", it, 22.dp) }
+                    PdfBtn({ vm.nav.pop() }, size = 46.dp) { Ic("back", it, 24.dp) }
+                    T(
+                        note.t.ifBlank { "PDF" }, 18f, 600, white,
+                        Modifier.weight(1f).padding(horizontal = 6.dp).graphicsLayer { translationX = -sp * 28.dp.toPx() }, maxLines = 1
+                    )
+                    PdfBtn({ if (hasText) findOn = true else vm.show("This PDF is a scan, so there's no text to search") }) {
+                        Ic("search", if (hasText) it else it.copy(alpha = .38f), 24.dp)
                     }
-                    if (sp > .01f) {
-                        val full = vwDp - 28.dp
-                        Box(
-                            Modifier.align(Alignment.CenterEnd).padding(end = 88.dp * (1f - sp))
-                                .width(44.dp + (full - 44.dp) * sp).height(46.dp).clip(CircleShape).background(pal.c4)
+                    PdfBtn({ ui.inkOn = !ui.inkOn }, selected = ui.inkOn) { InkToolIcon(0, it) }
+                    PdfBtn({ vm.nav.push(Scr.NoteMenu(id)) }) { Ic("more", it, 24.dp) }
+                }
+                if (sp > .01f) {
+                    val full = vwDp - 12.dp
+                    Box(
+                        Modifier.align(Alignment.CenterEnd).padding(end = 88.dp * (1f - sp))
+                            .width(44.dp + (full - 44.dp) * sp).height(46.dp).clip(CircleShape).background(pal.c3)
+                    ) {
+                        Row(
+                            Modifier.fillMaxSize().graphicsLayer { alpha = ((sp - .45f) / .4f).coerceIn(0f, 1f) },
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                Modifier.fillMaxSize().graphicsLayer { alpha = ((sp - .45f) / .4f).coerceIn(0f, 1f) },
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                IconBtn("back", pal.os, { findOn = false }, size = 44.dp)
-                                BasicTextField(
-                                    value = query, onValueChange = { query = it }, singleLine = true,
-                                    modifier = Modifier.weight(1f).focusRequester(fr),
-                                    textStyle = TextStyle(color = pal.os, fontFamily = LocalFF.current, fontSize = 16.sp, fontWeight = FontWeight(500)),
-                                    cursorBrush = SolidColor(pal.p),
-                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                                    keyboardActions = KeyboardActions(onSearch = { step(1) }),
-                                    decorationBox = { inner -> Box { if (query.isEmpty()) T("Search", 16f, 500, pal.osv); inner() } }
-                                )
-                                if (searching && ui.hits.isEmpty()) LoadingBlob(Modifier.size(22.dp))
-                                else if (query.isNotBlank()) T(if (ui.hits.isEmpty()) "0" else "${ui.cur + 1}/${ui.hits.size}", 13f, 700, if (ui.hits.isEmpty()) pal.osv else pal.p)
-                                IconBtn("aup", pal.os, { step(-1) }, size = 40.dp, enabled = ui.hits.isNotEmpty())
-                                IconBtn("adn", pal.os, { step(1) }, size = 40.dp, enabled = ui.hits.isNotEmpty())
-                            }
+                            IconBtn("back", white, { findOn = false }, size = 44.dp)
+                            BasicTextField(
+                                value = query, onValueChange = { query = it }, singleLine = true,
+                                modifier = Modifier.weight(1f).focusRequester(fr),
+                                textStyle = TextStyle(color = white, fontFamily = LocalFF.current, fontSize = 16.sp, fontWeight = FontWeight(500)),
+                                cursorBrush = SolidColor(white),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                keyboardActions = KeyboardActions(onSearch = { step(1) }),
+                                decorationBox = { inner -> Box { if (query.isEmpty()) T("Search", 16f, 500, white.copy(alpha = .5f)); inner() } }
+                            )
+                            if (searching && ui.hits.isEmpty()) LoadingBlob(Modifier.size(22.dp))
+                            else if (query.isNotBlank()) T(if (ui.hits.isEmpty()) "0" else "${ui.cur + 1}/${ui.hits.size}", 13f, 700, white.copy(alpha = .7f))
+                            IconBtn("aup", white, { step(-1) }, size = 40.dp, enabled = ui.hits.isNotEmpty())
+                            IconBtn("adn", white, { step(1) }, size = 40.dp, enabled = ui.hits.isNotEmpty())
                         }
                     }
                 }
@@ -1778,50 +1786,49 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
             if (inkShown) spring(.68f, 300f) else spring(1f, 800f), label = "inkbar"
         )
         if (inkP > .004f) {
+            // satu permukaan: panel (warna + tebal) dan kapsul alat berada di wadah yang sama, jadi saat mode coret aktif
+            // wadahnya TUMBUH ke atas (bukan kartu kedua yang muncul), dan menciut lagi saat selesai
             Column(
-                Modifier.align(Alignment.BottomCenter).padding(bottom = maxOf(sab, imeDp) + 16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)
+                Modifier.align(Alignment.BottomCenter).padding(bottom = maxOf(sab, imeDp) + 16.dp)
+                    .graphicsLayer {
+                        transformOrigin = TransformOrigin(.5f, 1f)
+                        val p = inkP
+                        translationY = (1f - p.coerceIn(0f, 1f)) * 40.dp.toPx()
+                        val sc = .55f + .45f * p.coerceAtLeast(0f)
+                        scaleX = sc; scaleY = sc
+                        alpha = (p * 3f).coerceIn(0f, 1f)
+                    }
+                    .shadow(12.dp, RoundedCornerShape(30.dp)).clip(RoundedCornerShape(30.dp)).background(pal.c3),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // panel warna + tebal goresan: tumbuh dari kapsul alat saat mode coret aktif
                 AnimatedVisibility(
                     ui.inkOn,
-                    enter = expandVertically(spring(.7f, 420f), expandFrom = Alignment.Bottom) + fadeIn(tween(160)),
-                    exit = shrinkVertically(spring(1f, 800f), shrinkTowards = Alignment.Bottom) + fadeOut(tween(100))
+                    enter = expandVertically(spring(.75f, 380f), expandFrom = Alignment.Bottom) + fadeIn(tween(200, delayMillis = 60)),
+                    exit = shrinkVertically(spring(1f, 700f), shrinkTowards = Alignment.Bottom) + fadeOut(tween(90))
                 ) { PdfInkPanel(ui) { saveTool() } }
                 Row(
-                    Modifier
-                        .graphicsLayer {
-                            transformOrigin = TransformOrigin(.5f, 1f)
-                            val p = inkP
-                            translationY = (1f - p.coerceIn(0f, 1f)) * 36.dp.toPx()
-                            val sc = .7f + .3f * p.coerceAtLeast(0f)
-                            scaleX = sc; scaleY = sc
-                            alpha = (p * 2.5f).coerceIn(0f, 1f)
-                        }
-                        .clip(CircleShape)
-                        .layout { m, c ->
-                            val pl = m.measure(c)
-                            val w = (pl.width * (.2f + .8f * inkP).coerceAtLeast(.1f)).roundToInt()
-                            layout(w, pl.height) { pl.placeRelative((w - pl.width) / 2, 0) }
-                        }
-                        .shadow(10.dp, CircleShape)
-                        .background(pal.c3).padding(horizontal = 8.dp, vertical = 6.dp),
+                    Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    for (t in 0..2) {
-                        val on = ui.inkOn && ui.tool == t
-                        PdfBtn(
-                            {
-                                saveTool()
-                                ui.tool = t
-                                ui.color = vm.pr.ic.getOrElse(t) { 0 }
-                                ui.wDp = vm.pr.iw.getOrElse(t) { if (t == 0) 3f else if (t == 1) 16f else 18f }
-                                if (!ui.inkOn) ui.inkOn = true
-                                // mode cari: sembunyikan keyboard supaya area coret lega
-                                if (findOn) { focusMgr.clearFocus(); kb?.hide() }
-                            },
-                            Modifier.pop({ inkP }, t), selected = on
-                        ) { InkToolIcon(t, it) }
+                    // tiga alat berbagi SATU penanda yang meluncur (meregang searah gerak) alih-alih tiap tombol berkedip sendiri
+                    Box(Modifier.pop({ inkP }, 0).width(136.dp).height(44.dp)) {
+                        PdfSlideMark(ui.tool, 46.dp, 44.dp, 44.dp, 15.dp, ui.inkOn, pal.p, null)
+                        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                            for (t in 0..2) {
+                                PdfBtn(
+                                    {
+                                        saveTool()
+                                        ui.tool = t
+                                        ui.color = vm.pr.ic.getOrElse(t) { 0 }
+                                        ui.wDp = vm.pr.iw.getOrElse(t) { if (t == 0) 3f else if (t == 1) 16f else 18f }
+                                        if (!ui.inkOn) ui.inkOn = true
+                                        // mode cari: sembunyikan keyboard supaya area coret lega
+                                        if (findOn) { focusMgr.clearFocus(); kb?.hide() }
+                                    },
+                                    selected = ui.inkOn && ui.tool == t, fill = false
+                                ) { InkToolIcon(t, it) }
+                            }
+                        }
                     }
                     PdfBtn({ ui.ink.undo() }, Modifier.pop({ inkP }, 3), enabled = ui.ink.canUndo) { Ic("undo", it, 22.dp) }
                     PdfBtn({ ui.ink.redo() }, Modifier.pop({ inkP }, 4), enabled = ui.ink.canRedo) {
@@ -1831,7 +1838,7 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                         // mode cari: X hanya mematikan mode coret, kapsul tetap di tempatnya
                         PdfBtn({ saveTool(); ui.inkOn = false; ui.drawing = false }, Modifier.pop({ inkP }, 5), tonal = true, enabled = ui.inkOn) { Ic("x", it, 22.dp) }
                     } else {
-                        PdfBtn({ saveTool(); ui.inkOn = false }, Modifier.pop({ inkP }, 5), selected = true) { Ic("ok", it, 22.dp) }
+                        PdfBtn({ saveTool(); ui.inkOn = false }, Modifier.pop({ inkP }, 5), tonal = true) { Ic("ok", pal.p, 22.dp) }
                     }
                 }
             }
@@ -1843,21 +1850,25 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
 // ---------------------------------------------------------------- komponen M3 Expressive
 
 /**
- * Tombol ikon M3 Expressive: bulat saat diam, kotak membulat saat aktif (dipilih), makin kotak + menciut saat ditekan.
- * Bentuk, warna, dan skala semuanya berpegas. [content] menerima warna isi yang sudah teranimasi.
+ * Tombol ikon M3 Expressive: bulat saat diam; ditekan = lapisan keadaan muncul + bentuk menciut jadi kotak membulat;
+ * dipilih (fill = true) = kotak membulat berwarna utama. Bentuk, warna, dan skala semuanya berpegas.
+ * fill = false: tombol tidak punya latar sendiri (dipakai bersama [PdfSlideMark]); hanya warna isinya yang berganti.
  */
 @Composable
 private fun PdfBtn(
     onClick: () -> Unit, modifier: Modifier = Modifier, selected: Boolean = false, tonal: Boolean = false,
-    enabled: Boolean = true, size: Dp = 44.dp, content: @Composable (Color) -> Unit
+    enabled: Boolean = true, size: Dp = 44.dp, fill: Boolean = true, content: @Composable (Color) -> Unit
 ) {
     val pal = LocalPal.current
     val hap = LocalHapticFeedback.current
     val src = remember { MutableInteractionSource() }
     val pr by src.collectIsPressedAsState()
-    val r by animateDpAsState(if (pr) size * .24f else if (selected) size * .34f else size / 2, spring(.55f, 700f), label = "pbr")
+    val r by animateDpAsState(if (pr) size * .26f else if (selected && fill) size * .34f else size / 2, spring(.55f, 700f), label = "pbr")
     val sc by animateFloatAsState(if (pr) .9f else 1f, spring(.45f, 650f), label = "pbs")
-    val bg by animateColorAsState(if (selected) pal.p else if (tonal) pal.c4 else Color.Transparent, spring(stiffness = 500f), label = "pbb")
+    val bg by animateColorAsState(
+        if (selected && fill) pal.p else if (tonal) pal.c4 else if (pr) pal.os.copy(alpha = .14f) else Color.Transparent,
+        spring(stiffness = 500f), label = "pbb"
+    )
     val fg by animateColorAsState(if (selected) pal.op else pal.os, spring(stiffness = 500f), label = "pbf")
     Box(
         modifier.graphicsLayer { scaleX = sc; scaleY = sc; alpha = if (enabled) 1f else .38f }
@@ -1870,21 +1881,191 @@ private fun PdfBtn(
     ) { content(fg) }
 }
 
-/** Pilihan warna goresan: bulat, lalu berubah jadi kotak membulat bercincin + centang saat dipilih. */
+/**
+ * Penanda yang MELUNCUR antar item (alat coret, warna): tepi depan bergerak cepat, tepi belakang menyusul pelan, jadi bentuknya
+ * meregang searah gerakan lalu mengerut di tujuan. fill = isi penuh, ring = hanya cincin. Muncul / hilang dengan skala berpegas;
+ * saat belum terlihat ia langsung pindah (tidak meluncur dari posisi lama).
+ */
+@Composable
+private fun PdfSlideMark(idx: Int, pitch: Dp, w: Dp, h: Dp, corner: Dp, show: Boolean, fill: Color?, ring: Color?) {
+    val sh by animateFloatAsState(if (show) 1f else 0f, spring(.5f, 520f), label = "smv")
+    val st = remember { intArrayOf(idx, 1) }
+    if (idx != st[0]) { st[1] = if (idx > st[0]) 1 else 0; st[0] = idx }
+    val right = st[1] == 1
+    val still = sh < .05f
+    val slow: androidx.compose.animation.core.FiniteAnimationSpec<Dp> = if (still) androidx.compose.animation.core.snap() else spring(.8f, 300f)
+    val fast: androidx.compose.animation.core.FiniteAnimationSpec<Dp> = if (still) androidx.compose.animation.core.snap() else spring(.7f, 900f)
+    val a by animateDpAsState(pitch * idx, if (right) slow else fast, label = "sma")
+    val b by animateDpAsState(pitch * idx + w, if (right) fast else slow, label = "smb")
+    val shape = RoundedCornerShape(corner)
+    Box(
+        Modifier.offset(x = a).width((b - a).coerceAtLeast(0.dp)).height(h)
+            .graphicsLayer { val k = sh.coerceAtLeast(0f); scaleX = k; scaleY = k; alpha = k.coerceIn(0f, 1f) }
+            .then(
+                if (fill != null) Modifier.clip(shape).background(fill)
+                else Modifier.border(3.dp, ring ?: Color.Transparent, shape)
+            )
+    )
+}
+
+/** Pilihan warna: bulat; saat dipilih mengecil ke dalam cincin penanda, berubah jadi kotak membulat, dan centang membesar. */
 @Composable
 private fun PdfSwatch(col: Color, selected: Boolean, onClick: () -> Unit) {
-    val pal = LocalPal.current
     val hap = LocalHapticFeedback.current
-    val r by animateDpAsState(if (selected) 13.dp else 20.dp, spring(.5f, 600f), label = "swr")
-    val sc by animateFloatAsState(if (selected) 1.06f else .9f, spring(.45f, 600f), label = "sws")
-    val shape = RoundedCornerShape(r)
+    val k by animateFloatAsState(if (selected) 1f else 0f, spring(.5f, 600f), label = "swk")
     val dark = col.red * .299f + col.green * .587f + col.blue * .114f < .6f
     Box(
-        Modifier.graphicsLayer { scaleX = sc; scaleY = sc }.size(40.dp).clip(shape).background(col)
-            .border(3.dp, if (selected) pal.os else Color.Transparent, shape)
-            .clickable { hap.performHapticFeedback(HapticFeedbackType.TextHandleMove); onClick() },
+        Modifier.size(40.dp).clickable { hap.performHapticFeedback(HapticFeedbackType.TextHandleMove); onClick() },
         Alignment.Center
-    ) { if (selected) Ic("ok", if (dark) Color.White else Color.Black, 18.dp) }
+    ) {
+        Box(
+            Modifier.graphicsLayer { val s = 1f - .22f * k.coerceIn(0f, 1.2f); scaleX = s; scaleY = s }
+                .size(40.dp).clip(RoundedCornerShape((20f - 8f * k.coerceIn(0f, 1f)).dp)).background(col),
+            Alignment.Center
+        ) {
+            Box(Modifier.graphicsLayer { val c = k.coerceAtLeast(0f); scaleX = c; scaleY = c; alpha = c.coerceIn(0f, 1f) }) {
+                Ic("ok", if (dark) Color.White else Color.Black, 18.dp)
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- gulir cepat (tepi kanan, mode gulir)
+
+/** Keadaan pegangan gulir cepat; dibaca oleh penggambar ([PdfFastScrollUi]) dan oleh penangkap sentuhan di induk ([fastTouch]). */
+@Stable
+private class PdfFast {
+    var vis by mutableStateOf(false)
+    var drag by mutableStateOf(false)
+    var dragF by mutableFloatStateOf(0f)
+    var f = 0f          // posisi daftar 0..1 (diisi penggambar)
+    var top = 0f        // px: tepi atas lintasan
+    var track = 1f      // px: panjang lintasan gagang
+    var thumbH = 0f     // px: tinggi area sentuh gagang
+    var off = false     // mode coret aktif: pegangan tidak dipakai
+}
+
+/**
+ * Penangkap sentuhan gagang, dipasang di induk (pass Initial) seperti [selHandleTouch]: bila jari mendarat di gagang yang sedang tampil,
+ * sentuhan dimakan di sini sehingga daftar tidak ikut bergulir, lalu geseran jari memetakan posisi gagang -> halaman lewat [onFrac].
+ */
+private fun Modifier.fastTouch(fs: PdfFast, onFrac: (Float) -> Unit): Modifier = pointerInput(fs) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        if (!fs.vis || fs.off) return@awaitEachGesture
+        val y0 = fs.top + fs.track * (if (fs.drag) fs.dragF else fs.f)
+        val zone = 44.dp.toPx()
+        val pad = 10.dp.toPx()
+        if (down.position.x < size.width - zone || down.position.y < y0 - pad || down.position.y > y0 + fs.thumbH + pad) return@awaitEachGesture
+        down.consume()
+        val grab = down.position.y - y0
+        fs.dragF = fs.f
+        fs.drag = true
+        try {
+            while (true) {
+                val ev = awaitPointerEvent(PointerEventPass.Initial)
+                if (ev.changes.count { it.pressed } >= 2) break
+                val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                c.consume()
+                if (c.changedToUp()) break
+                val nf = ((c.position.y - grab - fs.top) / fs.track.coerceAtLeast(1f)).coerceIn(0f, 1f)
+                fs.dragF = nf
+                onFrac(nf)
+            }
+        } finally { fs.drag = false }
+    }
+}
+
+/**
+ * Gagang gulir cepat M3 Expressive: muncul (menggeser masuk dari tepi) saat menggulir, lalu hilang sendiri. Tipis saat diam; disentuh =
+ * membesar jadi pil tebal berpegangan, dan gelembung berisi pratinjau halaman + nomornya tumbuh dari gagang.
+ */
+@Composable
+private fun PdfFastScrollUi(ui: PdfUi, fs: PdfFast, list: LazyListState, count: Int, topPad: Dp, botPad: Dp) {
+    if (count < 2) return
+    val pal = LocalPal.current
+    val dens = LocalDensity.current.density
+    var h by remember { mutableIntStateOf(0) }
+    val thumbH = 64.dp
+    val listF by remember(list, count) {
+        derivedStateOf {
+            if (!list.canScrollForward) 1f else {
+                val f = list.layoutInfo.visibleItemsInfo.firstOrNull()
+                val pos = if (f == null) 0f else list.firstVisibleItemIndex + list.firstVisibleItemScrollOffset / f.size.toFloat().coerceAtLeast(1f)
+                (pos / (count - 1)).coerceIn(0f, 1f)
+            }
+        }
+    }
+    SideEffect {
+        fs.f = listF
+        fs.off = ui.inkOn
+        fs.top = topPad.value * dens
+        fs.thumbH = thumbH.value * dens
+        fs.track = (h - fs.top - botPad.value * dens - fs.thumbH).coerceAtLeast(1f)
+    }
+    val scrolling = list.isScrollInProgress
+    LaunchedEffect(scrolling, fs.drag) { if (scrolling || fs.drag) fs.vis = true else { delay(1600); fs.vis = false } }
+    val appear by animateFloatAsState(if (fs.vis && !ui.inkOn) 1f else 0f, spring(.7f, 420f), label = "fsa")
+    val grow by animateFloatAsState(if (fs.drag) 1f else 0f, spring(.55f, 460f), label = "fsg")
+    val f = if (fs.drag) fs.dragF else listF
+    val shownPg = (f * (count - 1)).roundToInt().coerceIn(0, count - 1)
+
+    var thumb by remember { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(shownPg, fs.drag) {
+        if (!fs.drag) return@LaunchedEffect
+        val key = ui.fid + ":" + shownPg + "@256"
+        val hit = PdfCache.get(key)
+        if (hit != null) { thumb = hit.asImageBitmap(); return@LaunchedEffect }
+        delay(70)
+        val b = ui.doc.render(shownPg, 256) ?: return@LaunchedEffect
+        PdfCache.put(key, b)
+        thumb = b.asImageBitmap()
+    }
+
+    Box(Modifier.fillMaxSize().onSizeChanged { h = it.height }) {
+        if (appear > .01f) {
+            val yPx = fs.top + fs.track * f
+            val g = grow.coerceAtLeast(0f)
+            Box(
+                Modifier.align(Alignment.TopEnd).offset { IntOffset(0, yPx.roundToInt()) }.size(44.dp, thumbH)
+                    .graphicsLayer { alpha = appear.coerceIn(0f, 1f); translationX = (1f - appear.coerceIn(0f, 1f)) * 22.dp.toPx() }
+            ) {
+                if (g > .01f) {
+                    val ar = ui.doc.ratioOf(shownPg).coerceIn(.5f, 2.2f)
+                    Row(
+                        Modifier.align(Alignment.CenterEnd).offset(x = (-40).dp)
+                            .graphicsLayer { transformOrigin = TransformOrigin(1f, .5f); scaleX = g; scaleY = g; alpha = g.coerceIn(0f, 1f) }
+                            .shadow(8.dp, RoundedCornerShape(26.dp)).clip(RoundedCornerShape(26.dp)).background(pal.pc)
+                            .padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Canvas(Modifier.width(84.dp).height((84f * ar).dp).clip(RoundedCornerShape(8.dp)).background(Color.White)) {
+                            val b = thumb
+                            if (b != null) drawImage(
+                                b, dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()),
+                                filterQuality = FilterQuality.Low, colorFilter = if (ui.dark) INVERT else null
+                            )
+                        }
+                        Column(Modifier.padding(end = 6.dp)) {
+                            T((shownPg + 1).toString(), 26f, 900, pal.opc)
+                            T("of $count", 12f, 600, pal.opc.copy(alpha = .7f))
+                        }
+                    }
+                }
+                Box(
+                    Modifier.align(Alignment.CenterEnd).padding(end = 4.dp)
+                        .width((5f + 15f * g).dp).height((46f + 18f * g).dp)
+                        .shadow((2f + 4f * g).dp, CircleShape).clip(CircleShape).background(pal.p),
+                    Alignment.Center
+                ) {
+                    Canvas(Modifier.size(10.dp, 16.dp).graphicsLayer { alpha = g.coerceIn(0f, 1f) }) {
+                        val sw = 2.dp.toPx()
+                        for (i in 0..2) drawLine(pal.op, Offset(0f, size.height * i / 2f), Offset(size.width, size.height * i / 2f), sw, StrokeCap.Round)
+                    }
+                }
+            }
+        }
+    }
 }
 
 /** Ruas trek dengan ujung luar bulat penuh dan sisi dekat gagang bersudut kecil (gaya penggeser M3 Expressive). */
@@ -1971,7 +2152,7 @@ private fun PdfSlider(frac: Float, onChange: (Float) -> Unit, onDone: () -> Unit
     }
 }
 
-/** Panel di atas kapsul alat: palet warna (pulpen / stabilo) + pratinjau dan penggeser tebal goresan. */
+/** Isi panel di atas alat (di dalam wadah yang sama dengan kapsul alat): palet warna + pratinjau dan penggeser tebal goresan. */
 @Composable
 private fun PdfInkPanel(ui: PdfUi, onSave: () -> Unit) {
     val pal = LocalPal.current
@@ -1980,25 +2161,39 @@ private fun PdfInkPanel(ui: PdfUi, onSave: () -> Unit) {
     val hi = if (t == 0) 12f else if (t == 1) 32f else 40f
     val frac = ((ui.wDp - lo) / (hi - lo)).coerceIn(0f, 1f)
     val ip = ui.inkPal ?: pal
-    val col = if (t < 2) inkColor(ip, ui.color, t == 1) else pal.os
+    val col by animateColorAsState(if (t < 2) inkColor(ip, ui.color, t == 1) else pal.os, spring(stiffness = 500f), label = "ipc")
+    val fillA by animateFloatAsState(if (t == 2) 0f else 1f, spring(1f, 500f), label = "ipf")
     val dot by animateDpAsState(ui.wDp.coerceIn(4f, 34f).dp, spring(.6f, 500f), label = "ipd")
-    Column(
-        Modifier.shadow(10.dp, RoundedCornerShape(30.dp)).clip(RoundedCornerShape(30.dp)).background(pal.c3)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp), horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        if (t < 2) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            for (i in 0..4) PdfSwatch(inkColor(ip, i, t == 1), ui.color == i) { ui.color = i; onSave() }
-        }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(Modifier.size(40.dp), Alignment.Center) {
-                Box(
-                    Modifier.size(dot).clip(CircleShape)
-                        .then(if (t == 2) Modifier.border(2.dp, pal.os, CircleShape) else Modifier.background(col))
-                )
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(
+            Modifier.padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // baris warna menutup mulus saat memilih penghapus (tidak ada warna untuk dipilih)
+            AnimatedVisibility(
+                t < 2,
+                enter = expandVertically(spring(.8f, 420f)) + fadeIn(tween(180, delayMillis = 40)),
+                exit = shrinkVertically(spring(1f, 700f)) + fadeOut(tween(90))
+            ) {
+                Box(Modifier.padding(bottom = 6.dp).width(216.dp).height(40.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        for (i in 0..4) PdfSwatch(inkColor(ip, i, t == 1), ui.color == i) { ui.color = i; onSave() }
+                    }
+                    PdfSlideMark(ui.color, 44.dp, 40.dp, 40.dp, 14.dp, true, null, pal.os)
+                }
             }
-            PdfSlider(frac, { ui.wDp = lo + it * (hi - lo) }, onSave, Modifier.width(190.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // pratinjau: titik berisi (pulpen / stabilo) menjadi cincin kosong (penghapus) dan sebaliknya
+                Box(Modifier.size(40.dp), Alignment.Center) {
+                    Box(
+                        Modifier.size(dot).clip(CircleShape).background(col.copy(alpha = fillA))
+                            .border(2.dp, pal.os.copy(alpha = 1f - fillA), CircleShape)
+                    )
+                }
+                PdfSlider(frac, { ui.wDp = lo + it * (hi - lo) }, onSave, Modifier.width(190.dp))
+            }
         }
+        Box(Modifier.padding(top = 4.dp).fillMaxWidth().height(1.dp).background(pal.os.copy(alpha = .08f)))
     }
 }
 
@@ -2027,8 +2222,10 @@ private fun PageCapsule(page: Int, count: Int, onSeek: (Int) -> Unit) {
     AnimatedContent(
         targetState = open,
         modifier = Modifier.shadow(10.dp, CircleShape).clip(CircleShape).background(pal.c3),
+        contentAlignment = Alignment.Center,
         transitionSpec = {
-            (fadeIn(tween(200)) + scaleIn(spring(.75f, 420f), initialScale = .88f)) togetherWith fadeOut(tween(110))
+            (fadeIn(tween(220, delayMillis = 90)) + scaleIn(spring(.8f, 380f), initialScale = .9f)) togetherWith
+                fadeOut(tween(90)) using SizeTransform(clip = false) { _, _ -> spring(.72f, 380f) }
         },
         label = "pcap"
     ) { isOpen ->
