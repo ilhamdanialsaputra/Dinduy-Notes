@@ -1005,7 +1005,8 @@ private fun TwoColLayout(
                 for (k in 0 until n) {
                     if (saved[k] >= 0) { lane[k] = saved[k]; continue }
                     // seri tinggi (atau tinggi belum terukur = 0): kolom dengan kartu lebih sedikit, bukan selalu kiri
-                    val v = if (hh[0] < hh[1]) 0 else if (hh[0] > hh[1]) 1 else if (cn[0] <= cn[1]) 0 else 1
+                    // kartu paling atas (catatan baru selalu masuk di indeks 0) selalu mulai dari kolom KIRI, seperti Google Keep
+                    val v = if (k == 0) 0 else if (hh[0] < hh[1]) 0 else if (hh[0] > hh[1]) 1 else if (cn[0] <= cn[1]) 0 else 1
                     cn[v]++
                     lane[k] = v
                     hh[v] += items[k].second.height + gap
