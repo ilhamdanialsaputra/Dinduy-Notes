@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -152,6 +154,19 @@ private fun fmtSize(b: Long): String =
     if (b >= 1_048_576L) String.format(java.util.Locale.US, "%.1f MB", b / 1048576f) else "${max(1L, (b + 512L) / 1024L)} KB"
 
 // ------------------------------------------------------------------ komponen
+
+/** Membuka/melipat satu baris panel: tingginya ikut f (0..1) dan isinya memanjang dari atas, jadi tidak ada yang muncul tiba-tiba. */
+private fun Modifier.reveal(f: Float): Modifier = this
+    .layout { m, c ->
+        val pl = m.measure(c)
+        val h = (pl.height * f).roundToInt().coerceAtLeast(0)
+        layout(pl.width, h) { pl.place(0, 0) }
+    }
+    .graphicsLayer {
+        scaleX = .88f + .12f * f.coerceIn(0f, 1f)
+        scaleY = f.coerceAtLeast(0f)
+        transformOrigin = TransformOrigin(.5f, 0f)
+    }
 
 /** Garis progres bergelombang M3 Expressive: gelombang mengalir sepanjang bagian yang sudah dibaca; lebih tinggi saat menyusun ulang. */
 @Composable
@@ -479,7 +494,7 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
     val def = ((if (hasInk) faithful else 12f).coerceIn(lo, hiQ) * 2f).roundToInt() / 2f
     var pt by remember(id) { mutableFloatStateOf(def) }
     var attempt by remember(id) { mutableIntStateOf(0) }
-    var open by remember { mutableStateOf(true) }
+    var open by remember { mutableStateOf(false) }   // awalnya versi simpel (terlipat); geser ke atas untuk membuka
 
     var view by remember { mutableStateOf<PdfView?>(null) }
     var info by remember { mutableStateOf<PdfExport.Result?>(null) }
@@ -572,6 +587,9 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
     var ptBump by remember { mutableStateOf(false) }
     LaunchedEffect(pt) { ptBump = true; delay(110); ptBump = false }
     val ptPop by animateFloatAsState(if (ptBump) 1.1f else 1f, spring(.35f, 520f), label = "ptp")
+    val ovA by animateFloatAsState(if (open) 1f else 0f, spring(.66f, 460f), label = "ovA")
+    val ovB by animateFloatAsState(if (open) 1f else 0f, spring(.66f, 340f), label = "ovB")
+    val ovC by animateFloatAsState(if (open) 1f else 0f, spring(.72f, 260f), label = "ovC")
     LaunchedEffect(curPage) { if (info != null) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
 
     Box(Modifier.fillMaxSize().background(pal.bg)) {
@@ -681,7 +699,6 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
                 Modifier.fillMaxWidth()
                     .shadow(if (pal.dark) 12.dp else 8.dp, panelShape)
                     .clip(panelShape).background(pal.c2)
-                    .animateContentSize(spring(.8f, 420f))
             ) {
                 val hw by animateDpAsState(if (open) 36.dp else 56.dp, spring(.55f, 500f), label = "hdl")
                 Box(
@@ -739,20 +756,29 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
                         ) { T("$ptTxt pt", 16f, 700, pal.op, Modifier.wrapContentWidth(Alignment.CenterHorizontally, unbounded = true), maxLines = 1) }
                     }
 
-                    if (open) {
+                    if (open || ovA > .002f || ovB > .002f || ovC > .002f) {
                         // praset satu ketukan
-                        Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Row(Modifier.reveal(ovA).fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                             presets.forEachIndexed { i, p ->
-                                PresetBtn(p.first, pt == p.second, i == 0, i == presets.lastIndex, Modifier.weight(1f)) { setPt(p.second) }
+                                PresetBtn(
+                                    p.first, pt == p.second, i == 0, i == presets.lastIndex,
+                                    Modifier.weight(1f).graphicsLayer {
+                                        // tombol muncul berurutan dari kiri: membesar dari kecil
+                                        val fi = (ovA * 1.5f - i * .14f).coerceIn(0f, 1.1f)
+                                        val s = .55f + .45f * fi
+                                        scaleX = s; scaleY = s
+                                    }
+                                ) { setPt(p.second) }
                             }
                         }
                         // atur halus: kurang / slider / tambah
-                        Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            StepBtn(false, pt > lo) { setPt(pt - 1f) }
+                        Row(Modifier.reveal(ovB).fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.graphicsLayer { val s = ovB.coerceIn(0f, 1.1f); scaleX = s; scaleY = s }) { StepBtn(false, pt > lo) { setPt(pt - 1f) } }
                             PdfSlider(pt, lo, hiQ, Modifier.weight(1f).padding(horizontal = 4.dp)) { setPt(it) }
-                            StepBtn(true, pt < hiQ) { setPt(pt + 1f) }
+                            Box(Modifier.graphicsLayer { val s = ovB.coerceIn(0f, 1.1f); scaleX = s; scaleY = s }) { StepBtn(true, pt < hiQ) { setPt(pt + 1f) } }
                         }
                         // ringkasan hasil
+                        Column(Modifier.reveal(ovC)) {
                         val sizeTxt = remember(info) { info?.let { fmtSize(it.file.length()) } }
                         if (info != null && sizeTxt != null && !failed) {
                             Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -766,6 +792,7 @@ fun PdfExportPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
                         }
                         if (hasInk) {
                             T("Drawings keep their size. Only the text changes.", 13f, 400, pal.osv, Modifier.padding(top = 2.dp), lh = 1.3f)
+                        }
                         }
                     }
 
