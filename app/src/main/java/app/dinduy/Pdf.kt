@@ -1539,8 +1539,8 @@ private fun PdfSilkCurl(
     ) {
         // GLSurfaceView tak ikut pudar bersama induknya, jadi disembunyikan selama morph buka/tutup dari beranda.
         // Kamera mesin tetap: view diposisikan supaya halaman diam persis menempati persegi halaman (geo), sisanya hitam.
-        // Halaman yang lebih tinggi dari ~1.55 x lebarnya tak muat di frustum kamera mesin (tinggi dunia 1.657): diperkecil di tengah supaya tidak terpotong.
-        val fit = min(1f, 1.55f / r0)
+        // Halaman yang lebih tinggi dari ~1.8 x lebarnya tak muat di frustum kamera mesin (tinggi dunia 2.08): diperkecil di tengah supaya tidak terpotong.
+        val fit = min(1f, 1.8f / r0)
         SilkGlView(
             ctl, vm.openP.value > .2f, Modifier.fillMaxSize(),
             geo.left + geo.pw * (1f - fit) / 2f, geo.top + geo.ph * (1f - fit) / 2f, geo.pw * fit, geo.ph * fit
