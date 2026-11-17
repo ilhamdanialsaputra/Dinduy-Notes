@@ -1332,6 +1332,15 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
 private const val SILK_GAIN_F = 1.1f    // maju: jarak geser jari (pecahan lebar halaman) -> gerak siluet
 private const val SILK_GAIN_B = 1.25f   // mundur
 
+private class SilkSnap(
+    val prev: SilkPage?, val cur: SilkPage?, val next: SilkPage?, val slot: Int,
+    val xr: Float, val tilt: Float, val dark: Boolean, val z: Float, val px: Float, val py: Float
+) {
+    override fun equals(other: Any?): Boolean = other is SilkSnap && other.prev === prev && other.cur === cur && other.next === next &&
+        other.slot == slot && other.xr == xr && other.tilt == tilt && other.dark == dark && other.z == z && other.px == px && other.py == py
+    override fun hashCode(): Int = xr.hashCode() * 31 + slot
+}
+
 private class SilkGeo(
     val pw: Float, val ph: Float, val vw: Float, val vh: Float,
     val left: Float, val top: Float, val avail: Float, val topPad: Float
@@ -1516,6 +1525,22 @@ private fun PdfSilkCurl(
     }
 
     // ---- kirim ke renderer
+    // SideEffect saja TIDAK cukup: state yang dibaca di dalam SideEffect tidak memicu recomposition, jadi xr / tilt / dir yang berubah tiap frame
+    // animasi tidak pernah sampai ke renderer. snapshotFlow memantau semuanya dan mendorong satu update per perubahan.
+    val pagesNow by rememberUpdatedState(pages)
+    LaunchedEffect(ctl) {
+        snapshotFlow {
+            val pg = pagesNow
+            val c = cur
+            val hp = hi?.takeIf { it.first == c && cz > 1.02f }?.third
+            SilkSnap(pg[c - 1], hp ?: pg[c], pg[c + 1], if (dir < 0) 0 else 1, xr, tilt, ui.dark, cz, cpan.x, cpan.y)
+        }.collect { n ->
+            val g = geoNow
+            ctl.setPages(n.prev, n.cur, n.next)
+            ctl.setState(n.slot, n.xr, n.tilt, n.dark, n.z, n.px, n.py, g.left, g.top, g.pw, g.ph, g.vw, g.vh)
+        }
+    }
+    // geometri / bitmap yang berubah lewat komposisi (rasio halaman terukur, bitmap baru selesai dirender)
     SideEffect {
         ctl.setPages(pPrev, pCur, pNext)
         ctl.setState(
