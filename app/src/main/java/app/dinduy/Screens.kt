@@ -2557,7 +2557,7 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                     SCard(POS_BOT) {
                         Row(
                             Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
-                                .clickable { vm.setHideLabeled(!vm.hideLabeled) }
+                                .clickable { vm.updateHideLabeled(!vm.hideLabeled) }
                                 .padding(vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
