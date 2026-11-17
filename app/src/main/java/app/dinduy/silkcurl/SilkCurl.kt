@@ -146,20 +146,11 @@ class SilkController(private val onFail: () -> Unit) {
     /** true bila settlement yang sedang jalan hanya "kembali ke halaman semula" (PageChange.NONE). */
     private var settleNone = false
 
-    /** Sedang settle balik ke halaman semula dan jari tidak menyentuh: aman diinterupsi sentuhan baru tanpa menunggu animasinya. */
-    val interruptible: Boolean get() = settling && settleNone && !touching
+    /** Halaman tujuan settlement yang sedang memindahkan halaman (-1 bila tidak ada). Dipakai agar batas buku dihitung dari tujuan, bukan dari halaman lama. */
+    private var settleTarget = -1
 
-    /**
-     * Hentikan settle "kembali ke halaman semula" seketika supaya geseran / ketukan berikutnya langsung terpegang.
-     * Hanya berlaku untuk PageChange.NONE; balikan yang benar-benar pindah halaman tidak diinterupsi.
-     */
-    fun interrupt() {
-        if (!interruptible) return
-        try { view?.cancelGesture() } catch (t: Throwable) { }
-        settling = false
-        settleNone = false
-        touching = false
-    }
+    /** true selama ada ketukan yang menunggu giliran di mesin (dirantai tepat setelah balikan yang sedang jalan). */
+    val hasQueuedTurns: Boolean get() = view?.hasQueuedTurns() == true
 
     private val main = Handler(Looper.getMainLooper())
     private var view: SilkSurfaceView? = null
@@ -204,16 +195,14 @@ class SilkController(private val onFail: () -> Unit) {
         }
 
         override fun onGestureRejected(gestureId: Long, generationId: Long, reason: GestureRejectionReason) {
-            touching = false
-            // pemulihan: bila mesin menolak geseran (mis. deck hilang setelah interupsi), suplai ulang deck
-            lastSig = null
-            flush()
+            // hanya geseran milik kita yang gagal; penolakan ketukan (gestureId = NO_GESTURE_ID) tidak boleh mematikan geseran yang sedang jalan
+            if (gestureId == gid) touching = false
+            main.post { flush() }
         }
 
         override fun onGestureCancelled(gestureId: Long, generationId: Long) {
             // callback basi dari gestur lama tidak boleh mematikan geseran baru yang sudah dimulai
-            if (touching && gestureId != gid) return
-            touching = false
+            if (gestureId == gid) touching = false
         }
 
         override fun onSettlementStarted(
@@ -221,19 +210,21 @@ class SilkController(private val onFail: () -> Unit) {
         ) {
             settling = true
             settleNone = pageChange == PageChange.NONE
+            settleTarget = -1
             if (pageChange == PageChange.NONE) return
             // deck halaman tujuan disuplai SEKARANG (jadi pending): mesin mengaktifkannya tepat saat settlement selesai
             val t = ordOf(targetLogicalPageId) ?: if (pageChange == PageChange.NEXT) curOrd + 1 else curOrd - 1
+            settleTarget = t
             if (t in 0 until count) submit(t)
         }
 
         override fun onSettlementCompleted(
             gestureId: Long, generationId: Long, currentLogicalPageId: String, currentOrdinal: Int, pageChange: PageChange
         ) {
-            if (touching && pageChange == PageChange.NONE && gestureId != gid) return   // basi: geseran baru sudah dimulai
+            // `touching` sengaja tidak disentuh: jari yang sudah turun (geseran ditunda mesin) tetap milik geseran itu
             settling = false
             settleNone = false
-            touching = false
+            settleTarget = -1
             if (pageChange != PageChange.NONE) {
                 curOrd = currentOrdinal
                 onPage(currentOrdinal)
@@ -242,12 +233,15 @@ class SilkController(private val onFail: () -> Unit) {
         }
 
         override fun onSettlementCancelled(gestureId: Long, generationId: Long, currentLogicalPageId: String) {
-            if (touching && gestureId != gid) return   // basi: geseran baru sudah dimulai
+            // Mesin selalu melapor "cancelled" SEBELUM "started" berikutnya, jadi aman menurunkan settling di sini.
+            // Resubmit deck hanya bila yang dibatalkan balikan halaman (deck pending jadi basi); ditunda satu putaran
+            // supaya settlement pengganti (mis. ketukan yang mengambil alih) sudah berjalan dan flush() melihat busy.
+            val wasMove = !settleNone
             settling = false
             settleNone = false
-            touching = false
-            lastSig = null
-            flush()
+            settleTarget = -1
+            if (wasMove) lastSig = null
+            main.post { flush() }
         }
     }
 
@@ -319,23 +313,36 @@ class SilkController(private val onFail: () -> Unit) {
         flush()
     }
 
-    /** Ketukan tepi: memicu turn(PageChange) pada mesin. false bila tak bisa (di ujung buku, sibuk, deck belum siap). */
+    /** Ordinal halaman setelah settlement yang sedang jalan selesai (tujuan bila sedang pindah halaman). */
+    private fun virtOrd(): Int = if (settling && !settleNone && settleTarget >= 0) settleTarget else curOrd
+
+    /** Boleh memulai geseran ke arah [dir] (1 = maju, -1 = mundur)? Tidak lagi bergantung pada busy: mesin yang mengambil alih / menunda. */
+    fun canDrag(dir: Int): Boolean {
+        if (view == null || failed) return false
+        val o = virtOrd()
+        return if (dir > 0) o + 1 < count else o > 0
+    }
+
+    /**
+     * Ketukan tepi: turn(PageChange) mesin. Tidak pernah ditolak karena sibuk: bila balikan sedang jalan, ketukan diantrikan di mesin dan dirantai
+     * tepat setelahnya (balikan batal yang sedang kembali diambil alih mulus). false hanya di ujung buku / mesin belum punya deck.
+     */
     fun turn(next: Boolean): Boolean {
         val v = view ?: return false
-        interrupt()
-        if (busy || failed) return false
-        if (next && curOrd + 1 >= count) return false
-        if (!next && curOrd <= 0) return false
+        if (failed) return false
+        val o = virtOrd()
+        if (next && o + 1 >= count) return false
+        if (!next && o <= 0) return false
         return try { v.turn(if (next) PageChange.NEXT else PageChange.PREVIOUS) } catch (t: Throwable) { false }
     }
 
-    /** Awal geseran (dir 1 = maju / geser ke kiri, -1 = mundur). Koordinat bebas asal konsisten (hanya selisih yang dipakai mesin). */
+    /**
+     * Awal geseran (dir 1 = maju / geser ke kiri, -1 = mundur). Koordinat bebas asal konsisten (hanya selisih yang dipakai mesin).
+     * Tidak pernah ditolak karena sibuk: halaman yang sedang kembali ditangkap di posisinya; balikan yang sedang selesai dipercepat dan geseran
+     * dimulai tepat setelahnya (ditangani mesin).
+     */
     fun dragBegin(dir: Int, x: Float, y: Float, t: Long): Boolean {
-        if (view == null || failed) return false
-        interrupt()
-        if (busy) return false
-        if (dir > 0 && curOrd + 1 >= count) return false
-        if (dir < 0 && curOrd <= 0) return false
+        if (!canDrag(dir)) return false
         gid++
         downX = x
         downTime = t
@@ -349,6 +356,10 @@ class SilkController(private val onFail: () -> Unit) {
         send(MotionEvent.ACTION_MOVE, clampX(x), y, t)
     }
 
+    /**
+     * Akhir geseran. [cancelled] = true: halaman kembali ke tempat semula dengan animasi singkat milik mesin (ACTION_CANCEL di mesin sekarang
+     * menjadi revert yang mulus, bukan reset seketika) dan langsung bisa disentuh lagi.
+     */
     fun dragEnd(x: Float, y: Float, t: Long, cancelled: Boolean) {
         if (!touching) return
         send(if (cancelled) MotionEvent.ACTION_CANCEL else MotionEvent.ACTION_UP, clampX(x), y, t)
@@ -358,8 +369,9 @@ class SilkController(private val onFail: () -> Unit) {
     /** Di ujung buku mesin tak boleh diajak membalik ke halaman yang tak ada: jari tak boleh melewati titik sentuh awal ke arah itu. */
     private fun clampX(x: Float): Float {
         var xx = x
-        if (curOrd <= 0) xx = min(xx, downX)
-        if (curOrd + 1 >= count) xx = max(xx, downX)
+        val o = virtOrd()
+        if (o <= 0) xx = min(xx, downX)
+        if (o + 1 >= count) xx = max(xx, downX)
         return xx
     }
 
@@ -385,7 +397,12 @@ class SilkController(private val onFail: () -> Unit) {
 
     /** Suplai deck untuk halaman [curOrd] bila isinya berubah. Tidak menyentuh mesin saat jari / settlement aktif (deck baru akan mereset model kurva). */
     private fun flush() {
-        if (view == null || failed || caps == null || busy) return
+        val v = view
+        if (v == null || failed || caps == null) return
+        if (settling) return
+        // jari yang menunggu serah-terima halaman dari mesin (geseran ditunda) tidak menghalangi suplai deck; jari yang benar-benar menggeser menghalangi
+        if (touching && !v.isGestureDeferred()) return
+        if (v.hasQueuedTurns()) return   // ketukan antre: jangan ganti deck di sela rantai balikan
         val o = curOrd
         if (o !in 0 until count || pageAt(o) == null) return
         if (sigFor(o) == lastSig) return
