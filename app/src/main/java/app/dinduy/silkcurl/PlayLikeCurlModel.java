@@ -4,7 +4,7 @@
  * Original project : https://github.com/karankalsi/PlayLikeCurl
  * Maintained fork  : Arnab11/PlayLikeCurl (GLES2 renderer, production bitmap API v1, release 1.1.4)
  * Local changes    : package declaration (karacken.curl -> app.dinduy.silkcurl). Logic edits are marked "Local change"
- *                    in PageRenderer.updateMvp (fov 45f -> 55f) and PageSurfaceView.completeSettlement only.
+ *                    in PageRenderer.updateMvp (fov 45f -> 55f) PageSurfaceView (gesture / settlement lifecycle), PlayLikeCurlModel, Settlement, SettlementInterpolator (turn, revert, grab, queue).
  *
  * MIT License
  *
@@ -41,13 +41,23 @@ public final class PlayLikeCurlModel {
     public static final float RADIUS = 0.18f;
     public static final int LEFT_ENDPOINT_PERCENT = 100;
     public static final int RIGHT_ENDPOINT_PERCENT = -5;
+    /** Duration of a fling / release that commits a page change (unchanged from upstream). */
     public static final long SETTLEMENT_DURATION_MILLIS = 300L;
+    /** Local change: duration of a full edge-tap turn. Soft start, so it reads smooth rather than abrupt. */
+    public static final long TURN_DURATION_MILLIS = 480L;
+    /** Local change: duration of a full return to the original page after an uncompleted drag. */
+    public static final long REVERT_DURATION_MILLIS = 240L;
+    /** Local change: shortest settlement produced by {@link #timed}; keeps tiny corrections visible but quick. */
+    public static final long MIN_SETTLEMENT_MILLIS = 120L;
     public static final float LEFT_DEPTH = -0.001f;
     public static final float FRONT_DEPTH = -0.002f;
     public static final float RIGHT_DEPTH = -0.003f;
     public static final float RIGHT_ENDPOINT_POSITION = GRID * (RIGHT_ENDPOINT_PERCENT / 100f);
     private static final float RELEASE_COMMIT_POSITION =
             (GRID + RIGHT_ENDPOINT_POSITION) / 2f;
+    private static final float FULL_TRAVEL_PERCENT =
+            LEFT_ENDPOINT_PERCENT - RIGHT_ENDPOINT_PERCENT;
+    private static final float DISPLACED_EPSILON = 0.001f;
 
     private final int pageCount;
     private final PageState leftPage = new PageState(
@@ -114,6 +124,26 @@ public final class PlayLikeCurlModel {
         gestureStartCurlPosition = activePageState().getCurlPosition();
     }
 
+    /**
+     * Local change: starts a gesture WITHOUT resetting a page that is still in motion (finger lands on a
+     * page that is returning / settling). The drag continues from the page's current position, so there
+     * is no jump. At rest this is exactly {@link #beginGesture(float)}.
+     */
+    void grabGesture(float x) {
+        if (!isDisplaced()) {
+            beginGesture(x);
+            return;
+        }
+        gestureStartX = x;
+        gestureStartCurlPosition = activePageState().getCurlPosition();
+    }
+
+    /** Local change: true when the active page is not at its rest position (mid drag / mid settlement). */
+    boolean isDisplaced() {
+        float rest = activePage == ActivePage.LEFT ? RIGHT_ENDPOINT_POSITION : GRID;
+        return Math.abs(activePageState().getCurlPosition() - rest) > DISPLACED_EPSILON;
+    }
+
     public void dragTo(float x, float width) {
         if (width <= 0f) return;
         float delta = x - gestureStartX;
@@ -124,11 +154,14 @@ public final class PlayLikeCurlModel {
                 gestureStartCurlPosition = activePageState().getCurlPosition();
             }
             float value = gestureStartCurlPosition + movedFraction * GRID;
-            if (value <= GRID) activePageState().setCurlPosition(value);
+            // Local change: clamp instead of ignoring, so a grabbed page lands exactly on its rest pose.
+            activePageState().setCurlPosition(Math.min(value, GRID));
         } else if (delta < 0f) {
             float value = (1f - Math.abs(movedFraction)) * GRID
                     - (GRID - gestureStartCurlPosition);
-            if (canSwipeNext()) activePageState().setCurlPosition(value);
+            if (canSwipeNext()) {
+                activePageState().setCurlPosition(Math.max(value, RIGHT_ENDPOINT_POSITION));
+            }
         }
     }
 
@@ -141,10 +174,7 @@ public final class PlayLikeCurlModel {
                         PageChange.PREVIOUS,
                         SettlementInterpolator.DECELERATE);
             }
-            return settlement(
-                    RIGHT_ENDPOINT_PERCENT,
-                    PageChange.NONE,
-                    SettlementInterpolator.ACCELERATE_DECELERATE);
+            return revert();
         }
         if (canSwipeNext()
                 && activePageState().getCurlPosition() <= RELEASE_COMMIT_POSITION) {
@@ -153,14 +183,29 @@ public final class PlayLikeCurlModel {
                     PageChange.NEXT,
                     SettlementInterpolator.DECELERATE);
         }
-        return settlement(
-                LEFT_ENDPOINT_PERCENT,
+        return revert();
+    }
+
+    /**
+     * Local change: short, smooth return of the active page to its rest pose (page change NONE).
+     * Duration scales with the remaining distance, so a page that is almost home returns almost instantly.
+     */
+    Settlement revert() {
+        int target = activePage == ActivePage.LEFT
+                ? RIGHT_ENDPOINT_PERCENT
+                : LEFT_ENDPOINT_PERCENT;
+        return timed(
+                target,
                 PageChange.NONE,
-                SettlementInterpolator.ACCELERATE_DECELERATE);
+                SettlementInterpolator.FAST_OUT_SLOW_IN,
+                REVERT_DURATION_MILLIS);
     }
 
     Settlement flingTowardNext() {
         if (!canSwipeNext()) return release();
+        // Local change: flicking toward "next" while the PREVIOUS page is being dragged puts that page away
+        // (revert). Upstream animated it away but still committed PageChange.NEXT.
+        if (activePage == ActivePage.LEFT) return revert();
         return settlement(
                 RIGHT_ENDPOINT_PERCENT,
                 PageChange.NEXT,
@@ -169,24 +214,53 @@ public final class PlayLikeCurlModel {
 
     Settlement flingTowardPrevious() {
         if (!canSwipePrevious()) return release();
+        // Local change: flicking toward "previous" while the CURRENT page is being dragged away brings it
+        // back (revert). Upstream animated it home but still committed PageChange.PREVIOUS.
+        if (activePage == ActivePage.CURRENT) return revert();
         return settlement(
                 LEFT_ENDPOINT_PERCENT,
                 PageChange.PREVIOUS,
                 SettlementInterpolator.DECELERATE);
     }
 
+    /**
+     * Edge turn. If the matching page is still returning (an interrupted revert) the turn continues from
+     * where that page is; otherwise it starts from the rest pose.
+     */
     Settlement turn(PageChange pageChange) {
         if (pageChange == PageChange.PREVIOUS) {
             if (!canSwipePrevious()) return release();
-            setActivePage(ActivePage.LEFT);
-            leftPage.setCurlPosition(RIGHT_ENDPOINT_POSITION);
-            return flingTowardPrevious();
+            float left = leftPage.getCurlPosition();
+            boolean continuing = activePage == ActivePage.LEFT
+                    && left > RIGHT_ENDPOINT_POSITION
+                    && left < GRID;
+            if (!continuing) {
+                resetPages();
+                setActivePage(ActivePage.LEFT);
+                leftPage.setCurlPosition(RIGHT_ENDPOINT_POSITION);
+            }
+            return timed(
+                    LEFT_ENDPOINT_PERCENT,
+                    PageChange.PREVIOUS,
+                    SettlementInterpolator.FAST_OUT_SLOW_IN,
+                    TURN_DURATION_MILLIS);
         }
         if (pageChange == PageChange.NEXT) {
             if (!canSwipeNext()) return release();
-            setActivePage(ActivePage.CURRENT);
-            frontPage.setCurlPosition(GRID);
-            return flingTowardNext();
+            float front = frontPage.getCurlPosition();
+            boolean continuing = activePage == ActivePage.CURRENT
+                    && front < GRID
+                    && front > RIGHT_ENDPOINT_POSITION;
+            if (!continuing) {
+                resetPages();
+                setActivePage(ActivePage.CURRENT);
+                frontPage.setCurlPosition(GRID);
+            }
+            return timed(
+                    RIGHT_ENDPOINT_PERCENT,
+                    PageChange.NEXT,
+                    SettlementInterpolator.FAST_OUT_SLOW_IN,
+                    TURN_DURATION_MILLIS);
         }
         return release();
     }
@@ -218,6 +292,19 @@ public final class PlayLikeCurlModel {
                 SETTLEMENT_DURATION_MILLIS,
                 interpolator,
                 pageChange);
+    }
+
+    /** Settlement whose duration is {@code baseMillis} scaled by the distance still to travel. */
+    private Settlement timed(
+            int targetPercent,
+            PageChange pageChange,
+            SettlementInterpolator interpolator,
+            long baseMillis) {
+        float fromPercent = activePageState().getCurlPosition() / GRID * 100f;
+        float travel = Math.abs(fromPercent - targetPercent) / FULL_TRAVEL_PERCENT;
+        travel = Math.max(0.35f, Math.min(1f, travel));
+        long duration = Math.max(MIN_SETTLEMENT_MILLIS, Math.round(baseMillis * travel));
+        return new Settlement(targetPercent, duration, interpolator, pageChange);
     }
 
     private void resetPages() {
