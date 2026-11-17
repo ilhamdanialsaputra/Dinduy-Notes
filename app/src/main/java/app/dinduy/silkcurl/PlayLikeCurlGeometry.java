@@ -4,7 +4,8 @@
  * Original project : https://github.com/karankalsi/PlayLikeCurl
  * Maintained fork  : Arnab11/PlayLikeCurl (GLES2 renderer, production bitmap API v1, release 1.1.4)
  * Local changes    : package declaration (karacken.curl -> app.dinduy.silkcurl). Logic edits are marked "Local change"
- *                    in PageRenderer.updateMvp (fov 45f -> 55f) and PageSurfaceView.completeSettlement only.
+ *                    in PageRenderer.updateMvp (fov 45f -> 55f), PageSurfaceView.completeSettlement, and
+ *                    PlayLikeCurlGeometry.activeDepth (curl profile: bend near the spine, flat free edge).
  *
  * MIT License
  *
@@ -33,6 +34,14 @@ package app.dinduy.silkcurl;
 
 final class PlayLikeCurlGeometry {
     static final float CAMERA_DISTANCE = 2f;
+    /** Local change: how far (in grid columns) the bend leads the original wave, to keep it visible near the spine. */
+    private static final float BEND_LEAD_COLUMNS = 3f;
+    /** Local change: columns at the free edge that are always flat (keeps the edge from tilting up or down). */
+    private static final float FLAT_TAIL_COLUMNS = 1.5f;
+    /** Local change: resting height of the spine side, as a multiple of the curl radius. */
+    private static final float BASE_LIFT = 0.1f;
+    /** Local change: plateau height of the flat part, as a multiple of the curl radius (upstream crest: 2.1). */
+    private static final float PLATEAU_LIFT = 1.8f;
 
     private PlayLikeCurlGeometry() {
     }
@@ -138,17 +147,31 @@ final class PlayLikeCurlGeometry {
         return column / (float) PlayLikeCurlModel.GRID * (1f - radius) - percentage;
     }
 
+    /**
+     * Local change: depth profile of the page that is being turned.
+     *
+     * <p>Upstream used a travelling sine wave. Its far slope dived steeply near the free (right) edge
+     * mid-swipe, and its rising slope tilted the edge up toward the viewer as the page left the screen.
+     *
+     * <p>This profile is a single smooth ramp (half-cosine) that travels with the swipe and then stays
+     * on a flat plateau. The curvature lives near the spine (left side) and everything toward the free
+     * edge is flat, so the edge never dives and never tilts up. The ramp end is clamped short of the last
+     * column, so the free edge itself is always exactly flat.
+     */
     private static float activeDepth(PageRole role, int column, float curlPosition) {
         if (role == PageRole.RIGHT) return PlayLikeCurlModel.RIGHT_DEPTH;
         float rawPercentage = 1f - curlPosition / PlayLikeCurlModel.GRID;
         float percentage = role == PageRole.LEFT ? rawPercentage * 0.75f : rawPercentage;
         float radius = resolvedRadius(percentage);
-        float waveWidth = role == PageRole.LEFT ? 0.50f : 0.60f;
+        float rampWidth = PlayLikeCurlModel.GRID * (role == PageRole.LEFT ? 0.50f : 0.60f);
         float delta = PlayLikeCurlModel.GRID - curlPosition;
-        return (float) (
-                radius * Math.sin(
-                        3.14f / (PlayLikeCurlModel.GRID * waveWidth) * (column - delta))
-                        + radius * 1.1f);
+        float rampEnd = Math.min(
+                delta + rampWidth / 2f + BEND_LEAD_COLUMNS,
+                PlayLikeCurlModel.GRID - FLAT_TAIL_COLUMNS);
+        float t = (column - (rampEnd - rampWidth)) / rampWidth;
+        t = Math.max(0f, Math.min(1f, t));
+        float smooth = 0.5f * (1f - (float) Math.cos(Math.PI * t));
+        return radius * (BASE_LIFT + (PLATEAU_LIFT - BASE_LIFT) * smooth);
     }
 
     private static float resolvedRadius(float percentage) {
