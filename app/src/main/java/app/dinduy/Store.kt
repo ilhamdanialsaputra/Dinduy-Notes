@@ -212,6 +212,14 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     val docs = mutableStateListOf<Note>()
     val labels = mutableStateListOf<String>()
     var filter by mutableStateOf<String?>(null)   // null = semua catatan, selain itu = nama label yang menyaring beranda
+    // opsi "Hide labeled notes": catatan yang punya label disembunyikan dari beranda "Notes" dan hanya tampil lewat label di menu samping.
+    // Disimpan di SharedPreferences (bukan di Prefs) supaya tidak mengubah format Prefs.
+    var hideLabeled by mutableStateOf(sp.getBoolean("hideLbl", false))
+    fun setHideLabeled(v: Boolean) {
+        if (hideLabeled == v) return
+        hideLabeled = v
+        sp.edit().putBoolean("hideLbl", v).apply()
+    }
     var lblDlg by mutableStateOf<LblDlg?>(null)
     var snack by mutableStateOf<Snack?>(null)
     var sheet by mutableStateOf<Sheet?>(null)
@@ -504,7 +512,11 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     fun live() = docs.filter { !it.a && it.dt == 0L }
     /** Catatan beranda setelah disaring label aktif. */
-    fun liveF() = live().filter { (filter == null || filter in it.lb) && (!remFilter || it.rm > 0L) }
+    fun liveF(all: Boolean = false): List<Note> {
+        // all = true (pencarian): abaikan opsi sembunyikan, supaya catatan berlabel tetap bisa dicari dari beranda
+        val hide = hideLabeled && !all && filter == null && !remFilter
+        return live().filter { (filter == null || filter in it.lb) && (!remFilter || it.rm > 0L) && !(hide && it.lb.isNotEmpty()) }
+    }
 
     // ---------- label ----------
     fun sortedLabels() = labels.sortedBy { it.lowercase() }
@@ -1096,6 +1108,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                 put("sp", buildJsonObject {
                     put("pdfmode", sp.getInt("pdfmode", 0))
                     put("pdfcurl", sp.getInt("pdfcurl", 0))
+                    put("hidelbl", if (hideLabeled) 1 else 0)
                 })
             }
             put("docs", J.encodeToJsonElement(notes))
@@ -1304,7 +1317,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         val notes = arr.mapNotNull { (it as? JsonObject)?.let { o -> docFrom(o) } }
         val lbl = (m["lbl"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content } ?: emptyList()
         val so = m["sp"] as? JsonObject
-        val cfg = if (so == null) emptyMap<String, Int>() else listOf("pdfmode", "pdfcurl").filter { so[it] != null }.associateWith { so.num(it).toInt() }
+        val cfg = if (so == null) emptyMap<String, Int>() else listOf("pdfmode", "pdfcurl", "hidelbl").filter { so[it] != null }.associateWith { so.num(it).toInt() }
         val one = (m["kind"] as? JsonPrimitive)?.content == "note" && notes.size == 1
         return Pending(notes, prefsOf(m), imgs.size, m.num("at").let { if (it == 0L) now else it }, dir, imgs, lbl, auds, pdfs, lps, cfg, one)
     }
@@ -1416,6 +1429,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                 p.pr?.let { pr = it.copy(fs = it.fs.coerceIn(14, 30)) }
                 p.cfg["pdfmode"]?.let { v -> sp.edit().putInt("pdfmode", v).apply(); PdfBus.mode = v }
                 p.cfg["pdfcurl"]?.let { v -> sp.edit().putInt("pdfcurl", v).apply(); PdfBus.curl = v }
+                p.cfg["hidelbl"]?.let { v -> setHideLabeled(v == 1) }
             } else {
                 for (d in p.notes) {
                     val i = docs.indexOfFirst { it.id == d.id }
