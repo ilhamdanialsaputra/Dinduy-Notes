@@ -215,7 +215,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     // opsi "Hide labeled notes": catatan yang punya label disembunyikan dari beranda "Notes" dan hanya tampil lewat label di menu samping.
     // Disimpan di SharedPreferences (bukan di Prefs) supaya tidak mengubah format Prefs.
     var hideLabeled by mutableStateOf(sp.getBoolean("hideLbl", false))
-    fun setHideLabeled(v: Boolean) {
+    fun updateHideLabeled(v: Boolean) {
         if (hideLabeled == v) return
         hideLabeled = v
         sp.edit().putBoolean("hideLbl", v).apply()
@@ -1429,7 +1429,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                 p.pr?.let { pr = it.copy(fs = it.fs.coerceIn(14, 30)) }
                 p.cfg["pdfmode"]?.let { v -> sp.edit().putInt("pdfmode", v).apply(); PdfBus.mode = v }
                 p.cfg["pdfcurl"]?.let { v -> sp.edit().putInt("pdfcurl", v).apply(); PdfBus.curl = v }
-                p.cfg["hidelbl"]?.let { v -> setHideLabeled(v == 1) }
+                p.cfg["hidelbl"]?.let { v -> updateHideLabeled(v == 1) }
             } else {
                 for (d in p.notes) {
                     val i = docs.indexOfFirst { it.id == d.id }
