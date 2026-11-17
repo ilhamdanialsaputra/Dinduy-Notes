@@ -1510,59 +1510,23 @@ private fun PdfSilkCurl(
         cur = h.page.coerceIn(0, max(0, countNow - 1))   // controller.sync membatalkan balikan yang sedang jalan
     }
     LaunchedEffect(page) {
-        if (page != cur && !ctl.busy) cur = page.coerceIn(0, max(0, countNow - 1))
+        if (page != cur && !ctl.busy && !ctl.hasQueuedTurns) cur = page.coerceIn(0, max(0, countNow - 1))
     }
     LaunchedEffect(cur) { cz = 1f; cpan = Offset.Zero }
 
-    // selama ada seleksi teks halaman tidak boleh berpindah (ketukan tepi / geseran hanya boleh menutup seleksi)
-    fun idle() = !ctl.busy && cz <= 1.02f && !findNow && ui.sel == null
-
-    var tapJob by remember { mutableStateOf<Job?>(null) }
     // Geseran jari: dicatat untuk menentukan balikan selesai atau dibatalkan (kembali ke halaman semula)
-    val dg = remember { FloatArray(6) }          // 0 = x awal, 1 = x terakhir (untuk kecepatan), 2 = kecepatan x (px/dtk), 3 = arah, 4 = (cadangan), 5 = y saat batal
-    val settleOn = remember { BooleanArray(1) }  // true selama jari "dikembalikan" setelah geseran dibatalkan
-    // Bila pengguna menyentuh lagi saat pengembalian masih jalan: selesaikan seketika supaya geseran / ketukan baru langsung terpegang.
-    fun abortSettle() {
-        if (!settleOn[0]) return
-        settleOn[0] = false
-        tapJob?.cancel()
-        ctl.dragEnd(dg[0], dg[5], android.os.SystemClock.uptimeMillis(), false)
-    }
+    val dg = remember { FloatArray(6) }          // 0 = x awal, 1 = x terakhir (untuk kecepatan), 2 = kecepatan x (px/dtk), 3 = arah, 4-5 = cadangan
     val dgT = remember { LongArray(1) }
 
-    // Ketukan tepi: halaman maju dijalankan sebagai geseran terskrip yang mulus dan lambat lewat mesin yang sama (drag*),
-    // sehingga kecepatannya setara dengan balikan mundur. Balikan mundur tetap memakai turn() mesin.
+    // Curl hanya boleh jalan bila tidak diperbesar, tidak dalam mode cari, dan tidak ada seleksi teks. Sibuk / sedang settle BUKAN alasan menolak:
+    // mesin sendiri yang mengambil alih halaman yang sedang kembali, menunda geseran saat balikan selesai, dan merantai ketukan.
+    fun curlAllowed() = cz <= 1.02f && !findNow && ui.sel == null
+
+    // Ketukan tepi: maju dan mundur memakai jalur yang sama (turn() mesin, durasi / easing diatur di PlayLikeCurlModel). Ketukan beruntun
+    // diantrikan dan dirantai oleh mesin, tidak ada yang diabaikan.
     fun tapTurn(forward: Boolean) {
-        abortSettle()
-        ctl.interrupt()
-        if (tapJob?.isActive == true || !idle()) return
-        if (if (forward) cur + 1 >= countNow else cur <= 0) return
-        if (!forward) { ctl.turn(false); return }
-        tapJob = scope.launch {
-            val g = geoNow
-            val sx = g.left + g.pw * .9f
-            val sy = g.top + g.ph * .82f
-            val ex = g.left + g.pw * .04f
-            val t0 = android.os.SystemClock.uptimeMillis()
-            var finished = false
-            ctl.dragBegin(1, sx, sy, t0)
-            ctl.dragMove(sx, sy, t0)
-            try {
-                val dur = 520f
-                while (true) {
-                    withFrameNanos { }
-                    val now = android.os.SystemClock.uptimeMillis()
-                    val f = ((now - t0) / dur).coerceIn(0f, 1f)
-                    val e = FastOutSlowInEasing.transform(f)
-                    ctl.dragMove(sx + (ex - sx) * e, sy, now)
-                    if (f >= 1f) break
-                }
-                ctl.dragEnd(ex, sy, android.os.SystemClock.uptimeMillis(), false)
-                finished = true
-            } finally {
-                if (!finished) ctl.dragEnd(sx, sy, android.os.SystemClock.uptimeMillis(), true)
-            }
-        }
+        if (!curlAllowed()) return
+        ctl.turn(forward)
     }
 
     fun cClamp(o: Offset, z: Float): Offset {
@@ -1606,12 +1570,8 @@ private fun PdfSilkCurl(
                 selBusy = { ui.selGrab }
             )
             .silkDrag(
-                canStart = { d ->
-                    (idle() || ((settleOn[0] || ctl.interruptible) && cz <= 1.02f && !findNow && ui.sel == null)) &&
-                        (if (d > 0) cur + 1 < countNow else cur > 0)
-                },
+                canStart = { d -> curlAllowed() && ctl.canDrag(d) },
                 onStart = { d, p, t ->
-                    abortSettle()
                     dg[0] = p.x; dg[1] = p.x; dg[2] = 0f; dg[3] = d.toFloat(); dgT[0] = t
                     ctl.dragBegin(d, p.x, p.y, t)
                 },
@@ -1624,39 +1584,14 @@ private fun PdfSilkCurl(
                     ctl.dragMove(p.x, p.y, t)
                 },
                 onEnd = { p, t, cancelled ->
-                    // Balikan hanya selesai bila jari sudah menarik halaman cukup jauh (>= 50% lebar halaman) atau lewat kibasan cepat;
-                    // selain itu dibatalkan sehingga halaman kembali ke posisi semula dan tidak berpindah.
+                    // Balikan hanya selesai bila jari sudah menarik halaman cukup jauh (>= 22% lebar halaman) atau lewat kibasan cepat;
+                    // selain itu dibatalkan: mesin menganimasikan halaman kembali ke tempatnya dengan singkat dan halaman itu
+                    // langsung bisa digeser / diketuk lagi, bahkan di tengah animasi kembali (tidak ada skrip jari di sini).
                     val dir = dg[3]
                     val prog = (if (dir > 0f) dg[0] - p.x else p.x - dg[0]) / geoNow.pw.coerceAtLeast(1f)
                     val vel = if (dir > 0f) -dg[2] else dg[2]
                     val done = !cancelled && (prog >= .22f || (prog >= .05f && vel >= 500f * dens))
-                    if (done) ctl.dragEnd(p.x, p.y, t, false)
-                    else {
-                        // Batal: jangan memakai dragEnd(cancelled = true) (memotong animasi). Jari "dikembalikan" dengan mulus ke titik awal
-                        // lewat mesin yang sama, lalu dilepas di sana: mesin sendiri yang menganimasikan halaman kembali ke tempatnya.
-                        tapJob?.cancel()
-                        dg[5] = p.y
-                        settleOn[0] = true
-                        tapJob = scope.launch {
-                            val sx = p.x
-                            val ex = dg[0]
-                            val y = p.y
-                            val t0 = android.os.SystemClock.uptimeMillis()
-                            val dur = 110f + 90f * prog.coerceIn(0f, 1f)   // singkat: supaya cepat terpegang lagi
-                            while (settleOn[0]) {
-                                withFrameNanos { }
-                                if (!settleOn[0]) break
-                                val now = android.os.SystemClock.uptimeMillis()
-                                val f = ((now - t0) / dur).coerceIn(0f, 1f)
-                                ctl.dragMove(sx + (ex - sx) * FastOutSlowInEasing.transform(f), y, now)
-                                if (f >= 1f) break
-                            }
-                            if (settleOn[0]) {
-                                settleOn[0] = false
-                                ctl.dragEnd(ex, y, android.os.SystemClock.uptimeMillis(), false)
-                            }
-                        }
-                    }
+                    ctl.dragEnd(p.x, p.y, t, !done)
                 }
             )
     ) {
