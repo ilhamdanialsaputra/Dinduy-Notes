@@ -676,8 +676,11 @@ private fun Modifier.selHandleTouch(
                 val ev = awaitPointerEvent(PointerEventPass.Initial)
                 if (ev.changes.count { it.pressed } >= 2) break
                 val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                // jari diangkat dicek SEBELUM consume() dan tanpa peduli sudah dikonsumsi atau belum: changedToUp() bernilai false untuk event yang sudah dikonsumsi,
+                // sehingga loop tidak pernah selesai dan selGrab nyangkut true sampai sentuhan berikutnya
+                val lifted = !c.pressed
                 c.consume()
-                if (c.changedToUp() || !hc.isAttached) break
+                if (lifted || !hc.isAttached) break
                 finger = c.position
                 refresh()
             }
@@ -886,8 +889,9 @@ private fun Modifier.curlTouch(
             if (multi) { if (ev.changes.none { it.pressed }) break else continue }   // cubitan ditangani pinch()
             val c = ev.changes.firstOrNull { it.id == down.id } ?: break
             if (selBusy() || c.isConsumed) {   // dimakan pemegang gagang di induk (atau sedang memegang gagang): bukan ketukan / geseran halaman
+                val lifted = !c.pressed   // jangan pakai changedToUp(): false untuk event yang sudah dikonsumsi, loop jadi menggantung ke gestur berikutnya
                 c.consume()
-                if (c.changedToUp()) break else continue
+                if (lifted) break else continue
             }
             if (c.changedToUp()) {
                 val quick = c.uptimeMillis - down.uptimeMillis < viewConfiguration.longPressTimeoutMillis
@@ -1087,8 +1091,11 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
                             val ev = awaitPointerEvent()
                             if (ev.changes.size >= 2) break
                             val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                            // Up sudah dikonsumsi curlTouch (selBusy) di pass Initial, jadi changedToUp() false dan selGrab nyangkut true:
+                            // sentuhan berikutnya (ketuk / geser) lolos ke PageCurl dan membalik halaman. Cek lepas jari tanpa peduli consumed.
+                            val lifted = !c.pressed
                             c.consume()
-                            if (c.changedToUp()) break
+                            if (lifted) break
                             val f = posAt(c.position - grab) ?: continue
                             val ns = if (f < an) PSel(f, an) else if (f > an) PSel(an, f) else null
                             val cs = ui.sel
