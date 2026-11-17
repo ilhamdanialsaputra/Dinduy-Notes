@@ -143,6 +143,24 @@ class SilkController(private val onFail: () -> Unit) {
     val busy: Boolean get() = settling || touching
     var onPage: (Int) -> Unit = {}
 
+    /** true bila settlement yang sedang jalan hanya "kembali ke halaman semula" (PageChange.NONE). */
+    private var settleNone = false
+
+    /** Sedang settle balik ke halaman semula dan jari tidak menyentuh: aman diinterupsi sentuhan baru tanpa menunggu animasinya. */
+    val interruptible: Boolean get() = settling && settleNone && !touching
+
+    /**
+     * Hentikan settle "kembali ke halaman semula" seketika supaya geseran / ketukan berikutnya langsung terpegang.
+     * Hanya berlaku untuk PageChange.NONE; balikan yang benar-benar pindah halaman tidak diinterupsi.
+     */
+    fun interrupt() {
+        if (!interruptible) return
+        try { view?.cancelGesture() } catch (t: Throwable) { }
+        settling = false
+        settleNone = false
+        touching = false
+    }
+
     private val main = Handler(Looper.getMainLooper())
     private var view: SilkSurfaceView? = null
     private var caps: RenderCapabilities? = null
@@ -187,9 +205,14 @@ class SilkController(private val onFail: () -> Unit) {
 
         override fun onGestureRejected(gestureId: Long, generationId: Long, reason: GestureRejectionReason) {
             touching = false
+            // pemulihan: bila mesin menolak geseran (mis. deck hilang setelah interupsi), suplai ulang deck
+            lastSig = null
+            flush()
         }
 
         override fun onGestureCancelled(gestureId: Long, generationId: Long) {
+            // callback basi dari gestur lama tidak boleh mematikan geseran baru yang sudah dimulai
+            if (touching && gestureId != gid) return
             touching = false
         }
 
@@ -197,6 +220,7 @@ class SilkController(private val onFail: () -> Unit) {
             gestureId: Long, generationId: Long, sourceLogicalPageId: String, targetLogicalPageId: String, pageChange: PageChange
         ) {
             settling = true
+            settleNone = pageChange == PageChange.NONE
             if (pageChange == PageChange.NONE) return
             // deck halaman tujuan disuplai SEKARANG (jadi pending): mesin mengaktifkannya tepat saat settlement selesai
             val t = ordOf(targetLogicalPageId) ?: if (pageChange == PageChange.NEXT) curOrd + 1 else curOrd - 1
@@ -206,7 +230,9 @@ class SilkController(private val onFail: () -> Unit) {
         override fun onSettlementCompleted(
             gestureId: Long, generationId: Long, currentLogicalPageId: String, currentOrdinal: Int, pageChange: PageChange
         ) {
+            if (touching && pageChange == PageChange.NONE && gestureId != gid) return   // basi: geseran baru sudah dimulai
             settling = false
+            settleNone = false
             touching = false
             if (pageChange != PageChange.NONE) {
                 curOrd = currentOrdinal
@@ -216,7 +242,9 @@ class SilkController(private val onFail: () -> Unit) {
         }
 
         override fun onSettlementCancelled(gestureId: Long, generationId: Long, currentLogicalPageId: String) {
+            if (touching && gestureId != gid) return   // basi: geseran baru sudah dimulai
             settling = false
+            settleNone = false
             touching = false
             lastSig = null
             flush()
@@ -294,6 +322,7 @@ class SilkController(private val onFail: () -> Unit) {
     /** Ketukan tepi: memicu turn(PageChange) pada mesin. false bila tak bisa (di ujung buku, sibuk, deck belum siap). */
     fun turn(next: Boolean): Boolean {
         val v = view ?: return false
+        interrupt()
         if (busy || failed) return false
         if (next && curOrd + 1 >= count) return false
         if (!next && curOrd <= 0) return false
@@ -302,7 +331,9 @@ class SilkController(private val onFail: () -> Unit) {
 
     /** Awal geseran (dir 1 = maju / geser ke kiri, -1 = mundur). Koordinat bebas asal konsisten (hanya selisih yang dipakai mesin). */
     fun dragBegin(dir: Int, x: Float, y: Float, t: Long): Boolean {
-        if (view == null || busy || failed) return false
+        if (view == null || failed) return false
+        interrupt()
+        if (busy) return false
         if (dir > 0 && curOrd + 1 >= count) return false
         if (dir < 0 && curOrd <= 0) return false
         gid++
