@@ -929,18 +929,20 @@ private fun Modifier.curlTouch(
 // ---------------------------------------------------------------- satu halaman
 
 @Composable
+// bare = true: lapisan transparan di atas halaman yang digambar pihak lain (GL Silk curl): hanya seleksi, gagang, dan sorotan cari; tanpa bitmap / latar / coretan.
 // active = false: halaman ini tidak memasang gestur apa pun (seleksi / coret). Dipakai mode 3D: library PageCurl menumpuk halaman
 // sebelum / sesudahnya di atas halaman aktif, sehingga sentuhan jatuh ke halaman yang salah (seleksi muncul di halaman tak terlihat).
-private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Modifier = Modifier, active: Boolean = true) {
+private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Modifier = Modifier, active: Boolean = true, bare: Boolean = false) {
     val dens = LocalDensity.current.density
     val wPx = (widthDp.value * dens * mul).roundToInt()
     val bk = bucket(wPx)
     val key = ui.fid + ":" + index + "@" + bk
     var bmp by remember(index) { mutableStateOf<ImageBitmap?>(PdfCache.get(key)?.asImageBitmap()) }
-    LaunchedEffect(index, bk, ui.doc.ok) {
+    LaunchedEffect(index, bk, ui.doc.ok, bare) {
         if (!ui.doc.ok) return@LaunchedEffect
         val hit = PdfCache.get(key)
         if (hit != null) { bmp = hit.asImageBitmap(); return@LaunchedEffect }
+        if (bare) return@LaunchedEffect
         delay(40)   // lewat cepat saat menggulir kencang: yang sudah keluar layar dibatalkan sebelum dirender
         val b = ui.doc.render(index, bk) ?: return@LaunchedEffect
         PdfCache.put(key, b)
@@ -978,7 +980,7 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
         modifier
             .onSizeChanged { sizePx = it }
             .onGloballyPositioned { if (active) ui.pageCoords[index] = it }
-            .background(if (ui.dark) Color.Black else Color.White)
+            .then(if (bare) Modifier else Modifier.background(if (ui.dark) Color.Black else Color.White))
             .then(if (!active) Modifier else Modifier.pointerInput(ui.inkOn, ui.tool, ui.ts, index) {
                 if (!ui.inkOn) return@pointerInput
                 awaitEachGesture {
@@ -1097,7 +1099,7 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
     ) {
         Canvas(Modifier.fillMaxSize()) {
             val b = bmp
-            if (b != null) {
+            if (b != null && !bare) {
                 drawImage(
                     b, dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()),
                     filterQuality = FilterQuality.Medium, colorFilter = if (ui.dark) INVERT else null
@@ -1119,7 +1121,7 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
                     } else drawRect(Color(0xFFFFD54F).copy(alpha = .6f), tl, sz)
                 }
             }
-            if (pal != null) {
+            if (pal != null && !bare) {
                 for ((s, path, wpx) in paths) {
                     val col = inkColor(pal, s.c, s.t == 1)
                     if (s.t == 1) drawPath(
@@ -1168,7 +1170,7 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
             if (sel.a.p == index) handleXY(ptv, rg.first, rg.second, true, size.width, size.height)?.let { hdl(it, true) }
             if (sel.b.p == index) handleXY(ptv, rg.first, rg.second, false, size.width, size.height)?.let { hdl(it, false) }
         }
-        if (bmp == null) Box(Modifier.align(Alignment.Center)) { LoadingBlob(Modifier.size(36.dp)) }
+        if (bmp == null && !bare) Box(Modifier.align(Alignment.Center)) { LoadingBlob(Modifier.size(36.dp)) }
     }
 }
 
@@ -1399,6 +1401,27 @@ private fun silkBake(src: Bitmap, strokes: List<PInk>, dark: Boolean, pal: Pal):
     return SilkPage(out, preInverted = dark)
 }
 
+/**
+ * Selama [active] (ada seleksi teks), geseran satu jari TIDAK boleh sampai ke pembalik halaman di bawahnya (PageCurl): gerakan yang melewati batas geser
+ * dimakan di pass Initial. Dipasang SETELAH curlTouch / pinch (pass Initial berjalan dari luar ke dalam), jadi ketukan, cubitan, geser gambar saat diperbesar,
+ * dan gagang seleksi (sudah dimakan induk paling luar) tidak terganggu. Tekan lama tanpa bergerak tetap lewat (membuat / mengganti seleksi).
+ */
+private fun Modifier.noFlipWhile(active: () -> Boolean): Modifier = pointerInput(Unit) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        if (!active()) return@awaitEachGesture
+        var moved = false
+        while (true) {
+            val ev = awaitPointerEvent(PointerEventPass.Initial)
+            val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+            if (c.changedToUp() || !c.pressed) break
+            if (ev.changes.count { it.pressed } >= 2) continue
+            if (!moved && (c.position - down.position).getDistance() > viewConfiguration.touchSlop) moved = true
+            if (moved && !c.isConsumed && active()) c.consume()
+        }
+    }
+}
+
 /** Jendela bitmap untuk mesin: halaman cur-2 .. cur+2 (cur +-1 dipakai deck, +-2 supaya deck halaman tujuan langsung lengkap). */
 private class SilkWin(val cur: Int, val pages: Array<SilkPage?>, val dark: Boolean)
 
@@ -1433,6 +1456,8 @@ private fun PdfSilkCurl(
     val geo = SilkGeo(pwPx, phPx, vwPx, vhPx, (vwPx - pwPx) / 2f, topPad.value * dens + (availPx - phPx) / 2f, availPx, topPad.value * dens)
     val geoNow by rememberUpdatedState(geo)
     val bk = bucket(pwPx.roundToInt())
+    // Halaman yang lebih tinggi dari ~1.8 x lebarnya tak muat di frustum kamera mesin (tinggi dunia 2.08): diperkecil di tengah supaya tidak terpotong.
+    val fit = min(1f, 1.8f / r0)
 
     var cur by remember { mutableIntStateOf(page.coerceIn(0, max(0, count - 1))) }
     var cz by remember { mutableFloatStateOf(1f) }
@@ -1469,14 +1494,6 @@ private fun PdfSilkCurl(
             if (i in (cur - 2)..(cur + 2)) pages[i] = sp
         }
     }
-    // resolusi tinggi hanya untuk halaman yang sedang diperbesar (seperti mul di PdfPage); tidak pernah dikirim ke mesin
-    var hi by remember { mutableStateOf<Triple<Int, Float, SilkPage>?>(null) }
-    LaunchedEffect(pages, cur, cMul, ui.doc.ok) {
-        if (cMul <= 1f) { hi = null; return@LaunchedEffect }
-        val sp = make(cur, bucket((pwPx * cMul).roundToInt())) ?: return@LaunchedEffect
-        hi = Triple(cur, cMul, sp)
-    }
-
     // ---- sinkron dengan state luar: loncat dari pencarian / kapsul, halaman terakhir (page -> vm.upd di PdfReader)
     LaunchedEffect(goTo) {
         val h = goTo ?: return@LaunchedEffect
@@ -1488,7 +1505,8 @@ private fun PdfSilkCurl(
     }
     LaunchedEffect(cur) { cz = 1f; cpan = Offset.Zero }
 
-    fun idle() = !ctl.busy && cz <= 1.02f && !findNow
+    // selama ada seleksi teks halaman tidak boleh berpindah (ketukan tepi / geseran hanya boleh menutup seleksi)
+    fun idle() = !ctl.busy && cz <= 1.02f && !findNow && ui.sel == null
 
     fun cClamp(o: Offset, z: Float): Offset {
         val g = geoNow
@@ -1520,7 +1538,7 @@ private fun PdfSilkCurl(
             )
             .curlTouch(
                 scope, true, { cz > 1.02f }, { findNow }, { d -> cpan = cClamp(cpan + d, cz) },
-                onEdge = { d -> if (idle()) ctl.turn(d > 0) },   // ketukan tepi -> turn(PageChange) mesin
+                onEdge = { d -> if (ui.sel != null) ui.sel = null else if (idle()) ctl.turn(d > 0) },   // ketukan tepi: tutup seleksi, atau turn(PageChange) mesin
                 onTap = { if (ui.sel != null) ui.sel = null else onTapNow() },
                 onDouble = { p ->
                     val z0 = cz
@@ -1539,8 +1557,6 @@ private fun PdfSilkCurl(
     ) {
         // GLSurfaceView tak ikut pudar bersama induknya, jadi disembunyikan selama morph buka/tutup dari beranda.
         // Kamera mesin tetap: view diposisikan supaya halaman diam persis menempati persegi halaman (geo), sisanya hitam.
-        // Halaman yang lebih tinggi dari ~1.8 x lebarnya tak muat di frustum kamera mesin (tinggi dunia 2.08): diperkecil di tengah supaya tidak terpotong.
-        val fit = min(1f, 1.8f / r0)
         SilkGlView(
             ctl, vm.openP.value > .2f, Modifier.fillMaxSize(),
             geo.left + geo.pw * (1f - fit) / 2f, geo.top + geo.ph * (1f - fit) / 2f, geo.pw * fit, geo.ph * fit
@@ -1552,43 +1568,23 @@ private fun PdfSilkCurl(
             drawRect(if (ui.dark) Color.Black else Color.White, Offset(geo.left, geo.top), Size(geo.pw, geo.ph), alpha = cover)
         }
 
-        // diperbesar: mesin tidak mengenal zoom / pan, jadi halaman beresolusi tinggi digambar Compose di atas GL (curl mati selama cz > 1)
-        if (cz > 1.001f) {
-            val zp = hi?.takeIf { it.first == cur }?.third ?: pages[cur]
-            if (zp != null) {
-                val img = remember(zp) { zp.bitmap.asImageBitmap() }
-                Canvas(Modifier.fillMaxSize()) {
-                    drawRect(Color.Black)
-                    val w = geo.pw * cz
-                    val h = geo.ph * cz
-                    val cx = geo.left + geo.pw / 2f + cpan.x
-                    val cy = geo.top + geo.ph / 2f + cpan.y
-                    drawImage(
-                        img, srcOffset = IntOffset.Zero, srcSize = IntSize(img.width, img.height),
-                        dstOffset = IntOffset((cx - w / 2f).roundToInt(), (cy - h / 2f).roundToInt()),
-                        dstSize = IntSize(w.roundToInt(), h.roundToInt()), filterQuality = FilterQuality.High
-                    )
-                }
-            }
-        }
-
-        // sorotan hasil cari (GL tidak menggambar PdfPage): hanya saat halaman diam
-        val marks = remember(ui.hits, cur) { ui.hits.withIndex().filter { it.value.page == cur } }
-        if (!ctl.busy && marks.isNotEmpty()) Canvas(Modifier.fillMaxSize()) {
-            fun mx(f: Float) = geo.left + (f * geo.pw - geo.pw / 2f) * cz + geo.pw / 2f + cpan.x
-            fun my(f: Float) = geo.top + (f * geo.ph - geo.ph / 2f) * cz + geo.ph / 2f + cpan.y
-            for ((vi, h) in marks) {
-                val isCur = vi == ui.cur
-                val pad = 2f * density
-                for (r in h.rects) {
-                    val tl = Offset(mx(r[0]) - pad, my(r[1]) - pad)
-                    val sz = Size((r[2] - r[0]) * geo.pw * cz + pad * 2, max((r[3] - r[1]) * geo.ph * cz, 10f * density) + pad * 2)
-                    if (isCur) {
-                        drawRect(Color(0xFFFF8A00).copy(alpha = ui.pulse.value), tl, sz)
-                        drawRect(Color(0xFFE65100), tl, sz, style = Stroke(2.5f * density))
-                    } else drawRect(Color(0xFFFFD54F).copy(alpha = .6f), tl, sz)
-                }
-            }
+        // Lapisan PdfPage (sama dengan mode lain) tepat di atas halaman GL, hanya saat tidak ada balikan:
+        //  - diam (cz = 1): "bare" = transparan; GL tetap yang menggambar halaman, lapisan ini memberi tekan-lama-pilih-teks, gagang, menu salin,
+        //    dan sorotan hasil cari;
+        //  - diperbesar: PdfPage penuh (bitmap resolusi tinggi, coretan, mode gelap) menggantikan GL; curl mati, seleksi tetap jalan (ikut zoom dan pan).
+        // Ukuran / posisi mengikuti halaman GL: lebar = lebar GL (sudah dikali fit), tinggi sesuai rasio halaman ini, pusat tetap.
+        if (!ctl.busy) {
+            val rc = ui.doc.ratioOf(cur)
+            val lw = w0 * fit
+            val lhPx = lw.value * dens * rc
+            PdfPage(
+                ui, cur, lw, cMul,
+                Modifier
+                    .offset { IntOffset((geo.left + (geo.pw - lw.value * dens) / 2f).roundToInt(), (geo.top + (geo.ph - lhPx) / 2f).roundToInt()) }
+                    .width(lw).height(lw * rc)
+                    .graphicsLayer { scaleX = cz; scaleY = cz; translationX = cpan.x; translationY = cpan.y },
+                active = true, bare = cz <= 1.001f
+            )
         }
     }
 }
@@ -1883,7 +1879,8 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                         onEdge = { d ->
                             val st = csNow
                             val to = st.current + d
-                            if (to in 0 until count && flip?.isActive != true) {
+                            if (ui.sel != null) ui.sel = null   // seleksi aktif: ketukan tepi hanya menutup seleksi
+                            else if (to in 0 until count && flip?.isActive != true) {
                                 flip = scope.launch {
                                     try {
                                         withTimeoutOrNull(1200) { if (d > 0) st.next() else st.prev() }
@@ -1905,6 +1902,7 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                         busy = { ui.drawing },
                         selBusy = { ui.selGrab }
                     )
+                    .noFlipWhile { ui.sel != null && !ui.selGrab }   // seleksi aktif: geseran tidak boleh membalik halaman
                     .padding(top = topPad, bottom = sab + 12.dp),
                 Alignment.Center
             ) {
@@ -1961,7 +1959,8 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                         scope, !ui.inkOn, { pz > 1.05f }, { findOn }, { d -> pan = clampPan(pan + d, pz) },
                         onEdge = { d ->
                             val t = pager.currentPage + d
-                            if (t in 0 until count) scope.launch { pager.animateScrollToPage(t) }
+                            if (ui.sel != null) ui.sel = null   // seleksi aktif: ketukan tepi hanya menutup seleksi
+                            else if (t in 0 until count) scope.launch { pager.animateScrollToPage(t) }
                         },
                         onTap = { if (ui.sel != null) ui.sel = null else bars = !bars },
                         onDouble = { p ->
@@ -1975,7 +1974,7 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
             ) {
                 HorizontalPager(
                     state = pager, modifier = Modifier.fillMaxSize(), pageSpacing = 12.dp,
-                    userScrollEnabled = pz <= 1.05f && !ui.drawing && !findOn, beyondViewportPageCount = 1
+                    userScrollEnabled = pz <= 1.05f && !ui.drawing && !findOn && ui.sel == null, beyondViewportPageCount = 1
                 ) { p ->
                     val here = p == pager.currentPage
                     val w = fitW(p)
