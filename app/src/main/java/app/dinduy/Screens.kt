@@ -969,8 +969,28 @@ private fun TwoColLayout(
     val lim = limit()
     val full = lim >= pinnedIds.size + othersIds.size
     val rebalance = full
-    val pinC = pinnedIds.take(lim)
-    val othC = othersIds.take((lim - pinC.size).coerceAtLeast(0))
+    // Pemilihan kartu awal PER KOLOM (bukan sekadar urutan daftar): tiap kartu punya kolom tetap (laneOf), jadi mengambil
+    // `lim` kartu pertama menurut urutan bisa menghasilkan hampir semuanya di kolom kiri, dan kolom kanan kosong/telat muncul.
+    // Di sini kuota dibagi rata: tiap kolom mendapat sekitar lim/2 kartu terdepannya, urutan relatif tetap.
+    val pinC: List<String>
+    val othC: List<String>
+    if (full) { pinC = pinnedIds; othC = othersIds } else {
+        val cap = (lim + 1) / 2
+        val cnt = intArrayOf(0, 0)
+        var alt = 0
+        fun pick(ids: List<String>): List<String> {
+            val out = ArrayList<String>()
+            for (id in ids) {
+                if (cnt[0] >= cap && cnt[1] >= cap) break
+                // kartu tanpa kolom tersimpan: bergantian kiri/kanan (kartu pertama selalu kiri)
+                val ln = laneOf(id)?.takeIf { it == 0 || it == 1 } ?: (alt++ and 1)
+                if (cnt[ln] < cap) { cnt[ln]++; out.add(id) }
+            }
+            return out
+        }
+        pinC = pick(pinnedIds)
+        othC = pick(othersIds)
+    }
     val blocks = ArrayList<HBlock>().also { bl ->
         if (isEmpty) bl.add(HBlock("empty", emptyList()))
         if (sections) bl.add(HBlock("h-pin", emptyList()))
