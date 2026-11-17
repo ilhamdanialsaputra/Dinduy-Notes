@@ -442,8 +442,7 @@ fun SwipeCard(enabled: Boolean, shape: androidx.compose.ui.graphics.Shape, onArc
     val off = remember { Animatable(0f) }
     val col = remember { Animatable(1f) }
     var w by remember { mutableStateOf(1f) }
-    var winL by remember { mutableStateOf(0f) }
-    var winR by remember { mutableStateOf(0f) }
+    val swCoords = remember { arrayOfNulls<LayoutCoordinates>(1) }   // batas jendela dibaca hanya saat dilepas
     val scrW = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp * androidx.compose.ui.platform.LocalDensity.current.density
     val haptic = LocalHapticFeedback.current
     var hit by remember { mutableStateOf(false) }
@@ -458,7 +457,7 @@ fun SwipeCard(enabled: Boolean, shape: androidx.compose.ui.graphics.Shape, onArc
     LaunchedEffect(hit) { if (hit) { wig.snapTo(0f); wig.animateTo(1f, spring(.22f, 240f)) } else wig.snapTo(1f) }
     Box(
         Modifier.fillMaxWidth().onSizeChanged { w = it.width.toFloat().coerceAtLeast(1f) }
-            .onGloballyPositioned { val b = it.boundsInWindow(); winL = b.left; winR = b.right }
+            .onGloballyPositioned { swCoords[0] = it }
             .layout { m, c ->
                 val pl = m.measure(c)
                 val h = (pl.height * col.value).roundToInt()
@@ -483,6 +482,9 @@ fun SwipeCard(enabled: Boolean, shape: androidx.compose.ui.graphics.Shape, onArc
                             val right = off.value > 0
                             // buang sampai benar-benar keluar layar (kartu kolom kanan ke kiri / kolom kiri ke kanan harus menyeberang penuh)
                             val m = 24f * dens
+                            val wb = swCoords[0]?.takeIf { it.isAttached }?.boundsInWindow()
+                            val winL = wb?.left ?: 0f
+                            val winR = wb?.right ?: w
                             val tgt = if (right) maxOf(w * 1.1f, scrW - winL + m) else -maxOf(w * 1.1f, winR + m)
                             off.animateTo(tgt, tween(280, easing = Emph))
                             col.animateTo(0f, tween(300, easing = Emph))
@@ -911,6 +913,13 @@ private class StackShift(
 )
 
 
+/** Teks beranda saat tidak ada kartu yang tampil. */
+private fun homeEmptyMsg(vm: AppVM): String =
+    if (vm.remFilter) "No reminders yet. Open a note and tap the bell icon."
+    else if (vm.filter != null) "No notes with this label yet"
+    else if (vm.hideLabeled && vm.live().isNotEmpty()) "All your notes have labels. Open the menu and pick a label to see them."
+    else "Tap New to get started"
+
 /** Satu blok isi beranda 2 kolom: judul ("Pinned" / "Others" / "empty") atau satu kelompok kartu. */
 private class HBlock(val head: String?, val ids: List<String>)
 
@@ -943,14 +952,32 @@ private fun Modifier.slideTo(): Modifier = composed {
  * Posisi hasil ukur ditulis ke `rects` (id -> [x, y, lebar, tinggi] dalam isi yang tergulir), kolom yang dipakai ke `lanesOut`,
  * dan kolom yang baru dihitung (belum tersimpan) ke `fresh`.
  */
+/** Pembungkus yang bisa dilewati (skippable): selama k dan content tidak berubah, kartu yang sudah ada tidak dikomposisi ulang. */
+@Composable
+private fun TwoColCell(k: String, content: @Composable (String) -> Unit) { content(k) }
+
 @Composable
 private fun TwoColLayout(
-    blocks: List<HBlock>, laneOf: (String) -> Int?, dragId: String?,
+    isEmpty: Boolean, sections: Boolean, pinnedIds: List<String>, othersIds: List<String>, limit: () -> Int,
+    laneOf: (String) -> Int?, dragId: String?,
     padS: Int, padTop: Int, padBottom: Int, gap: Int,
     rects: HashMap<String, IntArray>, lanesOut: HashMap<String, Int>, fresh: HashMap<String, Int>,
-    rebalance: Boolean = true,
     modifier: Modifier = Modifier, content: @Composable (String) -> Unit
 ) {
+    // `limit` (jumlah kartu yang boleh dikomposisi) hanya dibaca DI SINI: menambah kartu bertahap hanya me-recompose layout ini,
+    // bukan seluruh HomeScreen. Kartu yang sudah ada dilewati (lihat TwoColCell), jadi tiap langkah hanya mengomposisi kartu baru.
+    val lim = limit()
+    val full = lim >= pinnedIds.size + othersIds.size
+    val rebalance = full
+    val pinC = pinnedIds.take(lim)
+    val othC = othersIds.take((lim - pinC.size).coerceAtLeast(0))
+    val blocks = ArrayList<HBlock>().also { bl ->
+        if (isEmpty) bl.add(HBlock("empty", emptyList()))
+        if (sections) bl.add(HBlock("h-pin", emptyList()))
+        bl.add(HBlock(null, pinC))
+        if (sections) bl.add(HBlock("h-other", emptyList()))
+        bl.add(HBlock(null, othC))
+    }
     val flatKeys = ArrayList<String>().also { l -> for (b in blocks) { val h = b.head; if (h != null) l.add(h) else l.addAll(b.ids) } }
     androidx.compose.ui.layout.Layout(
         modifier = modifier,
@@ -962,7 +989,7 @@ private fun TwoColLayout(
                     Box(
                         Modifier.layoutId(k).then(if (k == dragId) Modifier else Modifier.slideTo()),
                         propagateMinConstraints = true
-                    ) { content(k) }
+                    ) { TwoColCell(k, content) }
                 }
             }
         }
@@ -991,7 +1018,7 @@ private fun TwoColLayout(
                 val n = items.size
                 val saved = IntArray(n) { laneOf(items[it].first)?.takeIf { v -> v == 0 || v == 1 } ?: -1 }
                 // kolom tersimpan yang timpang parah (satu kolom hampir kosong) dianggap rusak: dihitung ulang seimbang
-                if (dragId == null && n >= 3) {
+                if (dragId == null && full && n >= 3) {
                     val hs = intArrayOf(0, 0); var cnt = 0
                     for (k in 0 until n) if (saved[k] >= 0) { hs[saved[k]] += items[k].second.height + gap; cnt++ }
                     if (cnt >= 3 && minOf(hs[0], hs[1]) * 5 < maxOf(hs[0], hs[1])) java.util.Arrays.fill(saved, -1)
@@ -1588,17 +1615,17 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
             val noteById = live.associateBy { it.id }
             // 2 kolom menyusun SEMUA kartu sekaligus (bukan lazy): saat app baru dibuka, puluhan kartu dikomposisi dalam satu frame
             // (itu yang bikin lag awal). Jadi mulai dari layar pertama saja, sisanya ditambah bertahap per beberapa frame.
-            var composeN by remember { mutableStateOf(14) }
-            LaunchedEffect(live.size) { while (composeN < live.size) { withFrameNanos { }; composeN += 8 } }
-            val pinnedC = pinned.take(composeN)
-            val othersC = others.take((composeN - pinnedC.size).coerceAtLeast(0))
-            val blocks = ArrayList<HBlock>().also { bl ->
-                if (live.isEmpty()) bl.add(HBlock("empty", emptyList()))
-                if (sections) bl.add(HBlock("h-pin", emptyList()))
-                bl.add(HBlock(null, pinnedC.map { it.id }))
-                if (sections) bl.add(HBlock("h-other", emptyList()))
-                bl.add(HBlock(null, othersC.map { it.id }))
+            // Awalnya hanya satu layar pertama (10 kartu). Sisanya ditambah bertahap SETELAH animasi masuk selesai (atau langsung kalau
+            // pengguna mulai menggulir), 4 kartu per 2 frame, supaya animasi awal tidak berebut frame dengan komposisi kartu.
+            val grow = remember { androidx.compose.runtime.mutableIntStateOf(10) }
+            LaunchedEffect(live.size) {
+                if (grow.intValue >= live.size) return@LaunchedEffect
+                val t0 = withFrameNanos { it }
+                while (scroll.value == 0 && !scroll.isScrollInProgress && withFrameNanos { it } - t0 < 700_000_000L) { }
+                while (grow.intValue < live.size) { withFrameNanos { }; withFrameNanos { }; grow.intValue += 4 }
             }
+            val pinnedIds = pinned.map { it.id }
+            val othersIds = others.map { it.id }
             val laneOf: (String) -> Int? = { id -> if (useLanes) (nd.laneOv[id] ?: vm.lanes[id]) else null }
             val padS = with(dens) { 8.dp.roundToPx() }
             val padTop = with(dens) { (sat + 78.dp).roundToPx() }
@@ -1610,10 +1637,11 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
             ) {
                 Column(Modifier.fillMaxSize().onSizeChanged { vpH[0] = it.height }.verticalScroll(scroll)) {
                     TwoColLayout(
-                        blocks = blocks, laneOf = laneOf, dragId = nd.id,
+                        isEmpty = live.isEmpty(), sections = sections, pinnedIds = pinnedIds, othersIds = othersIds,
+                        limit = { grow.intValue },
+                        laneOf = laneOf, dragId = nd.id,
                         padS = padS, padTop = padTop, padBottom = padBottom, gap = padS,
                         rects = rects, lanesOut = lanesCur, fresh = lanesNew,
-                        rebalance = composeN >= live.size,
                         modifier = Modifier.fillMaxWidth().onGloballyPositioned {
                             // kartu yang baru dapat kolom (baru dibuat / baru diedit): simpan, supaya kolomnya tidak berubah lagi
                             if (nd.id == null && useLanes && !vm.searchOn && lanesNew.isNotEmpty()) {
@@ -1625,8 +1653,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     ) { k ->
                         when (k) {
                             "empty" -> T(
-                                if (vm.remFilter) "No reminders yet. Open a note and tap the bell icon."
-                                else if (vm.filter != null) "No notes with this label yet" else "Tap New to get started", 17f, 600, pal.osv,
+                                homeEmptyMsg(vm), 17f, 600, pal.osv,
                                 Modifier.fillMaxWidth().padding(vertical = 48.dp), align = androidx.compose.ui.text.style.TextAlign.Center
                             )
                             "h-pin" -> T("Pinned", 13f, 500, pal.osv, Modifier.graphicsLayer { if (!vm.searchOn) alpha = shift.p.value.coerceIn(0f, 1f) }.padding(start = 16.dp, top = 12.dp, bottom = 4.dp), ls = .01f)
@@ -1652,8 +1679,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
             if (live.isEmpty()) {
                 item(key = "empty", span = full) {
                     T(
-                        if (vm.remFilter) "No reminders yet. Open a note and tap the bell icon."
-                        else if (vm.filter != null) "No notes with this label yet" else "Tap New to get started", 17f, 600, pal.osv,
+                        homeEmptyMsg(vm), 17f, 600, pal.osv,
                         Modifier.fillMaxWidth().padding(vertical = 48.dp), align = androidx.compose.ui.text.style.TextAlign.Center
                     )
                 }
@@ -1730,7 +1756,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         val res by remember(vm) {
             derivedStateOf {
                 val qq = vm.query.trim().lowercase()
-                vm.sorted(vm.liveF().filter { qq.isEmpty() || (it.t + " " + it.x).lowercase().contains(qq) })
+                vm.sorted(vm.liveF(all = true).filter { qq.isEmpty() || (it.t + " " + it.x).lowercase().contains(qq) })
             }
         }
 
@@ -2517,7 +2543,7 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                     }
                 }
                 SGroup("Notes", 60) {
-                    SCard(POS_ONE) {
+                    SCard(POS_TOP) {
                         T("Sort notes", 16f, 500, pal.os, Modifier.padding(bottom = 14.dp))
                         val sorts = listOf("u" to "Edited", "c" to "Created")
                         SegPill(2, sorts.indexOfFirst { it.first == pr.sort }.coerceAtLeast(0), { vm.setSort(sorts[it].first) }) { i, fg ->
@@ -2527,6 +2553,20 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                             T(it, 14f, 400, pal.osv)
                         }
                         T("Press, hold, and drag a card on the home screen to move it. Picking an order here clears those moves.", 14f, 400, pal.osv, Modifier.padding(top = 8.dp, start = 4.dp), lh = 1.3f)
+                    }
+                    SCard(POS_BOT) {
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
+                                .clickable { vm.setHideLabeled(!vm.hideLabeled) }
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                T("Hide labeled notes", 16f, 400, pal.os)
+                                T("Notes with a label only show up under that label in the menu. Search still finds them.", 14f, 400, pal.osv, lh = 1.3f)
+                            }
+                            MorphSwitch(vm.hideLabeled)
+                        }
                     }
                 }
                 SGroup("Drawing", 90) {
