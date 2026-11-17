@@ -126,7 +126,7 @@ internal object SilkShape {
             if (k > 0) {
                 val m = (prev + ang) * .5f
                 cx += cos(m) * len / N
-                cz += sin(m) * len / N
+                cz -= sin(m) * len / N   // z NEGATIF: lembar melengkung ke belakang (ke dalam), muka depan tetap terlihat di sisi cembung
             }
             x[k + 1] = cx - shift; z[k + 1] = cz; a[k + 1] = ang; u[k + 1] = c + f * len
             prev = ang
@@ -169,19 +169,20 @@ internal object SilkShape {
         var eT = -99f
         var eB = -99f
         var zm = 0f
-        for (j in 0 until N + 2) {
+        // urutan kolom dari ujung ke tulang punggung: bagian yang menekuk ke belakang digambar lebih dulu, bagian depan menutupinya (tanpa depth buffer)
+        for (j in N + 1 downTo 0) {
             val u = us[j]
             // lipatan miring: sisi bawah / atas maju beda jauh, makin besar ke ujung bebas
             val hd = tilt * env * 0.22f * u * sqrt(u.coerceAtLeast(0f))
             val a = th[j]
-            val g = (a - 1.95f) / 0.35f
-            val sh = 1f - 0.30f * sin(a) + 0.14f * exp(-g * g)
+            // cahaya dari kiri atas, muka depan cembung ke penonton: makin ke lipatan makin gelap
+            val sh = 0.55f + 0.45f * (cos(a) - 0.5f * sin(a)).coerceIn(0f, 1f)
             val cs = cos(a)
             val xt = xs[j] + hd
             val xb = xs[j] - hd
             if (xt > eT) eT = xt
             if (xb > eB) eB = xb
-            if (zs[j] > zm) zm = zs[j]
+            if (-zs[j] > zm) zm = -zs[j]
             b.put(xt); b.put(0f); b.put(u); b.put(0f); b.put(sh); b.put(cs)
             b.put(xb); b.put(1f); b.put(u); b.put(1f); b.put(sh); b.put(cs)
         }
