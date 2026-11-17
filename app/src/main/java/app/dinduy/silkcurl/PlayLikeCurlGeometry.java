@@ -34,18 +34,18 @@ package app.dinduy.silkcurl;
 
 final class PlayLikeCurlGeometry {
     static final float CAMERA_DISTANCE = 2f;
-    /** Local change: screen x (0 = left edge) where the crest is held; Play Books measured about 0.07. */
-    private static final float CREST_SCREEN_X = 0.07f;
+    /** Local change: screen x (0 = left edge) where the crest is held; Play Books measured about 0.07, tuned further left. */
+    private static final float CREST_SCREEN_X = 0.0f;
     /** Local change: grid columns over which the page rises to the crest (the bend at the spine). */
-    private static final float RISE_COLUMNS = 10f;
+    private static final float RISE_COLUMNS = 7f;
     /** Local change: the descent toward the free edge is never shorter than this many columns. */
     private static final float MIN_FALL_COLUMNS = 3f;
-    /** Local change: crest height as a multiple of the curl radius (upstream: 2.1; Play Books fit: 1.7). */
-    private static final float PEAK_LIFT = 1.7f;
+    /** Local change: crest height as a multiple of the curl radius (upstream: 2.1; Play Books fit: 1.7; tuned higher). */
+    private static final float PEAK_LIFT = 1.9f;
     /** Local change: base height of the page as a multiple of the curl radius (same as upstream). */
     private static final float BASE_LIFT = 0.1f;
     /** Local change: drop between crest and free edge per unit of descent length (higher = more droop). */
-    private static final float DROP_SLOPE = 0.29f;
+    private static final float DROP_SLOPE = 0.15f;
     /** Local change: descent length (screen units) at which the droop reaches its full {@link #DROP_SLOPE}. */
     private static final float DROP_REFERENCE_LENGTH = 0.67f;
 
