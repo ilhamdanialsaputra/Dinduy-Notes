@@ -44,8 +44,10 @@ final class PlayLikeCurlGeometry {
     private static final float PEAK_LIFT = 2.0f;
     /** Local change: base height of the page as a multiple of the curl radius (same as upstream). */
     private static final float BASE_LIFT = 0.1f;
-    /** Local change: steepest average slope (dz/dx) allowed on the descent; lower = flatter right side. */
-    private static final float MAX_FALL_SLOPE = 0.8f;
+    /** Local change: exponent of the descent. 2 = parabola: flat at the crest, bending down toward the free edge. */
+    private static final float FALL_POWER = 2.0f;
+    /** Local change: steepest downward slope (dz/dx) of the free edge itself; lower = flatter right side. */
+    private static final float MAX_TIP_SLOPE = 0.55f;
 
     private PlayLikeCurlGeometry() {
     }
@@ -157,10 +159,10 @@ final class PlayLikeCurlGeometry {
      * <p>Upstream used a travelling sine wave, whose far slope dived steeply near the free (right) edge
      * and whose rising slope tilted that edge up toward the viewer as the page left the screen.
      *
-     * <p>This profile is one hump: a smooth rise near the spine (left), a crest, then a long gentle
-     * half-cosine descent that reaches the base height exactly at the free edge. The edge therefore has
-     * zero slope at every progress value (it never dives and never faces up). The hump height is capped so
-     * the descent never gets steeper than {@link #MAX_FALL_SLOPE}, which flattens the page smoothly as it
+     * <p>This profile is one hump: a smooth rise near the spine (left), a crest, then a long descent that
+     * bends progressively downward and reaches the base height at the free edge. The edge itself always
+     * points slightly DOWN (like an upside-down "c"), never up, at every progress value. The hump height is
+     * capped so the edge slope never exceeds {@link #MAX_TIP_SLOPE}, which flattens the page smoothly as it
      * leaves the screen. The crest is pinned to a fixed screen position via the same x shift that
      * {@link #frontX} / {@link #leftX} use.
      */
@@ -179,7 +181,7 @@ final class PlayLikeCurlGeometry {
         float fall = grid - crest;
         float height = Math.min(
                 radius * PEAK_LIFT,
-                MAX_FALL_SLOPE * fall * (span / grid) / (float) (Math.PI / 2.0));
+                MAX_TIP_SLOPE * fall * (span / grid) / FALL_POWER);
         float profile;
         if (column <= crest) {
             float t = (column - (crest - RISE_COLUMNS)) / RISE_COLUMNS;
@@ -187,7 +189,7 @@ final class PlayLikeCurlGeometry {
             profile = 0.5f * (1f - (float) Math.cos(Math.PI * t));
         } else {
             float t = (column - crest) / fall;
-            profile = 0.5f * (1f + (float) Math.cos(Math.PI * t));
+            profile = 1f - (float) Math.pow(t, FALL_POWER);
         }
         return radius * BASE_LIFT + height * profile;
     }
