@@ -12,8 +12,6 @@ import android.provider.OpenableColumns
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -1680,6 +1678,7 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
     // Penutup anti-kedip. Mode 3D (Classic / Silk) membongkar dan membangun ulang seluruh pembalik halaman (surface GL) tiap ink hidup / mati,
     // dan itulah yang terlihat sebagai kedipan. Sebelum pergantian itu terjadi, halaman yang sedang dibaca digambar statis di atasnya
     // (bitmap sudah ada di cache), ditahan sampai pembalik baru siap, lalu dipudarkan.
+    var pageOpen by remember { mutableStateOf(false) }   // kapsul halaman: ringkas / penggeser
     var coverV by remember { mutableFloatStateOf(0f) }
     var coverTick by remember { mutableIntStateOf(0) }
     LaunchedEffect(coverTick) {
@@ -2155,17 +2154,18 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
         }
         val capW = minOf(vwDp - 24.dp, 340.dp)
         CapsuleHost(
-            cap, Modifier.align(Alignment.BottomCenter).padding(bottom = maxOf(sab, imeDp) + 14.dp),
-            tall = ui.inkOn && ui.styleOpen
+            cap,
+            kick = when (cap) { Cap.PAGE -> pageOpen; Cap.INK -> ui.inkOn to ui.tool; else -> null },
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = maxOf(sab, imeDp) + 14.dp)
         ) { c ->
             when (c) {
-                Cap.PAGE -> PageCapsule(page, count, capW) { i ->
+                Cap.PAGE -> PageCapsule(page, count, pageOpen, { pageOpen = it }, capW) { i ->
                     page = i
                     goTo = PHit(i, listOf(floatArrayOf(0f, 0f, 0f, 0f)), "", 0, 0)   // pindah halaman tanpa menggulir ke dalam halaman
                 }
                 Cap.SEL -> PdfSelBar({ copySel() }, { selectAll() }, { ui.sel = null })
-                else -> InkCapsule(
-                    ui, findOn, minOf(capW, 300.dp),
+                else -> InkDockBody(
+                    ui, findOn,
                     onPick = { t ->
                         if (ui.inkOn && ui.tool == t) ui.styleOpen = !ui.styleOpen   // ketuk alat aktif = buka / tutup warna + tebal
                         else {
@@ -2443,29 +2443,32 @@ private fun PdfSlider(frac: Float, onChange: (Float) -> Unit, onDone: () -> Unit
     }
 }
 
-// ---------------------------------------------------------------- kapsul bawah (satu wadah morphing)
+// ---------------------------------------------------------------- kapsul bawah (satu wadah morphing, mesin yang sama dengan MorphDock di DocBar)
 
 private enum class Cap { NONE, PAGE, SEL, INK }
 
 private class CapHold(var hidden: Boolean) {
     var last = Cap.PAGE
     var epoch = 0
+    var skipKick = false
 }
 
 /**
- * Wadah tunggal untuk semua kapsul bawah. Ukuran dianimasikan SATU kali oleh [animateContentSize] (satu pegas untuk lebar dan tinggi), jadi
- * tidak ada lagi tinggi yang tidak sejajar lalu meloncat di akhir; bentuk sudut juga ikut berpegas. Pergantian isi hanya pudar + skala halus,
- * ukuran isi langsung (snap) supaya wadah yang memorf, bukan isinya. Jangkar bawah-tengah: kapsul tumbuh ke atas, baris bawah tidak bergeser.
- * Muncul / hilang total: wadah membesar / menciut di tempat dengan pegas tanpa pantulan; transparansinya selesai lebih dulu daripada geraknya
- * sehingga ekor pegas tidak terlihat macet di tengah.
+ * SATU wadah untuk semua kapsul bawah, meniru MorphDock editor:
+ *  - berpindah kapsul = wadah MELAR ke samping dan memipih seperti jeli, sudutnya sesaat lebih kotak, lalu pulih dengan pegas berayun
+ *    (di lapisan gambar, tidak menyentuh tata letak);
+ *  - isi lama memipih ke satu tepi, isi baru melar masuk dari tepi seberang, elemennya muncul berurutan ([MorphSwap], XBtn / XGroup / SlideSeg);
+ *  - ukuran wadah mengalir dengan pegas yang sama dengan editor, tidak ada fade.
+ * Muncul dari kosong: skala + geser berpegas seperti dock editor. Hilang total: transparansi selesai lebih dulu daripada gerak, sehingga
+ * ekor pegas tidak tampak macet di tengah (dulu skala berhenti di .86 sampai pegas tenang, baru lenyap tiba-tiba).
  */
 @Composable
-private fun CapsuleHost(cap: Cap, modifier: Modifier = Modifier, tall: Boolean = false, content: @Composable (Cap) -> Unit) {
+private fun CapsuleHost(cap: Cap, kick: Any?, modifier: Modifier = Modifier, content: @Composable (Cap) -> Unit) {
     val pal = LocalPal.current
     val h = remember { CapHold(cap == Cap.NONE) }
     if (cap != Cap.NONE) {
-        // muncul dari kosong dengan isi yang berbeda dari terakhir: isi baru langsung dipasang (tanpa morf dari kapsul yang sudah hilang)
-        if (h.hidden && h.last != cap) h.epoch++
+        // muncul dari kosong dengan isi yang berbeda dari terakhir: isi baru langsung dipasang, tanpa morf dari kapsul yang sudah hilang
+        if (h.hidden && h.last != cap) { h.epoch++; h.skipKick = true }
         h.last = cap
         h.hidden = false
     }
@@ -2474,137 +2477,69 @@ private fun CapsuleHost(cap: Cap, modifier: Modifier = Modifier, tall: Boolean =
     LaunchedEffect(cap != Cap.NONE) {
         if (cap != Cap.NONE) {
             alive = true
-            vis.animateTo(1f, spring(.8f, 420f))
+            vis.animateTo(1f, M3E.spatial())
         } else {
             vis.animateTo(0f, spring(1f, 700f))
             alive = false
             h.hidden = true
         }
     }
+    // jeli: melar dan memipih, lalu pulih berayun (persis PdfDock / MorphDock)
+    val k = remember { Animatable(0f) }
+    val first = remember { booleanArrayOf(true) }
+    val kickKey = Pair(h.last, kick)
+    LaunchedEffect(kickKey) {
+        if (first[0]) first[0] = false
+        else if (h.skipKick) h.skipKick = false
+        else {
+            k.animateTo(1f, tween(110))
+            k.animateTo(0f, spring<Float>(dampingRatio = .38f, stiffness = 240f))
+        }
+    }
     if (cap == Cap.NONE && !alive) return
-    val corner by animateDpAsState(if (tall) 28.dp else 32.dp, spring(1f, 520f), label = "caprad")
     val elev = if (pal.dark) 10.dp else 6.dp
+    val inkK = Cap.INK.ordinal
     Box(
         modifier.graphicsLayer {
             val v = vis.value
             val a = (v * 1.7f).coerceIn(0f, 1f)
             alpha = a
-            val sc = (.72f + .28f * v).coerceAtLeast(.01f)
+            val sc = (.86f + .14f * v).coerceAtLeast(.01f)
             scaleX = sc; scaleY = sc
-            translationY = (1f - v) * 8.dp.toPx()
+            translationY = (1f - v) * size.height / 2f
             transformOrigin = TransformOrigin(.5f, 1f)
-            shadowElevation = elev.toPx() * a
-            shape = RoundedCornerShape(corner.coerceAtLeast(0.dp))
-            clip = true
         }
-            .animateContentSize(spring(.9f, 520f), alignment = Alignment.BottomCenter)
-            .background(pal.c3)
     ) {
-        androidx.compose.runtime.key(h.epoch) {
-            AnimatedContent(
-                targetState = h.last,
-                contentAlignment = Alignment.BottomCenter,
-                transitionSpec = {
-                    (fadeIn(tween(190, 70)) + scaleIn(tween(240), .94f)) togetherWith
-                        (fadeOut(tween(90)) + androidx.compose.animation.scaleOut(tween(90), .94f)) using
-                        SizeTransform(clip = false) { _, _ -> snap() }
-                },
-                label = "capcontent"
-            ) { c -> content(c) }
-        }
-    }
-}
-
-// ---------------------------------------------------------------- kapsul alat ink
-
-/** Tombol ikon kapsul ink: bulat; ditekan = sudut menciut jadi kotak membulat + sedikit mengecil, semuanya berpegas. */
-@Composable
-private fun IkBtn(
-    onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true,
-    w: Dp = 40.dp, h: Dp = 44.dp, bg: Color = Color.Transparent, content: @Composable () -> Unit
-) {
-    val hap = LocalHapticFeedback.current
-    val src = remember { MutableInteractionSource() }
-    val pr by src.collectIsPressedAsState()
-    val r by animateDpAsState(if (pr) h * .3f else h / 2, spring(.55f, 700f), label = "ikr")
-    val sc by animateFloatAsState(if (pr) .92f else 1f, spring(.45f, 650f), label = "iks")
-    Box(
-        modifier.graphicsLayer { scaleX = sc; scaleY = sc; alpha = if (enabled) 1f else .38f }
-            .size(w, h).clip(RoundedCornerShape(r.coerceAtLeast(0.dp))).background(bg)
-            .clickable(interactionSource = src, indication = LocalIndication.current, enabled = enabled) {
-                hap.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                onClick()
-            },
-        Alignment.Center
-    ) { content() }
-}
-
-/**
- * Pemilih alat (pulpen / stabilo / penghapus): grup tonal dengan penanda primer yang meluncur berpegas. Pada alat yang aktif ada titik warna kecil:
- * itu petunjuk bahwa mengetuk alat yang sama lagi membuka panel warna + tebal.
- */
-@Composable
-private fun IkToolSeg(sel: Int, on: Boolean, badge: Color?, onPick: (Int) -> Unit) {
-    val pal = LocalPal.current
-    val hap = LocalHapticFeedback.current
-    val iw = 42.dp
-    val ih = 44.dp
-    val x by animateDpAsState(iw * sel.coerceAtLeast(0), spring(.8f, 520f), label = "ikx")
-    val a by animateFloatAsState(if (on) 1f else 0f, spring(1f, 500f), label = "ika")
-    Box(Modifier.clip(CircleShape).background(pal.c4).padding(3.dp)) {
         Box(
-            Modifier.offset(x = x).size(iw, ih).graphicsLayer { alpha = a.coerceIn(0f, 1f); scaleX = .8f + .2f * a; scaleY = .8f + .2f * a }
-                .clip(CircleShape).background(pal.p)
-        )
-        Row {
-            for (k in 0..2) {
-                val isSel = on && k == sel
-                val fg by animateColorAsState(if (isSel) pal.op else pal.os, spring(stiffness = 500f), label = "ikfg")
-                Box(
-                    Modifier.size(iw, ih).clip(CircleShape).clickable {
-                        hap.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onPick(k)
-                    },
-                    Alignment.Center
-                ) {
-                    InkToolIcon(k, fg)
-                    if (isSel && badge != null) {
-                        Box(
-                            Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 5.dp).size(12.dp)
-                                .clip(CircleShape).background(pal.p).padding(2.dp).clip(CircleShape).background(badge)
-                        )
-                    }
+            Modifier.graphicsLayer {
+                val kv = k.value
+                scaleX = 1f + .05f * kv
+                scaleY = 1f - .06f * kv
+                transformOrigin = TransformOrigin(.5f, 1f)
+                shadowElevation = elev.toPx()
+                shape = RoundedCornerShape((34.dp.toPx() - 9.dp.toPx() * abs(kv).coerceAtMost(1.5f)).coerceAtLeast(16.dp.toPx()))
+                clip = true
+            }.background(pal.c3)
+        ) {
+            androidx.compose.runtime.CompositionLocalProvider(LocalDockMotion provides true) {
+                androidx.compose.runtime.key(h.epoch) {
+                    MorphSwap(
+                        h.last.ordinal,
+                        originX = { a, b -> if (a == inkK || b == inkK) .86f else if (b > a) 0f else 1f },
+                        dirOf = { a, b -> if (a == inkK || b == inkK) 1 else if (b > a) 1 else -1 },
+                        label = "cap"
+                    ) { n -> content(Cap.values()[n.coerceIn(0, 3)]) }
                 }
             }
         }
     }
 }
 
-/** Satu baris pilihan warna: yang dipilih berbingkai cincin dan isinya mengecil berpegas. */
-@Composable
-private fun IkColorRow(sel: Int, hl: Boolean, ip: Pal, onPick: (Int) -> Unit) {
-    val hap = LocalHapticFeedback.current
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        for (k in 0 until 5) {
-            val ring by animateFloatAsState(if (k == sel) 1f else 0f, spring(.7f, 500f), label = "ikring")
-            val col = inkColor(ip, k, hl)
-            Box(
-                Modifier.size(40.dp).clip(CircleShape).clickable {
-                    hap.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onPick(k)
-                },
-                Alignment.Center
-            ) {
-                Box(Modifier.size(38.dp).border(2.5.dp, col.copy(alpha = ring.coerceIn(0f, 1f)), CircleShape))
-                Box(Modifier.size((32f - 8f * ring).coerceAtLeast(10f).dp).clip(CircleShape).background(col))
-            }
-        }
-    }
-}
+// ---------------------------------------------------------------- kapsul alat ink
 
-/** Panel warna + tebal. Tampil hanya bila dibuka; baris warna menghilang untuk penghapus. Ukuran ditangani wadah, jadi di sini cukup pudar. */
+/** Panel di atas alat (sub-bilah dock): pilihan warna lewat SlideSeg, lalu grup tonal berisi pratinjau tebal + penggeser. */
 @Composable
-private fun IkStylePanel(ui: PdfUi, onSave: () -> Unit) {
+private fun PdfInkSub(ui: PdfUi, onSave: () -> Unit) {
     val pal = LocalPal.current
     val t = ui.tool
     val lo = if (t == 0) 1f else 8f
@@ -2614,69 +2549,78 @@ private fun IkStylePanel(ui: PdfUi, onSave: () -> Unit) {
     val col by animateColorAsState(if (t < 2) inkColor(ip, ui.color, t == 1) else pal.os, spring(stiffness = 500f), label = "ipc")
     val fillA by animateFloatAsState(if (t == 2) 0f else 1f, spring(1f, 500f), label = "ipf")
     val dot by animateDpAsState(ui.wDp.coerceIn(4f, 30f).dp, spring(.6f, 500f), label = "ipd")
-    Column(
-        Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 2.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        AnimatedVisibility(t < 2, enter = fadeIn(tween(170, 60)), exit = fadeOut(tween(80))) {
-            IkColorRow(ui.color, t == 1, ip) { ui.color = it; onSave() }
-        }
-        Row(
-            Modifier.fillMaxWidth().height(46.dp).clip(CircleShape).background(pal.c4),
-            verticalAlignment = Alignment.CenterVertically
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // baris warna menutup di dalam wadah saat memilih penghapus (tidak ada warna untuk dipilih)
+        AnimatedVisibility(
+            visible = t < 2,
+            enter = expandVertically(spring(1f, 520f)),
+            exit = shrinkVertically(spring(1f, 620f))
         ) {
+            SlideSeg(count = 5, sel = ui.color, i = 0, onPick = { ui.color = it; onSave() }) { k, c ->
+                Box(Modifier.size(26.dp).border(2.dp, c, CircleShape).padding(4.dp).clip(CircleShape).background(inkColor(ip, k, t == 1)))
+            }
+        }
+        XGroup(i = 1) {
             // pratinjau: titik berisi (pulpen / stabilo) menjadi cincin kosong (penghapus) dan sebaliknya
-            Box(Modifier.size(46.dp), Alignment.Center) {
+            Box(Modifier.size(44.dp), Alignment.Center) {
                 Box(
-                    Modifier.size(dot).clip(CircleShape).background(col.copy(alpha = fillA.coerceIn(0f, 1f)))
-                        .border(2.dp, pal.os.copy(alpha = (1f - fillA).coerceIn(0f, 1f)), CircleShape)
+                    Modifier.size(dot).clip(CircleShape).background(col.copy(alpha = fillA))
+                        .border(2.dp, pal.os.copy(alpha = 1f - fillA), CircleShape)
                 )
             }
-            PdfSlider(frac, { ui.wDp = lo + it * (hi - lo) }, onSave, Modifier.weight(1f))
-            Spacer(Modifier.width(10.dp))
+            PdfSlider(frac, { ui.wDp = lo + it * (hi - lo) }, onSave, Modifier.width(196.dp))
+            Spacer(Modifier.width(8.dp))
         }
-    }
-}
-
-/** Tombol selesai: centang (primer) saat mode ink biasa, berubah menjadi X tonal saat mode cari. Lebar, warna, dan ikon semuanya morf. */
-@Composable
-private fun IkDone(findOn: Boolean, enabled: Boolean, onClick: () -> Unit) {
-    val pal = LocalPal.current
-    val w by animateDpAsState(if (findOn) 48.dp else 54.dp, spring(.8f, 520f), label = "ikdw")
-    val bg by animateColorAsState(if (findOn) pal.c4 else pal.p, spring(stiffness = 500f), label = "ikdb")
-    IkBtn(onClick, enabled = enabled, w = w, h = 44.dp, bg = bg) {
-        AnimatedContent(
-            findOn, contentAlignment = Alignment.Center,
-            transitionSpec = { fadeIn(tween(140, 40)) togetherWith fadeOut(tween(80)) },
-            label = "ikdi"
-        ) { f -> if (f) Ic("x", pal.os, 22.dp) else Ic("ok", pal.op, 24.dp) }
     }
 }
 
 /**
- * Isi kapsul ink, dibuat ringkas: satu baris (alat | undo redo | selesai) yang tidak pernah penuh. Warna + tebal disembunyikan di panel yang
- * tumbuh ke atas di dalam wadah yang sama; dibuka dengan mengetuk alat yang sedang aktif.
+ * Isi kapsul ink, dibuat ringkas: satu baris (alat | undo redo | selesai). Warna + tebal disembunyikan di panel yang tumbuh ke atas di dalam
+ * wadah yang sama (pegas tanpa pantulan seperti sub-bilah editor); dibuka dengan mengetuk alat yang sedang aktif. Tombol selesai memakai
+ * lebar normal (dulu 68 dp dan terjepit), dan baris bisa digulir kalau layar sangat sempit, jadi tidak ada tombol yang gepeng.
  */
 @Composable
-private fun InkCapsule(ui: PdfUi, findOn: Boolean, w: Dp, onPick: (Int) -> Unit, onSave: () -> Unit, onClose: () -> Unit) {
+private fun InkDockBody(ui: PdfUi, findOn: Boolean, onPick: (Int) -> Unit, onSave: () -> Unit, onClose: () -> Unit) {
     val pal = LocalPal.current
     val ip = ui.inkPal ?: pal
-    Column(Modifier.width(w)) {
-        AnimatedVisibility(ui.inkOn && ui.styleOpen, enter = fadeIn(tween(190, 70)), exit = fadeOut(tween(80))) {
-            IkStylePanel(ui, onSave)
+    Column(Modifier.width(DockW)) {
+        AnimatedVisibility(
+            visible = ui.inkOn && ui.styleOpen,
+            enter = expandVertically(spring(1f, 520f)),
+            exit = shrinkVertically(spring(1f, 620f))
+        ) {
+            Box(Modifier.fillMaxWidth().padding(top = 8.dp), Alignment.Center) { PdfInkSub(ui, onSave) }
         }
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween
+            Modifier.fillMaxWidth().height(DockH).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            IkToolSeg(ui.tool, ui.inkOn, if (ui.tool < 2) inkColor(ip, ui.color, ui.tool == 1) else null, onPick)
-            Row(Modifier.clip(CircleShape).background(pal.c4).padding(3.dp)) {
-                IkBtn({ ui.ink.undo() }, enabled = ui.ink.canUndo, w = 38.dp) { Ic("undo", pal.os, 22.dp) }
-                IkBtn({ ui.ink.redo() }, enabled = ui.ink.canRedo, w = 38.dp) {
-                    Box(Modifier.graphicsLayer { scaleX = -1f }) { Ic("undo", pal.os, 22.dp) }
+            SlideSeg(count = 3, sel = if (ui.inkOn) ui.tool else -1, i = 0, onPick = onPick) { k, c ->
+                val act = ui.inkOn && k == ui.tool
+                // alat aktif: ketuk lagi = buka / tutup panel warna + tebal; titik warna kecil sebagai petunjuk
+                Box(
+                    if (act) Modifier.fillMaxSize().clickable { ui.styleOpen = !ui.styleOpen } else Modifier,
+                    Alignment.Center
+                ) {
+                    InkToolIcon(k, c)
+                    if (act && k < 2) Box(
+                        Modifier.align(Alignment.BottomEnd).padding(end = 4.dp, bottom = 4.dp).size(12.dp)
+                            .border(1.5.dp, c, CircleShape).padding(2.5.dp).clip(CircleShape).background(inkColor(ip, ui.color, k == 1))
+                    )
                 }
             }
-            IkDone(findOn, enabled = !findOn || ui.inkOn, onClick = onClose)
+            XGroup(i = 1) {
+                XBtn(enabled = ui.ink.canUndo, onClick = { ui.ink.undo() }) { Ic("undo", it) }
+                XBtn(enabled = ui.ink.canRedo, onClick = { ui.ink.redo() }) {
+                    Box(Modifier.graphicsLayer { scaleX = -1f }) { Ic("undo", it) }
+                }
+            }
+            if (findOn) {
+                // mode cari: X hanya mematikan mode coret, kapsul tetap di tempatnya
+                XBtn(i = 2, enabled = ui.inkOn, onClick = onClose) { Ic("x", it) }
+            } else {
+                XBtn(tone = 2, i = 2, onClick = onClose) { Ic("ok", it) }
+            }
         }
     }
 }
@@ -2686,18 +2630,18 @@ private fun InkCapsule(ui: PdfUi, findOn: Boolean, w: Dp, onPick: (Int) -> Unit,
 /**
  * Isi kapsul penunjuk halaman. Ketuk = kapsul melebar jadi penggeser bergelombang (gaya Material 3 Expressive: trek bergelombang yang
  * merambat, celah di sekitar gagang tegak yang memipih saat ditekan, titik akhir). Tekan lalu geser di mana saja pada trek untuk
- * pindah halaman; menciut sendiri kalau dibiarkan. Wadah, morf ukuran, dan bentuk disediakan [CapsuleHost].
+ * pindah halaman; menciut sendiri kalau dibiarkan. Status [open] ada di induk supaya wadah ikut melar (jeli) saat terbuka / tertutup.
  */
 @Composable
-private fun PageCapsule(page: Int, count: Int, maxW: Dp, onSeek: (Int) -> Unit) {
+private fun PageCapsule(page: Int, count: Int, open: Boolean, onOpen: (Boolean) -> Unit, maxW: Dp, onSeek: (Int) -> Unit) {
     val pal = LocalPal.current
     val haptic = LocalHapticFeedback.current
     val seek by androidx.compose.runtime.rememberUpdatedState(onSeek)
-    var open by remember { mutableStateOf(false) }
+    val setOpen by androidx.compose.runtime.rememberUpdatedState(onOpen)
     var drag by remember { mutableStateOf(false) }
     var live by remember { mutableIntStateOf(page) }
     var touch by remember { mutableIntStateOf(0) }
-    LaunchedEffect(open, drag, touch) { if (open && !drag) { delay(3200); open = false } }
+    LaunchedEffect(open, drag, touch) { if (open && !drag) { delay(3200); setOpen(false) } }
     val shown = (if (drag) live else page).coerceIn(0, (count - 1).coerceAtLeast(0))
     val frac = if (count <= 1) 0f else shown / (count - 1f)
     val animF by animateFloatAsState(frac, spring(1f, 1500f), label = "pcf")
@@ -2706,18 +2650,12 @@ private fun PageCapsule(page: Int, count: Int, maxW: Dp, onSeek: (Int) -> Unit) 
     val handleW by animateDpAsState(if (drag) 3.dp else 6.dp, spring(.6f, 520f), label = "pch")
     val amp by animateDpAsState(if (drag) 1.dp else 3.5.dp, spring(.6f, 400f), label = "pca")
     val trackW = (maxW - 112.dp).coerceIn(110.dp, 200.dp)
-    AnimatedContent(
-        targetState = open, contentAlignment = Alignment.Center,
-        transitionSpec = {
-            (fadeIn(tween(170, 70)) + scaleIn(tween(220), .92f)) togetherWith
-                (fadeOut(tween(90)) + androidx.compose.animation.scaleOut(tween(90), .92f)) using
-                SizeTransform(clip = false) { _, _ -> snap() }
-        },
-        label = "pcap"
-    ) { isOpen ->
+    // pergantian isi yang sama dengan dock editor: isi lama menciut, isi baru melompat masuk
+    MorphSwap(if (open) 1 else 0, dirOf = { a, b -> if (b > a) 1 else -1 }, label = "pcap") { kk ->
+        val isOpen = kk == 1
         if (!isOpen) {
             Row(
-                Modifier.height(48.dp).clickable { live = page; touch++; open = true }.padding(start = 16.dp, end = 20.dp),
+                Modifier.clickable { live = page; touch++; setOpen(true) }.padding(start = 14.dp, end = 18.dp, top = 10.dp, bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Canvas(Modifier.size(22.dp)) {
