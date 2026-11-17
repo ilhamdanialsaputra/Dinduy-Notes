@@ -4,8 +4,7 @@
  * Original project : https://github.com/karankalsi/PlayLikeCurl
  * Maintained fork  : Arnab11/PlayLikeCurl (GLES2 renderer, production bitmap API v1, release 1.1.4)
  * Local changes    : package declaration (karacken.curl -> app.dinduy.silkcurl). Logic edits are marked "Local change"
- *                    in PageRenderer.updateMvp (fov 45f -> 55f), PageSurfaceView.completeSettlement, and
- *                    PlayLikeCurlGeometry.activeDepth (curl profile fitted to Google Play Books).
+ *                    in PageRenderer.updateMvp (fov 45f -> 55f) and PageSurfaceView.completeSettlement only.
  *
  * MIT License
  *
@@ -34,20 +33,6 @@ package app.dinduy.silkcurl;
 
 final class PlayLikeCurlGeometry {
     static final float CAMERA_DISTANCE = 2f;
-    /** Local change: screen x (0 = left edge) where the crest is held; Play Books measured about 0.07, tuned further left. */
-    private static final float CREST_SCREEN_X = 0.0f;
-    /** Local change: grid columns over which the page rises to the crest (the bend at the spine). */
-    private static final float RISE_COLUMNS = 7f;
-    /** Local change: the descent toward the free edge is never shorter than this many columns. */
-    private static final float MIN_FALL_COLUMNS = 3f;
-    /** Local change: crest height as a multiple of the curl radius (upstream: 2.1; Play Books fit: 1.7; tuned higher). */
-    private static final float PEAK_LIFT = 1.9f;
-    /** Local change: base height of the page as a multiple of the curl radius (same as upstream). */
-    private static final float BASE_LIFT = 0.1f;
-    /** Local change: drop between crest and free edge per unit of descent length (higher = more droop). */
-    private static final float DROP_SLOPE = 0.15f;
-    /** Local change: descent length (screen units) at which the droop reaches its full {@link #DROP_SLOPE}. */
-    private static final float DROP_REFERENCE_LENGTH = 0.67f;
 
     private PlayLikeCurlGeometry() {
     }
@@ -153,44 +138,17 @@ final class PlayLikeCurlGeometry {
         return column / (float) PlayLikeCurlModel.GRID * (1f - radius) - percentage;
     }
 
-    /**
-     * Local change: depth of the page being turned, fitted to measurements of Google Play Books.
-     *
-     * <p>Measured on a Play Books frame (free edge at 74% of the screen width): the crest sits almost at
-     * the left screen edge (x about 0.07), then the page descends as a half-cosine all the way to the free
-     * edge, which ends only slightly above the page underneath and leaves it flat. Upstream put the crest
-     * at x about 0.3 and left the free edge raised, so it looked like a plateau with a bump.
-     *
-     * <p>The crest is held at {@link #CREST_SCREEN_X} on screen (same x shift as {@link #frontX} /
-     * {@link #leftX}). The drop between crest and free edge is proportional to the visible descent
-     * length, so as the page is consumed the descent gets shorter and shallower (the page droops less and
-     * less). The free edge itself always has zero slope, so it never tilts up or dives.
-     */
     private static float activeDepth(PageRole role, int column, float curlPosition) {
         if (role == PageRole.RIGHT) return PlayLikeCurlModel.RIGHT_DEPTH;
-        int grid = PlayLikeCurlModel.GRID;
-        float rawPercentage = 1f - curlPosition / grid;
+        float rawPercentage = 1f - curlPosition / PlayLikeCurlModel.GRID;
         float percentage = role == PageRole.LEFT ? rawPercentage * 0.75f : rawPercentage;
         float radius = resolvedRadius(percentage);
-        float shift = role == PageRole.LEFT
-                ? percentage
-                : (percentage > 0.05f ? percentage - 0.05f : 0f);
-        float span = 1f - radius;
-        float crest = grid * (CREST_SCREEN_X + shift) / span;
-        crest = Math.max(0f, Math.min(crest, grid - MIN_FALL_COLUMNS));
-        float fall = grid - crest;
-        float length = fall * (span / grid);
-        float base = radius * BASE_LIFT;
-        float crestHeight = radius * PEAK_LIFT;
-        float drop = DROP_SLOPE * length * Math.min(1f, length / DROP_REFERENCE_LENGTH);
-        drop = Math.min(drop, crestHeight - base);
-        if (column <= crest) {
-            float t = (column - (crest - RISE_COLUMNS)) / RISE_COLUMNS;
-            t = Math.max(0f, Math.min(1f, t));
-            return base + (crestHeight - base) * 0.5f * (1f - (float) Math.cos(Math.PI * t));
-        }
-        float t = (column - crest) / fall;
-        return crestHeight - drop * 0.5f * (1f - (float) Math.cos(Math.PI * t));
+        float waveWidth = role == PageRole.LEFT ? 0.50f : 0.60f;
+        float delta = PlayLikeCurlModel.GRID - curlPosition;
+        return (float) (
+                radius * Math.sin(
+                        3.14f / (PlayLikeCurlModel.GRID * waveWidth) * (column - delta))
+                        + radius * 1.1f);
     }
 
     private static float resolvedRadius(float percentage) {
