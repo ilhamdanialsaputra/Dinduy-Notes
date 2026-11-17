@@ -3,7 +3,8 @@
  *
  * Original project : https://github.com/karankalsi/PlayLikeCurl
  * Maintained fork  : Arnab11/PlayLikeCurl (GLES2 renderer, production bitmap API v1, release 1.1.4)
- * Local changes    : ONLY the package declaration (karacken.curl -> app.dinduy.silkcurl). No logic was changed.
+ * Local changes    : package declaration (karacken.curl -> app.dinduy.silkcurl). Logic edits are marked "Local change"
+ *                    in PageRenderer.updateMvp (fov 45f -> 55f) and PageSurfaceView.completeSettlement only.
  *
  * MIT License
  *
@@ -672,11 +673,7 @@ public class PageSurfaceView extends GLSurfaceView {
 
     private void completeSettlement(Settlement settlement, SettlementContext context) {
         LandscapeSpreadModel spread = landscapeModelOrNull();
-        if (spread != null) {
-            spread.completeSettlement(settlement);
-        } else {
-            interactionModelOrNull().completeSettlement(settlement);
-        }
+        PlayLikeCurlModel portraitModel = spread != null ? null : interactionModelOrNull();
         settlementRunning = false;
         settlementAnimator = null;
         activeSettlementContext = null;
@@ -685,6 +682,16 @@ public class PageSurfaceView extends GLSurfaceView {
         PageDeckCoordinator.Promotion<Bitmap> promotion =
                 deckCoordinator.completeSettlement();
         PageDeck<Bitmap> promoted = promotion.getActivatedDeck();
+        if (promoted == null) {
+            // Local change: when a replacement deck is promoted, the old model is discarded by
+            // applyActiveDeck, so it must NOT be reset to the rest pose here. Resetting it first made
+            // the GL thread occasionally draw one frame of the old page at rest before activation.
+            if (spread != null) {
+                spread.completeSettlement(settlement);
+            } else {
+                portraitModel.completeSettlement(settlement);
+            }
+        }
         if (promoted != null) {
             markPromotionRelease(promotion);
             queueEvent(() -> renderer.activateDeck(promoted.getGenerationId()));

@@ -125,7 +125,7 @@ internal class SilkSurfaceView(context: Context) : PageSurfaceView(context) {
 }
 
 private const val GPU_BUDGET_BYTES = 256L * 1024L * 1024L   // aktif + pengganti (default mesin 128 MB terlalu sempit untuk halaman 2400 px)
-private const val CAMERA_SPAN = 1.6568542f                    // 4 * tan(22.5 derajat): tinggi dunia yang terlihat kamera mesin (fov 45, jarak 2)
+private const val CAMERA_SPAN = 2.0822677f                    // 4 * tan(27.5 derajat): tinggi dunia yang terlihat kamera mesin (fov 55, jarak 2)
 
 /**
  * Pegangan dari sisi Compose ke mesin PlayLikeCurl. Semua method dipanggil dari thread utama.
@@ -429,7 +429,7 @@ private fun Context.findLifecycleOwner(): LifecycleOwner? {
 
 /**
  * PageSurfaceView di dalam Compose. Kamera mesin tetap (fov 45, jarak 2), jadi halaman diam hanya mengisi persis persegi
- * ([pageLeft], [pageTop], [pageWidth], [pageHeight]) bila lebar view = lebar halaman dan tinggi view = 1.6569 x lebar halaman, dengan pusat yang sama.
+ * ([pageLeft], [pageTop], [pageWidth], [pageHeight]) bila lebar view = lebar halaman dan tinggi view = 2.0823 x lebar halaman, dengan pusat yang sama.
  * View ditempatkan begitu; margin atas / bawah (tempat lembar menggembung) hitam. Satuan px, koordinat induk. Lebar <= 0 = isi induk apa adanya.
  * onPause / onResume mengikuti lifecycle; resource dibebaskan saat keluar komposisi.
  */
@@ -451,7 +451,7 @@ fun SilkGlView(
                 layout(constraints.maxWidth, constraints.maxHeight) { p.place(0, 0) }
             } else {
                 // Lebar viewport = lebar halaman PERSIS: di posisi diam mesin juga menggambar halaman sebelumnya yang menjorok ke kiri (x -0.79..0.03), dan
-                // lembar yang dibalik keluar ke kiri; keduanya harus terjepit di tepi halaman (sama seperti scissor di kode lama). Tinggi = 1.6569 x lebar
+                // lembar yang dibalik keluar ke kiri; keduanya harus terjepit di tepi halaman (sama seperti scissor di kode lama). Tinggi = 2.0823 x lebar
                 // (potret, sesuai syarat mesin) membuat skala piksel 1:1 dengan persegi halaman; sisa tinggi = margin atas / bawah tempat lembar menggembung.
                 val wv = pw
                 val hv = (CAMERA_SPAN * pageWidth).roundToInt().coerceAtLeast(wv + 1)

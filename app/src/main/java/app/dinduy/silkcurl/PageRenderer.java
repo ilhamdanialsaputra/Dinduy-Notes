@@ -3,7 +3,8 @@
  *
  * Original project : https://github.com/karankalsi/PlayLikeCurl
  * Maintained fork  : Arnab11/PlayLikeCurl (GLES2 renderer, production bitmap API v1, release 1.1.4)
- * Local changes    : ONLY the package declaration (karacken.curl -> app.dinduy.silkcurl). No logic was changed.
+ * Local changes    : package declaration (karacken.curl -> app.dinduy.silkcurl), and in PageRenderer.updateMvp the
+ * vertical field of view 45f -> 55f (wider frustum so the lifted sheet is not clipped; curve/geometry untouched).
  *
  * MIT License
  *
@@ -945,7 +946,7 @@ public final class PageRenderer implements GLSurfaceView.Renderer {
         Matrix.perspectiveM(
                 projectionMatrix,
                 0,
-                45f,
+                55f,
                 PlayLikeCurlGeometry.projectionAspect(width, height),
                 0.1f,
                 100f);
