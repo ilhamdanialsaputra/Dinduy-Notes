@@ -1,45 +1,64 @@
-@file:OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
-
 package app.dinduy
 
+import android.app.Activity
+import android.app.Application
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.pdf.PdfRenderer
+import android.net.Uri
+import android.os.Build
+import android.os.ParcelFileDescriptor
+import android.provider.OpenableColumns
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.foundation.border
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.LocalIndication
-import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.animateScrollBy
-import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
-import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState
-import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.ui.composed
-import androidx.compose.ui.layout.onPlaced
-import androidx.compose.ui.layout.positionInParent
-import androidx.compose.ui.layout.layoutId
-import androidx.compose.ui.unit.round
-import androidx.compose.animation.core.VectorConverter
-import androidx.compose.runtime.withFrameNanos
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.zIndex
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -47,2697 +66,2832 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.asPaddingValues
-import androidx.compose.foundation.layout.defaultMinSize
-import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.systemBars
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.lazy.LazyItemScope
-import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridItemScope
-import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
-import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
-import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
-import androidx.compose.foundation.lazy.staggeredgrid.items as gridItems
-import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.animation.core.VisibilityThreshold
-import androidx.compose.animation.core.tween as tweenSpec
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.ui.layout.LayoutCoordinates
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.shadow
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.indication
-import androidx.compose.foundation.interaction.PressInteraction
-import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
-import androidx.compose.ui.input.pointer.util.VelocityTracker
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.onClick
-import androidx.compose.ui.semantics.onLongClick
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.semantics
-import kotlinx.coroutines.launch
-import kotlin.math.abs
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.animation.expandHorizontally
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.RoundRect
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.clipPath
-import androidx.compose.animation.shrinkHorizontally
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.ui.layout.layout
-import androidx.compose.ui.layout.boundsInWindow
-import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.layout
+import eu.wewox.pagecurl.ExperimentalPageCurlApi
+import eu.wewox.pagecurl.config.PageCurlConfig
+import eu.wewox.pagecurl.config.rememberPageCurlConfig
+import eu.wewox.pagecurl.page.PageCurl
+import eu.wewox.pagecurl.page.rememberPageCurlState
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.PathParser
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.changedToUp
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.text.PDFTextStripper
+import com.tom_roush.pdfbox.text.TextPosition
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.yield
+import kotlinx.serialization.Serializable
+import java.io.File
+import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sin
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.animation.SizeTransform
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.horizontalDrag
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
+import app.dinduy.silkcurl.SilkController
+import app.dinduy.silkcurl.SilkGl
+import app.dinduy.silkcurl.SilkGlView
+import app.dinduy.silkcurl.SilkPage
+import app.dinduy.silkcurl.silkInverted
 
-interface Actions {
-    fun pickImages()
-    fun pickCover(id: String)                // pilih satu foto galeri sebagai sampul catatan
-    fun replaceImage(noteId: String, bid: String, ix: Int)   // pilih satu foto dari galeri untuk mengisi bingkai gambar (blok bid, urutan ix) di catatan noteId; ukuran bingkai tetap
-    fun takePhoto(replace: Boolean)         // buka kamera (minta izin bila perlu); hasilnya jadi gambar baru, atau mengisi bingkai terpilih bila replace
-    fun importMd()
-    fun saveBackup()
-    fun shareBackup()
-    fun restoreBackup()
-    fun saveMd(name: String, text: String)
-    fun savePdf(name: String, file: java.io.File)    // simpan PDF hasil ekspor lewat pemilih berkas sistem
-    fun sharePdf(name: String, file: java.io.File)   // bagikan PDF hasil ekspor lewat lembar bagikan
-    fun copyText(t: String)
-    fun askNotif()   // minta / arahkan ke izin notifikasi supaya pengingat bisa muncul
-    fun requestMic(onGranted: () -> Unit)   // minta izin mikrofon saat dibutuhkan; onGranted dipanggil bila diizinkan
-    fun saveAudio(aud: Aud, name: String)   // simpan berkas suara lewat pemilih berkas sistem (tanpa izin penyimpanan)
-    fun back()
+// =====================================================================================
+//  PDF di Dinduy: tiap PDF adalah satu "catatan" (Note.pdf = id berkas) supaya ikut label, sematan,
+//  arsip, sampah, dan morph buka/tutup di beranda. Berkas disalin ke filesDir/pdf/<id>.pdf.
+// =====================================================================================
+
+object PdfFiles {
+    fun dir(ctx: Context) = File(ctx.filesDir, "pdf").apply { mkdirs() }
+    fun file(ctx: Context, id: String) = File(dir(ctx), "$id.pdf")
+    fun ink(ctx: Context, id: String) = File(dir(ctx), "$id.ink.json")
 }
 
-@Composable
-fun satDp(): Dp = WindowInsets.statusBars.union(WindowInsets.displayCutout).asPaddingValues().calculateTopPadding()
-
-@Composable
-fun sabDp(): Dp = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-
-private val SH = listOf(
-    floatArrayOf(36f, 36f, 36f, 36f), floatArrayOf(52f, 20f, 52f, 20f), floatArrayOf(20f, 52f, 20f, 52f),
-    floatArrayOf(60f, 28f, 28f, 28f), floatArrayOf(28f, 28f, 60f, 28f)
-)
-
-private val FD_ID = Locale.US
-private val FD_SHORT = SimpleDateFormat("MMM d", FD_ID)
-private val FD_LONG = SimpleDateFormat("MMM d, yyyy", FD_ID)
-private val FD_YEAR = SimpleDateFormat("yyyy", Locale.US)
-
-// dipanggil hanya dari thread UI; formatter dibuat sekali (SimpleDateFormat mahal dibuat berulang per kartu)
-private fun fdate(u: Long): String {
-    val d = Date(u)
-    val same = FD_YEAR.format(d) == FD_YEAR.format(Date())
-    return (if (same) FD_SHORT else FD_LONG).format(d)
+/** Dipakai menu titik tiga PDF dan layar baca untuk saling memberi tahu (tanpa mengubah AppVM). */
+object PdfBus {
+    var find by mutableIntStateOf(0)       // dinaikkan menu: buka bilah cari
+    var hasText by mutableStateOf(false)   // PDF punya lapisan teks (bukan hasil scan)
+    var mode by mutableIntStateOf(-1)      // 0 gulir, 1 halaman; -1 belum dimuat
+    var curl by mutableIntStateOf(-1)      // 1 = efek balik halaman 3D (hanya mode halaman); -1 belum dimuat
+    var curlStyle by mutableIntStateOf(-1) // gaya 3D: 0 Classic curl, 1 Silk curl; -1 belum dimuat
 }
 
-private val WS_RX = Regex("\\s+")
-private val SP_RX = Regex("[ \\t]+")
-private val NL_RX = Regex("\\s*\\n\\s*\\n\\s*(\\n\\s*)*")
-
-/** Kartu catatan ala Google Keep: persegi dengan sudut sedikit membulat, bergaris tipis, tanpa bentuk ekspresif. */
-private const val CARD_R = 12f
-private val CARD_PAD_H = 16.dp
-private val CARD_PAD_V = 14.dp
-
-/** Spring "spatial" Material 3 Expressive untuk perpindahan kartu antar posisi di daftar. */
-private val PlaceSpec = spring<IntOffset>(0.8f, 380f, IntOffset.VisibilityThreshold)
-
-/** Kartu masuk/keluar/berpindah dengan mulus (dipakai di beranda, hasil pencarian, arsip, sampah). */
-fun LazyItemScope.flowItem(): Modifier = Modifier.animateItem(
-    fadeInSpec = tweenSpec(280, 60), placementSpec = PlaceSpec, fadeOutSpec = tweenSpec(160)
-)
-
-/** Sama seperti flowItem, untuk grid beranda (1 atau 2 kolom). */
-fun LazyStaggeredGridItemScope.flowItemG(): Modifier = Modifier.animateItem(
-    fadeInSpec = tweenSpec(280, 60), placementSpec = PlaceSpec, fadeOutSpec = tweenSpec(160)
-)
-
-/** Kartu yang sedang diseret: tetap memakai animateItem (supaya pelacak animasi tidak terputus) tetapi tanpa animasi apa pun. */
-fun LazyStaggeredGridItemScope.holdItemG(): Modifier = Modifier.animateItem(
-    fadeInSpec = null, placementSpec = null, fadeOutSpec = null
-)
-
-/**
- * Saat sebuah catatan membuka (morph kartu -> layar penuh), kartu lain tidak ditimpa begitu saja:
- * kartu di atas terdorong ke atas, kartu di bawah terdorong ke bawah mengikuti tepi kartu yang melebar,
- * sedikit mengecil dan memudar. Saat menutup, geraknya berbalik dengan spring yang sama.
- */
-fun Modifier.makeRoom(vm: AppVM, id: String, idx: Int, openIdx: () -> Int, h: Float, dens: Float, cols: Int = 1, w: Float = 0f, flat: Boolean = false): Modifier = graphicsLayer {
-    val oid = vm.openId
-    val m = vm.morph
-    val p = vm.openP.value.coerceIn(0f, 1f)
-    if (p <= 0.001f || oid == null || m == null || oid == id) return@graphicsLayer
-    val oi = openIdx()
-    if (oi < 0) return@graphicsLayer
-    // beranda (1 atau 2 kolom; w > 0 hanya diisi HomeCard): posisi kartu dibaca langsung, bukan sekadar urutan
-    val grid = w > 0f && !vm.searchOn
-    // morph dari kartu "Tambah catatan" (lebar penuh) atau menguncup ke tombol Baru tidak boleh menggeser kartu lain
-    if (grid && (!m.card || m.up || vm.note(oid) == null)) return@graphicsLayer
-    val wave = minOf(Math.abs(idx - oi), 5) * 10f * dens
-    // posisi hasil boundsInWindow terpotong layar: kartu yang sudah terdorong keluar layar bisa tercatat sebagai Rect kosong (0,0,0,0)
-    // lalu dianggap 'di atas' kartu yang dibuka -> melompat ke atas sesaat. Rect tak valid diperlakukan seperti belum ada.
-    val me = if (grid) vm.cardMorph[id]?.takeIf { it.r - it.l > 1f && it.b - it.t > 1f } else null
-    if (me != null) {
-        // kartu di atas terdorong ke atas, kartu di bawah ke bawah; di 2 kolom kartu di samping juga terdorong
-        // ke kiri/kanan menjauhi kartu yang melebar (bukan satu aliran vertikal)
-        val eps = 4f * dens
-        val above = me.b <= m.t + eps
-        val below = me.t >= m.b - eps
-        if (!above && !below && cols == 2) {
-            translationX = if (me.r <= m.l + eps || (me.l + me.r) < (m.l + m.r)) -(me.r + 8f * dens) * p else (w - me.l + 8f * dens) * p
-        } else {
-            val up = if (!above && !below) idx < oi else above
-            translationY = if (up) -(maxOf(m.t, 0f) + wave) * p else (maxOf(h - m.b, 0f) + wave) * p
-        }
-    } else {
-        translationY = if (idx < oi) -(maxOf(m.t, 0f) + wave) * p else (maxOf(h - m.b, 0f) + wave) * p
-    }
-    // kartu bersampul tidak ikut mengecil: skala yang berubah tiap frame membuat Skia berpindah level mipmap bitmap sampul
-    // (FilterQuality.Medium) -> gambar tampak 'melompat' / berkedip, terutama pada kartu yang separuh terpotong di tepi layar
-    if (!flat) {
-        val s = 1f - .05f * p
-        scaleX = s; scaleY = s
-    }
-    alpha = 1f - .6f * p
-    // kartu bersampul: alpha<1 memaksa layer offscreen untuk bitmap besar -> kedip saat kartu terpotong tepi layar; ModulateAlpha menghindarinya
-    if (flat) compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.ModulateAlpha
-}
-
-@Composable
-fun NoteCard(
-    d: Note, i: Int, kind: String, selected: Boolean, modifier: Modifier = Modifier,
-    delTime: Long = 0L, onLong: (() -> Unit)? = null, track: ((Morph) -> Unit)? = null, tick: Int = 0, cols: Int = 1,
-    paper: Boolean = false, onClick: (Morph) -> Unit
-) {
-    // catatan bersampul: kartu memakai palet dari warna foto sampulnya (terpisah dari palet aplikasi)
-    val gp = LocalPal.current
-    val pal = if (d.cp.isEmpty() || d.cv.isEmpty()) gp else remember(d.cp, gp.dark, gp.mono) { coverPal(gp.dark, d.cp, gp.mono) }
-    val cvm = LocalVM.current
-    LaunchedEffect(d.id, d.cv, d.cp) { if (d.cv.isNotEmpty() && d.cp.isEmpty()) cvm?.ensureCoverPal(d.id) }
-    val c2 = cols == 2
-    // semua kartu satu warna (kertas) dengan garis tepi tipis; saat dipilih garisnya menebal sedikit dan berwarna utama
-    val cardC = pal.s
-    val fg = pal.os
-    val edge = androidx.compose.ui.graphics.lerp(pal.bg, pal.os, .13f)
-    val shape = RoundedCornerShape(CARD_R.dp)
-    val src = remember { MutableInteractionSource() }
-    val pressed by src.collectIsPressedAsState()
-    val selA by animateFloatAsState(if (selected) 1f else 0f, spring(.6f, 400f), label = "sel")
-    val sc by animateFloatAsState(if (selected || pressed) .97f else 1f, spring(.55f, 500f), label = "sc")
-    var rect by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
-    val dens = LocalDensity.current.density
-    val haptic = LocalHapticFeedback.current
-    val coords = remember { arrayOfNulls<LayoutCoordinates>(1) }
-    fun morphNow(live: Boolean): Morph {
-        val c = coords[0]
-        val rc = if (c != null && c.isAttached) c.boundsInWindow() else rect
-        return Morph(
-            rc.left, rc.top, rc.right, rc.bottom, CARD_R * dens, cardC,
-            FloatArray(4) { CARD_R * dens },
-            Ghost("f", c2, fg, CARD_PAD_H, CARD_PAD_V, 0.dp, 0.dp), card = true
-        )
-    }
-    // posisi dilaporkan ulang setelah layar selesai bergeser masuk (arsip/sampah), supaya morph keluar akurat
-    LaunchedEffect(tick) { if (tick > 0) track?.invoke(morphNow(false)) }
-    Box(
-        modifier.onGloballyPositioned {
-            coords[0] = it
-            rect = it.boundsInWindow()
-            track?.invoke(morphNow(false))
-        }
-            .graphicsLayer { scaleX = sc; scaleY = sc }
-            .fillMaxWidth().clip(shape).background(cardC)
-            .border((1f + selA).dp, androidx.compose.ui.graphics.lerp(edge, pal.p, selA), shape)
-            .combinedClickable(
-                interactionSource = src, indication = LocalIndication.current,
-                onClick = { onClick(morphNow(true)) },
-                onLongClick = if (onLong != null) ({ haptic.performHapticFeedback(HapticFeedbackType.LongPress); onLong() }) else null
-            )
-    ) {
-        CompositionLocalProvider(LocalPal provides pal) {
-            CardBody(d, "f", c2, fg, CARD_PAD_H, CARD_PAD_V, 0.dp, 0.dp, delTime)
-        }
+/** Hapus berkas PDF / coretan yang tidak dipakai catatan mana pun lagi. */
+fun AppVM.gcPdf() {
+    val ctx = getApplication<Application>()
+    val keep = docs.mapNotNull { it.pdf.takeIf { p -> p.isNotEmpty() } }.toSet()
+    val limit = System.currentTimeMillis() - 120_000L
+    PdfFiles.dir(ctx).listFiles()?.forEach { f ->
+        val id = f.name.substringBefore('.')
+        if (id !in keep && f.lastModified() < limit) f.delete()
     }
 }
 
-/**
- * Isi teks kartu ala Keep: judul (bila ada), isi dengan tinggi mengikuti panjang teks (dibatasi supaya tidak terlalu tinggi),
- * lalu label / pengingat. Dipakai kartu asli dan bayangan teks saat morph buka/tutup.
- */
-@Composable
-fun CardBody(d: Note, kind: String, c2: Boolean, fg: Color, padH: Dp, padV: Dp, insTL: Dp, insBL: Dp, delTime: Long, drawCover: Boolean = true) {
-    val vm = LocalVM.current
-    if (d.cv.isEmpty() || vm == null) {
-        CardText(d, kind, c2, fg, padH, padV, insTL, insBL, delTime)
-        return
-    }
-    // sampul di atas, tepi ke tepi kartu; teks (bila ada) di bawahnya
-    val hasText = d.t.isNotBlank() || d.x.isNotBlank() || d.au.isNotEmpty() || (d.rm > 0L && d.dt == 0L) || d.lb.isNotEmpty() || delTime != 0L
-    Column(Modifier.fillMaxWidth()) {
-        // drawCover = false (bayangan morph): ruangnya tetap ada supaya teks berada di tempat yang sama, tapi gambarnya tidak digambar
-        // dua kali; sampul di editor sudah menimpanya dengan buram penuh (lihat EditorCover), jadi tidak ada pudar-silang yang kedip.
-        if (drawCover) CoverImage(vm, d, Modifier.fillMaxWidth().aspectRatio(coverAspect(c2)))
-        else Spacer(Modifier.fillMaxWidth().aspectRatio(coverAspect(c2)))
-        if (hasText) CardText(d, kind, c2, fg, padH, padV, insTL, insBL, delTime)
-    }
+fun isPdfUri(ctx: Context, u: Uri): Boolean {
+    val t = try { ctx.contentResolver.getType(u) } catch (e: Exception) { null }
+    if (t == "application/pdf") return true
+    val n = pdfName(ctx, u)
+    return n.endsWith(".pdf", true)
 }
 
-@Composable
-private fun CardText(d: Note, kind: String, c2: Boolean, fg: Color, padH: Dp, padV: Dp, insTL: Dp, insBL: Dp, delTime: Long) {
-    val remOn = d.rm > 0L && d.dt == 0L
-    val body = remember(d.x) { d.x.take(900).replace(SP_RX, " ").replace(NL_RX, "\n\n").trim() }
-    val hasTitle = d.t.isNotBlank()
-    val shownBody = body.ifEmpty { if (!hasTitle) (if (d.au.isNotEmpty()) "Voice note" else if (d.cv.isNotEmpty()) "" else "Empty") else "" }
-    // kartu bersampul: sampul tetap utuh, yang dipendekkan hanya kotak tulisannya (padding, jarak, dan jumlah baris)
-    val cvd = d.cv.isNotEmpty()
-    Column(
-        Modifier.fillMaxWidth().padding(horizontal = padH, vertical = if (cvd) padV * .72f else padV),
-        verticalArrangement = Arrangement.spacedBy(if (cvd) 5.dp else 8.dp)
-    ) {
-        if (hasTitle) {
-            T(d.t.trim(), 17f, 500, fg, Modifier.padding(end = if (d.p) 18.dp else 0.dp), lh = 1.25f, maxLines = if (cvd) 2 else 3)
+private fun pdfName(ctx: Context, u: Uri): String {
+    var name = ""
+    try {
+        ctx.contentResolver.query(u, null, null, null, null)?.use { c ->
+            val i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (i >= 0 && c.moveToFirst()) name = c.getString(i) ?: ""
         }
-        if (shownBody.isNotEmpty()) {
-            T(shownBody, 15f, 400, fg, lh = 1.4f, maxLines = if (cvd) (if (c2) 4 else 3) else (if (c2) 10 else 6), alpha = .88f)
-        }
-        if (remOn) {
-            Box { RemChip(Rem.stamp(d), fg, Rem.overdue(d), d.rr.isNotEmpty()) }
-        }
-        if (d.lb.isNotEmpty()) {
-            val maxShow = if (c2) 1 else 3
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                d.lb.take(maxShow).forEach { n -> KeepChip(n, fg, Modifier.weight(1f, fill = false)) }
-                if (d.lb.size > maxShow) KeepChip("+" + (d.lb.size - maxShow), fg)
-            }
-        }
-        if (delTime != 0L) {
-            // hanya di sampah: tanggal penghapusan
-            T("Deleted " + fdate(delTime), 12f, 600, fg, alpha = .65f)
-        }
-    }
+    } catch (e: Exception) { }
+    if (name.isEmpty()) name = u.lastPathSegment?.substringAfterLast('/') ?: ""
+    return name
 }
 
-/** Bayangan kartu: teks kartu yang pudar-silang dengan isi catatan selama morph, supaya teks tidak kedip. */
-@Composable
-fun GhostCard(d: Note, g: Ghost, modifier: Modifier = Modifier) {
-    Box(modifier) {
-        // tanpa ikon pin: kartu asli di beranda juga tidak menampilkannya, jadi tidak ada ikon yang berkedip saat morph
-        CardBody(d, g.kind, g.c2, g.fg, g.padH, g.padV, g.insTL, g.insBL, 0L, drawCover = false)
-    }
-}
-
-/** Label di kartu ala Keep: kotak membulat kecil, bukan kapsul. */
-@Composable
-fun KeepChip(text: String, color: Color, modifier: Modifier = Modifier) {
-    Box(modifier.clip(RoundedCornerShape(8.dp)).background(color.copy(alpha = .10f)).padding(horizontal = 8.dp, vertical = 4.dp)) {
-        T(text, 12f, 500, color, maxLines = 1, alpha = .85f)
-    }
-}
-
-/** Lencana label berbentuk kapsul di kartu catatan. */
-@Composable
-fun Capsule(text: String, color: Color, modifier: Modifier = Modifier) {
-    Box(modifier.clip(RoundedCornerShape(50)).background(color.copy(alpha = .14f)).padding(horizontal = 10.dp, vertical = 4.dp)) {
-        T(text, 12f, 700, color, maxLines = 1)
-    }
-}
-
-@Composable
-fun SwipeCard(enabled: Boolean, shape: androidx.compose.ui.graphics.Shape, onArchive: () -> Unit, onDelete: () -> Unit, content: @Composable () -> Unit) {
-    val pal = LocalPal.current
-    val scope = rememberCoroutineScope()
-    val off = remember { Animatable(0f) }
-    val col = remember { Animatable(1f) }
-    var w by remember { mutableStateOf(1f) }
-    val swCoords = remember { arrayOfNulls<LayoutCoordinates>(1) }   // batas jendela dibaca hanya saat dilepas
-    val scrW = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp * androidx.compose.ui.platform.LocalDensity.current.density
-    val haptic = LocalHapticFeedback.current
-    var hit by remember { mutableStateOf(false) }
-    var dir by remember { mutableStateOf(1) }
-    val dens = androidx.compose.ui.platform.LocalDensity.current.density
-    val p = (Math.abs(off.value) / (w * .34f)).coerceIn(0f, 1f)
-    val errC = (if (pal.dark) Color(0xFFF2B8B5) else Color(0xFFB3261E)).let { if (pal.mono) it.gray() else it }
-    val pop = remember { Animatable(0f) }
-    val wig = remember { Animatable(1f) }
-    // pegas kurang teredam: melompat melewati nilai akhir lalu berosilasi mengendap = efek "pop" dan goyangan
-    LaunchedEffect(hit) { pop.animateTo(if (hit) 1f else 0f, spring(.4f, 450f)) }
-    LaunchedEffect(hit) { if (hit) { wig.snapTo(0f); wig.animateTo(1f, spring(.22f, 240f)) } else wig.snapTo(1f) }
-    Box(
-        Modifier.fillMaxWidth().onSizeChanged { w = it.width.toFloat().coerceAtLeast(1f) }
-            .onGloballyPositioned { swCoords[0] = it }
-            .layout { m, c ->
-                val pl = m.measure(c)
-                val h = (pl.height * col.value).roundToInt()
-                layout(pl.width, h) { pl.placeRelative(0, 0) }
-            }
-            .draggable(
-                orientation = Orientation.Horizontal, enabled = enabled,
-                state = rememberDraggableState { dx ->
-                    scope.launch {
-                        off.snapTo(off.value + dx)
-                        if (off.value != 0f) dir = if (off.value > 0f) 1 else -1
-                        val nh = Math.abs(off.value) >= w * .34f
-                        if (nh && !hit) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        hit = nh
-                    }
-                },
-                onDragStopped = {
-                    scope.launch {
-                        val ok = Math.abs(off.value) >= w * .34f
-                        if (!ok) off.animateTo(0f, spring(1f, 500f))
-                        else {
-                            val right = off.value > 0
-                            // buang sampai benar-benar keluar layar (kartu kolom kanan ke kiri / kolom kiri ke kanan harus menyeberang penuh)
-                            val m = 24f * dens
-                            val wb = swCoords[0]?.takeIf { it.isAttached }?.boundsInWindow()
-                            val winL = wb?.left ?: 0f
-                            val winR = wb?.right ?: w
-                            val tgt = if (right) maxOf(w * 1.1f, scrW - winL + m) else -maxOf(w * 1.1f, winR + m)
-                            off.animateTo(tgt, tween(280, easing = Emph))
-                            col.animateTo(0f, tween(300, easing = Emph))
-                            if (right) onArchive() else onDelete()
-                        }
-                    }
-                }
-            )
-    ) {
-        // tanpa latar: hanya ikon yang menyusul tepi kartu, lalu "menyala" saat melewati ambang
-        val reveal = (Math.abs(off.value) / (14f * dens)).coerceIn(0f, 1f)
-        if (reveal > 0f) {
-            val r = dir > 0
-            val tint = if (r) pal.p else errC
-            val e = p * (2f - p)   // ease-out
-            Box(Modifier.matchParentSize().graphicsLayer { alpha = reveal * col.value.coerceIn(0f, 1f) }) {
-                Column(
-                    Modifier.align(if (r) Alignment.CenterStart else Alignment.CenterEnd)
-                        .offset {
-                            // ikon berada di tengah celah yang terbuka, lalu berhenti 56dp dari tepi layar
-                            val c = minOf(Math.abs(off.value) / 2f, 56.dp.toPx())
-                            val x = (c - 28.dp.toPx()).roundToInt()
-                            IntOffset(if (r) x else -x, 0)
-                        }
-                        .width(56.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Box(
-                        Modifier.size(56.dp).graphicsLayer {
-                            val s = (.4f + .6f * e) * (1f + .32f * pop.value)
-                            scaleX = s; scaleY = s
-                            // melewati ambang: tong sampah bergoyang meredam, arsip melompat naik lalu mendarat
-                            val w0 = 1f - wig.value
-                            rotationZ = if (r) 0f else -24f * w0
-                            translationY = if (r) -16.dp.toPx() * w0 else 0f
-                        },
-                        Alignment.Center
-                    ) { Ic(if (r) "arc" else "del", tint.copy(alpha = .5f + .5f * e), 30.dp) }
-                    T(
-                        if (r) "Archive" else "Delete", 12f, 800, tint,
-                        Modifier.graphicsLayer { alpha = pop.value.coerceIn(0f, 1f); translationY = (1f - pop.value) * 6.dp.toPx() }
-                    )
-                }
-            }
-        }
-        Box(Modifier.offset { IntOffset(off.value.roundToInt(), 0) }) { content() }
-    }
-}
-
-@Composable
-fun Opt(i: Int, icon: String, title: String, sub: String? = null, check: Boolean = false, trailing: String? = null, onClick: () -> Unit) {
-    val pal = LocalPal.current
-    val src = remember { MutableInteractionSource() }
-    val pr by src.collectIsPressedAsState()
-    val r by animateDpAsState(if (pr) 14.dp else 30.dp, spring(.6f, 500f), label = "r")
-    val sc by animateFloatAsState(if (pr) .97f else 1f, spring(.5f, 600f), label = "s")
-    val (bg, fg, ir) = when (i % 3) {
-        1 -> Triple(pal.pc, pal.opc, 30.dp)
-        2 -> Triple(pal.sc, pal.osc, 18.dp)
-        else -> Triple(pal.tc, pal.otc, 30.dp)
-    }
-    Row(
-        Modifier.fillMaxWidth().padding(bottom = 6.dp).graphicsLayer { scaleX = sc; scaleY = sc }.clip(RoundedCornerShape(r))
-            .clickable(interactionSource = src, indication = LocalIndication.current, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(18.dp)
-    ) {
-        Box(Modifier.size(60.dp).clip(RoundedCornerShape(ir)).background(bg), Alignment.Center) { Ic(icon, fg, 24.dp) }
-        Column(Modifier.weight(1f)) {
-            T(title, 19f, 800, pal.os)
-            if (sub != null) T(sub, 14f, 500, pal.osv)
-        }
-        if (check) Ic("ok", pal.p, 26.dp)
-        if (trailing != null) T(trailing, 19f, 900, pal.p)
-    }
-}
-
-@Composable
-fun FontRow(name: String, fam: FontFamily, on: Boolean, onClick: () -> Unit) {
-    val pal = LocalPal.current
-    val src = remember { MutableInteractionSource() }
-    val pr by src.collectIsPressedAsState()
-    val r by animateDpAsState(if (pr) 14.dp else if (on) 32.dp else 24.dp, spring(.6f, 500f), label = "r")
-    val sc by animateFloatAsState(if (pr) .97f else 1f, spring(.5f, 600f), label = "s")
-    val bg = androidx.compose.ui.graphics.lerp(pal.c4, pal.pc, animateFloatAsState(if (on) 1f else 0f, spring(.8f, 380f), label = "b").value)
-    val fg = if (on) pal.opc else pal.os
-    CompositionLocalProvider(LocalFF provides fam) {
-        Row(
-            Modifier.fillMaxWidth().padding(bottom = 8.dp).graphicsLayer { scaleX = sc; scaleY = sc }
-                .clip(RoundedCornerShape(r)).background(bg)
-                .clickable(interactionSource = src, indication = LocalIndication.current, onClick = onClick)
-                .padding(horizontal = 22.dp, vertical = 16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(Modifier.weight(1f)) {
-                T(name, 21f, 700, fg)
-                T("Neat notes, fast and cozy 0123", 14f, 400, fg, alpha = .75f)
-            }
-            if (on) Ic("ok", fg, 24.dp)
-        }
-    }
-}
-
-/** Pilihan "Follow device" (Material You): warna aplikasi mengikuti wallpaper. */
-@Composable
-fun DeviceColorRow(on: Boolean, onClick: () -> Unit) {
-    val pal = LocalPal.current
-    val src = remember { MutableInteractionSource() }
-    val pr by src.collectIsPressedAsState()
-    val r by animateDpAsState(if (pr) 14.dp else if (on) 32.dp else 24.dp, spring(.6f, 500f), label = "r")
-    val sc by animateFloatAsState(if (pr) .97f else 1f, spring(.5f, 600f), label = "s")
-    val k by animateFloatAsState(if (on) 1f else 0f, spring(.8f, 380f), label = "b")
-    val bg = androidx.compose.ui.graphics.lerp(pal.c4, pal.pc, k)
-    val fg = if (on) pal.opc else pal.os
-    Row(
-        Modifier.fillMaxWidth().padding(bottom = 14.dp).graphicsLayer { scaleX = sc; scaleY = sc }
-            .clip(RoundedCornerShape(r)).background(bg)
-            .clickable(interactionSource = src, indication = LocalIndication.current, onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        Box(Modifier.size(48.dp).clip(RoundedCornerShape(if (on) 24.dp else 16.dp)).background(pal.p), Alignment.Center) {
-            Ic("pal", pal.op, 24.dp)
-        }
-        Column(Modifier.weight(1f)) {
-            T("Follow device", 19f, 800, fg)
-            T("Material You, colors follow your wallpaper", 14f, 400, fg, alpha = .75f)
-        }
-        if (on) Ic("ok", fg, 24.dp)
-    }
-}
-
-// ---------- drawer ala Google Keep: panel persegi, baris berbentuk pil ----------
-@Composable
-fun DrawerItem(icon: String, title: String, selected: Boolean = false, trailing: String? = null, onLong: (() -> Unit)? = null, onClick: () -> Unit) {
-    val pal = LocalPal.current
-    val haptic = LocalHapticFeedback.current
-    val src = remember { MutableInteractionSource() }
-    val pr by src.collectIsPressedAsState()
-    val r by animateDpAsState(if (pr) 18.dp else 32.dp, spring(.6f, 500f), label = "r")
-    val bgA by animateFloatAsState(if (selected) 1f else 0f, spring(.8f, 380f), label = "bg")
-    Row(
-        Modifier.fillMaxWidth().height(64.dp).clip(RoundedCornerShape(r))
-            .background(pal.pc.copy(alpha = bgA))
-            .combinedClickable(
-                interactionSource = src, indication = LocalIndication.current, onClick = onClick,
-                onLongClick = if (onLong != null) ({ haptic.performHapticFeedback(HapticFeedbackType.LongPress); onLong() }) else null
-            )
-            .padding(start = 26.dp, end = 26.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Ic(icon, if (selected) pal.opc else pal.os, 24.dp)
-        Spacer(Modifier.width(26.dp))
-        T(title, 18f, if (selected) 700 else 500, if (selected) pal.opc else pal.os, Modifier.weight(1f), maxLines = 1)
-        if (trailing != null) T(trailing, 15f, 700, if (selected) pal.opc else pal.osv)
-    }
-}
-
-@Composable
-fun DrawerContent(vm: AppVM, close: () -> Unit, go: (Scr) -> Unit) {
-    val pal = LocalPal.current
-    @Composable
-    fun Divider() = Box(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 10.dp).height(1.dp).background(pal.ol))
-    Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).padding(horizontal = 12.dp)) {
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            T("Dinduy", 28f, 800, pal.p, Modifier.padding(start = 16.dp, top = 28.dp, bottom = 24.dp), ls = -.01f)
-            // sorotan (highlight) menandai posisi pengguna: "Catatan" = semua, atau satu label
-            DrawerItem("bulb", "Notes", selected = vm.filter == null && !vm.remFilter) { vm.filter = null; vm.remFilter = false; close() }
-            DrawerItem(
-                "bell", "Reminder", selected = vm.remFilter,
-                trailing = vm.live().count { it.rm > 0L }.takeIf { it > 0 }?.toString()
-            ) { vm.filter = null; vm.remFilter = true; close() }
-            T("Labels", 14f, 700, pal.osv, Modifier.padding(start = 26.dp, top = 16.dp, bottom = 6.dp))
-            vm.sortedLabels().forEach { n ->
-                DrawerItem(
-                    "label", n, selected = vm.filter == n,
-                    trailing = vm.labelCount(n).takeIf { it > 0 }?.toString(),
-                    onLong = { vm.sheet = Sheet.LblEdit(n) }
-                ) { vm.remFilter = false; vm.filter = n; close() }
-            }
-            DrawerItem("plus", "Create new label") { close(); vm.lblDlg = LblDlg(null, null) }
-            Divider()
-            DrawerItem("up", "Import files") { close(); vm.importTick++ }
-            DrawerItem("arc", "Archive", trailing = vm.archived().size.takeIf { it > 0 }?.toString()) { go(Scr.Archive) }
-            DrawerItem("del", "Trash", trailing = vm.trashed().size.takeIf { it > 0 }?.toString()) { go(Scr.Trash) }
-            Spacer(Modifier.height(12.dp))
-        }
-        Divider()
-        DrawerItem("i", "Info") { go(Scr.Info) }
-        DrawerItem("set", "Settings") { go(Scr.Settings) }
-        Spacer(Modifier.height(12.dp))
-    }
-}
-
-@Composable
-fun LabelDialogHost(vm: AppVM) {
-    val d = vm.lblDlg ?: return
-    val pal = LocalPal.current
-    val renaming = d.old != null
-    var text by remember(d) { mutableStateOf(d.old ?: "") }
-    var focused by remember(d) { mutableStateOf(false) }
-    var err by remember(d) { mutableStateOf(false) }
-    var closing by remember(d) { mutableStateOf(false) }
-    val fr = remember(d) { FocusRequester() }
-    val scope = rememberCoroutineScope()
-    val prog = remember(d) { Animatable(0f) }      // 0 -> 1: kartu masuk (pegas, sedikit membal)
-    val iconP = remember(d) { Animatable(0f) }     // lencana ikon masuk menyusul sesaat kemudian
-
-    // keluar: kartu mengecil + memudar dulu, baru dialog benar-benar dilepas
-    val close: () -> Unit = {
-        if (!closing) {
-            closing = true
-            scope.launch {
-                prog.animateTo(0f, androidx.compose.animation.core.tween(190, easing = androidx.compose.animation.core.FastOutLinearInEasing))
-                vm.lblDlg = null
-            }
-        }
-    }
-    val done: () -> Unit = {
-        if (!closing && text.isNotBlank()) {
-            val old = d.old
-            val ok = if (old != null) vm.renameLabel(old, text) else vm.addLabel(text, d.forNote)
-            if (ok) close() else err = true
-        }
-    }
-    LaunchedEffect(d) {
-        launch { prog.animateTo(1f, spring(.74f, 320f)) }
-        launch { delay(110); iconP.animateTo(1f, spring(.42f, 340f)) }
-        delay(260)
-        try { fr.requestFocus() } catch (e: Exception) { }
-    }
-
-    androidx.compose.ui.window.Dialog(
-        onDismissRequest = close,
-        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        // scrim digambar sendiri (ikut animasi), jadi redup bawaan jendela dimatikan
-        val win = (androidx.compose.ui.platform.LocalView.current.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
-        androidx.compose.runtime.SideEffect { win?.setDimAmount(0f); win?.setWindowAnimations(-1) }
-
-        Box(
-            Modifier.fillMaxSize()
-                .labelScrim(prog)
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { close() }
-                .padding(horizontal = 24.dp),
-            Alignment.Center
-        ) {
-            val cardShape = RoundedCornerShape(36.dp)
-            Column(
-                Modifier.widthIn(max = 380.dp).fillMaxWidth()
-                    .graphicsLayer {
-                        val p = prog.value
-                        val sc = .84f + .16f * p
-                        scaleX = sc; scaleY = sc
-                        alpha = (p * 2.2f).coerceIn(0f, 1f)
-                        translationY = (1f - p) * 36.dp.toPx()
-                    }
-                    .clip(cardShape).background(pal.c3)
-                    .pointerInput(Unit) { detectTapGestures { } }       // ketuk di kartu tidak menutup
-                    .padding(start = 24.dp, end = 24.dp, top = 30.dp, bottom = 24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // lencana ikon: kotak membulat besar, berputar sedikit sambil membal masuk
-                Box(
-                    Modifier.size(68.dp)
-                        .graphicsLayer {
-                            val k = iconP.value
-                            scaleX = k; scaleY = k; rotationZ = (1f - k) * -28f
-                        }
-                        .clip(RoundedCornerShape(24.dp)).background(pal.pc),
-                    Alignment.Center
-                ) { Ic("label", pal.opc, 32.dp) }
-                Spacer(Modifier.height(18.dp))
-                Box(Modifier.fillMaxWidth(), Alignment.Center) { T(if (renaming) "Rename label" else "New label", 26f, 900, pal.os) }
-                Spacer(Modifier.height(4.dp))
-                Box(Modifier.fillMaxWidth(), Alignment.Center) {
-                    T(if (renaming) "Notes keep this label" else if (d.forNote != null) "It will be added to this note" else "Use labels to group notes", 14f, 500, pal.osv, maxLines = 1)
-                }
-                Spacer(Modifier.height(22.dp))
-
-                // kolom isian: kapsul tonal, bingkai primer menyala saat fokus
-                val frame by animateColorAsState(
-                    if (err) pal.oec else if (focused) pal.p else Color.Transparent,
-                    androidx.compose.animation.core.tween(180), label = "lfr"
-                )
-                val tint by animateColorAsState(if (focused) pal.p else pal.osv, androidx.compose.animation.core.tween(180), label = "lti")
-                val clearK by animateFloatAsState(if (text.isNotEmpty()) 1f else 0f, spring(.6f, 520f), label = "lcl")
-                val fieldShape = RoundedCornerShape(28.dp)
-                Row(
-                    Modifier.fillMaxWidth().height(60.dp).clip(fieldShape).background(pal.c4)
-                        .border(2.dp, frame, fieldShape).padding(start = 18.dp, end = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Ic("label", tint, 22.dp)
-                    Spacer(Modifier.width(12.dp))
-                    Box(Modifier.weight(1f)) {
-                        BasicTextField(
-                            value = text, onValueChange = { text = it.take(30); err = false },
-                            modifier = Modifier.fillMaxWidth().focusRequester(fr).onFocusChanged { focused = it.isFocused },
-                            textStyle = TextStyle(color = pal.os, fontFamily = LocalFF.current, fontSize = 18.sp, fontWeight = FontWeight(600)),
-                            singleLine = true, cursorBrush = SolidColor(pal.p),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                            keyboardActions = KeyboardActions(onDone = { done() }),
-                            decorationBox = { inner -> Box { if (text.isEmpty()) T("Label name", 18f, 600, pal.osv, maxLines = 1); inner() } }
-                        )
-                    }
-                    Box(
-                        Modifier.size(40.dp).graphicsLayer { scaleX = clearK; scaleY = clearK; alpha = clearK }
-                            .clip(CircleShape)
-                            .clickable(enabled = text.isNotEmpty()) { text = ""; err = false; try { fr.requestFocus() } catch (e: Exception) { } },
-                        Alignment.Center
-                    ) {
-                        androidx.compose.foundation.Canvas(Modifier.size(12.dp)) {
-                            val sw = 2.2.dp.toPx()
-                            drawLine(pal.osv, Offset(0f, 0f), Offset(size.width, size.height), sw, androidx.compose.ui.graphics.StrokeCap.Round)
-                            drawLine(pal.osv, Offset(size.width, 0f), Offset(0f, size.height), sw, androidx.compose.ui.graphics.StrokeCap.Round)
-                        }
-                    }
-                }
-                Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.weight(1f)) {
-                        if (err) T("This label already exists", 13f, 600, pal.oec, maxLines = 1)
-                    }
-                    T("${text.length}/30", 13f, 600, if (text.length >= 26) pal.p else pal.osv)
-                }
-                Spacer(Modifier.height(18.dp))
-
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    LabelDlgBtn("Cancel", pal.c4, pal.os, true, Modifier.weight(1f)) { close() }
-                    LabelDlgBtn(if (renaming) "Save" else "Create", pal.p, pal.op, text.isNotBlank(), Modifier.weight(1f)) { done() }
-                }
-            }
-        }
-    }
-}
-
-/** Scrim yang ikut progres animasi kartu (dibaca di fase gambar, jadi tidak memicu recompose tiap frame). */
-private fun Modifier.labelScrim(p: Animatable<Float, androidx.compose.animation.core.AnimationVector1D>): Modifier =
-    this.drawBehind { drawRect(Color.Black.copy(alpha = .52f * p.value.coerceIn(0f, 1f))) }
-
-/** Tombol dialog ala M3 Expressive: kapsul tinggi, sudut menyusut dan badan mengecil saat ditekan. */
-@Composable
-private fun LabelDlgBtn(text: String, bg: Color, fg: Color, enabled: Boolean, modifier: Modifier, onClick: () -> Unit) {
-    val src = remember { MutableInteractionSource() }
-    val pr by src.collectIsPressedAsState()
-    val r by animateDpAsState(if (pr) 16.dp else 26.dp, spring(.6f, 520f), label = "lbr")
-    val sc by animateFloatAsState(if (pr) .95f else 1f, spring(.5f, 600f), label = "lbs")
-    val al by animateFloatAsState(if (enabled) 1f else .38f, androidx.compose.animation.core.tween(160), label = "lba")
-    Box(
-        modifier.height(52.dp).graphicsLayer { scaleX = sc; scaleY = sc; alpha = al }
-            .clip(RoundedCornerShape(r)).background(bg)
-            .clickable(interactionSource = src, indication = null, enabled = enabled, onClick = onClick),
-        Alignment.Center
-    ) { T(text, 16f, 800, fg, maxLines = 1) }
-}
-
-// ---------- beranda ----------
-/**
- * Keadaan seret-dan-lepas kartu beranda (ala Google Keep). Selama menyeret, urutan satu kelompok (disematkan / lainnya)
- * disimpan sementara di `order`; kartu lain bergeser dengan animasi karena grid mengikuti urutan itu.
- * Urutan baru baru disimpan permanen (AppVM.moveOrder) saat kartu dilepas.
- */
-@androidx.compose.runtime.Stable
-class NoteDrag {
-    var id by mutableStateOf<String?>(null)
-    var group = 0                                   // 0 = kelompok atas (disematkan / semua), 1 = lainnya
-    var order by mutableStateOf<List<String>>(emptyList())
-    var orig: List<String> = emptyList()
-    var finger by mutableStateOf(Offset.Zero)       // posisi jari di dalam grid
-    var grab = Offset.Zero                          // titik sentuh relatif terhadap pojok kiri-atas kartu
-    var dropping by mutableStateOf(false)
-    var ready by mutableStateOf(false)              // tata letak baru sudah terpasang; bayangan boleh meluncur ke slotnya
-    var h = 0                                       // tinggi kartu seretan (px)
-    var span = 0f                                   // tinggi kartu seretan + jarak antar kartu (px): jarak geser kartu lain di 1 kolom
-    val lift = Animatable(0f)                       // 0 -> 1: kartu terangkat (bayangan & skala muncul perlahan)
-    var resid = Offset.Zero                         // jarak kartu dari tempat barunya saat dilepas
-    var touchId: String? = null                     // kartu yang baru saja tersentuh (dicatat oleh kartu itu sendiri, jadi pasti benar)
-    var touchT = -1L                                // waktu sentuhan tadi, untuk mencocokkan dengan gestur di grid
-    var touchLocal = Offset.Zero                    // titik sentuh tadi di dalam kartu (koordinat lokal kartu itu)
-    // kartu bayangan (yang mengikuti jari) digambar di atas grid dengan koordinat dari jari saja, tidak dari layout grid,
-    // jadi tidak pernah ketinggalan satu frame / meloncat saat urutan bertukar
-    var startC = Offset.Zero                        // pojok kiri-atas kartu di dalam grid saat seretan dimulai
-    var at0 = Offset.Zero                           // posisi jari saat seretan dimulai
-    var off0 = Offset.Zero                          // offset item di layoutInfo saat seretan dimulai
-    var w = 0                                       // lebar kartu (px)
-    var dropAt = Offset.Zero                        // posisi bayangan saat dilepas
-    val settle = Animatable(0f)                     // 1 -> 0: kartu meluncur ke tempatnya
-    // 2 kolom: kolom (0 kiri / 1 kanan) tiap kartu di kelompok yang diseret, sementara selama seretan (disimpan permanen saat dilepas)
-    var laneOv by mutableStateOf<Map<String, Int>>(emptyMap())
-
-    fun begin(key: String, g: Int, ord: List<String>, grabAt: Offset, at: Offset) {
-        group = g; orig = ord; order = ord; grab = grabAt; finger = at; dropping = false; ready = false; id = key
-    }
-
-    fun reset() { id = null; dropping = false; ready = false; order = emptyList(); laneOv = emptyMap() }
-
-    /**
-     * 1 kolom: tata letak grid TIDAK berubah selama menyeret (kartu tidak benar-benar dipindah di daftar), jadi tidak ada
-     * lompatan gulir / pertukaran beruntun. Kartu di antara asal dan tujuan hanya digeser secara visual sejauh `span`.
-     */
-    fun shiftOf(key: String): Float {
-        val d = id ?: return 0f
-        if (key == d) return 0f
-        val o = orig.indexOf(d)
-        val t = order.indexOf(d)
-        val k = orig.indexOf(key)
-        if (o < 0 || t < 0 || k < 0 || o == t) return 0f
-        return when {
-            t > o && k > o && k <= t -> -span
-            t < o && k >= t && k < o -> span
-            else -> 0f
-        }
-    }
-}
-
-/**
- * Pergeseran tumpukan kartu saat pencarian dibuka/ditutup.
- * from = posisi tiap kartu (id -> offset di layar) di daftar ASAL: beranda saat membuka, hasil cari saat menutup. Tiap kartu meluncur
- * dari posisi asalnya ke posisi barunya, jadi gerak tetap terlihat walau beranda mentok di atas tetapi tata letaknya berubah
- * (judul "Pinned"/"Others" hilang, kartu pindah kolom). Kalau semua posisi sama (tidak ada yang berubah), tidak ada gerak.
- * px = cadangan untuk kartu yang tidak ada di daftar asal (beranda tergulir: jarak gulir, 0 = mentok di atas), p = progres 0..1.
- */
-private class StackShift(
-    val px: Float, val from: Map<String, Offset>,
-    val p: Animatable<Float, androidx.compose.animation.core.AnimationVector1D>
-)
-
-
-/** Teks beranda saat tidak ada kartu yang tampil. */
-private fun homeEmptyMsg(vm: AppVM): String =
-    if (vm.remFilter) "No reminders yet. Open a note and tap the bell icon."
-    else if (vm.filter != null) "No notes with this label yet"
-    else if (vm.hideLabeled && vm.live().isNotEmpty()) "All your notes have labels. Open the menu and pick a label to see them."
-    else "Tap New to get started"
-
-/** Satu blok isi beranda 2 kolom: judul ("Pinned" / "Others" / "empty") atau satu kelompok kartu. */
-private class HBlock(val head: String?, val ids: List<String>)
-
-/**
- * Kartu meluncur mulus ke posisi barunya (pengganti animateItem, yang hanya ada di daftar lazy).
- * Posisi diukur di induk yang sama untuk semua kartu, jadi kartu yang pindah kolom pun meluncur lintas kolom.
- */
-private fun Modifier.slideTo(): Modifier = composed {
-    val scope = rememberCoroutineScope()
-    var target by remember { mutableStateOf(IntOffset.Zero) }
-    val holder = remember { arrayOfNulls<Animatable<IntOffset, androidx.compose.animation.core.AnimationVector2D>>(1) }
-    this.onPlaced { c ->
-        val t = c.positionInParent().round()
-        // penempatan pertama: langsung di tempatnya (tanpa meluncur dari pojok)
-        if (holder[0] == null) holder[0] = Animatable(t, IntOffset.VectorConverter)
-        target = t
-    }.offset {
-        val a = holder[0]
-        if (a == null) IntOffset.Zero else {
-            if (a.targetValue != target) scope.launch { a.animateTo(target, PlaceSpec) }
-            a.value - target
-        }
-    }
-}
-
-/**
- * Tata letak beranda 2 kolom dengan kolom EKSPLISIT: tiap kartu punya kolomnya sendiri (laneOf), urutan di dalam kolom mengikuti
- * urutan daftar. Kartu yang belum punya kolom masuk ke kolom yang paling pendek (seperti grid staggered). Karena kolom tetap,
- * menukar dua kartu hanya mengubah dua kartu itu; kartu lain tetap di kolomnya (hanya menyesuaikan tinggi).
- * Posisi hasil ukur ditulis ke `rects` (id -> [x, y, lebar, tinggi] dalam isi yang tergulir), kolom yang dipakai ke `lanesOut`,
- * dan kolom yang baru dihitung (belum tersimpan) ke `fresh`.
- */
-/** Pembungkus yang bisa dilewati (skippable): selama k dan content tidak berubah, kartu yang sudah ada tidak dikomposisi ulang. */
-@Composable
-private fun TwoColCell(k: String, content: @Composable (String) -> Unit) { content(k) }
-
-@Composable
-private fun TwoColLayout(
-    isEmpty: Boolean, sections: Boolean, pinnedIds: List<String>, othersIds: List<String>, limit: () -> Int,
-    laneOf: (String) -> Int?, dragId: String?,
-    padS: Int, padTop: Int, padBottom: Int, gap: Int,
-    rects: HashMap<String, IntArray>, lanesOut: HashMap<String, Int>, fresh: HashMap<String, Int>,
-    modifier: Modifier = Modifier, content: @Composable (String) -> Unit
-) {
-    // `limit` (jumlah kartu yang boleh dikomposisi) hanya dibaca DI SINI: menambah kartu bertahap hanya me-recompose layout ini,
-    // bukan seluruh HomeScreen. Kartu yang sudah ada dilewati (lihat TwoColCell), jadi tiap langkah hanya mengomposisi kartu baru.
-    val lim = limit()
-    val full = lim >= pinnedIds.size + othersIds.size
-    val rebalance = full
-    // Pemilihan kartu awal PER KOLOM (bukan sekadar urutan daftar): tiap kartu punya kolom tetap (laneOf), jadi mengambil
-    // `lim` kartu pertama menurut urutan bisa menghasilkan hampir semuanya di kolom kiri, dan kolom kanan kosong/telat muncul.
-    // Di sini kuota dibagi rata: tiap kolom mendapat sekitar lim/2 kartu terdepannya, urutan relatif tetap.
-    val pinC: List<String>
-    val othC: List<String>
-    if (full) { pinC = pinnedIds; othC = othersIds } else {
-        val cap = (lim + 1) / 2
-        val cnt = intArrayOf(0, 0)
-        var alt = 0
-        fun pick(ids: List<String>): List<String> {
-            val out = ArrayList<String>()
-            for (id in ids) {
-                if (cnt[0] >= cap && cnt[1] >= cap) break
-                // kartu tanpa kolom tersimpan: bergantian kiri/kanan (kartu pertama selalu kiri)
-                val ln = laneOf(id)?.takeIf { it == 0 || it == 1 } ?: (alt++ and 1)
-                if (cnt[ln] < cap) { cnt[ln]++; out.add(id) }
-            }
-            return out
-        }
-        pinC = pick(pinnedIds)
-        othC = pick(othersIds)
-    }
-    val blocks = ArrayList<HBlock>().also { bl ->
-        if (isEmpty) bl.add(HBlock("empty", emptyList()))
-        if (sections) bl.add(HBlock("h-pin", emptyList()))
-        bl.add(HBlock(null, pinC))
-        if (sections) bl.add(HBlock("h-other", emptyList()))
-        bl.add(HBlock(null, othC))
-    }
-    val flatKeys = ArrayList<String>().also { l -> for (b in blocks) { val h = b.head; if (h != null) l.add(h) else l.addAll(b.ids) } }
-    androidx.compose.ui.layout.Layout(
-        modifier = modifier,
-        content = {
-            // satu daftar datar ber-key: kartu yang pindah blok (mis. di-pin) tetap instance yang sama, jadi slideTo bisa
-            // menganimasikannya dari posisi lama ke posisi baru (sebelumnya kartu dibuang & dibuat ulang = kedip)
-            for (k in flatKeys) {
-                androidx.compose.runtime.key(k) {
-                    Box(
-                        Modifier.layoutId(k).then(if (k == dragId) Modifier else Modifier.slideTo()),
-                        propagateMinConstraints = true
-                    ) { TwoColCell(k, content) }
-                }
-            }
-        }
-    ) { ms, c ->
-        val w = c.maxWidth
-        val byId = HashMap<String, androidx.compose.ui.layout.Measurable>(ms.size * 2)
-        for (m in ms) { val k = m.layoutId as? String ?: continue; byId[k] = m }
-        val colW = ((w - 2 * padS - gap) / 2).coerceAtLeast(0)
-        rects.clear(); lanesOut.clear(); fresh.clear()
-        val placed = ArrayList<Triple<androidx.compose.ui.layout.Placeable, Int, Int>>(ms.size)
-        var y = padTop
-        for (b in blocks) {
-            val h = b.head
-            if (h != null) {
-                val m = byId[h] ?: continue
-                val pl = m.measure(androidx.compose.ui.unit.Constraints.fixedWidth((w - 2 * padS).coerceAtLeast(0)))
-                placed.add(Triple(pl, padS, y))
-                rects[h] = intArrayOf(padS, y, pl.width, pl.height)
-                y += pl.height + gap
-            } else {
-                val items = ArrayList<Pair<String, androidx.compose.ui.layout.Placeable>>(b.ids.size)
-                for (id in b.ids) {
-                    val m = byId[id] ?: continue
-                    items.add(id to m.measure(androidx.compose.ui.unit.Constraints.fixedWidth(colW)))
-                }
-                val n = items.size
-                val saved = IntArray(n) { laneOf(items[it].first)?.takeIf { v -> v == 0 || v == 1 } ?: -1 }
-                // kolom tersimpan yang timpang parah (satu kolom hampir kosong) dianggap rusak: dihitung ulang seimbang
-                if (dragId == null && full && n >= 3) {
-                    val hs = intArrayOf(0, 0); var cnt = 0
-                    for (k in 0 until n) if (saved[k] >= 0) { hs[saved[k]] += items[k].second.height + gap; cnt++ }
-                    if (cnt >= 3 && minOf(hs[0], hs[1]) * 5 < maxOf(hs[0], hs[1])) java.util.Arrays.fill(saved, -1)
-                }
-                // kartu bersimpanan kolom dihitung dulu; kartu baru mengisi kolom yang paling pendek (kosong = paling awal, mulai dari kiri)
-                val hh = intArrayOf(0, 0)
-                for (k in 0 until n) if (saved[k] >= 0) hh[saved[k]] += items[k].second.height + gap
-                val lane = IntArray(n)
-                val cn = intArrayOf(0, 0)
-                for (k in 0 until n) if (saved[k] >= 0) cn[saved[k]]++
-                for (k in 0 until n) {
-                    if (saved[k] >= 0) { lane[k] = saved[k]; continue }
-                    // seri tinggi (atau tinggi belum terukur = 0): kolom dengan kartu lebih sedikit, bukan selalu kiri
-                    // kartu paling atas (catatan baru selalu masuk di indeks 0) selalu mulai dari kolom KIRI, seperti Google Keep
-                    val v = if (k == 0) 0 else if (hh[0] < hh[1]) 0 else if (hh[0] > hh[1]) 1 else if (cn[0] <= cn[1]) 0 else 1
-                    cn[v]++
-                    lane[k] = v
-                    hh[v] += items[k].second.height + gap
-                    fresh[items[k].first] = v
-                }
-                // seimbangkan ulang (mis. setelah catatan dihapus). Dihitung dulu di salinan (dry-run): kartu baru benar-benar
-                // dipindah kalau hasil akhirnya memang lebih seimbang. Jadi tidak ada kartu yang pindah lalu balik lagi ke tempat asal.
-                // Hanya kartu paling bawah di kolom yang lebih tinggi yang dicoba; kalau tidak muat, berhenti.
-                if (dragId == null && rebalance && n >= 2 && items.all { it.second.height > 0 }) {
-                    val plan = lane.copyOf()
-                    val bh = intArrayOf(0, 0)
-                    for (k in 0 until n) bh[plan[k]] += items[k].second.height + gap
-                    val startDiff = kotlin.math.abs(bh[0] - bh[1])
-                    var guard = n
-                    while (guard-- > 0) {
-                        val tall = if (bh[0] >= bh[1]) 0 else 1
-                        val diff = bh[tall] - bh[1 - tall]
-                        var pick = -1
-                        for (k in n - 1 downTo 0) if (plan[k] == tall) { pick = k; break }
-                        if (pick < 0) break
-                        val eff = items[pick].second.height + gap
-                        if (eff >= diff) break
-                        plan[pick] = 1 - tall
-                        bh[tall] -= eff; bh[1 - tall] += eff
-                    }
-                    if (kotlin.math.abs(bh[0] - bh[1]) < startDiff) {
-                        for (k in 0 until n) if (plan[k] != lane[k]) { lane[k] = plan[k]; fresh[items[k].first] = plan[k] }
-                    }
-                }
-                val ly = intArrayOf(y, y)
-                for (k in 0 until n) {
-                    val (id, pl) = items[k]
-                    val ln = lane[k]
-                    lanesOut[id] = ln
-                    val x = padS + ln * (colW + gap)
-                    placed.add(Triple(pl, x, ly[ln]))
-                    rects[id] = intArrayOf(x, ly[ln], pl.width, pl.height)
-                    ly[ln] += pl.height + gap
-                }
-                y = maxOf(ly[0], ly[1])
-            }
-        }
-        val total = maxOf(padTop, y - gap) + padBottom
-        layout(w, total) {
-            for ((pl, px, py) in placed) pl.place(px, py)
-        }
-    }
-}
-
-@Composable
-fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmall: (Boolean) -> Unit) {
-    val pal = LocalPal.current
-    val sat = satDp()
-    val sab = sabDp()
-    val dens = LocalDensity.current
-    val focusMgr = LocalFocusManager.current
-    val state = rememberLazyStaggeredGridState()
-    // state daftar hasil cari diangkat ke sini supaya posisi kartunya bisa dibaca untuk animasi buka/tutup pencarian
-    val resState = rememberLazyStaggeredGridState()
-    val nd = remember { NoteDrag() }
-    // 2 kolom: tata letak kolom eksplisit (bukan LazyVerticalStaggeredGrid), supaya kolom tiap kartu tetap dan seretan = tukar posisi
-    val scroll = rememberScrollState()
-    val rects = remember { HashMap<String, IntArray>() }       // id -> [x, y, lebar, tinggi] di dalam isi yang tergulir
-    val lanesCur = remember { HashMap<String, Int>() }         // id -> kolom yang sedang dipakai tata letak
-    val lanesNew = remember { HashMap<String, Int>() }         // kolom yang baru dihitung (kartu belum punya kolom); disimpan setelah tata letak
-    val vpH = remember { IntArray(1) }                         // tinggi area tampil
-    // tween tanpa overshoot supaya buka/tutup pencarian tidak bergetar
-    val saRaw by animateFloatAsState(if (vm.searchOn) 1f else 0f, if (vm.searchOn) spring(.9f, 380f) else spring(.95f, 460f), label = "sa")
-    val sa = saRaw.coerceIn(0f, 1f)
-    val fabConn = remember {
-        object : NestedScrollConnection {
-            var acc = 0f
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                val dy = available.y
-                if (dy == 0f) return Offset.Zero
-                if (dy * acc < 0f) acc = 0f
-                acc += dy
-                val th = 64f * dens.density
-                if (acc < -th) onSmall(true) else if (acc > th) onSmall(false)
-                return Offset.Zero
-            }
-        }
-    }
-    val fr = remember { FocusRequester() }
-    val sel = vm.sel
-    val selMode = sel.isNotEmpty()
-    val cols = vm.pr.cols.coerceIn(1, 2)
-    // derivedStateOf: hanya dihitung ulang saat catatan / filter / urutan / layar berubah, bukan tiap frame animasi pencarian atau keyboard
-    val live by remember(vm) {
-        derivedStateOf {
-            vm.sorted(vm.liveF()).let { l ->
-                // 1 & 2 kolom: catatan kosong yang sedang dibuka disembunyikan dari grid supaya kartu lain tidak bergeser
-                l.filterNot { d ->
-                    d.t.isBlank() && d.x.isBlank() && d.bl.none { it.isObj && it.ty != "hr" } && d.rm == 0L && d.au.isEmpty() && d.cv.isEmpty() &&
-                        vm.openId == d.id && vm.nav.stack.any { s -> s is Scr.Note && s.id == d.id }
-                }
-            }
-        }
-    }
-    val pos = remember(live) { live.withIndex().associate { it.value.id to it.index } }
-
-    LaunchedEffect(state, scroll, cols) {
-        androidx.compose.runtime.snapshotFlow { if (cols == 2) scroll.value > 0 else state.canScrollBackward }.collect { back -> if (!back) onSmall(false) }
-    }
-    LaunchedEffect(vm.filter, vm.remFilter) {
-        try { state.scrollToItem(0) } catch (e: Exception) { }
-        try { scroll.scrollTo(0) } catch (e: Exception) { }
-    }
-    // pindah 1 <-> 2 kolom: mulai dari atas (posisi gulir kedua mode tidak sebanding)
-    LaunchedEffect(cols) {
-        try { state.scrollToItem(0) } catch (e: Exception) { }
-        try { scroll.scrollTo(0) } catch (e: Exception) { }
-    }
-    // setelah catatan ditutup, kartunya (yang naik ke atas karena baru diedit) harus terlihat: gulir mulus ke atas,
-    // bersamaan dengan morph yang menguncup ke kartu itu
-    LaunchedEffect(vm.revealTick) {
-        if (vm.revealTick == 0) return@LaunchedEffect
-        val id = vm.revealId ?: return@LaunchedEffect
-        val lv = vm.sorted(vm.liveF())
-        val npin = lv.count { it.p }
-        val sec = !vm.remFilter && npin > 0 && npin < lv.size
-        val pin = if (sec) lv.filter { it.p } else lv
-        val oth = if (sec) lv.filter { !it.p } else emptyList()
-        var idx = pin.indexOfFirst { it.id == id }
-        if (idx >= 0) { if (sec) idx += 1 }
-        else {
-            val j = oth.indexOfFirst { it.id == id }
-            if (j < 0) return@LaunchedEffect
-            idx = 1 + pin.size + 1 + j
-        }
+/** Salin PDF-PDF ke penyimpanan aplikasi dan buat satu catatan PDF untuk tiap berkas. Berkas yang rusak / berkata sandi dilewati. */
+suspend fun AppVM.importPdfs(uris: List<Uri>): List<Note> = withContext(Dispatchers.IO) {
+    val ctx = getApplication<Application>()
+    val out = ArrayList<Note>()
+    for (u in uris) {
+        val id = uid()
+        val f = PdfFiles.file(ctx, id)
         try {
-            if (cols == 2) {
-                // 2 kolom: semua kartu sudah tersusun, posisinya diketahui; geser seminimal mungkin sampai kartu itu utuh terlihat
-                withFrameNanos { }
-                val r = rects[id] ?: return@LaunchedEffect
-                val topPx2 = with(dens) { (sat + 72.dp).toPx() }
-                val botPx2 = vpH[0] - with(dens) { 24.dp.toPx() }
-                val top = r[1] - scroll.value.toFloat()
-                val bot = top + r[3]
-                val d2 = when {
-                    top < topPx2 -> top - topPx2
-                    bot > botPx2 -> if (r[3] <= botPx2 - topPx2) bot - botPx2 else top - topPx2
+            ctx.contentResolver.openInputStream(u)?.use { i -> f.outputStream().use { o -> i.copyTo(o) } } ?: continue
+            var pages = 0
+            val pfd = ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)
+            try {
+                val r = PdfRenderer(pfd)
+                try { pages = r.pageCount } finally { r.close() }
+            } finally { pfd.close() }
+            if (pages <= 0) { f.delete(); continue }
+            val title = pdfName(ctx, u).replace(Regex("\\.pdf$", RegexOption.IGNORE_CASE), "").ifBlank { "PDF" }
+            val t = System.currentTimeMillis()
+            val cv = makePdfCover(this@importPdfs, f)
+            val n = Note(id = id, t = title, x = "PDF · " + cnt(pages, "page"), u = t, c = t, lb = listOfNotNull(filter), pdf = id, cv = cv, cx = .5f, cy = 0f, cz = 1f)
+            withContext(Dispatchers.Main) { docs.add(0, n); save() }
+            out.add(n)
+        } catch (e: Throwable) {
+            f.delete()
+        }
+    }
+    out
+}
+
+/** Render halaman pertama PDF jadi sampul (img/<id>.jpg) supaya kartu beranda dan morph buka/tutup memakai gambar PDF-nya. */
+fun makePdfCover(vm: AppVM, pdf: File): String {
+    try {
+        val pfd = ParcelFileDescriptor.open(pdf, ParcelFileDescriptor.MODE_READ_ONLY)
+        try {
+            val r = PdfRenderer(pfd)
+            try {
+                val pg = r.openPage(0)
+                try {
+                    val w = 900
+                    val h = (w * pg.height.toFloat() / pg.width.coerceAtLeast(1)).roundToInt().coerceIn(1, 2400)
+                    val bm = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                    bm.eraseColor(android.graphics.Color.WHITE)
+                    pg.render(bm, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    val id = uid()
+                    vm.imgDir.mkdirs()
+                    File(vm.imgDir, "$id.jpg").outputStream().use { bm.compress(Bitmap.CompressFormat.JPEG, 86, it) }
+                    bm.recycle()
+                    return id
+                } finally { pg.close() }
+            } finally { r.close() }
+        } finally { pfd.close() }
+    } catch (e: Throwable) { return "" }
+}
+
+// ---------------------------------------------------------------- render
+
+object PdfCache {
+    private val c = object : android.util.LruCache<String, Bitmap>(maxOf(32L * 1024 * 1024, Runtime.getRuntime().maxMemory() / 5).toInt()) {
+        override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
+    }
+    fun get(k: String): Bitmap? = c.get(k)
+    fun put(k: String, b: Bitmap) { c.put(k, b) }
+}
+
+private fun bucket(px: Int): Int = (((px + 255) / 256) * 256).coerceIn(256, 2400)
+
+/** Satu PDF yang sedang dibuka: PdfRenderer (bawaan Android) hanya boleh membuka satu halaman sekaligus, jadi semua akses dikunci. */
+@Stable
+class PdfDoc(private val file: File) {
+    private var pfd: ParcelFileDescriptor? = null
+    private var rend: PdfRenderer? = null
+    private val lock = Mutex()
+    var count by mutableIntStateOf(0)
+    var ok by mutableStateOf(false)
+    var failed by mutableStateOf(false)
+    val ratio = androidx.compose.runtime.mutableStateListOf<Float>()   // tinggi / lebar tiap halaman; 0 = belum diketahui
+
+    suspend fun open() = withContext(Dispatchers.IO) {
+        try {
+            val p = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+            pfd = p
+            val r = PdfRenderer(p)
+            rend = r
+            val n = r.pageCount
+            val l = ArrayList<Float>(n)
+            repeat(n) { l.add(0f) }
+            withContext(Dispatchers.Main) { ratio.addAll(l); count = n; ok = n > 0; failed = n <= 0 }
+        } catch (e: Throwable) {
+            withContext(Dispatchers.Main) { failed = true }
+        }
+    }
+
+    /** Ukur semua halaman di latar belakang supaya tinggi daftar tepat (halaman yang belum terukur memakai halaman pertama). */
+    suspend fun loadRatios() = withContext(Dispatchers.IO) {
+        for (i in 0 until count) {
+            val rt = lock.withLock {
+                val r = rend ?: return@withLock 0f
+                try {
+                    val p = r.openPage(i)
+                    try { p.height.toFloat() / p.width.coerceAtLeast(1) } finally { p.close() }
+                } catch (e: Throwable) { 0f }
+            }
+            if (rt > 0f) withContext(Dispatchers.Main) { if (i < ratio.size) ratio[i] = rt }
+            if (i % 8 == 7) yield()
+        }
+    }
+
+    fun ratioOf(i: Int): Float {
+        val r = ratio.getOrNull(i) ?: 0f
+        if (r > 0f) return r
+        return ratio.firstOrNull { it > 0f } ?: 1.4142f
+    }
+
+    suspend fun render(i: Int, wPx: Int): Bitmap? = withContext(Dispatchers.IO) {
+        lock.withLock {
+            val r = rend ?: return@withLock null
+            try {
+                val p = r.openPage(i)
+                try {
+                    val w = wPx.coerceIn(64, 2400)
+                    val h = (w * p.height.toFloat() / p.width.coerceAtLeast(1)).roundToInt().coerceIn(1, 6000)
+                    val bm = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                    bm.eraseColor(android.graphics.Color.WHITE)
+                    p.render(bm, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    bm
+                } finally { p.close() }
+            } catch (e: Throwable) { null }
+        }
+    }
+
+    fun close() {
+        val r = rend; val p = pfd
+        rend = null; pfd = null
+        CoroutineScope(Dispatchers.IO).launch {
+            lock.withLock {
+                try { r?.close() } catch (e: Throwable) { }
+                try { p?.close() } catch (e: Throwable) { }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- teks PDF (untuk pencarian)
+
+/** Teks satu halaman + kotak tiap huruf (pecahan lebar/tinggi halaman: kiri, atas, kanan, bawah). Spasi / baris baru = null. */
+class PgText(val t: String, val r: List<FloatArray?>, val lb: Set<Int> = emptySet())
+
+private class Grab : PDFTextStripper() {
+    val sb = StringBuilder()
+    val rs = ArrayList<FloatArray?>()
+    val lbs = HashSet<Int>()   // indeks pemisah baris (untuk salin)
+    init { setSortByPosition(true) }
+
+    override fun writeString(text: String, textPositions: MutableList<TextPosition>) {
+        for (tp in textPositions) {
+            val u = tp.unicode ?: continue
+            val pw = tp.pageWidth
+            val ph = tp.pageHeight
+            if (pw <= 0f || ph <= 0f) continue
+            val x = tp.xDirAdj
+            val y = tp.yDirAdj
+            val w = tp.widthDirAdj
+            val h = tp.heightDir
+            val box = floatArrayOf(x / pw, (y - h) / ph, (x + w) / pw, (y + h * .22f) / ph)
+            for (ch in u) { sb.append(ch); rs.add(box) }
+        }
+    }
+
+    override fun writeWordSeparator() { sb.append(' '); rs.add(null) }
+    override fun writeLineSeparator() { lbs.add(sb.length); sb.append(' '); rs.add(null) }
+}
+
+@Stable
+class PdfText(private val ctx: Context, private val file: File) {
+    private var doc: PDDocument? = null
+    private var broken = false
+    private val cache = java.util.concurrent.ConcurrentHashMap<Int, PgText>()
+    private val lock = Mutex()
+
+    private fun docNow(): PDDocument? {
+        if (broken) return null
+        doc?.let { return it }
+        return try {
+            PDFBoxResourceLoader.init(ctx)
+            PDDocument.load(file).also { doc = it }
+        } catch (e: Throwable) { broken = true; null }
+    }
+
+    /** Teks halaman bila sudah pernah dimuat (aman dipanggil dari UI), kalau belum null. */
+    fun peek(i: Int): PgText? = cache[i]
+
+    suspend fun page(i: Int): PgText? = withContext(Dispatchers.IO) {
+        lock.withLock {
+            cache[i]?.let { return@withLock it }
+            val d = docNow() ?: return@withLock null
+            try {
+                val g = Grab()
+                g.startPage = i + 1
+                g.endPage = i + 1
+                g.getText(d)
+                val p = PgText(g.sb.toString(), g.rs, g.lbs)
+                cache[i] = p
+                p
+            } catch (e: Throwable) { null }
+        }
+    }
+
+    /** True bila PDF punya lapisan teks (beberapa halaman pertama berisi huruf); PDF hasil scan = false. */
+    suspend fun detect(count: Int): Boolean {
+        for (i in 0 until min(count, 8)) {
+            val p = page(i) ?: continue
+            if (p.t.count { !it.isWhitespace() } >= 12) return true
+        }
+        return false
+    }
+
+    fun close() {
+        val d = doc
+        doc = null
+        CoroutineScope(Dispatchers.IO).launch { lock.withLock { try { d?.close() } catch (e: Throwable) { } } }
+    }
+}
+
+class PHit(val page: Int, val rects: List<FloatArray>, val snip: String, val ms: Int, val me: Int)
+
+private fun hitsIn(page: Int, pt: PgText, q: String): List<PHit> {
+    val out = ArrayList<PHit>()
+    var i = pt.t.indexOf(q, 0, ignoreCase = true)
+    while (i >= 0) {
+        val e = i + q.length
+        val rs = ArrayList<FloatArray>()
+        var cur: FloatArray? = null
+        for (k in i until e) {
+            val r = pt.r.getOrNull(k) ?: continue
+            val c = cur
+            if (c != null && abs(r[1] - c[1]) < (c[3] - c[1]) * .6f) {
+                c[0] = min(c[0], r[0]); c[1] = min(c[1], r[1]); c[2] = max(c[2], r[2]); c[3] = max(c[3], r[3])
+            } else { val n = r.copyOf(); cur = n; rs.add(n) }
+        }
+        if (rs.isNotEmpty()) {
+            val a = max(0, i - 30)
+            val b = min(pt.t.length, e + 50)
+            out.add(PHit(page, rs, pt.t.substring(a, b), i - a, e - a))
+        }
+        i = pt.t.indexOf(q, i + max(1, q.length), ignoreCase = true)
+    }
+    return out
+}
+
+// ---------------------------------------------------------------- seleksi teks (khusus PDF non-scan)
+
+data class PPos(val p: Int, val c: Int) : Comparable<PPos> {
+    override fun compareTo(other: PPos): Int = if (p != other.p) p.compareTo(other.p) else c.compareTo(other.c)
+}
+
+/** a = awal (termasuk), b = akhir (tidak termasuk); a < b. */
+class PSel(val a: PPos, val b: PPos)
+
+private fun rangeOn(s: PSel, p: Int, t: PgText): Pair<Int, Int>? {
+    if (p < s.a.p || p > s.b.p) return null
+    val a = if (p == s.a.p) s.a.c else 0
+    val b = if (p == s.b.p) min(s.b.c, t.t.length) else t.t.length
+    return if (b > a) a to b else null
+}
+
+/** Kotak sorotan per baris untuk huruf [i, e). */
+private fun rectsOf(pt: PgText, i: Int, e: Int): List<FloatArray> {
+    val rs = ArrayList<FloatArray>()
+    var cur: FloatArray? = null
+    for (k in i until e) {
+        val r = pt.r.getOrNull(k) ?: continue
+        val c = cur
+        if (c != null && abs(r[1] - c[1]) < (c[3] - c[1]) * .6f) {
+            c[0] = min(c[0], r[0]); c[1] = min(c[1], r[1]); c[2] = max(c[2], r[2]); c[3] = max(c[3], r[3])
+        } else { val n = r.copyOf(); cur = n; rs.add(n) }
+    }
+    return rs
+}
+
+/** Huruf terdekat dari titik (x, y) (pecahan lebar / tinggi halaman); ar = tinggi / lebar. -1 bila tak ada teks. */
+private fun nearestChar(pt: PgText, x: Float, y: Float, ar: Float): Int {
+    var best = -1; var bs = Float.MAX_VALUE
+    for (k in pt.r.indices) {
+        val r = pt.r[k] ?: continue
+        val dx = if (x < r[0]) r[0] - x else if (x > r[2]) x - r[2] else 0f
+        val dy = (if (y < r[1]) r[1] - y else if (y > r[3]) y - r[3] else 0f) * ar
+        val sc = dy * 4f + dx
+        if (sc < bs) { bs = sc; best = k }
+    }
+    return best
+}
+
+/** Posisi kursor (di antara dua huruf) terdekat dari titik. */
+private fun caretAt(pt: PgText, x: Float, y: Float, ar: Float): Int {
+    val k = nearestChar(pt, x, y, ar)
+    if (k < 0) return -1
+    val r = pt.r[k] ?: return -1
+    return if (x > (r[0] + r[2]) / 2f) k + 1 else k
+}
+
+private fun handleXY(pt: PgText, a: Int, b: Int, start: Boolean, w: Float, h: Float): Offset? {
+    if (start) { for (k in a until b) { val r = pt.r.getOrNull(k) ?: continue; return Offset(r[0] * w, r[3] * h) } }
+    else { for (k in b - 1 downTo a) { val r = pt.r.getOrNull(k) ?: continue; return Offset(r[2] * w, r[3] * h) } }
+    return null
+}
+
+private val SEL_COLOR = Color(0xFF4F8CFF)
+
+/** Jari-jari tetesan gagang seleksi (dp). Titik sudut lancipnya menempel di tepi teks. */
+private const val HDL_R = 9f
+
+/** Jarak tambahan (dp) gagang awal / akhir ke arah luar, supaya keduanya tidak dempet saat yang dipilih hanya satu kata. */
+private const val HDL_GAP = 2f
+
+/** Jari-jari area sentuh gagang (dp), dihitung dari pusat tetesan. */
+private const val HDL_HIT = 36f
+
+/** Titik kursor terdekat dari posisi [pos] (px, ruang halaman [index] selebar [W]); bila melewati batas halaman (mode gulir) turun / naik ke halaman tetangga. */
+private fun posAtPage(ui: PdfUi, index: Int, W: Float, pos: Offset, dens: Float, miss: (Int) -> Unit = {}): PPos? {
+    var p = index; var y = pos.y
+    if (!ui.paged) {
+        val gap = 6f * dens
+        while (p < ui.doc.count - 1 && y > ui.doc.ratioOf(p) * W) { y -= ui.doc.ratioOf(p) * W + gap; p++ }
+        while (y < 0f && p > 0) { p--; y += ui.doc.ratioOf(p) * W + gap }
+    }
+    val h = (ui.doc.ratioOf(p) * W).coerceAtLeast(1f)
+    val t = ui.txt?.peek(p) ?: run { miss(p); return null }
+    val c = caretAt(t, (pos.x / W).coerceIn(0f, 1f), (y / h).coerceIn(0f, 1f), h / W)
+    return if (c < 0) null else PPos(p, c)
+}
+
+private class HdlHit(val page: Int, val start: Boolean, val coords: LayoutCoordinates, val tip: Offset)
+
+/** Gagang seleksi yang paling dekat dengan [p] (koordinat [host]) dan masih dalam jangkauan sentuh, atau null. */
+private fun hitHandle(ui: PdfUi, host: LayoutCoordinates, p: Offset, dens: Float): HdlHit? {
+    val s = ui.sel ?: return null
+    val rr = HDL_R * dens
+    val gx = HDL_GAP * dens
+    var best: HdlHit? = null
+    var bd = HDL_HIT * dens
+    for ((idx, pc) in ui.pageCoords) {
+        if (!pc.isAttached) continue
+        val t = ui.txt?.peek(idx) ?: continue
+        val g = rangeOn(s, idx, t) ?: continue
+        val w = pc.size.width.toFloat()
+        val h = pc.size.height.toFloat()
+        for (st in booleanArrayOf(true, false)) {
+            if (if (st) s.a.p != idx else s.b.p != idx) continue
+            val o = handleXY(t, g.first, g.second, st, w, h) ?: continue
+            // pusat tetesan di ruang halaman (sama persis dengan yang digambar), lalu ke ruang induk lewat transformasi layar yang sebenarnya
+            val c = Offset(o.x + (if (st) -(rr + gx) else rr + gx), o.y + rr)
+            val d = (host.localPositionOf(pc, c) - p).getDistance()
+            if (d <= bd) { bd = d; best = HdlHit(idx, st, pc, o) }
+        }
+    }
+    return best
+}
+
+/**
+ * Pemegang gagang seleksi, dipasang di induk PALING LUAR (pass Initial): induk selalu melihat sentuhan lebih dulu daripada
+ * pager / daftar gulir / PageCurl / ketukan halaman, jadi begitu jari mendarat di gagang, sentuhan itu langsung dimakan di sini
+ * dan tidak ada gestur lain yang sempat memakainya (tidak menghapus seleksi, tidak menggulir, tidak membalik halaman).
+ * Seleksi diseret di sini juga; mengikuti GERAKAN jari (bukan lokasi jari) sehingga jari tidak menutupi huruf dan seleksi tidak meloncat.
+ */
+private fun Modifier.selHandleTouch(
+    ui: PdfUi, host: () -> LayoutCoordinates?, scope: CoroutineScope, hap: androidx.compose.ui.hapticfeedback.HapticFeedback
+): Modifier = pointerInput(ui) {
+    val dens = density
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        if (ui.sel == null || ui.inkOn || down.type == PointerType.Stylus) return@awaitEachGesture
+        val hc = host()?.takeIf { it.isAttached } ?: return@awaitEachGesture
+        val hit = hitHandle(ui, hc, down.position, dens) ?: return@awaitEachGesture
+        val pc = hit.coords
+        val s0 = ui.sel ?: return@awaitEachGesture
+        val an = if (hit.start) s0.b else s0.a
+        val grab = down.position - hc.localPositionOf(pc, Offset(hit.tip.x, hit.tip.y - 5f * dens))
+        down.consume()
+        ui.drawing = true
+        ui.selGrab = true
+        hap.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        var finger = down.position
+        // Hitung ulang seleksi dari posisi jari sekarang. Halaman acuan dipilih dari halaman yang sedang tampil (halaman asal bisa saja
+        // sudah tergulir keluar dan dibuang), lalu posAtPage berjalan turun / naik ke halaman yang benar.
+        fun refresh() {
+            val ref = ui.pageCoords.entries.filter { it.value.isAttached }.minByOrNull { abs(it.key - hit.page) } ?: return
+            val rc = ref.value
+            val local = rc.localPositionOf(hc, finger - grab)
+            val f = posAtPage(ui, ref.key, rc.size.width.toFloat().coerceAtLeast(1f), local, dens) { p -> scope.launch { ui.txt?.page(p) } } ?: return
+            val ns = if (f < an) PSel(f, an) else if (f > an) PSel(an, f) else null
+            val cs = ui.sel
+            if (ns != null && (cs == null || cs.a != ns.a || cs.b != ns.b)) {
+                hap.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                ui.sel = ns
+            }
+        }
+        // Gulir otomatis (mode gulir): jari di dekat tepi atas / bawah layar menggulir daftar terus-menerus, makin dekat tepi makin cepat,
+        // walau jari diam (tidak ada event sentuhan), jadi dijalankan sebagai coroutine terpisah per frame.
+        val auto = if (ui.scrollBy != null) scope.launch {
+            var last = withFrameNanos { it }
+            while (true) {
+                val now = withFrameNanos { it }
+                val dt = ((now - last) / 1_000_000_000f).coerceAtMost(.05f)
+                last = now
+                val hh = hc.size.height.toFloat()
+                val topZ = 130f * dens
+                val botZ = 150f * dens
+                val y = finger.y
+                val k = when {
+                    y > hh - botZ -> ((y - (hh - botZ)) / botZ).coerceIn(0f, 1.2f)
+                    y < topZ -> -((topZ - y) / topZ).coerceIn(0f, 1.2f)
                     else -> 0f
                 }
-                if (d2 != 0f) scroll.animateScrollBy(d2, tween(320, easing = Emph))
-                return@LaunchedEffect
-            }
-            val topPx = with(dens) { (sat + 72.dp).toPx() }
-            val botPx = state.layoutInfo.viewportEndOffset - with(dens) { 24.dp.toPx() }
-            val info = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id }
-            val ok = info != null && info.offset.y >= topPx - 2f && info.offset.y + info.size.height <= botPx
-            if (info != null) {
-                // kartu sudah tampil tapi terpotong: geser seminimal mungkin sampai utuh (atas maupun bawah), bukan lompat ke puncak
-                if (!ok) {
-                    val top = info.offset.y.toFloat()
-                    val bot = (info.offset.y + info.size.height).toFloat()
-                    val d = when {
-                        top < topPx -> top - topPx
-                        info.size.height <= botPx - topPx -> bot - botPx
-                        else -> top - topPx
-                    }
-                    if (d != 0f) state.animateScrollBy(d, tween(320, easing = Emph))
-                }
-            } else {
-                // kartu di luar layar: lompat dekat dulu (tersembunyi di balik editor yang masih besar), lalu geser mulus
-                if (state.firstVisibleItemIndex > idx + 8) state.scrollToItem(idx + 8)
-                state.animateScrollToItem(idx)
-            }
-        } catch (e: Exception) { }
-    }
-    LaunchedEffect(vm.searchOn) {
-        if (vm.searchOn) {
-            try { resState.scrollToItem(0) } catch (e: Exception) { }
-            delay(60); try { fr.requestFocus() } catch (e: Exception) { }
-        } else {
-            focusMgr.clearFocus()
-            delay(750)
-            if (!vm.searchOn) { vm.query = ""; try { resState.scrollToItem(0) } catch (e: Exception) { } }
-        }
-    }
-
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val imeH = with(dens) { WindowInsets.ime.getBottom(dens).toDp() }
-        val hPx = with(dens) { maxHeight.toPx() }
-        val wPx = with(dens) { maxWidth.toPx() }
-        // ---- gerak tumpukan kartu saat bilah cari dibuka / ditutup ----
-        // Beranda yang sudah tergulir: kartu meluncur (spring, tanpa fade) menuju posisi awal saat cari dibuka, dan kembali
-        // ke posisi gulir saat ditutup. Jaraknya dihitung dari posisi gulir saat itu. Kalau beranda mentok di atas: tanpa animasi.
-        val flip = remember { intArrayOf(0, 0) }
-        val onNow = if (vm.searchOn) 1 else 0
-        if (flip[1] != onNow) { flip[0]++; flip[1] = onNow }
-        val shift = remember(flip[0]) {
-            androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {
-                val opening = vm.searchOn
-                // posisi kartu di daftar asal: beranda (membuka) atau hasil cari (menutup; daftar itu baru dilepas, infonya masih terakhir)
-                val src = if (opening) state else resState
-                val mv = HashMap<String, Offset>()
-                if (flip[0] > 0 && opening && cols == 2) {
-                    for ((k, r) in rects) mv[k] = Offset(r[0].toFloat(), (r[1] - scroll.value).toFloat())
-                } else if (flip[0] > 0) for (v in src.layoutInfo.visibleItemsInfo) {
-                    val k = v.key as? String ?: continue
-                    mv[if (opening) k else k.removePrefix("s")] = Offset(v.offset.x.toFloat(), v.offset.y.toFloat())
-                }
-                val px = if (flip[0] == 0) 0f else {
-                    if (cols == 2) { if (scroll.value <= 0) 0f else scroll.value.toFloat().coerceIn(0f, hPx * .5f) }
-                    else if (!state.canScrollBackward) 0f else {
-                        val vis = state.layoutInfo.visibleItemsInfo
-                        val avg = if (vis.isEmpty()) 0f else vis.map { it.size.height }.average().toFloat()
-                        val est = (state.firstVisibleItemIndex.toFloat() / cols) * (avg + 8f * dens.density) + state.firstVisibleItemScrollOffset
-                        est.coerceIn(0f, hPx * .5f)
-                    }
-                }
-                val d = if (px < 2f) 0f else px
-                StackShift(d, mv, Animatable(if (d > 0f || mv.isNotEmpty()) 0f else 1f))
-            }
-        }
-        LaunchedEffect(shift) { if (shift.p.value < 1f) shift.p.animateTo(1f, spring(.72f, 320f)) }
-        // gerak satu kartu saat pencarian dibuka (closing = false, kartu di daftar hasil) atau ditutup (closing = true, kartu di beranda):
-        // meluncur dari posisi di daftar asal ke posisinya sekarang; kartu yang tidak ada di daftar asal memakai jarak gulir cadangan
-        fun stackMove(id: String, closing: Boolean): Modifier = Modifier.graphicsLayer {
-            if (vm.searchOn == closing) return@graphicsLayer
-            val q = 1f - shift.p.value
-            if (q <= .001f) return@graphicsLayer
-            val f = shift.from[id]
-            var curX = 0f
-            var curY = 0f
-            var has = false
-            if (f != null) {
-                if (closing && cols == 2) {
-                    val r = rects[id]
-                    if (r != null) { curX = r[0].toFloat(); curY = (r[1] - scroll.value).toFloat(); has = true }
-                } else {
-                    val k = if (closing) id else "s" + id
-                    val cur = (if (closing) state else resState).layoutInfo.visibleItemsInfo.firstOrNull { it.key == k }
-                    if (cur != null) { curX = cur.offset.x.toFloat(); curY = cur.offset.y.toFloat(); has = true }
+                if (k != 0f) {
+                    val moved = ui.scrollBy?.invoke(k * 900f * dens * dt) ?: 0f
+                    if (moved != 0f) refresh()
                 }
             }
-            if (f != null && has) {
-                translationX = (f.x - curX) * q
-                translationY = (f.y - curY) * q
-            } else {
-                translationY = (if (closing) shift.px else -shift.px) * q
+        } else null
+        try {
+            while (true) {
+                val ev = awaitPointerEvent(PointerEventPass.Initial)
+                if (ev.changes.count { it.pressed } >= 2) break
+                val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                // jari diangkat dicek SEBELUM consume() dan tanpa peduli sudah dikonsumsi atau belum: changedToUp() bernilai false untuk event yang sudah dikonsumsi,
+                // sehingga loop tidak pernah selesai dan selGrab nyangkut true sampai sentuhan berikutnya
+                val lifted = !c.pressed
+                c.consume()
+                if (lifted || !hc.isAttached) break
+                finger = c.position
+                refresh()
             }
-        }
-        // perkiraan slot kartu paling atas: titik awal morph menutup saat kartu tujuan belum tampil di layar
-        run {
-            val gap = 8f * dens.density
-            val padS = 8f * dens.density
-            val cw = if (cols == 2) (wPx - 2 * padS - gap) / 2f else wPx - 2 * padS
-            val t0 = with(dens) { (sat + 78.dp).toPx() }
-            vm.topSlot = Morph(padS, t0, padS + cw, t0 + 92f * dens.density, 12f * dens.density, pal.s, card = true)
-        }
-        val livePanelH = (maxHeight - imeH - (sat + 8.dp) - 10.dp).coerceAtLeast(160.dp)
-        // saat menutup, tinggi panel dibekukan agar tidak ikut naik-turun mengikuti keyboard yang menghilang
-        val panelHold = remember { arrayOf(livePanelH) }
-        if (vm.searchOn) panelHold[0] = livePanelH
-        val panelH = panelHold[0]
-
-        // daftar (grid 1 atau 2 kolom)
-        val np = live.count { it.p }
-        val sections = !vm.remFilter && np > 0 && np < live.size
-        val pinnedBase = if (sections) live.filter { it.p } else live
-        val othersBase = if (sections) live.filter { !it.p } else emptyList()
-        // saat menyeret, satu kelompok memakai urutan sementara supaya kartu lain bergeser mengikuti
-        fun shown(base: List<Note>, g: Int): List<Note> {
-            // 1 kolom: urutan di grid dibiarkan tetap selama menyeret (kartu lain digeser secara visual, lihat NoteDrag.shiftOf)
-            if (cols == 1 || nd.id == null || nd.group != g || nd.order.isEmpty()) return base
-            val byId = base.associateBy { it.id }
-            val o = nd.order.mapNotNull { byId[it] }
-            return if (o.size == base.size) o else base
-        }
-        val pinned = shown(pinnedBase, 0)
-        val others = shown(othersBase, 1)
-        val full = StaggeredGridItemSpan.FullLine
-
-        // ---- seret & lepas ----
-        val scope = rememberCoroutineScope()
-        val hapticDrag = LocalHapticFeedback.current
-        val dragCtx by rememberUpdatedState(Triple(sections, pinnedBase.map { it.id }, othersBase.map { it.id }))
-        // openId bukan state dan tidak pernah dikosongkan setelah catatan ditutup, jadi tidak boleh dipakai di sini;
-        // status "catatan sedang terbuka / menutup" dicek langsung saat jari menyentuh (lihat pointerInput di bawah)
-        val canDrag = !vm.searchOn && !vm.remFilter && live.size > 1
-        // kolom tetap hanya berlaku di beranda penuh; di tampilan label kartunya tersaring, jadi kolom dihitung otomatis (kolom terpendek)
-        val useLanes = vm.filter == null && !vm.remFilter
-        fun endDrag() {
-            val id = nd.id ?: return
-            if (nd.dropping) return
-            val ghost = nd.startC + (nd.finger - nd.at0)
-            nd.dropAt = ghost
-            val changed = nd.order != nd.orig
-            if (cols == 1) {
-                // 1 kolom: urutan baru baru dipasang ke grid sekarang. Kartu lain sudah berada di tempat visualnya, jadi
-                // pemasangan tidak terlihat (animasi penempatan dimatikan selama ada seretan).
-                val oldIdx = nd.orig.indexOf(id)
-                val newIdx = nd.order.indexOf(id)
-                val rangeKeys = HashSet<String>()
-                if (oldIdx >= 0 && newIdx >= 0) rangeKeys.addAll(nd.orig.subList(minOf(oldIdx, newIdx), maxOf(oldIdx, newIdx) + 1))
-                val before = HashMap<String, Int>()
-                for (v in state.layoutInfo.visibleItemsInfo) { val k = v.key as? String ?: continue; before[k] = v.offset.y }
-                nd.dropping = true
-                if (changed) vm.moveOrder(nd.order)
-                scope.launch {
-                    nd.settle.snapTo(1f)
-                    if (changed) {
-                        withFrameNanos { }
-                        withFrameNanos { }
-                        // grid mengikuti kartu pertama yang tampil bila kartu itu ikut berpindah (gulir tiba-tiba bergeser):
-                        // kartu di luar rentang pindahan tidak berubah posisi isinya, jadi selisihnya = lompatan gulir
-                        val ref = state.layoutInfo.visibleItemsInfo.firstOrNull { v ->
-                            val k = v.key as? String
-                            k != null && k !in rangeKeys && before.containsKey(k)
-                        }
-                        if (ref != null) {
-                            val jump = ref.offset.y - (before[ref.key as String] ?: ref.offset.y)
-                            if (jump != 0) state.scrollBy(jump.toFloat())
-                        }
-                        withFrameNanos { }
-                    }
-                    val inf = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id }
-                    nd.resid = if (inf != null) ghost - (nd.startC + (Offset(inf.offset.x.toFloat(), inf.offset.y.toFloat()) - nd.off0)) else Offset.Zero
-                    nd.ready = true
-                    nd.settle.snapTo(1f)
-                    nd.settle.animateTo(0f, spring(.85f, 340f))
-                    nd.lift.snapTo(0f)
-                    nd.reset()
-                }
-            } else {
-                nd.resid = Offset.Zero
-                val ov = nd.laneOv
-                if (changed || (useLanes && ov.any { (k, v) -> vm.lanes[k] != v })) {
-                    vm.moveOrder(nd.order, keepLanes = true)
-                    if (useLanes) vm.setLanes(ov)
-                }
-                nd.ready = true
-                nd.dropping = true
-                scope.launch {
-                    nd.settle.snapTo(1f)
-                    nd.settle.animateTo(0f, spring(.85f, 340f))
-                    nd.lift.snapTo(0f)
-                    nd.reset()
-                }
-            }
-        }
-        LaunchedEffect(canDrag, cols) { if (nd.id != null) nd.reset() }
-        // kartu terangkat perlahan (bayangan & skala), bukan muncul tiba-tiba
-        LaunchedEffect(nd.id) { if (nd.id != null) nd.lift.animateTo(1f, spring(.8f, 480f)) }
-        // tiap frame selama menyeret: gulir otomatis di tepi layar + cek kartu yang sedang ditindih
-        LaunchedEffect(nd.id) {
-            val id = nd.id ?: return@LaunchedEffect
-            val density = dens.density
-            var lastMove = 0L                 // 2 kolom: waktu (ns) pertukaran terakhir
-            var blockId: String? = null       // 2 kolom: kartu yang baru saja ditukar (tidak boleh langsung ditukar balik)
-            var lastSwapAt = Offset.Zero      // 2 kolom: posisi jari saat pertukaran terakhir
-            var lastFrame = 0L
-            while (nd.id == id && !nd.dropping) {
-                val now = withFrameNanos { it }
-                val dt = if (lastFrame == 0L) .016f else ((now - lastFrame) / 1_000_000_000f).coerceIn(.004f, .05f)
-                lastFrame = now
-
-                // ---- gulir otomatis: baru aktif setelah jari benar-benar bergerak, kecepatan naik halus (kuadrat) menuju tepi ----
-                if ((nd.finger - nd.at0).getDistance() > 12f * density) {
-                    val topLine = with(dens) { (sat + 72.dp + 28.dp).toPx() }
-                    val botLine = (if (cols == 2) hPx else state.layoutInfo.viewportSize.height.toFloat()) - 120f * density
-                    val zone = 90f * density
-                    val fy = nd.finger.y
-                    val up = fy < topLine
-                    val down = fy > botLine
-                    val mag = (if (up) topLine - fy else if (down) fy - botLine else 0f) / zone
-                    if (mag > 0f) {
-                        val m = mag.coerceIn(0f, 1f)
-                        val dy = 760f * density * m * m * dt
-                        if (cols == 2) scroll.scrollBy(if (up) -dy else dy) else state.scrollBy(if (up) -dy else dy)
-                    }
-                }
-
-                val li = state.layoutInfo
-                val vis = li.visibleItemsInfo
-                val byKey = vis.associateBy { it.key }
-
-                if (cols == 1) {
-                    // ---- 1 KOLOM ----
-                    // Tata letak grid tetap (urutan asli), jadi posisi semua kartu stabil dan keputusan di bawah tidak pernah
-                    // berbalik oleh pergeseran tata letak / gulir otomatis. Tujuan = berapa banyak kartu yang pusatnya sudah
-                    // dilewati pusat bayangan, dihitung pada tata letak asli. Dengan sedikit histeresis supaya tidak bolak-balik.
-                    val orig = nd.orig
-                    val o = orig.indexOf(id)
-                    if (o < 0 || nd.h <= 0) continue
-                    val cur = nd.order.indexOf(id)
-                    val cy = nd.startC.y + (nd.finger.y - nd.at0.y) + nd.h / 2f
-                    var fj = Int.MAX_VALUE
-                    var lj = -1
-                    for (j in orig.indices) if (byKey.containsKey(orig[j])) { if (j < fj) fj = j; lj = j }
-                    if (lj < 0) continue
-                    val hyst = 6f * density
-                    val ghostTop = cy - nd.h / 2f
-                    val ghostBot = cy + nd.h / 2f
-                    // kedalaman tumpang-tindih yang membuat tetangga memberi tempat: 60% dari tinggi yang lebih kecil antara bayangan & tetangga
-                    fun needOf(hn: Int): Float = .6f * minOf(hn, nd.h)
-                    // magnet ke posisi paling atas: cukup tepi atas bayangan menyentuh area slot teratas (tidak perlu pusatnya melewati
-                    // pusat kartu pertama, yang dulu membuat kartu harus nyaris tenggelam di bawah head bar)
-                    val first0 = byKey[orig[0]]
-                    val mg = minOf(nd.h * .5f, 48f * density) + (if (cur == 0) 12f * density else 0f)
-                    val toTop = o > 0 && first0 != null && cy - nd.h / 2f < first0.offset.y + mg
-                    var t = o
-                    var j = o + 1
-                    while (!toTop && j < orig.size) {
-                        val inf = byKey[orig[j]]
-                        // tepi BAWAH bayangan harus masuk ke kartu tetangga sedalam `need` (bukan pusat melewati pusat): jaraknya tidak lagi
-                        // membengkak untuk kartu tipis yang melewati kartu tinggi
-                        val pass = if (inf != null) ghostBot > inf.offset.y + needOf(inf.size.height) + (if (j <= cur) -hyst else hyst)
-                        else j < fj   // di luar layar: di atas = sudah dilewati, di bawah = belum
-                        if (!pass) break
-                        t = j; j++
-                    }
-                    if (toTop) t = 0
-                    else if (t == o) {
-                        j = o - 1
-                        while (j >= 0) {
-                            val inf = byKey[orig[j]]
-                            val pass = if (inf != null) ghostTop < inf.offset.y + inf.size.height - needOf(inf.size.height) + (if (j >= cur) hyst else -hyst)
-                            else j > lj
-                            if (!pass) break
-                            t = j; j--
-                        }
-                    }
-                    if (t != cur) {
-                        nd.order = orig.toMutableList().also { it.removeAt(o); it.add(t, id) }
-                        hapticDrag.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    }
-                } else {
-                    // ---- 2 KOLOM: TUKAR POSISI ----
-                    // Kolom tiap kartu tetap. Kartu seretan bertukar tempat (urutan + kolom) dengan kartu yang ditindih pusat bayangan;
-                    // kartu lain tidak berpindah kolom, hanya menyesuaikan tinggi. Posisi dibaca dari tata letak sendiri (rects),
-                    // jadi tidak ada tebakan / simulasi.
-                    val grp = nd.order
-                    val cur = grp.indexOf(id)
-                    if (cur < 0 || nd.w <= 0 || nd.h <= 0) continue
-                    // belum digeser sama sekali (baru tekan lama): jangan ubah apa pun
-                    if ((nd.finger - nd.at0).getDistance() < 12f * density) continue
-                    // beri waktu tata letak mengikuti pertukaran sebelumnya
-                    if (now - lastMove < 120_000_000L) continue
-                    val me = rects[id] ?: continue
-                    val cx = nd.startC.x + (nd.finger.x - nd.at0.x) + nd.w / 2f
-                    val cy = nd.startC.y + (nd.finger.y - nd.at0.y) + nd.h / 2f + scroll.value
-                    var target: String? = null
-                    for (k in grp) {
-                        if (k == id) continue
-                        val r = rects[k] ?: continue
-                        // pusat bayangan harus masuk cukup dalam ke kartu (bukan sekadar menyentuh tepinya)
-                        val ix = r[2] * .2f
-                        val iy = r[3] * .2f
-                        if (cx >= r[0] + ix && cx <= r[0] + r[2] - ix && cy >= r[1] + iy && cy <= r[1] + r[3] - iy) { target = k; break }
-                    }
-                    // pasangan yang baru ditukar tidak boleh langsung ditukar balik sebelum pusat bayangan keluar dari kartunya
-                    if (blockId != null && target != blockId) blockId = null
-                    // setelah menukar, jari harus bergerak dulu sebelum pertukaran berikutnya (mencegah tukar beruntun karena kartu di bawahnya naik)
-                    val far = (nd.finger - lastSwapAt).getDistance() >= 28f * density
-                    if (target != null && target != blockId && far) {
-                        val j = grp.indexOf(target)
-                        if (j >= 0 && j != cur) {
-                            val nl = grp.toMutableList()
-                            nl[cur] = target
-                            nl[j] = id
-                            if (useLanes) {
-                                val lm = HashMap(nd.laneOv)
-                                val la = lm[id]
-                                val lb = lm[target]
-                                if (la != null && lb != null) { lm[id] = lb; lm[target] = la }
-                                nd.laneOv = lm
-                            }
-                            nd.order = nl
-                            blockId = target
-                            lastSwapAt = nd.finger
-                            lastMove = now
-                            hapticDrag.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        }
-                    } else if (target == null && useLanes && far) {
-                        // area kosong di bawah kartu terakhir sebuah kolom: pindah ke ujung kolom itu
-                        val lane = if (cx < wPx / 2f) 0 else 1
-                        var lastBot = Int.MIN_VALUE      // tepi bawah kartu terakhir di kolom itu (tanpa kartu seretan)
-                        var gTop = Int.MAX_VALUE
-                        var gBot = Int.MIN_VALUE
-                        for (k in grp) {
-                            val r = rects[k] ?: continue
-                            if (r[1] < gTop) gTop = r[1]
-                            if (r[1] + r[3] > gBot) gBot = r[1] + r[3]
-                            if (k != id && nd.laneOv[k] == lane && r[1] + r[3] > lastBot) lastBot = r[1] + r[3]
-                        }
-                        val myLane = nd.laneOv[id]
-                        val inside = if (lastBot == Int.MIN_VALUE) cy >= gTop else cy > lastBot
-                        val alreadyLast = myLane == lane && me[1] + me[3] >= lastBot
-                        if (myLane != null && inside && cy < gBot + 80f * density && !alreadyLast) {
-                            val lm = HashMap(nd.laneOv)
-                            lm[id] = lane
-                            nd.laneOv = lm
-                            nd.order = grp.filter { it != id } + id
-                            lastSwapAt = nd.finger
-                            lastMove = now
-                            hapticDrag.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        }
-                    }
-                }
-            }
-        }
-        // seret & lepas (satu gestur untuk kedua mode)
-        val dragMod =                 Modifier.pointerInput(canDrag, cols, useLanes) {
-                    if (!canDrag) return@pointerInput
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                        // catatan sedang dibuka / menutup (morph berjalan): jangan mulai seret
-                        if (vm.openP.value > .001f || vm.nav.stack.any { it is Scr.Note }) return@awaitEachGesture
-                        // kartu sebelumnya masih meluncur ke tempatnya: seretan baru menunggu, supaya reset-nya tidak menimpa seretan ini
-                        if (nd.id != null) return@awaitEachGesture
-                        val (_, pin, oth) = dragCtx
-                        // pilihan sebelum tekan lama: setelah kartu dilepas dari seretan, pilihan dikembalikan ke ini (keluar dari mode pilih)
-                        val selBefore = vm.sel.toList()
-                        // tunggu tekan lama tanpa menyentuh kejadian: gulir dan ketuk biasa tetap jalan seperti semula.
-                        // Batal bila jari terangkat atau bergeser melewati batas (itu gulir / geser arsip-hapus, bukan seret).
-                        val slop = viewConfiguration.touchSlop
-                        var last = down.position
-                        val held = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
-                            while (true) {
-                                val ev = awaitPointerEvent(PointerEventPass.Initial)
-                                val c = ev.changes.firstOrNull { it.id == down.id }
-                                if (c == null || !c.pressed || (c.position - down.position).getDistance() > slop) break
-                                last = c.position
-                            }
-                        }
-                        // held != null berarti loop berakhir sebelum waktunya (batal); null = tekan lama berhasil
-                        if (held != null) return@awaitEachGesture
-                        // kartu yang tersentuh dicatat oleh kartu itu sendiri (HomeCard) lewat hit-test sentuhan asli, jadi tidak meleset
-                        // walau kartu sedang bergeser oleh animasi; mencocokkan koordinat layout di sini bisa memilih kartu yang salah.
-                        val key = (if (nd.touchT == down.uptimeMillis) nd.touchId else null)
-                            ?.takeIf { it in pin || it in oth } ?: return@awaitEachGesture
-                        val m0x: Float
-                        val m0y: Float
-                        val m0w: Int
-                        val m0h: Int
-                        if (cols == 2) {
-                            val r0 = rects[key] ?: return@awaitEachGesture
-                            m0x = r0[0].toFloat(); m0y = (r0[1] - scroll.value).toFloat(); m0w = r0[2]; m0h = r0[3]
-                        } else {
-                            val me0 = state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == key } ?: return@awaitEachGesture
-                            m0x = me0.offset.x.toFloat(); m0y = me0.offset.y.toFloat(); m0w = me0.size.width; m0h = me0.size.height
-                        }
-                        // pojok kiri-atas kartu di dalam grid = posisi jari saat menyentuh dikurangi titik sentuh di dalam kartu
-                        nd.startC = down.position - nd.touchLocal
-                        nd.at0 = last
-                        nd.off0 = Offset(m0x, m0y)
-                        nd.w = m0w
-                        nd.h = m0h
-                        nd.span = m0h + 8.dp.toPx()   // + verticalItemSpacing grid
-                        val g = if (key in pin) 0 else 1
-                        if (key !in vm.sel) {
-                            vm.sel.add(key)
-                            hapticDrag.performHapticFeedback(HapticFeedbackType.LongPress)
-                        }
-                        nd.begin(key, g, if (g == 0) pin else oth, last - Offset(m0x, m0y), last)
-                        if (cols == 2) nd.laneOv = if (useLanes) HashMap<String, Int>().also { lm -> for (k in (if (g == 0) pin else oth)) lanesCur[k]?.let { lm[k] = it } } else emptyMap()
-                        val start = last
-                        var moved = false
-                        try {
-                            while (true) {
-                                val ev = awaitPointerEvent(PointerEventPass.Initial)
-                                val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
-                                ch.consume()
-                                if (!ch.pressed) break
-                                if ((ch.position - start).getDistance() > slop * 2f) moved = true
-                                nd.finger = ch.position
-                            }
-                        } finally {
-                            endDrag()
-                            // seret selesai = kartu sudah dilepas di tempatnya: keluar dari mode pilih. Tekan lama tanpa menggeser tetap memilih.
-                            if (moved) { vm.sel.clear(); vm.sel.addAll(selBefore.filter { id -> vm.note(id) != null }) }
-                        }
-                    }
-                }
-        if (cols == 2) {
-            val noteById = live.associateBy { it.id }
-            // 2 kolom menyusun SEMUA kartu sekaligus (bukan lazy): saat app baru dibuka, puluhan kartu dikomposisi dalam satu frame
-            // (itu yang bikin lag awal). Jadi mulai dari layar pertama saja, sisanya ditambah bertahap per beberapa frame.
-            // Awalnya hanya satu layar pertama (10 kartu). Sisanya ditambah bertahap SETELAH animasi masuk selesai (atau langsung kalau
-            // pengguna mulai menggulir), 4 kartu per 2 frame, supaya animasi awal tidak berebut frame dengan komposisi kartu.
-            val grow = remember { androidx.compose.runtime.mutableIntStateOf(10) }
-            LaunchedEffect(live.size) {
-                if (grow.intValue >= live.size) return@LaunchedEffect
-                val t0 = withFrameNanos { it }
-                while (scroll.value == 0 && !scroll.isScrollInProgress && withFrameNanos { it } - t0 < 700_000_000L) { }
-                while (grow.intValue < live.size) { withFrameNanos { }; withFrameNanos { }; grow.intValue += 4 }
-            }
-            val pinnedIds = pinned.map { it.id }
-            val othersIds = others.map { it.id }
-            val laneOf: (String) -> Int? = { id -> if (useLanes) (nd.laneOv[id] ?: vm.lanes[id]) else null }
-            val padS = with(dens) { 8.dp.roundToPx() }
-            val padTop = with(dens) { (sat + 78.dp).roundToPx() }
-            val padBottom = with(dens) { (160.dp + sab).roundToPx() }
-            Box(
-                Modifier.fillMaxSize().nestedScroll(fabConn).graphicsLayer {
-                    alpha = if (vm.searchOn) 0f else 1f
-                }.then(dragMod)
-            ) {
-                Column(Modifier.fillMaxSize().onSizeChanged { vpH[0] = it.height }.verticalScroll(scroll)) {
-                    TwoColLayout(
-                        isEmpty = live.isEmpty(), sections = sections, pinnedIds = pinnedIds, othersIds = othersIds,
-                        limit = { grow.intValue },
-                        laneOf = laneOf, dragId = nd.id,
-                        padS = padS, padTop = padTop, padBottom = padBottom, gap = padS,
-                        rects = rects, lanesOut = lanesCur, fresh = lanesNew,
-                        modifier = Modifier.fillMaxWidth().onGloballyPositioned {
-                            // kartu yang baru dapat kolom (baru dibuat / baru diedit): simpan, supaya kolomnya tidak berubah lagi
-                            if (nd.id == null && useLanes && !vm.searchOn && lanesNew.isNotEmpty()) {
-                                val m = HashMap(lanesNew)
-                                lanesNew.clear()
-                                vm.setLanes(m)
-                            }
-                        }
-                    ) { k ->
-                        when (k) {
-                            "empty" -> T(
-                                homeEmptyMsg(vm), 17f, 600, pal.osv,
-                                Modifier.fillMaxWidth().padding(vertical = 48.dp), align = androidx.compose.ui.text.style.TextAlign.Center
-                            )
-                            "h-pin" -> T("Pinned", 13f, 500, pal.osv, Modifier.graphicsLayer { if (!vm.searchOn) alpha = shift.p.value.coerceIn(0f, 1f) }.padding(start = 16.dp, top = 12.dp, bottom = 4.dp), ls = .01f)
-                            "h-other" -> T("Others", 13f, 500, pal.osv, Modifier.graphicsLayer { if (!vm.searchOn) alpha = shift.p.value.coerceIn(0f, 1f) }.padding(start = 16.dp, top = 16.dp, bottom = 4.dp), ls = .01f)
-                            else -> {
-                                val d = noteById[k]
-                                if (d != null) HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, wPx, dens.density, pos, stackMove(d.id, true), nd, state)
-                            }
-                        }
-                    }
-                }
-            }
-        } else LazyVerticalStaggeredGrid(
-            columns = StaggeredGridCells.Fixed(cols),
-            state = state,
-            modifier = Modifier.fillMaxSize().nestedScroll(fabConn).graphicsLayer {
-                    alpha = if (vm.searchOn) 0f else 1f
-                }.then(dragMod),
-            contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = sat + 78.dp, bottom = 160.dp + sab),
-            verticalItemSpacing = 8.dp,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            if (live.isEmpty()) {
-                item(key = "empty", span = full) {
-                    T(
-                        homeEmptyMsg(vm), 17f, 600, pal.osv,
-                        Modifier.fillMaxWidth().padding(vertical = 48.dp), align = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                }
-            }
-            if (sections) item(key = "h-pin", span = full) {
-                T("Pinned", 13f, 500, pal.osv, Modifier.graphicsLayer { if (!vm.searchOn) alpha = shift.p.value.coerceIn(0f, 1f) }.padding(start = 16.dp, top = 12.dp, bottom = 4.dp), ls = .01f)
-            }
-            gridItems(pinned, key = { it.id }) { d ->
-                HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, wPx, dens.density, pos, (if (nd.id != null && (cols == 1 || nd.id == d.id)) holdItemG() else flowItemG()).then(stackMove(d.id, true)), nd, state)
-            }
-            if (sections) item(key = "h-other", span = full) {
-                T("Others", 13f, 500, pal.osv, Modifier.graphicsLayer { if (!vm.searchOn) alpha = shift.p.value.coerceIn(0f, 1f) }.padding(start = 16.dp, top = 16.dp, bottom = 4.dp), ls = .01f)
-            }
-            gridItems(others, key = { it.id }) { d ->
-                HomeCard(vm, nav, d, pos[d.id] ?: 0, !sel.isEmpty(), cols, hPx, wPx, dens.density, pos, (if (nd.id != null && (cols == 1 || nd.id == d.id)) holdItemG() else flowItemG()).then(stackMove(d.id, true)), nd, state)
-            }
-        }
-
-        // kartu bayangan yang mengikuti jari. Posisinya dihitung dari jari saja; saat dilepas ia meluncur ke slot barunya.
-        val ghostId = nd.id
-        val ghostNote = ghostId?.let { vm.note(it) }
-        if (ghostId != null && ghostNote != null && nd.w > 0) {
-            Box(
-                Modifier
-                    .offset {
-                        val q = if (nd.dropping) {
-                            if (cols == 2) {
-                                // 2 kolom: meluncur ke slot kartu di tata letak sendiri
-                                val r = if (nd.ready) rects[ghostId] else null
-                                if (r != null) {
-                                    val sl = Offset(r[0].toFloat(), (r[1] - scroll.value).toFloat())
-                                    sl + (nd.dropAt - sl) * nd.settle.value
-                                } else nd.dropAt
-                            } else {
-                                val inf = if (nd.ready) state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == ghostId } else null
-                                if (inf != null) {
-                                    val slot = nd.startC + (Offset(inf.offset.x.toFloat(), inf.offset.y.toFloat()) - nd.off0)
-                                    slot + nd.resid * nd.settle.value
-                                } else nd.dropAt
-                            }
-                        } else nd.startC + (nd.finger - nd.at0)
-                        IntOffset(q.x.toInt(), q.y.toInt())
-                    }
-                    .width(with(dens) { nd.w.toDp() })
-                    .graphicsLayer {
-                        val k = if (nd.dropping) (if (nd.ready) nd.settle.value.coerceIn(0f, 1f) else 1f) else nd.lift.value.coerceIn(0f, 1f)
-                        val sc2 = 1f + .03f * k
-                        scaleX = sc2; scaleY = sc2
-                        // bayangan lembut: elevasi lebih besar (lebih menyebar) tetapi warnanya dibuat tipis, bukan gelap & tajam
-                        shadowElevation = 16.dp.toPx() * k
-                        ambientShadowColor = Color.Black.copy(alpha = if (pal.dark) .50f else .22f)
-                        spotShadowColor = Color.Black.copy(alpha = if (pal.dark) .65f else .32f)
-                        shape = RoundedCornerShape(12.dp)
-                        clip = false
-                    }
-            ) {
-                NoteCard(ghostNote, pos[ghostId] ?: 0, "f", true, Modifier, cols = cols) { }
-            }
-        }
-
-        // header lengket: latar belakang di belakang bilah cari
-        Box(Modifier.fillMaxWidth().height(sat + 72.dp).background(pal.bg))
-        Box(
-            Modifier.padding(start = 10.dp, top = sat + 10.dp)
-                .graphicsLayer { translationX = -84.dp.toPx() * sa; scaleX = 1f - .4f * sa; scaleY = 1f - .4f * sa; alpha = 1f - sa }
-        ) { IconBtn("menu", pal.osv, { if (sa < .5f) openDrawer() }) }
-
-        Box(
-            Modifier.align(Alignment.TopEnd).padding(end = 10.dp, top = sat + 10.dp)
-                .graphicsLayer { translationX = 84.dp.toPx() * sa; scaleX = 1f - .4f * sa; scaleY = 1f - .4f * sa; alpha = 1f - sa }
-        ) { IconBtn(if (cols == 1) "cols" else "rows", pal.osv, { if (sa < .5f) vm.setPr(vm.pr.copy(cols = if (cols == 1) 2 else 1)) }) }
-
-        val q = vm.query.trim().lowercase()
-        val res by remember(vm) {
-            derivedStateOf {
-                val qq = vm.query.trim().lowercase()
-                vm.sorted(vm.liveF(all = true).filter { qq.isEmpty() || (it.t + " " + it.x).lowercase().contains(qq) })
-            }
-        }
-
-        // Bilah cari ala Google Keep: saat diam ia pil kertas di antara tombol menu dan tepi layar. Saat dibuka, bilah HANYA melebar
-        // ke kiri dan kanan (atas dan bawahnya tetap), sudutnya meluruh jadi 0 dan warnanya beralih ke latar, sehingga menyatu jadi
-        // bilah atas selebar layar. Halaman hasil (latar + kartu + garis pemisah) muncul memudar DI BAWAH bilah, bukan ikut melebar.
-        val padStartIdle = with(dens) { 72.dp.toPx() }
-        val padEndIdle = with(dens) { 72.dp.toPx() }
-        val topBar = with(dens) { (sat + 8.dp).toPx() }
-        val botBar = with(dens) { (sat + 64.dp).toPx() }
-        val radIdle = with(dens) { 28.dp.toPx() }
-        val divY = with(dens) { (sat + 72.dp).toPx() }
-        val divH = with(dens) { 1.dp.toPx() }
-        val divC = androidx.compose.ui.graphics.lerp(pal.bg, pal.os, .13f)
-        Box(Modifier.fillMaxSize()) {
-            // halaman hasil pencarian
-            // tanpa animasi (langsung muncul / hilang): hanya bilahnya yang bergerak, supaya tidak kedip
-            if (vm.searchOn) {
-                Box(
-                    Modifier.fillMaxSize()
-                        .drawBehind {
-                            drawRect(pal.bg)
-                            drawRect(divC, Offset(0f, divY), Size(size.width, divH))
-                        }
-                        .pointerInput(Unit) { detectTapGestures { } }
-                ) {
-                    // hasil pencarian: tampil di bawah bilah dengan tata letak yang sama seperti beranda (1 atau 2 kolom)
-                    LazyVerticalStaggeredGrid(
-                        columns = StaggeredGridCells.Fixed(cols),
-                        state = resState,
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = sat + 78.dp, bottom = imeH + 16.dp),
-                        verticalItemSpacing = 8.dp,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        if (res.isEmpty() && vm.searchOn) item(key = "empty-search", span = full) {
-                            T(if (q.isNotEmpty()) "No results" else "No notes yet", 17f, 600, pal.osv,
-                                Modifier.fillMaxWidth().padding(vertical = 48.dp), align = androidx.compose.ui.text.style.TextAlign.Center)
-                        }
-                        gridItems(res, key = { "s" + it.id }) { d ->
-                            val ri = res.indexOfFirst { it.id == d.id }.coerceAtLeast(0)
-                            NoteCard(
-                                d, pos[d.id] ?: ri, "f", false,
-                                flowItemG().makeRoom(vm, d.id, ri, { res.indexOfFirst { it.id == vm.openId } }, hPx, dens.density).then(stackMove(d.id, false)),
-                                cols = cols
-                            ) { m ->
-                                focusMgr.clearFocus(); vm.cardMorph[d.id] = m; nav.openNote(d.id, m)
-                            }
-                        }
-                    }
-                    Box(Modifier.fillMaxWidth().height(sat + 72.dp).background(pal.bg))
-                }
-            }
-        // bilah: hanya tepi kiri/kanan yang bergerak
-        Box(
-            Modifier.fillMaxSize()
-                .drawBehind {
-                    val k = sa
-                    val l = androidx.compose.ui.util.lerp(padStartIdle, 0f, k)
-                    val r = androidx.compose.ui.util.lerp(size.width - padEndIdle, size.width, k)
-                    val rad = androidx.compose.ui.util.lerp(radIdle, 0f, k)
-                    drawRoundRect(
-                        androidx.compose.ui.graphics.lerp(pal.s, pal.bg, (k * 1.6f).coerceAtMost(1f)),
-                        topLeft = Offset(l, topBar), size = Size(r - l, botBar - topBar), cornerRadius = CornerRadius(rad)
-                    )
-                }
-        ) {
-            // baris bilah: posisinya mengikuti tepi kiri/kanan wadah yang melebar
-            Row(
-                Modifier.padding(
-                    top = sat + 8.dp,
-                    start = androidx.compose.ui.unit.lerp(76.dp, 4.dp, sa),
-                    end = androidx.compose.ui.unit.lerp(80.dp, 8.dp, sa)
-                ).fillMaxWidth().height(56.dp)
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !vm.searchOn) { vm.searchOn = true },
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // ikon kiri: kaca pembesar berputar jadi panah kembali (seperti Keep)
-                Box(Modifier.size(48.dp).clip(CircleShape).clickable(enabled = vm.searchOn) { vm.searchOn = false }, Alignment.Center) {
-                    Box(Modifier.graphicsLayer { alpha = 1f - sa; scaleX = 1f - .5f * sa; scaleY = 1f - .5f * sa; rotationZ = -90f * sa }) { Ic("search", pal.osv) }
-                    Box(Modifier.graphicsLayer { alpha = sa; scaleX = .5f + .5f * sa; scaleY = .5f + .5f * sa; rotationZ = 90f * (1f - sa) }) { Ic("back", pal.os) }
-                }
-                Spacer(Modifier.width(6.dp))
-                BasicTextField(
-                    value = vm.query, onValueChange = { vm.query = it },
-                    modifier = Modifier.weight(1f).focusRequester(fr).onFocusChanged { if (it.isFocused && !vm.searchOn) vm.searchOn = true },
-                    textStyle = TextStyle(color = pal.os, fontFamily = LocalFF.current, fontSize = 17.sp, fontWeight = FontWeight(400)),
-                    singleLine = true, cursorBrush = SolidColor(pal.p),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { focusMgr.clearFocus() }),
-                    decorationBox = { inner ->
-                        Box { if (vm.query.isEmpty()) T(if (vm.remFilter) "Search in Reminders" else vm.filter?.let { "Search in $it" } ?: "Search notes", 17f, 400, pal.osv, maxLines = 1); inner() }
-                    }
-                )
-                // hapus teks: hanya muncul saat ada ketikan
-                AnimatedVisibility(
-                    visible = vm.searchOn && vm.query.isNotEmpty(),
-                    enter = fadeIn(tween(140)) + scaleIn(tween(180, easing = Emph), .6f),
-                    exit = fadeOut(tween(100)) + scaleOut(tween(120), .6f)
-                ) { IconBtn("x", pal.osv, { vm.query = "" }, size = 44.dp) }
-            }
-        }
-        }
+        } finally { auto?.cancel(); ui.drawing = false; ui.selGrab = false }
     }
 }
+
+// ---------------------------------------------------------------- coretan di PDF
+
+/** t: 0 pulpen, 1 stabilo. c: indeks warna 0..4. w: tebal sebagai pecahan lebar halaman. p: (x, y, k) tiga-tiga, x dan y dibagi lebar halaman. */
+@Serializable
+class PInk(val pg: Int, val t: Int, val c: Int, val w: Float, val p: List<Float>)
+
+@Serializable
+class PInkDoc(val s: List<PInk> = emptyList())
+
+@Stable
+class PInkState(private val file: File, private val scope: CoroutineScope) {
+    var list by mutableStateOf<List<PInk>>(emptyList()); private set
+    var canUndo by mutableStateOf(false); private set
+    var canRedo by mutableStateOf(false); private set
+    private val undoS = ArrayList<List<PInk>>()
+    private val redoS = ArrayList<List<PInk>>()
+    private var job: Job? = null
+    val byPage by derivedStateOf { list.groupBy { it.pg } }
+
+    suspend fun load() {
+        val l = withContext(Dispatchers.IO) {
+            try { if (file.exists()) J.decodeFromString(PInkDoc.serializer(), file.readText()).s else emptyList() } catch (e: Throwable) { emptyList() }
+        }
+        list = l
+    }
+
+    private fun flags() { canUndo = undoS.isNotEmpty(); canRedo = redoS.isNotEmpty() }
+
+    fun commit(next: List<PInk>) {
+        undoS.add(list); if (undoS.size > 100) undoS.removeAt(0)
+        redoS.clear(); list = next; flags(); save()
+    }
+
+    fun add(s: PInk) = commit(list + s)
+    fun remove(rm: Set<PInk>) { if (rm.isNotEmpty()) commit(list.filter { it !in rm }) }
+
+    fun undo() { if (undoS.isEmpty()) return; redoS.add(list); list = undoS.removeAt(undoS.size - 1); flags(); save() }
+    fun redo() { if (redoS.isEmpty()) return; undoS.add(list); list = redoS.removeAt(redoS.size - 1); flags(); save() }
+
+    private fun write(l: List<PInk>) {
+        try {
+            if (l.isEmpty()) file.delete() else file.writeText(J.encodeToString(PInkDoc.serializer(), PInkDoc(l)))
+        } catch (e: Throwable) { }
+    }
+
+    private fun save() {
+        job?.cancel()
+        val snap = list
+        job = scope.launch(Dispatchers.IO) { delay(500); write(snap) }
+    }
+
+    fun flush() { job?.cancel(); write(list) }
+}
+
+private fun segDist(x: Float, y: Float, ax: Float, ay: Float, bx: Float, by: Float): Float {
+    val dx = bx - ax; val dy = by - ay
+    val l2 = dx * dx + dy * dy
+    val t = if (l2 < 1e-12f) 0f else (((x - ax) * dx + (y - ay) * dy) / l2).coerceIn(0f, 1f)
+    val px = ax + t * dx - x; val py = ay + t * dy - y
+    return kotlin.math.sqrt(px * px + py * py)
+}
+
+private fun hitStroke(s: PInk, x: Float, y: Float, r: Float): Boolean {
+    val n = s.p.size / 3
+    val rr = r + s.w / 2f
+    if (n == 1) return kotlin.math.hypot(s.p[0] - x, s.p[1] - y) <= rr
+    for (i in 0 until n - 1) {
+        if (segDist(x, y, s.p[i * 3], s.p[i * 3 + 1], s.p[(i + 1) * 3], s.p[(i + 1) * 3 + 1]) <= rr) return true
+    }
+    return false
+}
+
+/** Coretan yang sedang digambar (piksel, tiga-tiga). */
+private class PLive(val tool: Int, val color: Int, val wPx: Float) {
+    var pts = FloatArray(192)
+    var n = 0
+    fun add(x: Float, y: Float, k: Float) {
+        if (n * 3 + 3 > pts.size) pts = pts.copyOf(pts.size * 2)
+        pts[n * 3] = x; pts[n * 3 + 1] = y; pts[n * 3 + 2] = k; n++
+    }
+}
+
+// ---------------------------------------------------------------- ikon tambahan
+
+private val PIC = mapOf(
+    "scan" to "M4 8V4h4V2H2v6h2zm16 0h2V2h-6v2h4v4zM4 16H2v6h6v-2H4v-4zm16 4h-4v2h6v-6h-2v4zM7 9h10v2H7V9zm0 4h10v2H7v-2z",
+    "page" to "M6 2h12c1.1 0 2 .9 2 2v16c0 1.1-.9 2-2 2H6c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2zm1 3v14h10V5H7z",
+    "expand" to "M21 11V3h-8l3.29 3.29-10 10L3 13v8h8l-3.29-3.29 10-10z"
+)
+private val PIC_CACHE = HashMap<String, androidx.compose.ui.graphics.Path>()
 
 @Composable
-fun HomeCard(
-    vm: AppVM, nav: Nav, d: Note, i: Int, selMode: Boolean, cols: Int, hPx: Float, wPx: Float, dens: Float,
-    pos: Map<String, Int>, base: Modifier, nd: NoteDrag, gs: LazyStaggeredGridState
-) {
-    val sel = vm.sel
-    androidx.compose.runtime.DisposableEffect(d.id) { onDispose { vm.cardMorph.remove(d.id) } }
-    val dragging = nd.id == d.id
-    // 1 kolom: kartu di antara asal & tujuan seretan bergeser secara visual (grid tidak berubah selama menyeret)
-    val shiftT = if (cols == 1) nd.shiftOf(d.id) else 0f
-    val shiftA = remember { Animatable(0f) }
-    LaunchedEffect(shiftT, nd.id) {
-        if (nd.id == null) shiftA.snapTo(0f) else shiftA.animateTo(shiftT, spring(.85f, 420f))
-    }
-    Column(
-        base.makeRoom(vm, d.id, i, { vm.openId?.let { pos[it] } ?: -1 }, hPx, dens, cols, wPx, flat = d.cv.isNotEmpty()).then(
-            // ruang kartu tetap ada (supaya kartu lain menata diri di sekitarnya) tetapi tidak terlihat: yang terlihat adalah
-            // kartu bayangan di atas grid (lihat HomeScreen), yang posisinya hanya bergantung pada jari
-            if (dragging) Modifier.graphicsLayer { alpha = 0f } else Modifier
-        ).then(
-            // saat dilepas, urutan baru dipasang ke grid dan pergeseran visual dihapus pada frame yang sama (posisinya identik)
-            if (cols == 1) Modifier.graphicsLayer { translationY = if (nd.id == null || nd.dropping) 0f else shiftA.value } else Modifier
-        ).pointerInput(d.id) {
-            // hanya mencatat (tidak mengonsumsi): kartu ini yang benar-benar tersentuh, dibaca oleh gestur seret di grid
-            awaitEachGesture {
-                val dn = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                nd.touchId = d.id; nd.touchT = dn.uptimeMillis; nd.touchLocal = dn.position
-            }
-        }
-    ) {
-        // animasi masuk hanya untuk kartu di layar pertama (urutan < 8); sisanya langsung tampil, supaya tidak puluhan animasi
-        // berjalan serentak saat app baru dibuka (2 kolom merender semua kartu sekaligus)
-        val first = remember(d.id) { val f = !vm.seen.contains(d.id); vm.seen.add(d.id); f && i < 8 }
-        val prog = remember(d.id) { Animatable(if (first) 0f else 1f) }
-        LaunchedEffect(d.id) {
-            if (first) {
-                delay(i * 35L)
-                prog.animateTo(1f, spring(.8f, 500f))
-            }
-        }
-        SwipeCard(
-            enabled = !selMode,
-            shape = SH[i % 5].let { RoundedCornerShape(it[0].dp, it[1].dp, it[2].dp, it[3].dp) },
-            onArchive = { vm.mark(listOf(d.id), "Note archived") { it.copy(a = true, p = false) } },
-            onDelete = { vm.mark(listOf(d.id), "Moved to Trash") { it.copy(dt = System.currentTimeMillis()) } }
-        ) {
-            NoteCard(
-                d, i, "f", d.id in sel,
-                Modifier.graphicsLayer {
-                    val pv = prog.value
-                    alpha = pv.coerceIn(0f, 1f); translationY = (1f - pv) * 32.dp.toPx()
-                    val sc = .92f + .08f * pv.coerceIn(0f, 1f); scaleX = sc; scaleY = sc
-                },
-                onLong = { if (d.id !in sel) sel.add(d.id) },
-                track = { m ->
-                    // selama kartu lain sedang membuka/menutup, posisi kartu ini jangan ditimpa: nilainya sudah ikut tergeser
-                    // (dan terpotong layar) oleh makeRoom sendiri, sehingga klasifikasi atas/bawah bisa berbalik di tengah animasi
-                    val busy = vm.openId != null && vm.openId != d.id && vm.openP.value > .001f
-                    if (!vm.searchOn && !busy) vm.cardMorph[d.id] = m
-                },
-                cols = cols,
-                onClick = { m ->
-                    if (selMode) { if (d.id in sel) sel.remove(d.id) else sel.add(d.id) }
-                    else nav.openNote(d.id, m)
-                }
-            )
-        }
+fun PIc(n: String, tint: Color, sz: Dp = 24.dp, modifier: Modifier = Modifier) {
+    val path = remember(n) { PIC_CACHE.getOrPut(n) { PathParser().parsePathString(PIC[n] ?: "").toPath() } }
+    Canvas(modifier.size(sz)) {
+        val sc = this.size.width / 24f
+        scale(sc, sc, pivot = Offset.Zero) { drawPath(path, tint) }
     }
 }
 
-/** Buka catatan baru dari tombol FAB (morph melar dari tombol ke satu halaman penuh). */
-fun openNewFromFab(vm: AppVM) {
-    val n = vm.newNote()
-    vm.nav.openNote(n.id, vm.fabMorph, true)
+// ---------------------------------------------------------------- keadaan layar baca
+
+@Stable
+class PdfUi(val doc: PdfDoc, val ink: PInkState, val fid: String) {
+    var dark by mutableStateOf(false)
+    var inkOn by mutableStateOf(false)
+    var styleOpen by mutableStateOf(false)   // panel warna + tebal pada kapsul ink: tersembunyi, dibuka dengan mengetuk alat yang sedang aktif
+    var tool by mutableIntStateOf(0)
+    var color by mutableIntStateOf(0)
+    var wDp by mutableFloatStateOf(3f)
+    var ts by mutableStateOf("auto")
+    var inkPal by mutableStateOf<Pal?>(null)
+    var hits by mutableStateOf<List<PHit>>(emptyList())
+    var cur by mutableIntStateOf(-1)
+    var drawing by mutableStateOf(false)
+    val pageCoords = HashMap<Int, LayoutCoordinates>()   // koordinat tiap halaman yang sedang tampil (dipakai pemegang gagang di induk)
+    var scrollBy: ((Float) -> Float)? = null   // hanya terisi di mode gulir: menggulir daftar sebesar px, mengembalikan yang benar-benar terpakai
+    var selGrab by mutableStateOf(false)   // jari sedang memegang gagang seleksi / menyeret seleksi: gestur halaman (pager / curl / ketukan) harus minggir
+    var pulse: androidx.compose.runtime.State<Float> = mutableFloatStateOf(.6f)
+    var txt: PdfText? = null
+    var sel by mutableStateOf<PSel?>(null)
+    var paged = false
+    var multi by mutableStateOf(false)   // dua jari (atau lebih) sedang menyentuh layar: gulir / zoom, bukan coretan
 }
 
-/** Bilah voice note cepat sedang menggantikan tombol Baru (ditarik, merekam, atau sedang menguncup kembali). */
-private fun quickCoversFab(vm: AppVM): Boolean =
-    (QuickFx.drag || QuickFx.shown || QuickFx.noteBound || QuickFx.p.value > .001f) &&
-        (vm.nav.top is Scr.Home || QuickFx.noteBound)
-
-private const val FAB_HOLD_MS = 550L   // tahan sedikit lama untuk memunculkan sheet (suara dll.)
+private val INVERT = ColorFilter.colorMatrix(
+    ColorMatrix(
+        floatArrayOf(
+            -.88f, 0f, 0f, 0f, 224f,
+            0f, -.88f, 0f, 0f, 224f,
+            0f, 0f, -.88f, 0f, 224f,
+            0f, 0f, 0f, 1f, 0f
+        )
+    )
+)
 
 /**
- * FAB:
- *  - ketuk            -> catatan baru langsung terbuka (melar dari tombol)
- *  - tahan ~0,5 detik -> sheet tambah (ada catatan suara)
- *  - tarik ke atas    -> catatan mekar mengikuti jari; lepas di atas ambang = terbuka, kalau tidak = menguncup lagi
- *  - geser ke kiri    -> tombol melebar jadi bilah voice note cepat (lihat QuickVoice); lepas di atas ambang = merekam
+ * Cubit / geser dua jari, dibaca di pass Initial pada induk supaya melihat SEMUA jari (halaman anak hanya melihat jari yang jatuh di dalamnya:
+ * dua jari di dua halaman berbeda tidak saling tahu). [onMulti] memberi tahu halaman bahwa ini gestur dua jari, jadi coretan dibatalkan.
+ * Jari pena (stylus) diabaikan: telapak yang menempel saat menulis dengan pena tidak boleh membatalkan goresan.
+ */
+private fun Modifier.pinch(onPinch: (Float, Offset, Offset) -> Unit, onEnd: () -> Unit, onMulti: (Boolean) -> Unit = {}): Modifier = pointerInput(Unit) {
+    awaitEachGesture {
+        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        var multi = false
+        try {
+            do {
+                val ev = awaitPointerEvent(PointerEventPass.Initial)
+                val pen = ev.changes.any { it.pressed && it.type == PointerType.Stylus }
+                if (!pen && ev.changes.count { it.pressed } >= 2) {
+                    if (!multi) onMulti(true)
+                    multi = true
+                    onPinch(ev.calculateZoom(), ev.calculatePan(), ev.calculateCentroid(useCurrent = true))
+                    ev.changes.forEach { if (it.positionChanged()) it.consume() }
+                }
+            } while (ev.changes.any { it.pressed })
+        } finally {
+            if (multi) onMulti(false)
+        }
+        if (multi) onEnd()
+    }
+}
+
+/**
+ * Sentuhan untuk mode 3D, dipasang di induk (pass Initial) supaya mendahului library:
+ * ketukan tunggal / ganda dipakai di sini (library tidak ikut membalik halaman),
+ * saat diperbesar satu jari menggeser gambar dan library tidak pernah melihat geseran itu (jadi tidak bisa pindah halaman).
+ * Geseran saat tidak diperbesar dibiarkan lewat ke library untuk melengkungkan halaman.
+ * Ketukan di zona tepi kiri / kanan (saat tidak diperbesar) langsung pindah halaman lewat onEdge(-1 / +1), tanpa menunggu ketukan ganda.
+ * Saat locked() (mode cari) geseran dikonsumsi di sini sehingga tidak ada yang bisa pindah halaman, dan ketukan tepi diabaikan.
+ */
+private const val EDGE_TAP = .22f
+
+private fun Modifier.curlTouch(
+    scope: CoroutineScope, enabled: Boolean = true, zoomed: () -> Boolean, locked: () -> Boolean = { false },
+    onPan: (Offset) -> Unit, onEdge: (Int) -> Unit,
+    onTap: () -> Unit, onDouble: (Offset) -> Unit,
+    // true = ketukan di zona tepi TIDAK dikonsumsi di sini: library PageCurl yang membalik halaman (tap bawaan library)
+    edgeToLib: Boolean = false,
+    // true = anak sedang memakai sentuhan ini (menyeret pegangan seleksi teks): jangan menggeser gambar yang diperbesar
+    busy: () -> Boolean = { false },
+    // true = jari memegang gagang seleksi: semua perubahan sentuhan dimakan di pass Initial (pager / library tidak boleh ikut menggeser halaman),
+    // dan lepasnya jari tidak dihitung sebagai ketukan (tidak menghapus seleksi, tidak membalik halaman di zona tepi)
+    selBusy: () -> Boolean = { false }
+): Modifier = pointerInput(enabled) {
+    if (!enabled) return@pointerInput
+    var lastT = 0L
+    var lastP = Offset.Zero
+    var pending: Job? = null
+    val tol = 56.dp.toPx()
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        val slop = viewConfiguration.touchSlop
+        val z0 = zoomed()
+        var moved = false
+        var multi = false
+        while (true) {
+            val ev = awaitPointerEvent(PointerEventPass.Initial)
+            if (ev.changes.count { it.pressed } >= 2) multi = true
+            if (multi) { if (ev.changes.none { it.pressed }) break else continue }   // cubitan ditangani pinch()
+            val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+            if (selBusy() || c.isConsumed) {   // dimakan pemegang gagang di induk (atau sedang memegang gagang): bukan ketukan / geseran halaman
+                val lifted = !c.pressed   // jangan pakai changedToUp(): false untuk event yang sudah dikonsumsi, loop jadi menggantung ke gestur berikutnya
+                c.consume()
+                if (lifted) break else continue
+            }
+            if (c.changedToUp()) {
+                val quick = c.uptimeMillis - down.uptimeMillis < viewConfiguration.longPressTimeoutMillis
+                val ex = c.position.x
+                val ew = size.width.toFloat()
+                if (edgeToLib && !moved && quick && !zoomed() && (ex < ew * EDGE_TAP || ex > ew * (1f - EDGE_TAP))) {
+                    // dibiarkan lewat ke library; saat mode cari (locked) ketukan tepi dimakan supaya tidak membalik
+                    if (locked()) c.consume()
+                    break
+                }
+                if (!moved && quick) {
+                    c.consume()
+                    val x = c.position.x
+                    val w = size.width.toFloat()
+                    if (!zoomed() && (x < w * EDGE_TAP || x > w * (1f - EDGE_TAP))) {
+                        // zona tepi: pindah halaman seketika
+                        pending?.cancel(); pending = null; lastT = 0L
+                        if (!locked()) onEdge(if (x < w / 2f) -1 else 1)
+                    } else {
+                        val now = c.uptimeMillis
+                        if (pending?.isActive == true && now - lastT < 300L && (c.position - lastP).getDistance() < tol) {
+                            pending?.cancel(); pending = null; lastT = 0L
+                            onDouble(c.position)
+                        } else {
+                            lastT = now; lastP = c.position
+                            pending = scope.launch { delay(300); onTap() }
+                        }
+                    }
+                } else if (!moved) {
+                    // Tekan lama dilepas (mis. selesai memilih teks): library PageCurl memakai detectTapGestures tanpa onLongPress, yang tetap
+                    // menganggap lepasnya tekan lama sebagai ketukan lalu membalik halaman. Dimakan di sini supaya library tidak melihatnya.
+                    c.consume()
+                }
+                break
+            }
+            if (!moved && (c.position - down.position).getDistance() > slop) moved = true
+            if (z0 && moved && !busy()) { onPan(c.positionChange()); c.consume() }
+            else if (!z0 && locked()) c.consume()   // mode cari: geseran tidak sampai ke pager / PageCurl
+        }
+    }
+}
+
+// ---------------------------------------------------------------- satu halaman
+
+@Composable
+// bare = true: lapisan transparan di atas halaman yang digambar pihak lain (GL Silk curl): hanya seleksi, gagang, dan sorotan cari; tanpa bitmap / latar / coretan.
+// active = false: halaman ini tidak memasang gestur apa pun (seleksi / coret). Dipakai mode 3D: library PageCurl menumpuk halaman
+// sebelum / sesudahnya di atas halaman aktif, sehingga sentuhan jatuh ke halaman yang salah (seleksi muncul di halaman tak terlihat).
+private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Modifier = Modifier, active: Boolean = true, bare: Boolean = false) {
+    val dens = LocalDensity.current.density
+    val wPx = (widthDp.value * dens * mul).roundToInt()
+    val bk = bucket(wPx)
+    val key = ui.fid + ":" + index + "@" + bk
+    var bmp by remember(index) { mutableStateOf<ImageBitmap?>(PdfCache.get(key)?.asImageBitmap()) }
+    LaunchedEffect(index, bk, ui.doc.ok, bare) {
+        if (!ui.doc.ok) return@LaunchedEffect
+        val hit = PdfCache.get(key)
+        if (hit != null) { bmp = hit.asImageBitmap(); return@LaunchedEffect }
+        if (bare) return@LaunchedEffect
+        delay(40)   // lewat cepat saat menggulir kencang: yang sudah keluar layar dibatalkan sebelum dirender
+        val b = ui.doc.render(index, bk) ?: return@LaunchedEffect
+        PdfCache.put(key, b)
+        bmp = b.asImageBitmap()
+    }
+    val strokes = ui.ink.byPage[index] ?: emptyList()
+    val pal = ui.inkPal
+    val scp = rememberCoroutineScope()
+    val hap = LocalHapticFeedback.current
+    var pt by remember(index) { mutableStateOf<PgText?>(ui.txt?.peek(index)) }
+    LaunchedEffect(index, PdfBus.hasText) { if (PdfBus.hasText && pt == null) { delay(350); pt = ui.txt?.page(index) } }
+    val sel = ui.sel
+    val ptv = pt
+    val rg = remember(sel, ptv) { if (sel != null && ptv != null) rangeOn(sel, index, ptv) else null }
+    val selR = remember(rg, ptv) { if (rg != null && ptv != null) rectsOf(ptv, rg.first, rg.second) else emptyList() }
+    val live = remember(index) { mutableStateOf<PLive?>(null) }
+    var tick by remember(index) { mutableIntStateOf(0) }
+    // gagang seleksi: memantul keluar dari tepi teks saat seleksi muncul, membesar + berhalo saat diseret
+    val hdlPop = remember { Animatable(0f) }
+    LaunchedEffect(sel != null) { if (sel != null) { hdlPop.snapTo(0f); hdlPop.animateTo(1f, spring(.46f, 420f)) } else hdlPop.snapTo(0f) }
+    val hdlGrow by animateFloatAsState(if (ui.drawing && sel != null) 1.3f else 1f, spring(.42f, 520f), label = "hdlg")
+    DisposableEffect(index, active) { onDispose { ui.pageCoords.remove(index) } }
+    val marks = remember(ui.hits, index) { ui.hits.withIndex().filter { it.value.page == index } }
+    var sizePx by remember { mutableStateOf(IntSize.Zero) }
+    val paths = remember(strokes, sizePx) {
+        val w = sizePx.width.toFloat()
+        strokes.map { s ->
+            val n = s.p.size / 3
+            val a = FloatArray(n * 3)
+            for (i in 0 until n) { a[i * 3] = s.p[i * 3] * w; a[i * 3 + 1] = s.p[i * 3 + 1] * w; a[i * 3 + 2] = s.p[i * 3 + 2] }
+            Triple(s, inkPath(a, n, s.t, s.w * w), s.w * w)
+        }
+    }
+    Box(
+        modifier
+            .onSizeChanged { sizePx = it }
+            .onGloballyPositioned { if (active) ui.pageCoords[index] = it }
+            .then(if (bare) Modifier else Modifier.background(if (ui.dark) Color.Black else Color.White))
+            .then(if (!active) Modifier else Modifier.pointerInput(ui.inkOn, ui.tool, ui.ts, index) {
+                if (!ui.inkOn) return@pointerInput
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = true)
+                    val stylus = down.type == PointerType.Stylus
+                    if (stylus) InkEnv.stylus = true
+                    val allow = when (ui.ts) {
+                        "stylus" -> stylus
+                        "finger" -> true
+                        else -> if (InkEnv.stylus) stylus else true
+                    }
+                    if (!allow) return@awaitEachGesture
+                    // dua jari sedang menyentuh layar (mis. menggulir dengan dua jari): bukan coretan
+                    if (!stylus && ui.multi) return@awaitEachGesture
+                    val W = size.width.toFloat().coerceAtLeast(1f)
+                    val wPxTool = ui.wDp * dens
+                    val lv = PLive(ui.tool, ui.color, wPxTool)
+                    val erased = HashSet<PInk>()
+                    // Jari baru ditampilkan / disimpan setelah menyentuh sebentar tanpa jari kedua: dua jari yang mendarat berurutan
+                    // (jari pertama beberapa milidetik lebih dulu) tidak sempat meninggalkan coretan. Pena langsung tampil.
+                    val grace = if (stylus) 0L else 90L
+                    val t0 = down.uptimeMillis
+                    var shown = stylus
+                    ui.drawing = true
+                    fun kOf(p: Float) = if (stylus && p > .01f) (.35f + .95f * p).coerceIn(.3f, 1.3f) else 1f
+                    fun point(pos: Offset, pr: Float) {
+                        if (ui.tool == 2) {
+                            val r = wPxTool / 2f / W
+                            (ui.ink.byPage[index] ?: emptyList()).forEach { s -> if (s !in erased && hitStroke(s, pos.x / W, pos.y / W, r)) erased.add(s) }
+                        } else lv.add(pos.x, pos.y, kOf(pr))
+                    }
+                    fun publish() { if (shown) { live.value = lv; tick++ } }
+                    down.consume()
+                    point(down.position, down.pressure)
+                    publish()
+                    var cancelled = false
+                    while (true) {
+                        val ev = awaitPointerEvent()
+                        val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                        // jari kedua (di halaman mana pun, dilihat induk lewat ui.multi), atau gestur lain mengambil sentuhan ini
+                        if (!stylus && (ui.multi || ev.changes.count { it.pressed } >= 2 || c.isConsumed)) { cancelled = true; break }
+                        if (stylus && c.isConsumed) { cancelled = true; break }
+                        if (c.changedToUp()) break
+                        if (!shown && c.uptimeMillis - t0 >= grace) shown = true
+                        for (h in c.historical) point(h.position, c.pressure)
+                        point(c.position, c.pressure)
+                        publish()
+                        c.consume()
+                    }
+                    ui.drawing = false
+                    live.value = null; tick++
+                    if (cancelled) return@awaitEachGesture
+                    if (ui.tool == 2) ui.ink.remove(erased)
+                    else if (lv.n > 0) {
+                        val pts = ArrayList<Float>(lv.n * 3)
+                        for (i in 0 until lv.n) { pts.add(lv.pts[i * 3] / W); pts.add(lv.pts[i * 3 + 1] / W); pts.add(lv.pts[i * 3 + 2]) }
+                        ui.ink.add(PInk(index, ui.tool, ui.color, lv.wPx / W, pts))
+                    }
+                }
+            })
+            .then(if (!active) Modifier else Modifier.pointerInput(ui.inkOn, index) {
+                if (ui.inkOn) return@pointerInput
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    if (!PdfBus.hasText) return@awaitEachGesture
+                    if (down.isConsumed) return@awaitEachGesture   // sudah dimakan pemegang gagang di induk (atau penghenti fling)
+                    val W = size.width.toFloat().coerceAtLeast(1f)
+                    val H = size.height.toFloat().coerceAtLeast(1f)
+                    val here = pt
+                    var anchor: PPos? = null
+                    var grab = Offset.Zero   // seleksi mengikuti GERAKAN jari, bukan lokasi jari (jari tidak menutupi / meloncat)
+                    // (menyentuh gagang yang sudah ada ditangani selHandleTouch di induk paling luar)
+                    // tekan lama di atas teks -> pilih satu kata; geser terus untuk memperluas
+                    if (anchor == null) {
+                        awaitLongPressOrCancellation(down.id) ?: return@awaitEachGesture
+                        if (here == null) { scp.launch { pt = ui.txt?.page(index) }; return@awaitEachGesture }
+                        val fx = (down.position.x / W).coerceIn(0f, 1f)
+                        val fy = (down.position.y / H).coerceIn(0f, 1f)
+                        val k = nearestChar(here, fx, fy, H / W)
+                        val r = if (k >= 0) here.r[k] else null
+                        if (r == null) return@awaitEachGesture
+                        val ddx = max(0f, max(r[0] - fx, fx - r[2]))
+                        val ddy = max(0f, max(r[1] - fy, fy - r[3])) * (H / W)
+                        if (ddx > .06f || ddy > .04f) return@awaitEachGesture
+                        var a = k; var b = k + 1
+                        if (here.t[k].isLetterOrDigit()) {
+                            while (a > 0 && here.t[a - 1].isLetterOrDigit()) a--
+                            while (b < here.t.length && here.t[b].isLetterOrDigit()) b++
+                        }
+                        hap.performHapticFeedback(HapticFeedbackType.LongPress)
+                        ui.sel = PSel(PPos(index, a), PPos(index, b))
+                        anchor = PPos(index, a)
+                    }
+                    val an = anchor ?: return@awaitEachGesture
+                    fun posAt(pos: Offset): PPos? = posAtPage(ui, index, W, pos, dens) { p -> scp.launch { ui.txt?.page(p) } }
+                    ui.drawing = true
+                    ui.selGrab = true
+                    try {
+                        while (true) {
+                            val ev = awaitPointerEvent()
+                            if (ev.changes.size >= 2) break
+                            val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                            // Up sudah dikonsumsi curlTouch (selBusy) di pass Initial, jadi changedToUp() false dan selGrab nyangkut true:
+                            // sentuhan berikutnya (ketuk / geser) lolos ke PageCurl dan membalik halaman. Cek lepas jari tanpa peduli consumed.
+                            val lifted = !c.pressed
+                            c.consume()
+                            if (lifted) break
+                            val f = posAt(c.position - grab) ?: continue
+                            val ns = if (f < an) PSel(f, an) else if (f > an) PSel(an, f) else null
+                            val cs = ui.sel
+                            if (ns != null && (cs == null || cs.a != ns.a || cs.b != ns.b)) {
+                                hap.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                ui.sel = ns
+                            }
+                        }
+                    } finally { ui.drawing = false; ui.selGrab = false }
+                }
+            })
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val b = bmp
+            if (b != null && !bare) {
+                drawImage(
+                    b, dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()),
+                    filterQuality = FilterQuality.Medium, colorFilter = if (ui.dark) INVERT else null
+                )
+            }
+            for (r in selR) {
+                val tl = Offset(r[0] * size.width, r[1] * size.height)
+                drawRect(SEL_COLOR.copy(alpha = .38f), tl, Size((r[2] - r[0]) * size.width, max((r[3] - r[1]) * size.height, 10f * density)))
+            }
+            for ((vi, h) in marks) {
+                val cur = vi == ui.cur
+                val pad = 2f * density
+                for (r in h.rects) {
+                    val tl = Offset(r[0] * size.width - pad, r[1] * size.height - pad)
+                    val sz = Size((r[2] - r[0]) * size.width + pad * 2, max((r[3] - r[1]) * size.height, 10f * density) + pad * 2)
+                    if (cur) {
+                        drawRect(Color(0xFFFF8A00).copy(alpha = ui.pulse.value), tl, sz)
+                        drawRect(Color(0xFFE65100), tl, sz, style = Stroke(2.5f * density))
+                    } else drawRect(Color(0xFFFFD54F).copy(alpha = .6f), tl, sz)
+                }
+            }
+            if (pal != null && !bare) {
+                for ((s, path, wpx) in paths) {
+                    val col = inkColor(pal, s.c, s.t == 1)
+                    if (s.t == 1) drawPath(
+                        path, col, alpha = .85f, style = Stroke(wpx, cap = StrokeCap.Butt, join = StrokeJoin.Round),
+                        blendMode = if (ui.dark) BlendMode.Screen else BlendMode.Multiply
+                    ) else drawPath(path, col)
+                }
+                tick
+                val lv = live.value
+                if (lv != null && lv.tool != 2 && lv.n > 0) {
+                    val col = inkColor(pal, lv.color, lv.tool == 1)
+                    val path = inkPath(lv.pts, lv.n, lv.tool, lv.wPx)
+                    if (lv.tool == 1) drawPath(
+                        path, col, alpha = .85f, style = Stroke(lv.wPx, cap = StrokeCap.Butt, join = StrokeJoin.Round),
+                        blendMode = if (ui.dark) BlendMode.Screen else BlendMode.Multiply
+                    ) else drawPath(path, col)
+                }
+            }
+        }
+        if (sel != null && rg != null && ptv != null) Canvas(Modifier.fillMaxSize()) {
+            val k = (hdlPop.value * hdlGrow).coerceAtLeast(0f)
+            val halo = ((hdlGrow - 1f) / .3f).coerceIn(0f, 1f)
+            val rr = HDL_R * density
+            // tetesan bergaya M3 Expressive: bulat penuh dengan satu sudut lancip yang menyentuh tepi teks
+            fun hdl(o: Offset, start: Boolean) {
+                if (k <= .001f) return
+                val gx = HDL_GAP * density
+                val l = if (start) o.x - 2f * rr - gx else o.x + gx
+                val full = CornerRadius(rr)
+                val tip = CornerRadius(2.5f * density)
+                val shape = androidx.compose.ui.graphics.Path().apply {
+                    addRoundRect(
+                        RoundRect(
+                            l, o.y, l + 2f * rr, o.y + 2f * rr,
+                            topLeftCornerRadius = if (start) full else tip, topRightCornerRadius = if (start) tip else full,
+                            bottomRightCornerRadius = full, bottomLeftCornerRadius = full
+                        )
+                    )
+                }
+                scale(k, k, pivot = o) {
+                    if (halo > 0f) drawCircle(SEL_COLOR.copy(alpha = .2f * halo), 2.1f * rr, Offset(l + rr, o.y + rr))
+                    translate(0f, 1.6f * density) { drawPath(shape, Color.Black.copy(alpha = .18f)) }
+                    drawPath(shape, SEL_COLOR)
+                }
+            }
+            if (sel.a.p == index) handleXY(ptv, rg.first, rg.second, true, size.width, size.height)?.let { hdl(it, true) }
+            if (sel.b.p == index) handleXY(ptv, rg.first, rg.second, false, size.width, size.height)?.let { hdl(it, false) }
+        }
+        if (bmp == null && !bare) Box(Modifier.align(Alignment.Center)) { LoadingBlob(Modifier.size(36.dp)) }
+    }
+}
+
+
+// ---------------------------------------------------------------- bilah seleksi (grup tombol tersambung M3 Expressive)
+
+@Composable
+private fun PdfSelBar(onCopy: () -> Unit, onAll: () -> Unit, onCancel: () -> Unit) {
+    val pal = LocalPal.current
+    val items = listOf<Pair<String, () -> Unit>>("Copy" to onCopy, "Select all" to onAll, "Cancel" to onCancel)
+    Row(
+        Modifier.padding(5.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically
+    ) {
+        items.forEachIndexed { i, (label, f) -> PdfSelBtn(i, items.size, label, i == 0, f) }
+    }
+}
+
+/** Tombol bilah seleksi: ujung luar bulat penuh, sambungan antar tombol bersudut kecil; ditekan = semua sudut membulat + menyempit. Muncul memantul berurutan. */
+@Composable
+private fun PdfSelBtn(i: Int, n: Int, label: String, primary: Boolean, onClick: () -> Unit) {
+    val pal = LocalPal.current
+    val hap = LocalHapticFeedback.current
+    val src = remember { MutableInteractionSource() }
+    val pr by src.collectIsPressedAsState()
+    val outer by animateDpAsState(if (pr) 22.dp else 26.dp, spring(.55f, 700f), label = "pso")
+    val inner by animateDpAsState(if (pr) 22.dp else 7.dp, spring(.55f, 700f), label = "psi")
+    val sc by animateFloatAsState(if (pr) .92f else 1f, spring(.45f, 650f), label = "pss")
+    val pop = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { delay(50L + i * 35L); pop.animateTo(1f, spring(.6f, 460f)) }
+    val sC = if (i == 0) outer else inner
+    val eC = if (i == n - 1) outer else inner
+    Box(
+        Modifier.graphicsLayer { val p = pop.value.coerceAtLeast(0f); scaleX = p * sc; scaleY = p * sc }
+            .height(46.dp).widthIn(min = 64.dp)
+            .clip(RoundedCornerShape(topStart = sC, bottomStart = sC, topEnd = eC, bottomEnd = eC))
+            .background(if (primary) pal.p else pal.c4)
+            .clickable(interactionSource = src, indication = LocalIndication.current) {
+                hap.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onClick()
+            }
+            .padding(horizontal = 18.dp),
+        Alignment.Center
+    ) { T(label, 14f, 800, (if (primary) pal.op else pal.os).copy(alpha = if (label == "Cancel") .78f else 1f)) }
+}
+
+// ---------------------------------------------------------------- layar baca
+
+@Composable
+fun PdfScreen(vm: AppVM, id: String, act: Actions) {
+    val note = vm.note(id) ?: return
+    val ctx = LocalContext.current
+    val appPal = LocalPal.current
+    val file = remember(note.pdf) { PdfFiles.file(ctx, note.pdf) }
+    val scope = rememberCoroutineScope()
+    val doc = remember(file) { PdfDoc(file) }
+    val txt = remember(file) { PdfText(ctx, file) }
+    val ink = remember(file) { PInkState(PdfFiles.ink(ctx, note.pdf), scope) }
+    DisposableEffect(file) { onDispose { ink.flush(); doc.close(); txt.close() } }
+    LaunchedEffect(file) {
+        if (!file.exists()) { doc.failed = true; return@LaunchedEffect }
+        launch { ink.load() }
+        if (vm.note(id)?.cv?.isEmpty() == true) {
+            val cvId = withContext(Dispatchers.IO) { makePdfCover(vm, file) }
+            if (cvId.isNotEmpty()) vm.upd(id) { if (it.cv.isEmpty()) it.copy(cv = cvId, cx = .5f, cy = 0f, cz = 1f) else it }
+        }
+        doc.open()
+        if (doc.ok) {
+            launch { doc.loadRatios() }
+            PdfBus.hasText = false
+            PdfBus.hasText = txt.detect(doc.count)
+        }
+    }
+
+    val dark = when (note.pdk) { 1 -> true; 2 -> false; else -> appPal.dark }
+    val vpal = remember(dark, appPal, vm.pr.seed, vm.pr.dyn, vm.pr.mono) {
+        if (dark == appPal.dark) appPal else {
+            val base = (if (vm.pr.dyn && Build.VERSION.SDK_INT >= 31) dynamicPal(ctx, if (dark) "dark" else "light") else null)
+                ?: buildPal(if (dark) "dark" else "light", vm.pr.seed)
+            if (vm.pr.mono) base.toMono() else base
+        }
+    }
+    val cp = remember(appPal, vm.pr.seed, vm.pr.dyn, vm.pr.mono) {
+        if (appPal.dark) appPal else {
+            val base = (if (vm.pr.dyn && Build.VERSION.SDK_INT >= 31) dynamicPal(ctx, "dark") else null) ?: buildPal("dark", vm.pr.seed)
+            if (vm.pr.mono) base.toMono() else base
+        }
+    }
+    val ui = remember(file) { PdfUi(doc, ink, note.pdf).also { it.dark = dark; it.inkPal = vpal; it.ts = vm.pr.ts; it.txt = txt } }
+    SideEffect { ui.dark = dark; ui.inkPal = vpal; ui.ts = vm.pr.ts }
+    val view = LocalView.current
+    LaunchedEffect(Unit) {
+        val w = (view.context as Activity).window
+        snapshotFlow { vm.openP.value > .2f }.collect { dk ->
+            WindowCompat.getInsetsController(w, view).isAppearanceLightStatusBars = if (dk) false else !appPal.dark
+        }
+    }
+    DisposableEffect(appPal.dark) {
+        onDispose {
+            val w = (view.context as Activity).window
+            WindowCompat.getInsetsController(w, view).isAppearanceLightStatusBars = !appPal.dark
+        }
+    }
+    if (PdfBus.mode < 0) PdfBus.mode = ctx.getSharedPreferences("dinduy", 0).getInt("pdfmode", 0)
+    if (PdfBus.curl < 0) PdfBus.curl = ctx.getSharedPreferences("dinduy", 0).getInt("pdfcurl", 0)
+    if (PdfBus.curlStyle < 0) PdfBus.curlStyle = ctx.getSharedPreferences("dinduy", 0).getInt("pdfcurlstyle", 0)
+
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalPal provides cp,
+        androidx.compose.material3.LocalContentColor provides cp.os
+    ) {
+        Box(
+            Modifier.fillMaxSize().background(Color.Black).graphicsLayer {
+                // buka/tutup dari beranda: isi PDF berkedip sangat cepat (pudar-silang dengan sampul kartu), bukan ikut membesar dari kartu.
+                // Rentang pudar dipersempit (dulu .20-.45, sekarang .14-.26 dari progres morph) supaya kedipnya singkat.
+                val x = ((vm.openP.value - .14f) / .12f).coerceIn(0f, 1f)
+                alpha = x * x * (3f - 2f * x)
+            }
+        ) {
+            when {
+                doc.failed -> {
+                    var shown by remember { mutableStateOf(false) }
+                    LaunchedEffect(Unit) { shown = true }
+                    val pop by animateFloatAsState(if (shown) 1f else 0f, spring(.45f, 260f), label = "errpop")
+                    Column(
+                        Modifier.fillMaxSize().padding(32.dp), Arrangement.Center, Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            Modifier.graphicsLayer { scaleX = pop; scaleY = pop; rotationZ = (1f - pop) * -14f }
+                                .size(112.dp).clip(RoundedCornerShape(40.dp)).background(cp.ec),
+                            Alignment.Center
+                        ) { PIc("page", cp.oec, 52.dp) }
+                        Spacer(Modifier.height(28.dp))
+                        T("This PDF can't be opened", 24f, 800, cp.os)
+                        Spacer(Modifier.height(8.dp))
+                        T("The file is missing, damaged, or protected with a password.", 15f, 400, cp.osv)
+                        Spacer(Modifier.height(28.dp))
+                        val esrc = remember { MutableInteractionSource() }
+                        val epr by esrc.collectIsPressedAsState()
+                        val er by animateDpAsState(if (epr) 14.dp else 28.dp, spring(.55f, 700f), label = "errbtn")
+                        Row(
+                            Modifier.clip(RoundedCornerShape(er)).background(cp.p)
+                                .clickable(interactionSource = esrc, indication = LocalIndication.current) { vm.nav.pop() }
+                                .padding(horizontal = 26.dp, vertical = 15.dp),
+                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Ic("back", cp.op, 20.dp)
+                            T("Go back", 15f, 800, cp.op)
+                        }
+                    }
+                }
+                !doc.ok -> Box(Modifier.fillMaxSize(), Alignment.Center) { LoadingBlob(Modifier.size(56.dp)) }
+                else -> PdfReader(vm, id, act, ui, txt, note)
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- Silk curl: gaya 3D kedua (mesin PlayLikeCurl asli, kode di app.dinduy.silkcurl)
+
+private class SilkGeo(
+    val pw: Float, val ph: Float, val vw: Float, val vh: Float,
+    val left: Float, val top: Float, val avail: Float, val topPad: Float
+)
+
+/**
+ * Geser horizontal untuk Silk curl, dipasang SETELAH pinch() dan curlTouch() (pass Main): geseran saat diperbesar, saat mode cari,
+ * atau saat dua jari sudah dimakan di pass Initial, jadi tidak pernah sampai sini. Gestur hanya DITERUSKAN ke mesin (SilkController.drag*):
+ * kurva, drag, fling, dan settlement dikerjakan mesin PlayLikeCurl sendiri. [onEnd] menerima (posisi, waktu, dibatalkan).
+ */
+private fun Modifier.silkDrag(
+    canStart: (Int) -> Boolean,
+    onStart: (Int, Offset, Long) -> Unit,
+    onMove: (Offset, Long) -> Unit,
+    onEnd: (Offset, Long, Boolean) -> Unit
+): Modifier = pointerInput(Unit) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false)
+        val slop = awaitHorizontalTouchSlopOrCancellation(down.id) { change, _ -> change.consume() } ?: return@awaitEachGesture
+        val dir = if (slop.position.x < down.position.x) 1 else -1   // 1 = maju (geser ke kiri)
+        if (!canStart(dir)) return@awaitEachGesture
+        onStart(dir, down.position, down.uptimeMillis)
+        var lastP = slop.position
+        var lastT = slop.uptimeMillis
+        onMove(lastP, lastT)
+        val ok = horizontalDrag(slop.id) { c ->
+            lastP = c.position
+            lastT = c.uptimeMillis
+            onMove(lastP, lastT)
+            c.consume()
+        }
+        onEnd(lastP, lastT, !ok)
+    }
+}
+
+private suspend fun silkLoad(ui: PdfUi, i: Int, bk: Int): Bitmap? {
+    if (!ui.doc.ok) return null
+    val key = ui.fid + ":" + i + "@" + bk
+    PdfCache.get(key)?.let { return it }
+    val b = ui.doc.render(i, bk) ?: return null
+    PdfCache.put(key, b)
+    return b
+}
+
+/**
+ * Halaman yang punya coretan dibakar ke salinan bitmap (bitmap PdfCache bersama dan tidak pernah diubah / di-recycle). Di mode gelap
+ * halaman dibalik dulu persis seperti PdfPage, baru dicoret, lalu ditandai preInverted supaya shader tidak membalik lagi.
+ */
+private fun silkBake(src: Bitmap, strokes: List<PInk>, dark: Boolean, pal: Pal): SilkPage {
+    val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+    val cv = androidx.compose.ui.graphics.Canvas(out.asImageBitmap())
+    val w = src.width.toFloat()
+    val h = src.height.toFloat()
+    CanvasDrawScope().draw(Density(1f), LayoutDirection.Ltr, cv, Size(w, h)) {
+        drawImage(src.asImageBitmap(), colorFilter = if (dark) INVERT else null)
+        for (s in strokes) {
+            val n = s.p.size / 3
+            val a = FloatArray(n * 3)
+            for (i in 0 until n) { a[i * 3] = s.p[i * 3] * w; a[i * 3 + 1] = s.p[i * 3 + 1] * w; a[i * 3 + 2] = s.p[i * 3 + 2] }
+            val path = inkPath(a, n, s.t, s.w * w)
+            val col = inkColor(pal, s.c, s.t == 1)
+            if (s.t == 1) drawPath(
+                path, col, alpha = .85f, style = Stroke(s.w * w, cap = StrokeCap.Butt, join = StrokeJoin.Round),
+                blendMode = if (dark) BlendMode.Screen else BlendMode.Multiply
+            ) else drawPath(path, col)
+        }
+    }
+    return SilkPage(out, preInverted = dark)
+}
+
+/**
+ * Selama [active] (ada seleksi teks), geseran satu jari TIDAK boleh sampai ke pembalik halaman di bawahnya (PageCurl): gerakan yang melewati batas geser
+ * dimakan di pass Initial. Dipasang SETELAH curlTouch / pinch (pass Initial berjalan dari luar ke dalam), jadi ketukan, cubitan, geser gambar saat diperbesar,
+ * dan gagang seleksi (sudah dimakan induk paling luar) tidak terganggu. Tekan lama tanpa bergerak tetap lewat (membuat / mengganti seleksi).
+ */
+private fun Modifier.noFlipWhile(active: () -> Boolean): Modifier = pointerInput(Unit) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        if (!active()) return@awaitEachGesture
+        down.consume()   // library tidak boleh melihat sentuhan baru ini sebagai awal ketukan / geseran selagi ada seleksi
+        var moved = false
+        while (true) {
+            val ev = awaitPointerEvent(PointerEventPass.Initial)
+            val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+            if (c.changedToUp() || !c.pressed) {
+                // sentuhan apa pun yang berakhir selagi ada seleksi tidak boleh sampai ke ketukan bawaan library (yang membalik halaman)
+                if (!c.isConsumed && active()) c.consume()
+                break
+            }
+            if (ev.changes.count { it.pressed } >= 2) continue
+            if (!moved && (c.position - down.position).getDistance() > viewConfiguration.touchSlop) moved = true
+            if (moved && !c.isConsumed && active()) c.consume()
+        }
+    }
+}
+
+/** Jendela bitmap untuk mesin: halaman cur-2 .. cur+2 (cur +-1 dipakai deck, +-2 supaya deck halaman tujuan langsung lengkap). */
+private class SilkWin(val cur: Int, val pages: Array<SilkPage?>, val dark: Boolean)
+
+/**
+ * Mode halaman 3D gaya Silk, memakai mesin PlayLikeCurl asli (OpenGL ES 2.0). Mesin yang menggambar kurva dan menjalankan geser / fling / settlement;
+ * di sini hanya: menyuplai bitmap (PdfCache, tidak pernah di-recycle), meneruskan gestur yang valid, dan menyinkronkan [cur] dengan page / goTo / startPage.
+ * Zoom > 1 mematikan curl: halaman diperbesar digambar Compose (pan tetap jalan) di atas GL. Teks dan coretan baru tidak aktif di sini
+ * (seperti Classic, coret aktif -> pager biasa).
  */
 @Composable
-fun Fab(vm: AppVM, act: Actions, small: Boolean, hide: Boolean, lift: Dp) {
-    val ctx = LocalContext.current
-    val pal = LocalPal.current
-    val src = remember { MutableInteractionSource() }
-    val pr by src.collectIsPressedAsState()
+private fun PdfSilkCurl(
+    vm: AppVM, ui: PdfUi, count: Int, vwDp: Dp, vhDp: Dp, topPad: Dp, sab: Dp, dens: Float, startPage: Int,
+    page: Int, onPage: (Int) -> Unit, goTo: PHit?, clearGoTo: () -> Unit, findOn: Boolean,
+    onTap: () -> Unit, onFail: () -> Unit
+) {
     val scope = rememberCoroutineScope()
-    val haptic = LocalHapticFeedback.current
-    // morph dari tombol ini: wadah catatan menggambar tombolnya sendiri, jadi tombol asli tidak boleh mengecil / memudar
-    // sendiri di atas catatan (itu yang tampak sebagai kedip di bawah layar). Cukup disembunyikan di fase gambar (fabCovered).
-    val viaMorph = vm.morph?.fabg != null && (FabFx.drag || vm.nav.stack.any { it is Scr.Note })
-    val gone = (hide || FabFx.drag) && !viaMorph
-    // bilah voice note cepat (QuickVoice) menggambar bentuk yang sama persis di atas tombol ini; selama ia aktif tombol asli
-    // harus benar-benar hilang (tanpa animasi, tanpa skala) supaya tidak ada dua tombol bertumpuk. Dibaca di lambda gambar
-    // agar tidak memicu rekomposisi tiap frame saat bilah ditarik.
-    val sc by animateFloatAsState(if (gone) .4f else if (pr) .93f else 1f, spring(.55f, 500f), label = "sc")
-    val al by animateFloatAsState(if (gone) 0f else 1f, tween(if (FabFx.drag) 80 else 250), label = "al")
-    val r by animateDpAsState(if (pr) 22.dp else 32.dp, spring(.6f, 500f), label = "r")
-    val ly by animateDpAsState(lift, spring(.7f, 400f), label = "ly")
-    // dilepas dari komposisi selama catatan terbuka: tombol tak terlihat TIDAK boleh tetap menangkap sentuhan di pojok kanan bawah
-    if (hide && (viaMorph || al <= .01f)) return
-    val sab = sabDp()
-    val dens = LocalDensity.current.density
-    val shape = RoundedCornerShape(r)
-    Box(Modifier.fillMaxSize().padding(end = 20.dp, bottom = 24.dp + sab), contentAlignment = Alignment.BottomEnd) {
-        Row(
-            Modifier.offset(y = -ly)
-                .onGloballyPositioned { c ->
-                    val b = c.boundsInWindow()
-                    if (!hide && b.width > 0f) vm.fabMorph = Morph(b.left, b.top, b.right, b.bottom, 32f * dens, pal.pc, card = true, fabg = FabGhost(!small, pal.opc))
-                }
-                .graphicsLayer {
-                    val q = quickCoversFab(vm)
-                    scaleX = if (q) 1f else sc; scaleY = if (q) 1f else sc
-                    // catatan yang membuka (morph kartu) menutupi tombol secara bertahap mengikuti progresnya, tanpa animasi sendiri
-                    val kp = (1f - vm.openP.value.coerceIn(0f, 1f) / .5f).coerceIn(0f, 1f)
-                    alpha = if (q || fabCovered(vm)) 0f else al * kp * kp * (3f - 2f * kp)
-                    transformOrigin = TransformOrigin(1f, 1f)
-                }
-                .shadow(
-                    if (pal.dark) 4.dp else 3.dp, shape, clip = false,
-                    ambientColor = pal.p.copy(alpha = if (pal.dark) .35f else .22f),
-                    spotColor = pal.p.copy(alpha = if (pal.dark) .45f else .32f)
-                )
-                .height(88.dp).widthIn(min = 88.dp).clip(shape).background(pal.pc)
-                .indication(src, LocalIndication.current)
-                .semantics(mergeDescendants = true) {
-                    role = Role.Button
-                    onClick("New note") { if (!hide) openNewFromFab(vm); true }
-                    onLongClick("Add voice note") { if (!hide) vm.addOn = true; true }
-                }
-                .pointerInput(hide) {
-                    if (hide) return@pointerInput
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        val press = PressInteraction.Press(down.position)
-                        scope.launch { src.emit(press) }
-                        val slop = viewConfiguration.touchSlop
-                        val sx = down.position.x
-                        val sy = down.position.y
-                        var res = 0   // 0 batal, 1 ketuk, 2 tarik ke atas, 3 geser ke kiri
-                        val held = withTimeoutOrNull(FAB_HOLD_MS) {
-                            var done = false
-                            while (!done) {
-                                val ev = awaitPointerEvent()
-                                val c = ev.changes.firstOrNull { it.id == down.id }
-                                if (c == null || c.isConsumed) { res = 0; done = true }
-                                else if (c.changedToUpIgnoreConsumed()) { res = 1; done = true }
-                                else {
-                                    val dx = c.position.x - sx
-                                    val dy = c.position.y - sy
-                                    if (dy < -slop && abs(dy) > abs(dx)) { res = 2; done = true }
-                                    else if (dx < -slop && abs(dx) > abs(dy)) { res = 3; done = true }
-                                    else if (abs(dx) > slop * 2f || dy > slop * 2f) { res = 0; done = true }
-                                }
-                            }
-                            true
-                        }
-                        if (held == null) {
-                            // ditahan cukup lama tanpa bergerak: sheet tambah
-                            scope.launch { src.emit(PressInteraction.Release(press)) }
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            vm.addOn = true
-                            return@awaitEachGesture
-                        }
-                        when (res) {
-                            1 -> {
-                                scope.launch { src.emit(PressInteraction.Release(press)) }
-                                openNewFromFab(vm)
-                            }
-                            2 -> {
-                                scope.launch { src.emit(PressInteraction.Cancel(press)) }
-                                val n = vm.newNote()
-                                FabFx.drag = true
-                                scope.launch { vm.openP.snapTo(0f) }
-                                vm.nav.openNote(n.id, vm.fabMorph, false)
-                                val dist = 260.dp.toPx()
-                                val tracker = VelocityTracker()
-                                tracker.addPosition(down.uptimeMillis, down.position)
-                                var p = 0f
-                                var passed = false
-                                while (true) {
-                                    val ev = awaitPointerEvent()
-                                    val c = ev.changes.firstOrNull { it.id == down.id } ?: break
-                                    tracker.addPosition(c.uptimeMillis, c.position)
-                                    val up = c.changedToUpIgnoreConsumed()
-                                    c.consume()
-                                    if (up) break
-                                    p = ((sy - c.position.y) / dist).coerceIn(0f, 1f)
-                                    val v = p
-                                    // progres mengejar jari lewat spring kaku (bukan loncat per sampel sentuh): gerak wadah mulus walau
-                                    // sampel sentuh tidak rata, dan kecepatannya berlanjut mulus ke animasi lepas jari di bawah
-                                    scope.launch { vm.openP.animateTo(v, spring(1f, 1400f)) }
-                                    val nowPassed = p > .3f
-                                    if (nowPassed != passed) { passed = nowPassed; haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
-                                }
-                                val vy = tracker.calculateVelocity().y
-                                val commit = p > .3f || vy < -1100f
-                                scope.launch {
-                                    if (commit) {
-                                        vm.openP.animateTo(1f, spring(.85f, 560f))
-                                        FabFx.drag = false
-                                        vm.ed?.let { it.focusAt(it.blocks[0].id, 0) }   // keyboard baru muncul setelah halaman terbuka
-                                    } else {
-                                        vm.openP.animateTo(0f, spring(1f, 700f))
-                                        vm.nav.pop()
-                                        FabFx.drag = false
-                                    }
-                                }
-                            }
-                            3 -> {
-                                scope.launch { src.emit(PressInteraction.Cancel(press)) }
-                                if (vm.rec.active) {
-                                    vm.show("Already recording")
-                                    return@awaitEachGesture
-                                }
-                                if (!micOk(ctx)) {
-                                    // belum ada izin mikrofon: minta dulu, geser lagi setelah diizinkan
-                                    act.requestMic { }
-                                    return@awaitEachGesture
-                                }
-                                QuickFx.drag = true
-                                val dist = 220.dp.toPx()
-                                val tracker = VelocityTracker()
-                                tracker.addPosition(down.uptimeMillis, down.position)
-                                var p = 0f
-                                var passed = false
-                                while (true) {
-                                    val ev = awaitPointerEvent()
-                                    val c = ev.changes.firstOrNull { it.id == down.id } ?: break
-                                    tracker.addPosition(c.uptimeMillis, c.position)
-                                    val up = c.changedToUpIgnoreConsumed()
-                                    c.consume()
-                                    if (up) break
-                                    p = ((sx - c.position.x - slop).coerceAtLeast(0f) / dist).coerceIn(0f, 1f)
-                                    val v = p
-                                    // progres mengejar jari lewat spring kaku (bukan snapTo): kecepatan jari terbawa mulus ke animasi lepas jari
-                                    scope.launch { QuickFx.p.animateTo(v, spring(1f, 1400f)) }
-                                    val nowPassed = p > .35f
-                                    if (nowPassed != passed) { passed = nowPassed; haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
-                                }
-                                val vx = tracker.calculateVelocity().x
-                                QuickFx.drag = false
-                                if (p > .35f || vx < -1000f) {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    scope.launch {
-                                        // bilah mekar LEBIH DULU dan tidak menunggu perekam: MediaRecorder disiapkan di thread IO,
-                                        // jadi main thread tidak terblokir dan gerak tidak berhenti di tengah
-                                        val grow = launch { QuickFx.p.animateTo(1f, spring(.8f, 480f)) }
-                                        if (!quickStartAsync(vm)) {
-                                            grow.cancel()
-                                            QuickFx.p.animateTo(0f, spring(1f, 600f))
-                                        }
-                                    }
-                                } else {
-                                    scope.launch { QuickFx.p.animateTo(0f, spring(1f, 600f)) }
-                                }
-                            }
-                            else -> scope.launch { src.emit(PressInteraction.Cancel(press)) }
-                        }
-                    }
-                }
-                .padding(horizontal = 28.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center
-        ) {
-            Ic("plus", pal.opc, 36.dp)
-            AnimatedVisibility(
-                visible = !small,
-                enter = expandHorizontally(tween(320, easing = Emph), expandFrom = Alignment.Start) + fadeIn(tween(240, 60)),
-                exit = shrinkHorizontally(tween(280, easing = Emph), shrinkTowards = Alignment.Start) + fadeOut(tween(120))
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Spacer(Modifier.width(14.dp))
-                    T("New", 22f, 900, pal.opc, maxLines = 1)
-                }
-            }
+    val countNow by rememberUpdatedState(count)
+    val findNow by rememberUpdatedState(findOn)
+    val onPageNow by rememberUpdatedState(onPage)
+    val onTapNow by rememberUpdatedState(onTap)
+    val onFailNow by rememberUpdatedState(onFail)
+
+    // ---- ukuran: persis seperti cabang Classic (halaman di tengah area di antara bilah atas dan bawah)
+    val r0 = ui.doc.ratioOf(startPage)
+    val availDp = vhDp - topPad - sab - 12.dp
+    val w0 = minOf(vwDp, availDp / r0)
+    val pwPx = w0.value * dens
+    val phPx = pwPx * r0
+    val vwPx = vwDp.value * dens
+    val vhPx = vhDp.value * dens
+    val availPx = availDp.value * dens
+    val geo = SilkGeo(pwPx, phPx, vwPx, vhPx, (vwPx - pwPx) / 2f, topPad.value * dens + (availPx - phPx) / 2f, availPx, topPad.value * dens)
+    val geoNow by rememberUpdatedState(geo)
+    val bk = bucket(pwPx.roundToInt())
+    // Halaman yang lebih tinggi dari ~1.8 x lebarnya tak muat di frustum kamera mesin (tinggi dunia 2.08): diperkecil di tengah supaya tidak terpotong.
+    val fit = min(1f, 1.8f / r0)
+
+    var cur by remember { mutableIntStateOf(page.coerceIn(0, max(0, count - 1))) }
+    var cz by remember { mutableFloatStateOf(1f) }
+    var cpan by remember { mutableStateOf(Offset.Zero) }
+    val cMul by remember { derivedStateOf { ceil(cz).coerceAtLeast(1f) } }
+
+    val ctl = remember {
+        SilkController { onFailNow() }.also { c -> c.onPage = { p -> cur = p; onPageNow(p) } }   // balikan selesai (mesin) -> state luar
+    }
+
+    // seleksi teks tidak jalan di atas GLSurfaceView
+    LaunchedEffect(Unit) { ui.sel = null }
+
+    // ---- bitmap: peta kecil, hanya jendela cur-2..cur+2; dibuat ulang bila resolusi / mode gelap / coretan berubah.
+    // Mesin menerima bitmap APA ADANYA (tidak ada shader invert): mode gelap dan coretan dibakar ke salinan di sini, di latar belakang.
+    val pages = remember(bk, ui.dark, ui.ink.list) { mutableStateMapOf<Int, SilkPage>() }
+    suspend fun make(i: Int, res: Int): SilkPage? {
+        val b = silkLoad(ui, i, res) ?: return null
+        val strokes = ui.ink.byPage[i]
+        val pal = ui.inkPal
+        val dk = ui.dark
+        return withContext(Dispatchers.Default) {
+            if (!strokes.isNullOrEmpty() && pal != null) silkBake(b, strokes, dk, pal)
+            else if (dk) SilkPage(silkInverted(b), true)
+            else SilkPage(b, false)
         }
     }
-}
-
-@Composable
-fun SelBar(vm: AppVM) {
-    val pal = LocalPal.current
-    val sat = satDp()
-    var count by remember { mutableStateOf(0) }
-    if (vm.sel.isNotEmpty()) count = vm.sel.size
-    AnimatedVisibility(
-        visible = vm.sel.isNotEmpty(),
-        enter = slideInVertically(tween(450, easing = Emph)) { -it }, exit = slideOutVertically(tween(450, easing = Emph)) { -it }
-    ) {
-        Row(
-            Modifier.fillMaxWidth().height(sat + 72.dp).background(pal.bg).padding(top = sat + 12.dp, start = 10.dp, end = 10.dp),
-            verticalAlignment = Alignment.Top
-        ) {
-            IconBtn("x", pal.os, { vm.sel.clear() }, size = 48.dp)
-            Box(Modifier.weight(1f).height(48.dp).padding(start = 6.dp), Alignment.CenterStart) { T("$count selected", 18f, 900, pal.os) }
-            IconBtn("all", pal.os, { vm.liveF().forEach { if (it.id !in vm.sel) vm.sel.add(it.id) } }, size = 48.dp)
-            IconBtn("pin", pal.os, {
-                val ids = vm.sel.toList()
-                if (ids.isNotEmpty()) {
-                    val all = ids.all { vm.note(it)?.p == true }
-                    vm.sel.clear()
-                    vm.mark(ids, if (all) "Note unpinned" else "${cnt(ids.size, "note")} pinned") { it.copy(p = !all) }
-                }
-            }, size = 48.dp)
-            IconBtn("arc", pal.os, {
-                val ids = vm.sel.toList()
-                if (ids.isNotEmpty()) { vm.sel.clear(); vm.mark(ids, "${cnt(ids.size, "note")} archived") { it.copy(a = true, p = false) } }
-            }, size = 48.dp)
-            IconBtn("del", pal.os, {
-                val ids = vm.sel.toList()
-                if (ids.isNotEmpty()) { vm.sel.clear(); vm.mark(ids, "${cnt(ids.size, "note")} moved to Trash") { it.copy(dt = System.currentTimeMillis()) } }
-            }, size = 48.dp)
+    LaunchedEffect(pages, cur, ui.doc.ok) {
+        for (k in pages.keys.toList()) if (k < cur - 2 || k > cur + 2) pages.remove(k)
+        for (d in intArrayOf(0, 1, -1, 2, -2)) {
+            val i = cur + d
+            if (i !in 0 until countNow || pages[i] != null) continue
+            val sp = make(i, bk) ?: continue
+            if (i in (cur - 2)..(cur + 2)) pages[i] = sp
         }
     }
-}
-
-// ---------- arsip & sampah ----------
-@Composable
-fun ListScreen(
-    vm: AppVM, title: String, notes: List<Note>, hint: String?, empty: String, trash: Boolean,
-    onBack: () -> Unit, onClick: (Note) -> Unit, onClear: (() -> Unit)? = null
-) {
-    val pal = LocalPal.current
-    val sat = satDp()
-    val sab = sabDp()
-    var hPx by remember { mutableFloatStateOf(0f) }
-    val dens = LocalDensity.current.density
-    var tick by remember { mutableIntStateOf(0) }
-    val seen = remember { HashSet<String>() }
-    LaunchedEffect(Unit) { delay(560); tick++ }
-    Column(Modifier.fillMaxSize().background(pal.bg).onSizeChanged { hPx = it.height.toFloat() }) {
-        Row(
-            Modifier.fillMaxWidth().padding(top = sat + 8.dp, bottom = 8.dp, start = 12.dp, end = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconBtn("back", pal.os, onBack)
-            T(title, 22f, 900, pal.os, Modifier.weight(1f).padding(start = 8.dp), ls = -.01f, maxLines = 1)
-            if (onClear != null && notes.isNotEmpty()) IconBtn("del", pal.os, onClear)
-        }
-        if (hint != null) T(hint, 14f, 600, pal.osv, Modifier.padding(start = 24.dp, end = 24.dp, bottom = 8.dp))
-        LazyColumn(
-            Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 40.dp + sab),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            if (notes.isEmpty()) item(key = "empty-list") {
-                T(empty, 17f, 600, pal.osv, flowItem().fillMaxWidth().padding(vertical = 48.dp), align = androidx.compose.ui.text.style.TextAlign.Center)
-            }
-            itemsIndexed(notes, key = { _, it -> it.id }) { ix, d ->
-                androidx.compose.runtime.DisposableEffect(d.id) { onDispose { vm.cardMorph.remove(d.id) } }
-                val first = remember(d.id) { d.id !in seen }
-                val prog = remember(d.id) { Animatable(if (first) 0f else 1f) }
-                LaunchedEffect(d.id) {
-                    if (first) {
-                        delay(minOf(ix, 8) * 55L); seen.add(d.id)
-                        prog.animateTo(1f, spring(.75f, 380f))
-                    }
-                }
-                NoteCard(
-                    d, ix, "f", false,
-                    flowItem()
-                        .makeRoom(vm, d.id, ix, { notes.indexOfFirst { it.id == vm.openId } }, hPx, dens)
-                        .graphicsLayer {
-                            val pv = prog.value
-                            alpha = pv.coerceIn(0f, 1f); translationY = (1f - pv) * 28.dp.toPx()
-                            val s = .94f + .06f * pv.coerceIn(0f, 1f); scaleX = s; scaleY = s
-                        },
-                    delTime = if (trash) d.dt else 0L,
-                    track = { m -> vm.cardMorph[d.id] = m }, tick = tick
-                ) { onClick(d) }
-            }
-        }
+    // ---- sinkron dengan state luar: loncat dari pencarian / kapsul, halaman terakhir (page -> vm.upd di PdfReader)
+    LaunchedEffect(goTo) {
+        val h = goTo ?: return@LaunchedEffect
+        clearGoTo()
+        cur = h.page.coerceIn(0, max(0, countNow - 1))   // controller.sync membatalkan balikan yang sedang jalan
     }
-}
-
-// ---------- pengaturan: gaya aplikasi Google (Pixel Settings + Material 3 Expressive) ----------
-const val POS_ONE = 0
-const val POS_TOP = 1
-const val POS_MID = 2
-const val POS_BOT = 3
-
-/** Pegas tinggi untuk semua kartu di Pengaturan: tinggi berubah mengikuti isi dengan gerak lembut tanpa memantul. */
-val SizeSpring = spring<androidx.compose.ui.unit.IntSize>(dampingRatio = .9f, stiffness = 420f)
-
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.slab(c: Color, l: Float, r: Float, y: Float, h: Float, rl: Float, rr: Float) {
-    if (r - l < 1f) return
-    val p = androidx.compose.ui.graphics.Path().apply {
-        addRoundRect(
-            androidx.compose.ui.geometry.RoundRect(
-                l, y, r, y + h,
-                topLeftCornerRadius = androidx.compose.ui.geometry.CornerRadius(rl),
-                topRightCornerRadius = androidx.compose.ui.geometry.CornerRadius(rr),
-                bottomRightCornerRadius = androidx.compose.ui.geometry.CornerRadius(rr),
-                bottomLeftCornerRadius = androidx.compose.ui.geometry.CornerRadius(rl)
-            )
-        )
+    LaunchedEffect(page) {
+        if (page != cur && !ctl.busy && !ctl.hasQueuedTurns) cur = page.coerceIn(0, max(0, countNow - 1))
     }
-    drawPath(p, c)
-}
+    LaunchedEffect(cur) { cz = 1f; cpan = Offset.Zero }
 
-/** Slider M3 Expressive: trek tebal terbelah di sekitar gagang; gagang menipis dan memanjang saat disentuh. */
-@Composable
-fun BigSlider(value: Float, min: Float, max: Float, onChange: (Float) -> Unit) {
-    val pal = LocalPal.current
-    var w by remember { mutableStateOf(1f) }
-    var down by remember { mutableStateOf(false) }
-    val f = ((value - min) / (max - min)).coerceIn(0f, 1f)
-    val fa by animateFloatAsState(f, spring(1f, 1200f), label = "sf")
-    val hw by animateFloatAsState(if (down) 2f else 4f, spring(.6f, 600f), label = "shw")
-    val hh by animateFloatAsState(if (down) 56f else 44f, spring(.6f, 600f), label = "shh")
-    fun at(x: Float) = onChange((min + (x / w).coerceIn(0f, 1f) * (max - min)).let { Math.round(it).toFloat().coerceIn(min, max) })
+    // Geseran jari: dicatat untuk menentukan balikan selesai atau dibatalkan (kembali ke halaman semula)
+    val dg = remember { FloatArray(6) }          // 0 = x awal, 1 = x terakhir (untuk kecepatan), 2 = kecepatan x (px/dtk), 3 = arah, 4-5 = cadangan
+    val dgT = remember { LongArray(1) }
+
+    // Curl hanya boleh jalan bila tidak diperbesar, tidak dalam mode cari, dan tidak ada seleksi teks. Sibuk / sedang settle BUKAN alasan menolak:
+    // mesin sendiri yang mengambil alih halaman yang sedang kembali, menunda geseran saat balikan selesai, dan merantai ketukan.
+    fun curlAllowed() = cz <= 1.02f && !findNow && ui.sel == null
+
+    // Ketukan tepi: maju dan mundur memakai jalur yang sama (turn() mesin, durasi / easing diatur di PlayLikeCurlModel). Ketukan beruntun
+    // diantrikan dan dirantai oleh mesin, tidak ada yang diabaikan.
+    fun tapTurn(forward: Boolean) {
+        if (!curlAllowed()) return
+        ctl.turn(forward)
+    }
+
+    fun cClamp(o: Offset, z: Float): Offset {
+        val g = geoNow
+        val mx = ((g.pw * z - g.vw) / 2f).coerceAtLeast(0f)
+        val my = ((g.ph * z - g.avail) / 2f).coerceAtLeast(0f)
+        return Offset(o.x.coerceIn(-mx, mx), o.y.coerceIn(-my, my))
+    }
+    fun cZoom(z1: Float, c: Offset, delta: Offset = Offset.Zero) {
+        val g = geoNow
+        val k = z1 / cz
+        val origin = Offset(g.vw / 2f, g.topPad + g.avail / 2f)
+        cpan = cClamp((c - origin) * (1f - k) + cpan * k + delta, z1)
+        cz = z1
+    }
+
+    // ---- kirim jendela bitmap ke mesin. snapshotFlow memantau cur / isi peta / mode gelap dan mendorong satu sync per perubahan.
+    LaunchedEffect(ctl) {
+        snapshotFlow {
+            val c = cur
+            SilkWin(c, Array(5) { k -> pages[c - 2 + k] }, ui.dark)
+        }.collect { w -> ctl.sync(w.cur, countNow, w.pages, w.dark) }
+    }
+
     Box(
-        Modifier.fillMaxWidth().height(56.dp).onSizeChanged { w = it.width.toFloat().coerceAtLeast(1f) }
-            .pointerInput(min, max) { detectTapGestures { at(it.x) } }
-            .pointerInput(min, max) {
-                detectDragGestures(
-                    onDragStart = { down = true; at(it.x) },
-                    onDragEnd = { down = false },
-                    onDragCancel = { down = false }
-                ) { ch, _ -> ch.consume(); at(ch.position.x) }
-            }
-            .drawBehind {
-                val th = 18.dp.toPx()
-                val y = (size.height - th) / 2
-                val hwp = hw.dp.toPx()
-                val gap = 6.dp.toPx()
-                val tx = (size.width * fa).coerceIn(hwp / 2, size.width - hwp / 2)
-                slab(pal.p, 0f, tx - hwp / 2 - gap, y, th, th / 2, 3.dp.toPx())
-                slab(pal.sc, tx + hwp / 2 + gap, size.width, y, th, 3.dp.toPx(), th / 2)
-                val hp = hh.dp.toPx()
-                drawRoundRect(
-                    pal.p, Offset(tx - hwp / 2, (size.height - hp) / 2), Size(hwp, hp),
-                    androidx.compose.ui.geometry.CornerRadius(hwp / 2)
-                )
-            }
-    )
-}
-
-/** Tombol segmen pil: indikator meluncur dengan pegas dan meregang selagi bergerak (morphing). */
-@Composable
-fun SegPill(n: Int, sel: Int, onSel: (Int) -> Unit, h: Dp = 52.dp, item: @Composable (Int, Color) -> Unit) {
-    val pal = LocalPal.current
-    val x = animateFloatAsState(sel.toFloat(), spring(.62f, 380f), label = "seg")
-    Box(Modifier.fillMaxWidth().height(h).clip(CircleShape).background(pal.c4).padding(4.dp)) {
-        Box(
-            Modifier.fillMaxHeight().fillMaxWidth(1f / n)
-                .graphicsLayer {
-                    val st = Math.abs(sel - x.value).coerceAtMost(1f)
-                    translationX = x.value * size.width
-                    scaleX = 1f + .22f * st
-                    scaleY = 1f - .08f * st
-                }
-                .clip(CircleShape).background(pal.p)
-        )
-        Row(Modifier.fillMaxSize()) {
-            for (i in 0 until n) {
-                val fg by animateColorAsState(if (i == sel) pal.op else pal.os, tween(220), label = "segfg")
-                Box(
-                    Modifier.weight(1f).fillMaxHeight().clip(CircleShape).clickable { onSel(i) },
-                    Alignment.Center
-                ) { item(i, fg) }
-            }
-        }
-    }
-}
-
-/** Sakelar M3 Expressive: gagang membesar dan bergeser, warna trek ikut berubah. */
-@Composable
-fun MorphSwitch(on: Boolean) {
-    val pal = LocalPal.current
-    val k by animateFloatAsState(if (on) 1f else 0f, spring(.7f, 420f), label = "sw")
-    val track = androidx.compose.ui.graphics.lerp(pal.neutral(if (pal.dark) .16f else .10f), pal.p, k)
-    val edge = androidx.compose.ui.graphics.lerp(pal.neutral(.45f), pal.p, k)
-    val thumb = androidx.compose.ui.graphics.lerp(pal.neutral(.45f), pal.op, k)
-    Box(Modifier.size(width = 52.dp, height = 32.dp).clip(CircleShape).background(track).border(2.dp, edge, CircleShape)) {
-        val d = 16f + 8f * k
-        val cx = 16f + 20f * k
-        Box(
-            Modifier.size(d.dp).graphicsLayer { translationX = (cx - d / 2f).dp.toPx(); translationY = ((32f - d) / 2f - 0f).dp.toPx() }
-                .clip(CircleShape).background(thumb),
-            Alignment.Center
-        ) { Box(Modifier.graphicsLayer { alpha = k; scaleX = k; scaleY = k }) { Ic("ok", pal.p, 16.dp) } }
-    }
-}
-
-/** Grup pengaturan: judul kecil berwarna di atas, kartu bersambung di bawahnya. Masuk bergantian dengan pegas. */
-@Composable
-fun SGroup(title: String, wait: Int, content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
-    val pal = LocalPal.current
-    val a = remember { Animatable(0f) }
-    LaunchedEffect(Unit) { delay(wait.toLong()); a.animateTo(1f, spring(.8f, 320f)) }
-    Column(
-        Modifier.fillMaxWidth().padding(bottom = 28.dp)
-            .graphicsLayer { alpha = a.value.coerceIn(0f, 1f); translationY = (1f - a.value) * 28.dp.toPx() }
-    ) {
-        T(title, 14f, 600, pal.p, Modifier.padding(start = 16.dp, bottom = 10.dp), ls = .01f)
-        Column(verticalArrangement = Arrangement.spacedBy(3.dp), content = content)
-    }
-}
-
-/** true di dalam PageScaffold (halaman opsi catatan, transkripsi, dst.): kartu memakai wadah tonal + border tipis supaya tidak menyatu dengan latar. */
-val LocalToneCards = androidx.compose.runtime.compositionLocalOf { false }
-
-/** Kartu bersambung: sudut luar besar, sudut antar kartu kecil. Saat ditekan semua sudut membulat (morph). */
-@Composable
-fun SCard(
-    pos: Int, onClick: (() -> Unit)? = null,
-    pad: PaddingValues = PaddingValues(horizontal = 20.dp, vertical = 18.dp),
-    bg: Color? = null,
-    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit
-) {
-    val pal = LocalPal.current
-    val src = remember { MutableInteractionSource() }
-    val pr by src.collectIsPressedAsState()
-    val press = pr && onClick != null
-    val top = if (pos == POS_ONE || pos == POS_TOP) 28f else 6f
-    val bot = if (pos == POS_ONE || pos == POS_BOT) 28f else 6f
-    val tr by animateFloatAsState(if (press) 28f else top, spring(.6f, 500f), label = "tr")
-    val br by animateFloatAsState(if (press) 28f else bot, spring(.6f, 500f), label = "br")
-    val shape = RoundedCornerShape(tr.coerceAtLeast(0f).dp, tr.coerceAtLeast(0f).dp, br.coerceAtLeast(0f).dp, br.coerceAtLeast(0f).dp)
-    val tone = LocalToneCards.current
-    Column(
-        Modifier.fillMaxWidth().clip(shape).background(bg ?: if (tone) pal.tb else pal.c2)
-            .then(if (tone) Modifier.border(1.dp, pal.ol, shape) else Modifier)
-            .then(if (onClick != null) Modifier.clickable(interactionSource = src, indication = LocalIndication.current, onClick = onClick) else Modifier)
-            .animateContentSize(SizeSpring).padding(pad),
-        content = content
-    )
-}
-
-@Composable
-fun SActionRow(pos: Int, icon: String, title: String, sub: String, onClick: () -> Unit) {
-    val pal = LocalPal.current
-    SCard(pos, onClick, PaddingValues(horizontal = 20.dp, vertical = 14.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Box(Modifier.size(44.dp).clip(CircleShape).background(pal.pc), Alignment.Center) { Ic(icon, pal.opc, 22.dp) }
-            Column(Modifier.weight(1f)) {
-                T(title, 16f, 500, pal.os)
-                T(sub, 14f, 400, pal.osv, lh = 1.3f)
-            }
-        }
-    }
-}
-
-@Composable
-fun FontChoice(name: String, fam: FontFamily, on: Boolean, onClick: () -> Unit) {
-    val pal = LocalPal.current
-    val src = remember { MutableInteractionSource() }
-    val pr by src.collectIsPressedAsState()
-    val r by animateDpAsState(if (pr) 12.dp else if (on) 28.dp else 16.dp, spring(.6f, 500f), label = "r")
-    val k by animateFloatAsState(if (on) 1f else 0f, spring(.8f, 380f), label = "b")
-    val fg = if (on) pal.opc else pal.os
-    CompositionLocalProvider(LocalFF provides fam) {
-        Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(r)).background(pal.pc.copy(alpha = k))
-                .clickable(interactionSource = src, indication = LocalIndication.current, onClick = onClick)
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(Modifier.weight(1f)) {
-                T(name, 18f, 500, fg)
-                T("Neat notes, fast and cozy 0123", 14f, 400, fg, alpha = .75f)
-            }
-            Box(Modifier.size(24.dp).graphicsLayer { scaleX = k; scaleY = k; alpha = k }) { Ic("ok", fg, 24.dp) }
-        }
-    }
-}
-
-@Composable
-fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
-    val pal = LocalPal.current
-    val sat = satDp()
-    val sab = sabDp()
-    val pr = vm.pr
-    val scroll = rememberScrollState()
-    var custom by remember { mutableStateOf(false) }
-    Box(Modifier.fillMaxSize().background(pal.bg)) {
-        Column(Modifier.fillMaxSize().verticalScroll(scroll)) {
-            Spacer(Modifier.height(sat + 64.dp))
-            Column(
-                Modifier.widthIn(max = 640.dp).fillMaxWidth().align(Alignment.CenterHorizontally)
-                    .padding(start = 16.dp, end = 16.dp, bottom = 24.dp + sab)
-            ) {
-                // judul besar: mengecil dan memudar saat digulir, digantikan judul kecil di bilah atas
-                T(
-                    "Settings", 40f, 400, pal.os,
-                    Modifier.padding(start = 8.dp, top = 20.dp, bottom = 32.dp).graphicsLayer {
-                        val k = (scroll.value / 110.dp.toPx()).coerceIn(0f, 1f)
-                        alpha = 1f - (k * 1.6f).coerceAtMost(1f)
-                        scaleX = 1f - .12f * k; scaleY = 1f - .12f * k
-                        transformOrigin = TransformOrigin(0f, .5f)
-                    },
-                    ls = -.01f, maxLines = 1
-                )
-                // Urutan kelompok: yang paling sering dipakai di atas (tampilan, catatan), yang jarang diubah di bawah (suara, cadangan)
-                SGroup("Appearance", 0) {
-                    SCard(POS_TOP) {
-                        T("Theme", 16f, 500, pal.os)
-                        val modes = listOf("auto" to "phone", "light" to "lm", "dark" to "dm")
-                        val curMode = normMode(pr.mode)
-                        val cap = when (curMode) {
-                            "auto" -> "Auto: light or dark follows your device"
-                            "light" -> "Light"
-                            else -> "Dark (AMOLED, pure black)"
-                        }
-                        Crossfade(cap, Modifier.padding(top = 2.dp, bottom = 14.dp), tween(200), label = "cap") { T(it, 14f, 400, pal.osv) }
-                        SegPill(3, modes.indexOfFirst { it.first == curMode }.coerceAtLeast(0), { vm.setPr(pr.copy(mode = modes[it].first)) }) { i, fg ->
-                            Ic(modes[i].second, fg, 24.dp)
-                        }
-                    }
-                    SCard(POS_MID) {
-                        T("Colors", 16f, 500, pal.os, Modifier.padding(bottom = 12.dp))
-                        val dynAvail = android.os.Build.VERSION.SDK_INT >= 31
-                        val dynOn = pr.dyn && dynAvail
-                        if (dynAvail) {
-                            Row(
-                                Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
-                                    .clickable { vm.setPr(pr.copy(dyn = !dynOn)) }
-                                    .padding(vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)
-                            ) {
-                                Column(Modifier.weight(1f)) {
-                                    T("Dynamic color", 16f, 400, pal.os)
-                                    T("Material You, follows your wallpaper", 14f, 400, pal.osv)
-                                }
-                                MorphSwitch(dynOn)
-                            }
-                        }
-                        // satu-satunya pilihan warna manual: tombol warna kustom (dengan slider), hanya tampil saat Material You mati
-                        AnimatedVisibility(
-                            visible = !dynOn,
-                            enter = expandVertically(spring(.9f, 420f)) + fadeIn(tween(220)),
-                            exit = shrinkVertically(spring(1f, 500f)) + fadeOut(tween(140))
-                        ) {
-                            val (ch, cs) = hueSat(pr.seed)
-                            Row(
-                                Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
-                                    .clickable { custom = true }
-                                    .padding(vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)
-                            ) {
-                                Box(Modifier.size(40.dp).clip(CircleShape).background(hsl(ch, cs.coerceIn(35f, 88f), 50f).let { if (pal.mono) it.gray() else it }))
-                                Column(Modifier.weight(1f)) {
-                                    T("Custom color", 16f, 400, pal.os)
-                                    T("Pick your own hue and intensity", 14f, 400, pal.osv)
-                                }
-                                Ic("chr", pal.osv, 24.dp)
-                            }
-                        }
-                    }
-                    SCard(POS_MID, onClick = { vm.setPr(pr.copy(mono = !pr.mono)) }) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Column(Modifier.weight(1f)) {
-                                T("Monochrome", 16f, 500, pal.os)
-                                T("Turn all app colors to grayscale", 14f, 400, pal.osv)
-                            }
-                            MorphSwitch(pr.mono)
-                        }
-                    }
-                    SCard(POS_BOT, pad = PaddingValues(start = 12.dp, end = 12.dp, top = 18.dp, bottom = 12.dp)) {
-                        T("Font", 16f, 500, pal.os, Modifier.padding(start = 8.dp, bottom = 10.dp))
-                        val am = LocalContext.current.assets
-                        listOf("def" to "Default", "flex" to "Roboto Flex", "times" to "Times New Roman", "reenie" to "Reenie Beanie").forEach { (id, name) ->
-                            val fam = remember(id) { loadFont(am, id) }
-                            FontChoice(name, fam, pr.ff == id) { vm.setPr(pr.copy(ff = id)) }
-                        }
-                    }
-                }
-                SGroup("Notes", 60) {
-                    SCard(POS_TOP) {
-                        T("Sort notes", 16f, 500, pal.os, Modifier.padding(bottom = 14.dp))
-                        val sorts = listOf("u" to "Edited", "c" to "Created")
-                        SegPill(2, sorts.indexOfFirst { it.first == pr.sort }.coerceAtLeast(0), { vm.setSort(sorts[it].first) }) { i, fg ->
-                            T(sorts[i].second, 15f, 500, fg)
-                        }
-                        Crossfade(if (pr.sort == "c") "Most recently created on top" else "Most recently edited on top", Modifier.padding(top = 12.dp, start = 4.dp), tween(200), label = "scap") {
-                            T(it, 14f, 400, pal.osv)
-                        }
-                        T("Press, hold, and drag a card on the home screen to move it. Picking an order here clears those moves.", 14f, 400, pal.osv, Modifier.padding(top = 8.dp, start = 4.dp), lh = 1.3f)
-                    }
-                    SCard(POS_BOT) {
-                        Row(
-                            Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
-                                .clickable { vm.updateHideLabeled(!vm.hideLabeled) }
-                                .padding(vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                T("Hide labeled notes", 16f, 400, pal.os)
-                                T("Notes with a label only show up under that label in the menu. Search still finds them.", 14f, 400, pal.osv, lh = 1.3f)
-                            }
-                            MorphSwitch(vm.hideLabeled)
-                        }
-                    }
-                }
-                SGroup("Drawing", 90) {
-                    SCard(POS_TOP) {
-                        T("Touch input", 16f, 500, pal.os, Modifier.padding(bottom = 14.dp))
-                        val tsl = listOf("auto" to "Auto", "stylus" to "Stylus only", "finger" to "Finger too")
-                        SegPill(3, tsl.indexOfFirst { it.first == pr.ts }.coerceAtLeast(0), { vm.setPr(pr.copy(ts = tsl[it].first)) }) { i, fg ->
-                            T(tsl[i].second, 14f, 500, fg)
-                        }
-                        Crossfade(
-                            when (pr.ts) {
-                                "stylus" -> "Only the stylus draws. Fingers still type and scroll."
-                                "finger" -> "Stylus and fingers both draw. One finger draws, two fingers scroll."
-                                else -> "With a stylus, only the stylus draws. Without one, one finger draws and two fingers scroll."
-                            }, Modifier.padding(top = 12.dp, start = 4.dp), tween(200), label = "tscap"
-                        ) { T(it, 14f, 400, pal.osv) }
-                    }
-                    SCard(POS_BOT) {
-                        T("Back to text mode automatically", 16f, 500, pal.os, Modifier.padding(bottom = 14.dp))
-                        val atl = listOf(0 to "Off", 5 to "5 s", 10 to "10 s", 30 to "30 s")
-                        SegPill(4, atl.indexOfFirst { it.first == pr.iat }.coerceAtLeast(0), { vm.setPr(pr.copy(iat = atl[it].first)) }) { i, fg ->
-                            T(atl[i].second, 14f, 500, fg)
-                        }
-                    }
-                }
-                SGroup("Voice", 120) {
-                    val ready = vm.models.list.filter { it.status == 2 }.joinToString { it.info.name }
-                    SActionRow(
-                        POS_ONE, "mic", "Voice transcription",
-                        if (vm.gqSet) "Groq API key saved" + (if (ready.isNotEmpty()) " · offline model: $ready" else "")
-                        else if (ready.isNotEmpty()) "Offline model ready: $ready"
-                        else "Add a Groq API key (fast) or download an offline model"
-                    ) { vm.nav.push(Scr.Models) }
-                }
-                SGroup("Backup", 150) {
-                    val n = vm.docs.size
-                    val ni = vm.imgIds().size
-                    val na = vm.docs.sumOf { it.au.size }
-                    val old = vm.lastBk != 0L && System.currentTimeMillis() - vm.lastBk > 7 * 86400000L
-                    val info = cnt(n, "note") + ", " + cnt(ni, "photo") + ", " + cnt(na, "audio file") + ". " + (if (vm.lastBk != 0L) {
-                        "Last backup: " + SimpleDateFormat("MMM d, yyyy, HH:mm", Locale.US).format(Date(vm.lastBk)) +
-                            (if (old) ". It's been over a week, so back up again." else ".")
-                    } else "No backup yet.") + " Backup files stay on your device. No server is involved."
-                    SCard(POS_TOP) { T(info, 14f, 400, pal.osv, lh = 1.5f) }
-                    SActionRow(POS_MID, "dl", "Save backup", "One .dinduy file with your notes, photos, and audio") { act.saveBackup() }
-                    SActionRow(POS_MID, "up", "Share backup", "Send it with WhatsApp, Files, and more") { act.shareBackup() }
-                    SActionRow(POS_BOT, "restore", "Restore backup", "Pick a .dinduy file from your device (web version files work too)") { act.restoreBackup() }
-                }
-            }
-        }
-        // bilah atas: transparan di puncak, berubah jadi warna wadah saat digulir; judul kecil muncul menggantikan judul besar
-        Row(
-            Modifier.fillMaxWidth().height(sat + 64.dp)
-                .drawBehind {
-                    val k = (scroll.value / 80.dp.toPx()).coerceIn(0f, 1f)
-                    drawRect(androidx.compose.ui.graphics.lerp(pal.bg, pal.c2, k))
-                }
-                .padding(top = sat, start = 8.dp, end = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconBtn("back", pal.os, onBack)
-            T(
-                "Settings", 22f, 400, pal.os,
-                Modifier.padding(start = 8.dp).graphicsLayer {
-                    val k = (scroll.value / 110.dp.toPx()).coerceIn(0f, 1f)
-                    val a = ((k - .5f) * 2f).coerceIn(0f, 1f)
-                    alpha = a; translationY = (1f - a) * 12.dp.toPx()
+        Modifier.fillMaxSize().background(Color.Black)
+            .pinch(
+                onPinch = { z, p, c -> cZoom((cz * z).coerceIn(1f, 4f), c, p) },
+                onEnd = { if (cz < 1.05f) { cz = 1f; cpan = Offset.Zero } }
+            )
+            .curlTouch(
+                scope, true, { cz > 1.02f }, { findNow }, { d -> cpan = cClamp(cpan + d, cz) },
+                onEdge = { d -> if (ui.sel != null) ui.sel = null else tapTurn(d > 0) },   // ketukan tepi: tutup seleksi, atau turn(PageChange) mesin
+                onTap = { if (ui.sel != null) ui.sel = null else onTapNow() },
+                onDouble = { p ->
+                    val z0 = cz
+                    val z1 = if (z0 > 1.2f) 1f else 2.5f
+                    scope.launch { animate(0f, 1f, animationSpec = spring(1f, 420f)) { v, _ -> cZoom(z0 + (z1 - z0) * v, p) } }
                 },
-                maxLines = 1
+                busy = { ui.drawing },
+                selBusy = { ui.selGrab }
+            )
+            .silkDrag(
+                canStart = { d -> curlAllowed() && ctl.canDrag(d) },
+                onStart = { d, p, t ->
+                    dg[0] = p.x; dg[1] = p.x; dg[2] = 0f; dg[3] = d.toFloat(); dgT[0] = t
+                    ctl.dragBegin(d, p.x, p.y, t)
+                },
+                onMove = { p, t ->
+                    val dtm = t - dgT[0]
+                    if (dtm >= 10L) {
+                        dg[2] = dg[2] * .4f + (p.x - dg[1]) / dtm * 1000f * .6f
+                        dg[1] = p.x; dgT[0] = t
+                    }
+                    ctl.dragMove(p.x, p.y, t)
+                },
+                onEnd = { p, t, cancelled ->
+                    // Balikan hanya selesai bila jari sudah menarik halaman cukup jauh (>= 22% lebar halaman) atau lewat kibasan cepat;
+                    // selain itu dibatalkan: mesin menganimasikan halaman kembali ke tempatnya dengan singkat dan halaman itu
+                    // langsung bisa digeser / diketuk lagi, bahkan di tengah animasi kembali (tidak ada skrip jari di sini).
+                    val dir = dg[3]
+                    val prog = (if (dir > 0f) dg[0] - p.x else p.x - dg[0]) / geoNow.pw.coerceAtLeast(1f)
+                    val vel = if (dir > 0f) -dg[2] else dg[2]
+                    val done = !cancelled && (prog >= .22f || (prog >= .05f && vel >= 500f * dens))
+                    ctl.dragEnd(p.x, p.y, t, !done)
+                }
+            )
+    ) {
+        // GLSurfaceView tak ikut pudar bersama induknya, jadi disembunyikan selama morph buka/tutup dari beranda.
+        // Kamera mesin tetap: view diposisikan supaya halaman diam persis menempati persegi halaman (geo), sisanya hitam.
+        SilkGlView(
+            ctl, vm.openP.value > .2f, Modifier.fillMaxSize(),
+            geo.left + geo.pw * (1f - fit) / 2f, geo.top + geo.ph * (1f - fit) / 2f, geo.pw * fit, geo.ph * fit
+        )
+
+        // penutup warna kertas sampai deck pertama siap (hindari kedip hitam saat surface dibuat)
+        val cover by animateFloatAsState(if (ctl.ready) 0f else 1f, tween(140), label = "silkcover")
+        if (cover > .001f) Canvas(Modifier.fillMaxSize()) {
+            drawRect(if (ui.dark) Color.Black else Color.White, Offset(geo.left, geo.top), Size(geo.pw, geo.ph), alpha = cover)
+        }
+
+        // Lapisan PdfPage (sama dengan mode lain) tepat di atas halaman GL, hanya saat tidak ada balikan:
+        //  - diam (cz = 1): "bare" = transparan; GL tetap yang menggambar halaman, lapisan ini memberi tekan-lama-pilih-teks, gagang, menu salin,
+        //    dan sorotan hasil cari;
+        //  - diperbesar: PdfPage penuh (bitmap resolusi tinggi, coretan, mode gelap) menggantikan GL; curl mati, seleksi tetap jalan (ikut zoom dan pan).
+        // Ukuran / posisi mengikuti halaman GL: lebar = lebar GL (sudah dikali fit), tinggi sesuai rasio halaman ini, pusat tetap.
+        if (!ctl.busy) {
+            val rc = ui.doc.ratioOf(cur)
+            val lw = w0 * fit
+            val lhPx = lw.value * dens * rc
+            PdfPage(
+                ui, cur, lw, cMul,
+                Modifier
+                    .offset { IntOffset((geo.left + (geo.pw - lw.value * dens) / 2f).roundToInt(), (geo.top + (geo.ph - lhPx) / 2f).roundToInt()) }
+                    .width(lw).height(lw * rc)
+                    .graphicsLayer { scaleX = cz; scaleY = cz; translationX = cpan.x; translationY = cpan.y },
+                active = true, bare = cz <= 1.001f
             )
         }
     }
-    if (custom) {
-        val (h0, s0) = hueSat(pr.seed)
-        var h by remember { mutableStateOf(h0) }
-        var s by remember { mutableStateOf(s0.coerceIn(35f, 88f)) }
-        val col = hsl(h, s, 40f)
-        AlertDialog(
-            onDismissRequest = { custom = false },
-            containerColor = pal.c3,
-            shape = RoundedCornerShape(28.dp),
-            title = { T("Custom color", 24f, 400, pal.os) },
-            text = {
-                Column {
-                    Box(Modifier.fillMaxWidth().height(56.dp).clip(RoundedCornerShape(28.dp)).background(col))
-                    Spacer(Modifier.height(16.dp))
-                    T("Hue", 14f, 500, pal.osv)
-                    BigSlider(h, 0f, 360f) { h = it }
-                    T("Intensity", 14f, 500, pal.osv)
-                    BigSlider(s, 35f, 88f) { s = it }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    vm.setPr(pr.copy(seed = String.format("#%06X", hsl(h, s, 50f).toArgb() and 0xFFFFFF), dyn = false)); custom = false
-                }) { T("Use", 15f, 600, pal.p) }
-            },
-            dismissButton = { TextButton(onClick = { custom = false }) { T("Cancel", 15f, 500, pal.osv) } }
-        )
-    }
 }
 
-// ---------- sheet ----------
+@OptIn(ExperimentalPageCurlApi::class)
 @Composable
-fun SheetHost(vm: AppVM, nav: Nav, act: Actions) {
+private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfText, note: Note) {
     val pal = LocalPal.current
-    val s = vm.sheet ?: return
-    val st = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val close = { vm.sheet = null }
-    ModalBottomSheet(
-        onDismissRequest = { vm.sheet = null }, sheetState = st,
-        shape = RoundedCornerShape(topStart = 40.dp, topEnd = 40.dp), containerColor = pal.c3,
-        scrimColor = Color.Black.copy(alpha = .5f),
-        dragHandle = {
-            Box(Modifier.padding(top = 14.dp, bottom = 18.dp).width(40.dp).height(5.dp).clip(RoundedCornerShape(3.dp)).background(pal.ol))
+    val dens = LocalDensity.current.density
+    val scope = rememberCoroutineScope()
+    val count = ui.doc.count
+    val sat = satDp()
+    val sab = sabDp()
+    var bars by remember { mutableStateOf(true) }
+    var findOn by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+    var searching by remember { mutableStateOf(false) }
+    val fr = remember { FocusRequester() }
+    val mode = PdfBus.mode
+    val startPage = remember { note.pg.coerceIn(0, count - 1) }
+    var page by remember { mutableIntStateOf(startPage) }
+    val hasText = PdfBus.hasText
+    // mode 3D (efek balik halaman melengkung); mati saat pensil coret aktif
+    val curlOn = mode != 0 && PdfBus.curl == 1 && !ui.inkOn
+    // Silk curl (OpenGL, app.dinduy.silkcurl). Gagal / tak didukung => otomatis jatuh ke Classic. curlMode di bawah = cabang Classic, tidak berubah.
+    var silkFailed by remember { mutableStateOf(false) }
+    val silkMode = curlOn && PdfBus.curlStyle == 1 && !silkFailed && SilkGl.supported(LocalContext.current)
+    val curlMode = curlOn && !silkMode
+
+    // pengaturan alat coret terakhir
+    LaunchedEffect(Unit) {
+        ui.tool = 0
+        ui.color = vm.pr.ic.getOrElse(0) { 0 }
+        ui.wDp = vm.pr.iw.getOrElse(0) { 3f }
+    }
+    fun saveTool() {
+        val ic = vm.pr.ic.toMutableList(); val iw = vm.pr.iw.toMutableList()
+        while (ic.size < 3) ic.add(0); while (iw.size < 3) iw.add(3f)
+        ic[ui.tool] = ui.color; iw[ui.tool] = ui.wDp
+        vm.setPr(vm.pr.copy(ic = ic, iw = iw))
+    }
+
+    // Penutup anti-kedip. Mode 3D (Classic / Silk) membongkar dan membangun ulang seluruh pembalik halaman (surface GL) tiap ink hidup / mati,
+    // dan itulah yang terlihat sebagai kedipan. Sebelum pergantian itu terjadi, halaman yang sedang dibaca digambar statis di atasnya
+    // (bitmap sudah ada di cache), ditahan sampai pembalik baru siap, lalu dipudarkan.
+    var pageOpen by remember { mutableStateOf(false) }   // kapsul halaman: ringkas / penggeser
+    var coverV by remember { mutableFloatStateOf(0f) }
+    var coverTick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(coverTick) {
+        if (coverTick == 0) return@LaunchedEffect
+        delay(if (PdfBus.curlStyle == 1) 420L else 280L)
+        animate(1f, 0f, animationSpec = tween(180)) { v, _ -> coverV = v }
+    }
+    fun setInk(on: Boolean) {
+        if (ui.inkOn == on) return
+        if (!on) saveTool()
+        if (!on && mode != 0 && PdfBus.curl == 1) { coverV = 1f; coverTick++ }   // dinaikkan di snapshot yang sama dengan pergantian cabang
+        ui.inkOn = on
+        if (!on) { ui.drawing = false; ui.styleOpen = false }
+    }
+
+    // simpan halaman terakhir
+    LaunchedEffect(page) { delay(900); if (page != note.pg) vm.upd(id) { it.copy(pg = page) } }
+
+    // menu titik tiga -> "Search in PDF"
+    LaunchedEffect(PdfBus.find) { if (PdfBus.find > 0) { PdfBus.find = 0; if (PdfBus.hasText) findOn = true else vm.show("This PDF is a scan, so there's no text to search") } }
+    LaunchedEffect(findOn) { if (findOn) { delay(120); try { fr.requestFocus() } catch (e: Exception) { } } else { ui.hits = emptyList(); ui.cur = -1; query = "" } }
+
+    var goTo by remember { mutableStateOf<PHit?>(null) }
+    LaunchedEffect(query, findOn) {
+        if (!findOn) return@LaunchedEffect
+        val q = query.trim()
+        ui.hits = emptyList(); ui.cur = -1
+        if (q.isEmpty()) { searching = false; return@LaunchedEffect }
+        delay(280)
+        searching = true
+        val acc = ArrayList<PHit>()
+        var first = true
+        for (p in 0 until count) {
+            val pt = txt.page(p) ?: continue
+            val h = hitsIn(p, pt, q)
+            if (h.isNotEmpty()) {
+                acc.addAll(h)
+                ui.hits = acc.toList()
+                if (first) { first = false; ui.cur = 0; goTo = acc[0]; page = acc[0].page }
+            }
         }
+        searching = false
+        if (acc.isEmpty()) vm.show("No results")
+    }
+    var listOn by remember { mutableStateOf(false) }
+    val kb = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val focusMgr = androidx.compose.ui.platform.LocalFocusManager.current
+    fun jump(i: Int) {
+        if (i !in ui.hits.indices) return
+        ui.cur = i
+        goTo = ui.hits[i]
+        page = ui.hits[i].page
+    }
+    fun step(d: Int) {
+        val n = ui.hits.size
+        if (n == 0) return
+        jump(((ui.cur + d) % n + n) % n)
+    }
+    if (findOn) {
+        val inf = rememberInfiniteTransition(label = "hit")
+        val pl = inf.animateFloat(.3f, .75f, infiniteRepeatable(tween(650), RepeatMode.Reverse), label = "hitp")
+        SideEffect { ui.pulse = pl }
+    }
+
+    BackHandler(enabled = findOn || ui.inkOn || ui.sel != null) {
+        if (ui.sel != null) ui.sel = null else if (ui.inkOn) setInk(false) else if (findOn) findOn = false
+    }
+    SideEffect { ui.paged = mode != 0 }
+    LaunchedEffect(ui.inkOn, findOn) { if (ui.inkOn || findOn) ui.sel = null }
+    val ctx = LocalContext.current
+    fun copySel() {
+        val s = ui.sel ?: return
+        scope.launch {
+            val sb = StringBuilder()
+            for (p in s.a.p..s.b.p) {
+                val t = txt.page(p) ?: continue
+                val a = if (p == s.a.p) s.a.c else 0
+                val b = min(if (p == s.b.p) s.b.c else t.t.length, t.t.length)
+                if (b <= a) continue
+                val part = StringBuilder()
+                for (k in a until b) part.append(if (k in t.lb) '\n' else t.t[k])
+                val str = part.toString().replace(Regex(" *\n *"), "\n").trim()
+                if (str.isNotEmpty()) { if (sb.isNotEmpty()) sb.append("\n\n"); sb.append(str) }
+            }
+            if (sb.isEmpty()) return@launch
+            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("PDF", sb.toString()))
+            if (Build.VERSION.SDK_INT < 33) vm.show("Copied")
+            ui.sel = null
+        }
+    }
+    fun selectAll() {
+        scope.launch {
+            var a: PPos? = null
+            var b: PPos? = null
+            for (p in 0 until count) {
+                val t = txt.page(p) ?: continue
+                val k = t.r.indexOfFirst { it != null }
+                if (k >= 0) { a = PPos(p, k); break }
+            }
+            for (p in count - 1 downTo 0) {
+                val t = txt.page(p) ?: continue
+                val k = t.r.indexOfLast { it != null }
+                if (k >= 0) { b = PPos(p, k + 1); break }
+            }
+            if (a != null && b != null) ui.sel = PSel(a, b)
+        }
+    }
+
+    val hostRef = remember { arrayOfNulls<LayoutCoordinates>(1) }
+    val hapScr = LocalHapticFeedback.current
+    BoxWithConstraints(
+        Modifier.fillMaxSize().onGloballyPositioned { hostRef[0] = it }.selHandleTouch(ui, { hostRef[0] }, scope, hapScr)
     ) {
-        Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 24.dp).navigationBarsPadding()) {
-            fun title(id: String) = vm.note(id)?.t?.ifEmpty { "Untitled" } ?: "Untitled"
-            when (s) {
-                is Sheet.LblEdit -> {
-                    T(s.name, 26f, 1000, pal.os, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 14.dp), ls = -.01f)
-                    Opt(1, "pen", "Rename") { close(); vm.lblDlg = LblDlg(s.name, null) }
-                    Opt(2, "del", "Delete label", "Notes aren't deleted") { close(); vm.deleteLabel(s.name) }
+        val vwDp = maxWidth
+        val vhDp = maxHeight
+        val topPad = sat + 64.dp
+        val botPad = sab + 96.dp
+
+        val vwPx = vwDp.value * dens
+        SideEffect { ui.scrollBy = null }   // mode lain tidak punya gulir otomatis; mode gulir mengisinya lagi tepat di bawah
+        if (mode == 0) {
+            // ---------------- mode gulir (menerus) ----------------
+            val list = rememberLazyListState(initialFirstVisibleItemIndex = startPage)
+            SideEffect { ui.scrollBy = { d -> list.dispatchRawDelta(d) } }
+            var zoom by remember { mutableFloatStateOf(1f) }
+            var hx by remember { mutableFloatStateOf(0f) }   // geseran horizontal (px) saat diperbesar
+            fun clampX(x: Float, z: Float) = x.coerceIn(0f, max(0f, vwPx * (z - 1f)))
+            // zoom ke z1 dengan titik (cx, cy) tetap di bawah jari
+            fun applyZoom(z1: Float, cx: Float, cy: Float, panX: Float = 0f, panY: Float = 0f) {
+                val k = z1 / zoom
+                if (k != 1f) list.dispatchRawDelta((list.firstVisibleItemScrollOffset + cy) * (k - 1f))
+                hx = clampX((hx + cx) * k - cx - panX, z1)
+                zoom = z1
+                if (panY != 0f) list.dispatchRawDelta(-panY)
+            }
+            val curPage by remember(list) {
+                derivedStateOf {
+                    val li = list.layoutInfo
+                    val mid = li.viewportStartOffset + li.viewportSize.height / 2
+                    li.visibleItemsInfo.firstOrNull { it.offset <= mid && it.offset + it.size >= mid }?.index ?: list.firstVisibleItemIndex
                 }
-                is Sheet.Arc -> {
-                    T(title(s.id), 26f, 1000, pal.os, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 14.dp), ls = -.01f)
-                    Opt(1, "txt", "Open note") { close(); nav.openNote(s.id, vm.cardMorph[s.id]) }
-                    Opt(2, "unarc", "Unarchive") { close(); vm.mark(listOf(s.id), "Note unarchived") { it.copy(a = false) } }
-                    Opt(3, "del", "Delete note") { close(); vm.mark(listOf(s.id), "Moved to Trash") { it.copy(dt = System.currentTimeMillis()) } }
+            }
+            LaunchedEffect(curPage) { page = curPage }
+            LaunchedEffect(goTo) {
+                val h = goTo ?: return@LaunchedEffect
+                goTo = null
+                val itemH = vwDp.value * zoom * ui.doc.ratioOf(h.page) * dens
+                val top = h.rects.minOf { it[1] } * itemH
+                list.scrollToItem(h.page, 0)
+                val off = top - list.layoutInfo.viewportSize.height * .3f
+                if (off > 0f) list.scrollBy(off)
+            }
+            val fs = remember { PdfFast() }
+            val fsJob = remember { arrayOfNulls<Job>(1) }
+            val fsLast = remember { intArrayOf(-1) }
+            fun fastSeek(nf: Float) {
+                val pos = nf * (count - 1)
+                val i = pos.toInt().coerceIn(0, count - 1)
+                if (i != fsLast[0]) { fsLast[0] = i; hapScr.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
+                fsJob[0]?.cancel()
+                fsJob[0] = scope.launch {
+                    val itemH = vwDp.value * zoom * ui.doc.ratioOf(i) * dens
+                    list.scrollToItem(i, ((pos - i) * itemH).roundToInt())
                 }
-                is Sheet.Trs -> {
-                    T(title(s.id), 26f, 1000, pal.os, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 14.dp), ls = -.01f)
-                    Opt(1, "restore", "Restore") { close(); vm.mark(listOf(s.id), "Note restored") { it.copy(dt = 0L) } }
-                    Opt(2, "del", "Delete forever") { close(); vm.purge(s.id) }
-                }
-                is Sheet.Bk -> {
-                    val p = vm.pending
-                    T("Restore backup", 26f, 1000, pal.os, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp), ls = -.01f)
-                    if (p != null) T(
-                        cnt(p.notes.size, "note") + ", " + cnt(p.nImg, "photo") + ", " + (if (p.aids.isNotEmpty()) cnt(p.aids.size, "audio file") + ", " else "") + "created " + SimpleDateFormat("MMM d, yyyy, HH:mm", Locale.US).format(Date(p.at)),
-                        14f, 400, pal.osv, Modifier.padding(start = 4.dp, bottom = 12.dp)
+            }
+            Box(
+                Modifier.fillMaxSize().clipToBounds()
+                    .fastTouch(fs) { fastSeek(it) }
+                    .pinch(
+                        onPinch = { z, pan, c -> applyZoom((zoom * z).coerceIn(1f, 5f), c.x, c.y, pan.x, pan.y) },
+                        onEnd = { },
+                        onMulti = { ui.multi = it }
                     )
-                    Opt(1, "lib", "Merge", "Add from the backup. Your current notes stay safe") { close(); vm.applyBackup(false) }
-                    Opt(2, "restore", "Replace all", "Replace all notes on this device with the backup") { close(); vm.applyBackup(true) }
+                    .pointerInput(ui.inkOn) {
+                        if (ui.inkOn) return@pointerInput
+                        detectTapGestures(
+                            onTap = { if (ui.sel != null) ui.sel = null else bars = !bars },
+                            onDoubleTap = { p ->
+                                val z0 = zoom
+                                val z1 = if (z0 > 1.2f) 1f else 2.5f
+                                scope.launch { animate(0f, 1f, animationSpec = spring(1f, 420f)) { v, _ -> applyZoom(z0 + (z1 - z0) * v, p.x, p.y) } }
+                            }
+                        )
+                    }
+                    .pointerInput(zoom > 1.01f, ui.inkOn, ui.drawing) {
+                        if (zoom <= 1.01f || ui.inkOn || ui.drawing) return@pointerInput
+                        detectHorizontalDragGestures { c, d -> c.consume(); hx = clampX(hx - d, zoom) }
+                    }
+            ) {
+                val contentW = vwDp * zoom
+                LazyColumn(
+                    state = list,
+                    userScrollEnabled = !ui.drawing,   // menyeret pegangan seleksi / menggoreskan pena: daftar tidak boleh ikut bergulir
+                    modifier = Modifier.requiredWidth(contentW).fillMaxHeight().graphicsLayer { translationX = vwPx * (zoom - 1f) / 2f - hx },
+                    contentPadding = PaddingValues(top = topPad, bottom = botPad),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(count, key = { it }) { i ->
+                        PdfPage(ui, i, contentW, 1f, Modifier.width(contentW).height(contentW * ui.doc.ratioOf(i)))
+                    }
                 }
-                is Sheet.EmptyTrash -> {
-                    T("Empty Trash?", 26f, 1000, pal.os, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 14.dp), ls = -.01f)
-                    Opt(1, "del", "Delete all forever", "This can't be undone") { close(); vm.purgeAll() }
+                PdfFastScrollUi(ui, fs, list, count, topPad, botPad)
+            }
+        } else if (silkMode) {
+            // ---------------- mode halaman 3D, gaya Silk curl (OpenGL ES 2.0) ----------------
+            PdfSilkCurl(
+                vm, ui, count, vwDp, vhDp, topPad, sab, dens, startPage, page, { page = it }, goTo, { goTo = null }, findOn,
+                { if (ui.sel != null) ui.sel = null else bars = !bars },
+                {
+                    if (!silkFailed) vm.show("Silk curl isn't available on this device, using Classic curl")
+                    silkFailed = true
+                }
+            )
+        } else if (curlMode) {
+            // ---------------- mode halaman 3D: efek balik halaman melengkung (library PageCurl) ----------------
+            // awal HARUS konstan (startPage), bukan `page`: `page` berubah tiap balik halaman, dan state yang ikut berubah membuat
+            // lambda pointerInput di bawah (dibuat sekali) memegang state lama yang sudah mati => ketukan hanya jalan sekali
+            // state PageCurl dibuat ulang setelah tiap balikan lewat ketukan (gen++): next()/prev() bawaan library meninggalkan state
+            // internalnya macet sehingga ketukan berikutnya tak bereaksi, sedangkan geser jari tidak terpengaruh. State baru mulai
+            // dari halaman tujuan, jadi tidak ada lompatan.
+            var gen by remember { mutableIntStateOf(0) }
+            // mulai dari halaman yang sedang dibaca (bukan startPage): cabang ini dibuat ulang tiap ink dimatikan, jadi startPage membuat lompat ke awal
+            var baseP by remember { mutableIntStateOf(page.coerceIn(0, count - 1)) }
+            var flip by remember { mutableStateOf<Job?>(null) }
+            val cs = androidx.compose.runtime.key(gen) { rememberPageCurlState(baseP) }
+            val csNow by androidx.compose.runtime.rememberUpdatedState(cs)
+            val r0 = ui.doc.ratioOf(startPage)
+            val w0 = minOf(vwDp, (vhDp - topPad - sab - 12.dp) / r0)
+            val cfg = rememberPageCurlConfig(
+                backPageColor = if (ui.dark) Color(0xFF1C1C1E) else Color.White,
+                dragInteraction = PageCurlConfig.GestureDragInteraction()
+            )
+            var cz by remember { mutableFloatStateOf(1f) }
+            var cpan by remember { mutableStateOf(Offset.Zero) }
+            val cMul by remember { derivedStateOf { ceil(cz).coerceAtLeast(1f) } }
+            val availPx = (vhDp - topPad - sab - 12.dp).value * dens
+            fun cClamp(o: Offset, z: Float): Offset {
+                val w = w0.value * dens * z
+                val h = w0.value * dens * r0 * z
+                val mx = ((w - vwPx) / 2f).coerceAtLeast(0f)
+                val my = ((h - availPx) / 2f).coerceAtLeast(0f)
+                return Offset(o.x.coerceIn(-mx, mx), o.y.coerceIn(-my, my))
+            }
+            fun cZoom(z1: Float, c: Offset, delta: Offset = Offset.Zero) {
+                val k = z1 / cz
+                val origin = Offset(vwPx / 2f, topPad.value * dens + availPx / 2f)
+                cpan = cClamp((c - origin) * (1f - k) + cpan * k + delta, z1)
+                cz = z1
+            }
+            // Pengaman: library PageCurl punya ketukan bawaan yang bisa membalik halaman tepat saat seleksi dibuat / ditutup.
+            // Perpindahan halaman yang bukan dari kita (flip ketukan tepi / geser) dalam 600 ms setelah status seleksi berubah dibatalkan.
+            val selAt = remember { LongArray(1) }
+            LaunchedEffect(ui.sel != null) { selAt[0] = System.currentTimeMillis() }
+            LaunchedEffect(cs) {
+                var prev = cs.current
+                snapshotFlow { cs.current }.collect {
+                    if (it != prev && flip?.isActive != true && System.currentTimeMillis() - selAt[0] < 600L) {
+                        cs.snapTo(prev)
+                        page = prev
+                    } else {
+                        prev = it; page = it; cz = 1f; cpan = Offset.Zero
+                    }
+                }
+            }
+            LaunchedEffect(goTo) {
+                val h = goTo ?: return@LaunchedEffect
+                goTo = null
+                cs.snapTo(h.page)
+            }
+            Box(
+                Modifier.fillMaxSize()
+                    .pinch(
+                        onPinch = { z, p, c -> cZoom((cz * z).coerceIn(1f, 4f), c, p) },
+                        onEnd = { if (cz < 1.05f) { cz = 1f; cpan = Offset.Zero } }
+                    )
+                    .curlTouch(
+                        scope, true, { cz > 1.02f }, { findOn }, { d -> cpan = cClamp(cpan + d, cz) },
+                        onEdge = { d ->
+                            val st = csNow
+                            val to = st.current + d
+                            if (ui.sel != null) ui.sel = null   // seleksi aktif: ketukan tepi hanya menutup seleksi
+                            else if (to in 0 until count && flip?.isActive != true) {
+                                flip = scope.launch {
+                                    try {
+                                        withTimeoutOrNull(1200) { if (d > 0) st.next() else st.prev() }
+                                    } catch (e: CancellationException) {
+                                        throw e
+                                    } catch (e: Throwable) {
+                                    }
+                                    baseP = to
+                                    gen++
+                                }
+                            }
+                        },
+                        onTap ={ if (ui.sel != null) ui.sel = null else bars = !bars },
+                        onDouble = { p ->
+                            val z0 = cz
+                            val z1 = if (z0 > 1.2f) 1f else 2.5f
+                            scope.launch { animate(0f, 1f, animationSpec = spring(1f, 420f)) { v, _ -> cZoom(z0 + (z1 - z0) * v, p) } }
+                        },
+                        busy = { ui.drawing },
+                        selBusy = { ui.selGrab }
+                    )
+                    .noFlipWhile { ui.sel != null && !ui.selGrab }   // seleksi aktif: geseran tidak boleh membalik halaman
+                    .padding(top = topPad, bottom = sab + 12.dp),
+                Alignment.Center
+            ) {
+                PageCurl(
+                    count = count, state = cs, config = cfg,
+                    modifier = Modifier.width(w0).height(w0 * r0).graphicsLayer {
+                        scaleX = cz; scaleY = cz; translationX = cpan.x; translationY = cpan.y
+                    }
+                ) { p ->
+                    PdfPage(ui, p, w0, cMul, Modifier.fillMaxSize(), active = p == cs.current)
+                }
+            }
+        } else {
+            // ---------------- mode halaman (geser per halaman) ----------------
+            val pager = rememberPagerState(initialPage = page.coerceIn(0, count - 1), pageCount = { count })
+            var pz by remember { mutableFloatStateOf(1f) }
+            var pan by remember { mutableStateOf(Offset.Zero) }
+            LaunchedEffect(pager) { snapshotFlow { pager.currentPage }.collect { page = it; pz = 1f; pan = Offset.Zero } }
+            LaunchedEffect(goTo) {
+                val h = goTo ?: return@LaunchedEffect
+                goTo = null
+                pager.scrollToPage(h.page)
+            }
+            fun fitW(p: Int): Dp {
+                val r = ui.doc.ratioOf(p)
+                val availH = vhDp - topPad - sab - 12.dp
+                return minOf(vwDp, availH / r)
+            }
+            fun clampPan(o: Offset, z: Float): Offset {
+                val w = fitW(pager.currentPage).value * dens * z
+                val h = w * ui.doc.ratioOf(pager.currentPage)
+                val vx = vwDp.value * dens
+                val vy = (vhDp - topPad - sab - 12.dp).value * dens
+                val mx = ((w - vx) / 2f).coerceAtLeast(0f)
+                val my = ((h - vy) / 2f).coerceAtLeast(0f)
+                return Offset(o.x.coerceIn(-mx, mx), o.y.coerceIn(-my, my))
+            }
+            // pusat halaman di layar (px): titik asal skala graphicsLayer
+            fun origin() = Offset(vwPx / 2f, topPad.value * dens + (vhDp - topPad - sab - 12.dp).value * dens / 2f)
+            fun zoomAt(z1: Float, c: Offset, delta: Offset = Offset.Zero) {
+                val k = z1 / pz
+                val d = c - origin()
+                pan = clampPan(d * (1f - k) + pan * k + delta, z1)
+                pz = z1
+            }
+            Box(
+                Modifier.fillMaxSize()
+                    .pinch(
+                        onPinch = { z, p, c -> zoomAt((pz * z).coerceIn(1f, 4f), c, p) },
+                        onEnd = { if (pz < 1.05f) { pz = 1f; pan = Offset.Zero } },
+                        onMulti = { ui.multi = it }
+                    )
+                    .curlTouch(
+                        scope, !ui.inkOn, { pz > 1.05f }, { findOn }, { d -> pan = clampPan(pan + d, pz) },
+                        onEdge = { d ->
+                            val t = pager.currentPage + d
+                            if (ui.sel != null) ui.sel = null   // seleksi aktif: ketukan tepi hanya menutup seleksi
+                            else if (t in 0 until count) scope.launch { pager.animateScrollToPage(t) }
+                        },
+                        onTap = { if (ui.sel != null) ui.sel = null else bars = !bars },
+                        onDouble = { p ->
+                            val z0 = pz
+                            val z1 = if (z0 > 1.2f) 1f else 2.5f
+                            scope.launch { animate(0f, 1f, animationSpec = spring(1f, 420f)) { v, _ -> zoomAt(z0 + (z1 - z0) * v, p) } }
+                        },
+                        busy = { ui.drawing },
+                        selBusy = { ui.selGrab }
+                    )
+            ) {
+                HorizontalPager(
+                    state = pager, modifier = Modifier.fillMaxSize(), pageSpacing = 12.dp,
+                    userScrollEnabled = pz <= 1.05f && !ui.drawing && !findOn && ui.sel == null, beyondViewportPageCount = 1
+                ) { p ->
+                    val here = p == pager.currentPage
+                    val w = fitW(p)
+                    Box(Modifier.fillMaxSize().padding(top = topPad, bottom = sab + 12.dp), Alignment.Center) {
+                        val mul = if (here) ceil(pz).coerceAtLeast(1f) else 1f
+                        PdfPage(
+                            ui, p, w, mul,
+                            Modifier.width(w).height(w * ui.doc.ratioOf(p)).graphicsLayer {
+                                if (here) { scaleX = pz; scaleY = pz; translationX = pan.x; translationY = pan.y }
+                            }
+                        )
+                    }
                 }
             }
         }
+
+        // ---------------- penutup anti-kedip (lihat setInk) ----------------
+        if (coverV > .002f && mode != 0) {
+            val rr = ui.doc.ratioOf(startPage)
+            val cw = minOf(vwDp, (vhDp - topPad - sab - 12.dp) / rr) * (if (silkMode) min(1f, 1.8f / rr) else 1f)
+            Box(
+                Modifier.fillMaxSize().graphicsLayer { alpha = coverV.coerceIn(0f, 1f) }.padding(top = topPad, bottom = sab + 12.dp),
+                Alignment.Center
+            ) {
+                PdfPage(ui, page, cw, 1f, Modifier.width(cw).height(cw * ui.doc.ratioOf(page)), active = false)
+            }
+        }
+
+        // ---------------- bilah atas: hitam polos (seperti semula). Turun / naik dengan pegas; tombol berubah bentuk saat ditekan / aktif;
+        // tombol cari membuat bilah cari tumbuh dari ikonnya sementara judul menggeser keluar, yang lain menyingkir ----------------
+        val spRaw by androidx.compose.animation.core.animateFloatAsState(if (findOn) 1f else 0f, spring(.85f, 520f), label = "find")
+        // spring bisa overshoot (>1 atau <0): padding/lebar negatif membuat app force close, jadi dikunci 0..1
+        val sp = spRaw.coerceIn(0f, 1f)
+        val white = Color.White
+        AnimatedVisibility(
+            bars || findOn, Modifier.align(Alignment.TopCenter),
+            enter = fadeIn(spring(stiffness = 600f)) + androidx.compose.animation.slideInVertically(spring(.72f, 520f)) { -it / 3 },
+            exit = fadeOut(spring(stiffness = 800f)) + androidx.compose.animation.slideOutVertically(spring(1f, 800f)) { -it / 3 }
+        ) {
+            Box(Modifier.fillMaxWidth().background(Color.Black).padding(top = sat).height(60.dp).padding(horizontal = 6.dp)) {
+                Row(
+                    Modifier.fillMaxSize().graphicsLayer { alpha = (1f - sp * 2f).coerceIn(0f, 1f) },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    PdfBtn({ vm.nav.pop() }, size = 46.dp) { Ic("back", it, 24.dp) }
+                    T(
+                        note.t.ifBlank { "PDF" }, 18f, 600, white,
+                        Modifier.weight(1f).padding(horizontal = 6.dp).graphicsLayer { translationX = -sp * 28.dp.toPx() }, maxLines = 1
+                    )
+                    PdfBtn({ if (hasText) findOn = true else vm.show("This PDF is a scan, so there's no text to search") }) {
+                        Ic("search", if (hasText) it else it.copy(alpha = .38f), 24.dp)
+                    }
+                    PdfBtn({ setInk(!ui.inkOn) }, selected = ui.inkOn) { InkToolIcon(0, it) }
+                    PdfBtn({ vm.nav.push(Scr.NoteMenu(id)) }) { Ic("more", it, 24.dp) }
+                }
+                if (sp > .01f) {
+                    val full = vwDp - 12.dp
+                    Box(
+                        Modifier.align(Alignment.CenterEnd).padding(end = 88.dp * (1f - sp))
+                            .width(44.dp + (full - 44.dp) * sp).height(46.dp).clip(CircleShape).background(pal.c3)
+                    ) {
+                        Row(
+                            Modifier.fillMaxSize().graphicsLayer { alpha = ((sp - .45f) / .4f).coerceIn(0f, 1f) },
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconBtn("back", white, { findOn = false }, size = 44.dp)
+                            BasicTextField(
+                                value = query, onValueChange = { query = it }, singleLine = true,
+                                modifier = Modifier.weight(1f).focusRequester(fr),
+                                textStyle = TextStyle(color = white, fontFamily = LocalFF.current, fontSize = 16.sp, fontWeight = FontWeight(500)),
+                                cursorBrush = SolidColor(white),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                keyboardActions = KeyboardActions(onSearch = { step(1) }),
+                                decorationBox = { inner -> Box { if (query.isEmpty()) T("Search", 16f, 500, white.copy(alpha = .5f)); inner() } }
+                            )
+                            if (searching && ui.hits.isEmpty()) LoadingBlob(Modifier.size(22.dp))
+                            else if (query.isNotBlank()) T(if (ui.hits.isEmpty()) "0" else "${ui.cur + 1}/${ui.hits.size}", 13f, 700, white.copy(alpha = .7f))
+                            IconBtn("aup", white, { step(-1) }, size = 40.dp, enabled = ui.hits.isNotEmpty())
+                            IconBtn("adn", white, { step(1) }, size = 40.dp, enabled = ui.hits.isNotEmpty())
+                        }
+                    }
+                }
+            }
+        }
+
+        // ---------------- kapsul bawah: SATU wadah morphing ----------------
+        // Penunjuk halaman, bilah seleksi, dan alat ink adalah isi dari wadah yang sama. Berganti kapsul = wadah berubah ukuran + bentuk dengan
+        // satu pegas (tinggi dan lebar jalan bersamaan, tidak ada loncatan), isi lama pudar dan isi baru muncul. Muncul / hilang total =
+        // wadah membesar / menciut di tempatnya (bukan meluncur dari bawah).
+        val imeDp = with(LocalDensity.current) { WindowInsets.ime.getBottom(this).toDp() }
+        val cap = when {
+            ui.inkOn || findOn -> Cap.INK
+            ui.sel != null -> Cap.SEL
+            bars -> Cap.PAGE
+            else -> Cap.NONE
+        }
+        val capW = minOf(vwDp - 24.dp, 340.dp)
+        CapsuleHost(
+            cap,
+            kick = when (cap) { Cap.PAGE -> pageOpen; Cap.INK -> ui.inkOn to ui.tool; else -> null },
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = maxOf(sab, imeDp) + 14.dp)
+        ) { c ->
+            when (c) {
+                Cap.PAGE -> PageCapsule(page, count, pageOpen, { pageOpen = it }, capW) { i ->
+                    page = i
+                    goTo = PHit(i, listOf(floatArrayOf(0f, 0f, 0f, 0f)), "", 0, 0)   // pindah halaman tanpa menggulir ke dalam halaman
+                }
+                Cap.SEL -> PdfSelBar({ copySel() }, { selectAll() }, { ui.sel = null })
+                else -> InkDockBody(
+                    ui, findOn,
+                    onPick = { t ->
+                        if (ui.inkOn && ui.tool == t) ui.styleOpen = !ui.styleOpen   // ketuk alat aktif = buka / tutup warna + tebal
+                        else {
+                            saveTool()
+                            ui.tool = t
+                            ui.color = vm.pr.ic.getOrElse(t) { 0 }
+                            ui.wDp = vm.pr.iw.getOrElse(t) { if (t == 0) 3f else if (t == 1) 16f else 18f }
+                            if (!ui.inkOn) setInk(true)
+                            // mode cari: sembunyikan keyboard supaya area coret lega
+                            if (findOn) { focusMgr.clearFocus(); kb?.hide() }
+                        }
+                    },
+                    onSave = { saveTool() },
+                    onClose = { setInk(false) }
+                )
+            }
+        }
+    }
+}
+
+
+// ---------------------------------------------------------------- komponen M3 Expressive
+
+/**
+ * Tombol ikon M3 Expressive: bulat saat diam; ditekan = lapisan keadaan muncul + bentuk menciut jadi kotak membulat;
+ * dipilih (fill = true) = kotak membulat berwarna utama. Bentuk, warna, dan skala semuanya berpegas.
+ * fill = false: tombol tidak punya latar sendiri (dipakai bersama [PdfSlideMark]); hanya warna isinya yang berganti.
+ */
+@Composable
+private fun PdfBtn(
+    onClick: () -> Unit, modifier: Modifier = Modifier, selected: Boolean = false, tonal: Boolean = false,
+    enabled: Boolean = true, size: Dp = 44.dp, fill: Boolean = true, content: @Composable (Color) -> Unit
+) {
+    val pal = LocalPal.current
+    val hap = LocalHapticFeedback.current
+    val src = remember { MutableInteractionSource() }
+    val pr by src.collectIsPressedAsState()
+    val r by animateDpAsState(if (pr) size * .26f else if (selected && fill) size * .34f else size / 2, spring(.55f, 700f), label = "pbr")
+    val sc by animateFloatAsState(if (pr) .9f else 1f, spring(.45f, 650f), label = "pbs")
+    val bg by animateColorAsState(
+        if (selected && fill) pal.p else if (tonal) pal.c4 else if (pr) pal.os.copy(alpha = .14f) else Color.Transparent,
+        spring(stiffness = 500f), label = "pbb"
+    )
+    val fg by animateColorAsState(if (selected) pal.op else pal.os, spring(stiffness = 500f), label = "pbf")
+    Box(
+        modifier.graphicsLayer { scaleX = sc; scaleY = sc; alpha = if (enabled) 1f else .38f }
+            .size(size).clip(RoundedCornerShape(r.coerceAtLeast(0.dp))).background(bg)
+            .clickable(interactionSource = src, indication = LocalIndication.current, enabled = enabled) {
+                hap.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onClick()
+            },
+        Alignment.Center
+    ) { content(fg) }
+}
+
+// ---------------------------------------------------------------- gulir cepat (tepi kanan, mode gulir)
+
+/** Keadaan pegangan gulir cepat; dibaca oleh penggambar ([PdfFastScrollUi]) dan oleh penangkap sentuhan di induk ([fastTouch]). */
+@Stable
+private class PdfFast {
+    var vis by mutableStateOf(false)
+    var drag by mutableStateOf(false)
+    var dragF by mutableFloatStateOf(0f)
+    var f = 0f          // posisi daftar 0..1 (diisi penggambar)
+    var top = 0f        // px: tepi atas lintasan
+    var track = 1f      // px: panjang lintasan gagang
+    var thumbH = 0f     // px: tinggi area sentuh gagang
+    var off = false     // mode coret aktif: pegangan tidak dipakai
+}
+
+/**
+ * Penangkap sentuhan gagang, dipasang di induk (pass Initial) seperti [selHandleTouch]: bila jari mendarat di gagang yang sedang tampil,
+ * sentuhan dimakan di sini sehingga daftar tidak ikut bergulir, lalu geseran jari memetakan posisi gagang -> halaman lewat [onFrac].
+ */
+private fun Modifier.fastTouch(fs: PdfFast, onFrac: (Float) -> Unit): Modifier = pointerInput(fs) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        if (!fs.vis || fs.off) return@awaitEachGesture
+        val y0 = fs.top + fs.track * (if (fs.drag) fs.dragF else fs.f)
+        val zone = 44.dp.toPx()
+        val pad = 10.dp.toPx()
+        if (down.position.x < size.width - zone || down.position.y < y0 - pad || down.position.y > y0 + fs.thumbH + pad) return@awaitEachGesture
+        down.consume()
+        val grab = down.position.y - y0
+        fs.dragF = fs.f
+        fs.drag = true
+        try {
+            while (true) {
+                val ev = awaitPointerEvent(PointerEventPass.Initial)
+                if (ev.changes.count { it.pressed } >= 2) break
+                val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                c.consume()
+                if (c.changedToUp()) break
+                val nf = ((c.position.y - grab - fs.top) / fs.track.coerceAtLeast(1f)).coerceIn(0f, 1f)
+                fs.dragF = nf
+                onFrac(nf)
+            }
+        } finally { fs.drag = false }
+    }
+}
+
+/**
+ * Gagang gulir cepat M3 Expressive: muncul (menggeser masuk dari tepi) saat menggulir, lalu hilang sendiri. Tipis saat diam; disentuh =
+ * membesar jadi pil tebal berpegangan, dan gelembung berisi pratinjau halaman + nomornya tumbuh dari gagang.
+ */
+@Composable
+private fun PdfFastScrollUi(ui: PdfUi, fs: PdfFast, list: LazyListState, count: Int, topPad: Dp, botPad: Dp) {
+    if (count < 2) return
+    val pal = LocalPal.current
+    val dens = LocalDensity.current.density
+    var h by remember { mutableIntStateOf(0) }
+    val thumbH = 64.dp
+    val listF by remember(list, count) {
+        derivedStateOf {
+            if (!list.canScrollForward) 1f else {
+                val f = list.layoutInfo.visibleItemsInfo.firstOrNull()
+                val pos = if (f == null) 0f else list.firstVisibleItemIndex + list.firstVisibleItemScrollOffset / f.size.toFloat().coerceAtLeast(1f)
+                (pos / (count - 1)).coerceIn(0f, 1f)
+            }
+        }
+    }
+    SideEffect {
+        fs.f = listF
+        fs.off = ui.inkOn
+        fs.top = topPad.value * dens
+        fs.thumbH = thumbH.value * dens
+        fs.track = (h - fs.top - botPad.value * dens - fs.thumbH).coerceAtLeast(1f)
+    }
+    val scrolling = list.isScrollInProgress
+    LaunchedEffect(scrolling, fs.drag) { if (scrolling || fs.drag) fs.vis = true else { delay(1600); fs.vis = false } }
+    val appear by animateFloatAsState(if (fs.vis && !ui.inkOn) 1f else 0f, spring(.7f, 420f), label = "fsa")
+    val grow by animateFloatAsState(if (fs.drag) 1f else 0f, spring(.55f, 460f), label = "fsg")
+    val f = if (fs.drag) fs.dragF else listF
+    val shownPg = (f * (count - 1)).roundToInt().coerceIn(0, count - 1)
+
+    var thumb by remember { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(shownPg, fs.drag) {
+        if (!fs.drag) return@LaunchedEffect
+        val key = ui.fid + ":" + shownPg + "@256"
+        val hit = PdfCache.get(key)
+        if (hit != null) { thumb = hit.asImageBitmap(); return@LaunchedEffect }
+        delay(70)
+        val b = ui.doc.render(shownPg, 256) ?: return@LaunchedEffect
+        PdfCache.put(key, b)
+        thumb = b.asImageBitmap()
+    }
+
+    Box(Modifier.fillMaxSize().onSizeChanged { h = it.height }) {
+        if (appear > .01f) {
+            val yPx = fs.top + fs.track * f
+            val g = grow.coerceAtLeast(0f)
+            Box(
+                Modifier.align(Alignment.TopEnd).offset { IntOffset(0, yPx.roundToInt()) }.size(44.dp, thumbH)
+                    .graphicsLayer { alpha = appear.coerceIn(0f, 1f); translationX = (1f - appear.coerceIn(0f, 1f)) * 22.dp.toPx() }
+            ) {
+                if (g > .01f) {
+                    val ar = ui.doc.ratioOf(shownPg).coerceIn(.5f, 2.2f)
+                    Row(
+                        Modifier.align(Alignment.CenterEnd).offset(x = (-40).dp)
+                            .graphicsLayer { transformOrigin = TransformOrigin(1f, .5f); scaleX = g; scaleY = g; alpha = g.coerceIn(0f, 1f) }
+                            .shadow(8.dp, RoundedCornerShape(26.dp)).clip(RoundedCornerShape(26.dp)).background(pal.pc)
+                            .padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Canvas(Modifier.width(84.dp).height((84f * ar).dp).clip(RoundedCornerShape(8.dp)).background(Color.White)) {
+                            val b = thumb
+                            if (b != null) drawImage(
+                                b, dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()),
+                                filterQuality = FilterQuality.Low, colorFilter = if (ui.dark) INVERT else null
+                            )
+                        }
+                        Column(Modifier.padding(end = 6.dp)) {
+                            T((shownPg + 1).toString(), 26f, 900, pal.opc)
+                            T("of $count", 12f, 600, pal.opc.copy(alpha = .7f))
+                        }
+                    }
+                }
+                Box(
+                    Modifier.align(Alignment.CenterEnd).padding(end = 4.dp)
+                        .width((5f + 15f * g).dp).height((46f + 18f * g).dp)
+                        .shadow((2f + 4f * g).dp, CircleShape).clip(CircleShape).background(pal.p),
+                    Alignment.Center
+                ) {
+                    Canvas(Modifier.size(10.dp, 16.dp).graphicsLayer { alpha = g.coerceIn(0f, 1f) }) {
+                        val sw = 2.dp.toPx()
+                        for (i in 0..2) drawLine(pal.op, Offset(0f, size.height * i / 2f), Offset(size.width, size.height * i / 2f), sw, StrokeCap.Round)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Ruas trek dengan ujung luar bulat penuh dan sisi dekat gagang bersudut kecil (gaya penggeser M3 Expressive). */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.pdfSeg(l: Float, r: Float, cy: Float, th: Float, col: Color, leftBig: Boolean) {
+    if (r - l < 1f) return
+    val big = CornerRadius(th / 2f)
+    val small = CornerRadius(2.dp.toPx())
+    val p = androidx.compose.ui.graphics.Path()
+    p.addRoundRect(
+        RoundRect(
+            l, cy - th / 2f, r, cy + th / 2f,
+            if (leftBig) big else small, if (leftBig) small else big,
+            if (leftBig) small else big, if (leftBig) big else small
+        )
+    )
+    drawPath(p, col)
+}
+
+/** Garis bergelombang yang merambat (indikator progres bergelombang M3 Expressive). */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.pdfWave(x0: Float, x1: Float, cy: Float, amp: Float, wl: Float, ph: Float, sw: Float, col: Color) {
+    if (x1 - x0 < 1f) return
+    val k = (2.0 * Math.PI / wl).toFloat()
+    val p = androidx.compose.ui.graphics.Path()
+    var x = x0
+    p.moveTo(x, cy + amp * sin(x * k - ph))
+    while (x < x1) { x = min(x + 3f, x1); p.lineTo(x, cy + amp * sin(x * k - ph)) }
+    drawPath(p, col, style = Stroke(sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+}
+
+/** Progres bergelombang: bagian terisi bergelombang dan bergerak, sisanya garis lurus berujung bulat. */
+@Composable
+private fun PdfWavy(frac: Float, modifier: Modifier = Modifier) {
+    val pal = LocalPal.current
+    val inf = rememberInfiniteTransition(label = "wv")
+    val ph by inf.animateFloat(0f, 6.2831855f, infiniteRepeatable(tween(1500, easing = androidx.compose.animation.core.LinearEasing)), label = "wvp")
+    val f by animateFloatAsState(frac.coerceIn(0f, 1f), spring(.8f, 200f), label = "wvf")
+    Canvas(modifier.fillMaxWidth().height(20.dp)) {
+        val sw = 5.dp.toPx()
+        val cy = size.height / 2f
+        val end = sw / 2f + (size.width - sw) * f
+        if (size.width - sw / 2f - (end + sw) > 1f) drawLine(pal.osv.copy(alpha = .28f), Offset(end + sw, cy), Offset(size.width - sw / 2f, cy), sw, StrokeCap.Round)
+        pdfWave(sw / 2f, end, cy, 3.dp.toPx(), 20.dp.toPx(), ph, sw, pal.p)
+    }
+}
+
+/** Penggeser tebal M3 Expressive: trek berujung bulat, celah di sekitar gagang tegak yang memipih saat disentuh. */
+@Composable
+private fun PdfSlider(frac: Float, onChange: (Float) -> Unit, onDone: () -> Unit, modifier: Modifier = Modifier) {
+    val pal = LocalPal.current
+    val hap = LocalHapticFeedback.current
+    val cb by androidx.compose.runtime.rememberUpdatedState(onChange)
+    val fin by androidx.compose.runtime.rememberUpdatedState(onDone)
+    var drag by remember { mutableStateOf(false) }
+    val hw by animateDpAsState(if (drag) 3.dp else 5.dp, spring(.6f, 520f), label = "psh")
+    Canvas(
+        modifier.height(40.dp).pointerInput(Unit) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                val pad = 8.dp.toPx()
+                fun at(x: Float): Float = ((x - pad) / (size.width - 2f * pad).coerceAtLeast(1f)).coerceIn(0f, 1f)
+                drag = true
+                hap.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                cb(at(down.position.x)); down.consume()
+                while (true) {
+                    val ev = awaitPointerEvent()
+                    val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                    if (!c.pressed) break
+                    cb(at(c.position.x)); c.consume()
+                }
+                drag = false
+                fin()
+            }
+        }
+    ) {
+        val pad = 8.dp.toPx()
+        val th = 14.dp.toPx()
+        val gap = 6.dp.toPx()
+        val w = hw.toPx()
+        val cy = size.height / 2f
+        val x = pad + (size.width - 2f * pad) * frac.coerceIn(0f, 1f)
+        pdfSeg(pad, x - w / 2f - gap, cy, th, pal.p, true)
+        pdfSeg(x + w / 2f + gap, size.width - pad, cy, th, pal.os.copy(alpha = .22f), false)
+        drawRoundRect(pal.p, Offset(x - w / 2f, cy - 18.dp.toPx()), Size(w, 36.dp.toPx()), CornerRadius(w / 2f))
+    }
+}
+
+// ---------------------------------------------------------------- kapsul bawah (satu wadah morphing, mesin yang sama dengan MorphDock di DocBar)
+
+private enum class Cap { NONE, PAGE, SEL, INK }
+
+private class CapHold(var hidden: Boolean) {
+    var last = Cap.PAGE
+    var epoch = 0
+    var skipKick = false
+}
+
+/**
+ * SATU wadah untuk semua kapsul bawah, meniru MorphDock editor:
+ *  - berpindah kapsul = wadah MELAR ke samping dan memipih seperti jeli, sudutnya sesaat lebih kotak, lalu pulih dengan pegas berayun
+ *    (di lapisan gambar, tidak menyentuh tata letak);
+ *  - isi lama memipih ke satu tepi, isi baru melar masuk dari tepi seberang, elemennya muncul berurutan ([MorphSwap], XBtn / XGroup / SlideSeg);
+ *  - ukuran wadah mengalir dengan pegas yang sama dengan editor, tidak ada fade.
+ * Muncul dari kosong: skala + geser berpegas seperti dock editor. Hilang total: transparansi selesai lebih dulu daripada gerak, sehingga
+ * ekor pegas tidak tampak macet di tengah (dulu skala berhenti di .86 sampai pegas tenang, baru lenyap tiba-tiba).
+ */
+@Composable
+private fun CapsuleHost(cap: Cap, kick: Any?, modifier: Modifier = Modifier, content: @Composable (Cap) -> Unit) {
+    val pal = LocalPal.current
+    val h = remember { CapHold(cap == Cap.NONE) }
+    if (cap != Cap.NONE) {
+        // muncul dari kosong dengan isi yang berbeda dari terakhir: isi baru langsung dipasang, tanpa morf dari kapsul yang sudah hilang
+        if (h.hidden && h.last != cap) { h.epoch++; h.skipKick = true }
+        h.last = cap
+        h.hidden = false
+    }
+    val vis = remember { Animatable(if (cap != Cap.NONE) 1f else 0f) }
+    var alive by remember { mutableStateOf(cap != Cap.NONE) }
+    LaunchedEffect(cap != Cap.NONE) {
+        if (cap != Cap.NONE) {
+            alive = true
+            vis.animateTo(1f, M3E.spatial())
+        } else {
+            vis.animateTo(0f, spring(1f, 700f))
+            alive = false
+            h.hidden = true
+        }
+    }
+    // jeli: melar dan memipih, lalu pulih berayun (persis PdfDock / MorphDock)
+    val k = remember { Animatable(0f) }
+    val first = remember { booleanArrayOf(true) }
+    val kickKey = Pair(h.last, kick)
+    LaunchedEffect(kickKey) {
+        if (first[0]) first[0] = false
+        else if (h.skipKick) h.skipKick = false
+        else {
+            k.animateTo(1f, tween(110))
+            k.animateTo(0f, spring<Float>(dampingRatio = .38f, stiffness = 240f))
+        }
+    }
+    if (cap == Cap.NONE && !alive) return
+    val elev = if (pal.dark) 10.dp else 6.dp
+    val inkK = Cap.INK.ordinal
+    Box(
+        modifier.graphicsLayer {
+            val v = vis.value
+            val a = (v * 1.7f).coerceIn(0f, 1f)
+            alpha = a
+            val sc = (.86f + .14f * v).coerceAtLeast(.01f)
+            scaleX = sc; scaleY = sc
+            translationY = (1f - v) * size.height / 2f
+            transformOrigin = TransformOrigin(.5f, 1f)
+        }
+    ) {
+        Box(
+            Modifier.graphicsLayer {
+                val kv = k.value
+                scaleX = 1f + .05f * kv
+                scaleY = 1f - .06f * kv
+                transformOrigin = TransformOrigin(.5f, 1f)
+                shadowElevation = elev.toPx()
+                shape = RoundedCornerShape((34.dp.toPx() - 9.dp.toPx() * abs(kv).coerceAtMost(1.5f)).coerceAtLeast(16.dp.toPx()))
+                clip = true
+            }.background(pal.c3)
+        ) {
+            androidx.compose.runtime.CompositionLocalProvider(LocalDockMotion provides true) {
+                androidx.compose.runtime.key(h.epoch) {
+                    MorphSwap(
+                        h.last.ordinal,
+                        originX = { a, b -> if (a == inkK || b == inkK) .86f else if (b > a) 0f else 1f },
+                        dirOf = { a, b -> if (a == inkK || b == inkK) 1 else if (b > a) 1 else -1 },
+                        label = "cap"
+                    ) { n -> content(Cap.values()[n.coerceIn(0, 3)]) }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- kapsul alat ink
+
+/** Panel di atas alat (sub-bilah dock): pilihan warna lewat SlideSeg, lalu grup tonal berisi pratinjau tebal + penggeser. */
+@Composable
+private fun PdfInkSub(ui: PdfUi, onSave: () -> Unit) {
+    val pal = LocalPal.current
+    val t = ui.tool
+    val lo = if (t == 0) 1f else 8f
+    val hi = if (t == 0) 12f else if (t == 1) 32f else 40f
+    val frac = ((ui.wDp - lo) / (hi - lo)).coerceIn(0f, 1f)
+    val ip = ui.inkPal ?: pal
+    val col by animateColorAsState(if (t < 2) inkColor(ip, ui.color, t == 1) else pal.os, spring(stiffness = 500f), label = "ipc")
+    val fillA by animateFloatAsState(if (t == 2) 0f else 1f, spring(1f, 500f), label = "ipf")
+    val dot by animateDpAsState(ui.wDp.coerceIn(4f, 30f).dp, spring(.6f, 500f), label = "ipd")
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // baris warna menutup di dalam wadah saat memilih penghapus (tidak ada warna untuk dipilih)
+        AnimatedVisibility(
+            visible = t < 2,
+            enter = expandVertically(spring(1f, 520f)),
+            exit = shrinkVertically(spring(1f, 620f))
+        ) {
+            SlideSeg(count = 5, sel = ui.color, i = 0, onPick = { ui.color = it; onSave() }) { k, c ->
+                Box(Modifier.size(26.dp).border(2.dp, c, CircleShape).padding(4.dp).clip(CircleShape).background(inkColor(ip, k, t == 1)))
+            }
+        }
+        XGroup(i = 1) {
+            // pratinjau: titik berisi (pulpen / stabilo) menjadi cincin kosong (penghapus) dan sebaliknya
+            Box(Modifier.size(44.dp), Alignment.Center) {
+                Box(
+                    Modifier.size(dot).clip(CircleShape).background(col.copy(alpha = fillA))
+                        .border(2.dp, pal.os.copy(alpha = 1f - fillA), CircleShape)
+                )
+            }
+            PdfSlider(frac, { ui.wDp = lo + it * (hi - lo) }, onSave, Modifier.width(196.dp))
+            Spacer(Modifier.width(8.dp))
+        }
+    }
+}
+
+/**
+ * Isi kapsul ink, dibuat ringkas: satu baris (alat | undo redo | selesai). Warna + tebal disembunyikan di panel yang tumbuh ke atas di dalam
+ * wadah yang sama (pegas tanpa pantulan seperti sub-bilah editor); dibuka dengan mengetuk alat yang sedang aktif. Tombol selesai memakai
+ * lebar normal (dulu 68 dp dan terjepit), dan baris bisa digulir kalau layar sangat sempit, jadi tidak ada tombol yang gepeng.
+ */
+@Composable
+private fun InkDockBody(ui: PdfUi, findOn: Boolean, onPick: (Int) -> Unit, onSave: () -> Unit, onClose: () -> Unit) {
+    val pal = LocalPal.current
+    val ip = ui.inkPal ?: pal
+    Column(Modifier.width(DockW)) {
+        AnimatedVisibility(
+            visible = ui.inkOn && ui.styleOpen,
+            enter = expandVertically(spring(1f, 520f)),
+            exit = shrinkVertically(spring(1f, 620f))
+        ) {
+            Box(Modifier.fillMaxWidth().padding(top = 8.dp), Alignment.Center) { PdfInkSub(ui, onSave) }
+        }
+        Row(
+            Modifier.fillMaxWidth().height(DockH).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            SlideSeg(count = 3, sel = if (ui.inkOn) ui.tool else -1, i = 0, onPick = onPick) { k, c ->
+                val act = ui.inkOn && k == ui.tool
+                // alat aktif: ketuk lagi = buka / tutup panel warna + tebal; titik warna kecil sebagai petunjuk
+                Box(
+                    if (act) Modifier.fillMaxSize().clickable { ui.styleOpen = !ui.styleOpen } else Modifier,
+                    Alignment.Center
+                ) {
+                    InkToolIcon(k, c)
+                    if (act && k < 2) Box(
+                        Modifier.align(Alignment.BottomEnd).padding(end = 4.dp, bottom = 4.dp).size(12.dp)
+                            .border(1.5.dp, c, CircleShape).padding(2.5.dp).clip(CircleShape).background(inkColor(ip, ui.color, k == 1))
+                    )
+                }
+            }
+            XGroup(i = 1) {
+                XBtn(enabled = ui.ink.canUndo, onClick = { ui.ink.undo() }) { Ic("undo", it) }
+                XBtn(enabled = ui.ink.canRedo, onClick = { ui.ink.redo() }) {
+                    Box(Modifier.graphicsLayer { scaleX = -1f }) { Ic("undo", it) }
+                }
+            }
+            if (findOn) {
+                // mode cari: X hanya mematikan mode coret, kapsul tetap di tempatnya
+                XBtn(i = 2, enabled = ui.inkOn, onClick = onClose) { Ic("x", it) }
+            } else {
+                XBtn(tone = 2, i = 2, onClick = onClose) { Ic("ok", it) }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- kapsul penunjuk halaman
+
+/**
+ * Isi kapsul penunjuk halaman. Ketuk = kapsul melebar jadi penggeser bergelombang (gaya Material 3 Expressive: trek bergelombang yang
+ * merambat, celah di sekitar gagang tegak yang memipih saat ditekan, titik akhir). Tekan lalu geser di mana saja pada trek untuk
+ * pindah halaman; menciut sendiri kalau dibiarkan. Status [open] ada di induk supaya wadah ikut melar (jeli) saat terbuka / tertutup.
+ */
+@Composable
+private fun PageCapsule(page: Int, count: Int, open: Boolean, onOpen: (Boolean) -> Unit, maxW: Dp, onSeek: (Int) -> Unit) {
+    val pal = LocalPal.current
+    val haptic = LocalHapticFeedback.current
+    val seek by androidx.compose.runtime.rememberUpdatedState(onSeek)
+    val setOpen by androidx.compose.runtime.rememberUpdatedState(onOpen)
+    var drag by remember { mutableStateOf(false) }
+    var live by remember { mutableIntStateOf(page) }
+    var touch by remember { mutableIntStateOf(0) }
+    LaunchedEffect(open, drag, touch) { if (open && !drag) { delay(3200); setOpen(false) } }
+    val shown = (if (drag) live else page).coerceIn(0, (count - 1).coerceAtLeast(0))
+    val frac = if (count <= 1) 0f else shown / (count - 1f)
+    val animF by animateFloatAsState(frac, spring(1f, 1500f), label = "pcf")
+    val prog = if (count <= 1) 1f else (page + 1f) / count
+    val animP by animateFloatAsState(prog, spring(1f, 800f), label = "pcp")
+    val handleW by animateDpAsState(if (drag) 3.dp else 6.dp, spring(.6f, 520f), label = "pch")
+    val amp by animateDpAsState(if (drag) 1.dp else 3.5.dp, spring(.6f, 400f), label = "pca")
+    val trackW = (maxW - 112.dp).coerceIn(110.dp, 200.dp)
+    // pergantian isi yang sama dengan dock editor: isi lama menciut, isi baru melompat masuk
+    MorphSwap(if (open) 1 else 0, dirOf = { a, b -> if (b > a) 1 else -1 }, label = "pcap") { kk ->
+        val isOpen = kk == 1
+        if (!isOpen) {
+            Row(
+                Modifier.clickable { live = page; touch++; setOpen(true) }.padding(start = 14.dp, end = 18.dp, top = 10.dp, bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Canvas(Modifier.size(22.dp)) {
+                    val sw = 3.dp.toPx()
+                    val tl = Offset(sw / 2f, sw / 2f)
+                    val sz = Size(size.width - sw, size.height - sw)
+                    drawArc(pal.os.copy(alpha = .16f), 0f, 360f, false, tl, sz, style = Stroke(sw))
+                    drawArc(pal.p, -90f, 360f * animP.coerceIn(0f, 1f), false, tl, sz, style = Stroke(sw, cap = StrokeCap.Round))
+                }
+                T("Page ${page + 1} of $count", 14f, 700, pal.os)
+            }
+        } else {
+            val inf = rememberInfiniteTransition(label = "pcw")
+            val ph by inf.animateFloat(0f, 6.2831855f, infiniteRepeatable(tween(1400, easing = androidx.compose.animation.core.LinearEasing)), label = "pcwp")
+            Row(
+                Modifier.height(52.dp).padding(horizontal = 18.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                T((shown + 1).toString(), 15f, 800, pal.os, Modifier.widthIn(min = 24.dp))
+                Canvas(
+                    Modifier.width(trackW).height(52.dp).pointerInput(count) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            val pad = 6.dp.toPx()
+                            fun at(x: Float): Int {
+                                val f = ((x - pad) / (size.width - 2f * pad).coerceAtLeast(1f)).coerceIn(0f, 1f)
+                                return (f * (count - 1).coerceAtLeast(0) + .5f).toInt()
+                            }
+                            drag = true; touch++
+                            live = at(down.position.x)
+                            seek(live)
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            down.consume()
+                            while (true) {
+                                val ev = awaitPointerEvent()
+                                val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!c.pressed) break
+                                val p = at(c.position.x)
+                                if (p != live) {
+                                    live = p
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    seek(p)
+                                }
+                                c.consume()
+                            }
+                            drag = false; touch++
+                        }
+                    }
+                ) {
+                    val pad = 6.dp.toPx()
+                    val sw = 5.dp.toPx()
+                    val gap = 6.dp.toPx()
+                    val hw = handleW.toPx()
+                    val cy = size.height / 2f
+                    val x = pad + (size.width - 2f * pad) * animF
+                    // bagian terisi: gelombang yang merambat; sisanya: garis lurus berujung bulat + titik akhir
+                    pdfWave(pad + sw / 2f, x - hw / 2f - gap, cy, amp.toPx(), 18.dp.toPx(), ph, sw, pal.p)
+                    val b0 = x + hw / 2f + gap
+                    val b1 = size.width - pad
+                    if (b1 - b0 > sw) drawLine(pal.os.copy(alpha = .18f), Offset(b0 + sw / 2f, cy), Offset(b1 - sw / 2f, cy), sw, StrokeCap.Round)
+                    if (b1 - b0 > 16.dp.toPx()) drawCircle(pal.p, 2.dp.toPx(), Offset(b1 - 7.dp.toPx(), cy))
+                    drawRoundRect(
+                        pal.p, Offset(x - hw / 2f, cy - 18.dp.toPx()), Size(hw, 36.dp.toPx()), CornerRadius(hw / 2f)
+                    )
+                }
+                T(count.toString(), 15f, 700, pal.os.copy(alpha = .55f))
+            }
+        }
+    }
+}
+
+/** Isi kapsul muncul bergantian (membesar + pudar) setelah kapsulnya mulai terbuka; i = urutan. */
+private fun Modifier.pop(p: () -> Float, i: Int): Modifier = graphicsLayer {
+    val t = ((p() - .15f - i * .06f) / .5f).coerceIn(0f, 1f)
+    val k = .4f + .6f * t
+    alpha = t; scaleX = k; scaleY = k
+}
+
+private suspend fun withFrameNanos0() { androidx.compose.runtime.withFrameNanos { } }
+
+// ---------------------------------------------------------------- menu titik tiga untuk PDF
+
+@Composable
+fun PdfMenuPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
+    val pal = LocalPal.current
+    val ctx = LocalContext.current
+    val d = vm.note(id)
+    val pinned = d?.p == true
+    val archived = d?.a == true
+    var renaming by remember { mutableStateOf(false) }
+    val mode = if (PdfBus.mode < 0) ctx.getSharedPreferences("dinduy", 0).getInt("pdfmode", 0) else PdfBus.mode
+    val fname = (d?.t?.ifBlank { null } ?: "Document").replace(Regex("[\\\\/:*?\"<>|]"), "_") + ".pdf"
+    val file = d?.let { PdfFiles.file(ctx, it.pdf) }
+
+    val total = Regex("\\d+").find(d?.x ?: "")?.value?.toIntOrNull() ?: 0
+    val curPg = ((d?.pg ?: 0) + 1).coerceIn(1, max(1, total))
+
+    PageScaffold("PDF options", d?.t?.ifEmpty { null } ?: "PDF", { nav.pop() }) {
+        SGroup("Document", 0) {
+            SCard(POS_ONE, null, PaddingValues(20.dp)) {
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Box(Modifier.size(64.dp).clip(RoundedCornerShape(22.dp)).background(pal.pc), Alignment.Center) { PIc("page", pal.opc, 32.dp) }
+                        Column(Modifier.weight(1f)) {
+                            T(d?.t?.ifBlank { null } ?: "PDF", 18f, 700, pal.os, maxLines = 1)
+                            T(if (total > 0) "Page $curPg of $total" else (d?.x ?: ""), 14f, 400, pal.osv, lh = 1.3f)
+                        }
+                    }
+                    if (total > 0) {
+                        Spacer(Modifier.height(16.dp))
+                        PdfWavy(curPg / total.toFloat())
+                    }
+                }
+            }
+        }
+        SGroup("Reading", 60) {
+            SCard(POS_TOP) {
+                T("Layout", 16f, 500, pal.os, Modifier.padding(bottom = 12.dp))
+                SegPill(2, mode, {
+                    PdfBus.mode = it
+                    ctx.getSharedPreferences("dinduy", 0).edit().putInt("pdfmode", it).apply()
+                }) { i, fg ->
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (i == 0) Ic("rows", fg, 20.dp) else PIc("page", fg, 20.dp)
+                        T(if (i == 0) "Scroll" else "Pages", 15f, 700, fg)
+                    }
+                }
+            }
+            val curlOn = (if (PdfBus.curl < 0) ctx.getSharedPreferences("dinduy", 0).getInt("pdfcurl", 0) else PdfBus.curl) == 1
+            val curlStyle = if (PdfBus.curlStyle < 0) ctx.getSharedPreferences("dinduy", 0).getInt("pdfcurlstyle", 0) else PdfBus.curlStyle
+            AnimatedVisibility(
+                visible = mode == 1,
+                enter = expandVertically(spring(.9f, 420f)) + fadeIn(tween(220)),
+                exit = shrinkVertically(spring(1f, 500f)) + fadeOut(tween(140))
+            ) {
+                SCard(POS_MID, onClick = {
+                    val v = if (curlOn) 0 else 1
+                    PdfBus.curl = v
+                    ctx.getSharedPreferences("dinduy", 0).edit().putInt("pdfcurl", v).apply()
+                }) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Column(Modifier.weight(1f)) {
+                            T("3D page", 16f, 500, pal.os)
+                            T("Pages curl like a real book. Swipe or tap the left / right edge to turn, zoom in to pan", 14f, 400, pal.osv, lh = 1.3f)
+                        }
+                        MorphSwitch(curlOn)
+                    }
+                }
+            }
+            AnimatedVisibility(
+                visible = mode == 1 && curlOn,
+                enter = expandVertically(spring(.9f, 420f)) + fadeIn(tween(220)),
+                exit = shrinkVertically(spring(1f, 500f)) + fadeOut(tween(140))
+            ) {
+                SCard(POS_MID) {
+                    T("Curl style", 16f, 500, pal.os, Modifier.padding(bottom = 12.dp))
+                    SegPill(2, curlStyle, {
+                        PdfBus.curlStyle = it
+                        ctx.getSharedPreferences("dinduy", 0).edit().putInt("pdfcurlstyle", it).apply()
+                    }) { i, fg ->
+                        T(if (i == 0) "Classic curl" else "Silk curl", 15f, 700, fg)
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for (i in 0..1) {
+                            Column(Modifier.alpha(if (curlStyle == i) 1f else .55f)) {
+                                T(if (i == 0) "Classic curl" else "Silk curl", 14f, 700, pal.os)
+                                T(if (i == 0) "Page rolls up like a cylinder" else "Page bends smoothly like paper", 14f, 400, pal.osv, lh = 1.3f)
+                            }
+                        }
+                    }
+                }
+            }
+            SCard(POS_BOT) {
+                T("Page color", 16f, 500, pal.os, Modifier.padding(bottom = 4.dp))
+                T("Dark turns white pages to true black (AMOLED)", 14f, 400, pal.osv, Modifier.padding(bottom = 12.dp), lh = 1.3f)
+                SegPill(3, d?.pdk ?: 0, { v -> vm.upd(id) { it.copy(pdk = v) } }) { i, fg ->
+                    T(listOf("Auto", "Dark", "Light")[i], 15f, 700, fg)
+                }
+            }
+        }
+        SGroup("This PDF", 120) {
+            MRow(POS_TOP, "search", "Search in PDF", if (PdfBus.hasText) "Find and highlight any word" else "Not available: this PDF is a scan") {
+                if (PdfBus.hasText) { nav.pop(); PdfBus.find++ } else vm.show("This PDF is a scan, so there's no text to search")
+            }
+            MRow(POS_MID, "pin", if (pinned) "Unpin" else "Pin", "Pinned notes show at the top") {
+                vm.mark(listOf(id), if (pinned) "Unpinned" else "Pinned") { it.copy(p = !pinned) }
+            }
+            MRow(POS_BOT, "label", "Labels", d?.lb?.joinToString(", ")?.ifEmpty { null } ?: "Set labels for this PDF", chevron = true) {
+                nav.push(Scr.NoteLabels(id))
+            }
+        }
+        SGroup("Share and save", 180) {
+            MRow(POS_TOP, "up", "Share PDF", "Send it with WhatsApp, Files, and more") { if (file != null) act.sharePdf(fname, file) }
+            MRow(POS_BOT, "dl", "Save a copy", "Pick where to save the PDF") { if (file != null) act.savePdf(fname, file) }
+        }
+        SGroup("Manage", 240) {
+            MRow(POS_TOP, "pen", "Rename", "Change the title shown on the home screen") { renaming = true }
+            MRow(POS_MID, if (archived) "unarc" else "arc", if (archived) "Unarchive" else "Archive", "Moved to Archive and hidden from home") {
+                if (archived) vm.mark(listOf(id), "Unarchived") { it.copy(a = false) }
+                else { nav.pop(); nav.pop(); vm.mark(listOf(id), "Archived") { it.copy(a = true, p = false) } }
+            }
+            MRow(POS_MID, "lib", "Duplicate", "Make a copy of this PDF") { vm.duplicate(id) }
+            MRow(POS_BOT, "del", "Delete", "Kept in Trash for 30 days", danger = true) {
+                nav.pop(); nav.pop(); vm.mark(listOf(id), "Moved to Trash") { it.copy(dt = System.currentTimeMillis()) }
+            }
+        }
+    }
+    if (renaming) {
+        val init = d?.t ?: ""
+        var tf by remember { mutableStateOf(TextFieldValue(init, TextRange(init.length))) }
+        val rfr = remember { FocusRequester() }
+        LaunchedEffect(Unit) { delay(150); try { rfr.requestFocus() } catch (e: Exception) { } }
+        val done = {
+            val t = tf.text.trim()
+            if (t.isNotEmpty()) vm.upd(id) { it.copy(t = t) }
+            renaming = false
+        }
+        AlertDialog(
+            onDismissRequest = { renaming = false },
+            containerColor = pal.c3,
+            title = { T("Rename PDF", 22f, 900, pal.os) },
+            text = {
+                // padding ada DI DALAM kolom teks (decorationBox), jadi seluruh pil bisa diketuk dan kursor bisa digeser sampai ujung
+                BasicTextField(
+                    value = tf, onValueChange = { if (it.text.length <= 120) tf = it }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(pal.c4).focusRequester(rfr),
+                    textStyle = TextStyle(color = pal.os, fontFamily = LocalFF.current, fontSize = 18.sp, fontWeight = FontWeight(600)),
+                    cursorBrush = SolidColor(pal.p),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { done() }),
+                    decorationBox = { inner -> Box(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp)) { inner() } }
+                )
+            },
+            confirmButton = { TextButton(onClick = { done() }) { T("Save", 16f, 900, pal.p) } },
+            dismissButton = { TextButton(onClick = { renaming = false }) { T("Cancel", 16f, 700, pal.osv) } }
+        )
     }
 }
