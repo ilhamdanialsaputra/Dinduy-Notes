@@ -5,7 +5,7 @@
  * Maintained fork  : Arnab11/PlayLikeCurl (GLES2 renderer, production bitmap API v1, release 1.1.4)
  * Local changes    : package declaration (karacken.curl -> app.dinduy.silkcurl). Logic edits are marked "Local change"
  *                    in PageRenderer.updateMvp (fov 45f -> 55f), PageSurfaceView.completeSettlement, and
- *                    PlayLikeCurlGeometry.activeDepth (Play Books-like curl profile).
+ *                    PlayLikeCurlGeometry.activeDepth (gentler, never upward free edge).
  *
  * MIT License
  *
@@ -34,20 +34,10 @@ package app.dinduy.silkcurl;
 
 final class PlayLikeCurlGeometry {
     static final float CAMERA_DISTANCE = 2f;
-    /** Local change: page x (screen units, 0 = spine side of the screen) where the hump crest is held. */
-    private static final float CREST_SCREEN_X = 0.20f;
-    /** Local change: grid columns over which the page rises to the crest (the visible bend near the spine). */
-    private static final float RISE_COLUMNS = 10f;
-    /** Local change: the descent toward the free edge is never shorter than this many columns. */
-    private static final float MIN_FALL_COLUMNS = 4f;
-    /** Local change: crest height as a multiple of the curl radius (upstream crest: 2.1). */
-    private static final float PEAK_LIFT = 2.0f;
-    /** Local change: base height of the page as a multiple of the curl radius (same as upstream). */
-    private static final float BASE_LIFT = 0.1f;
-    /** Local change: exponent of the descent. 2 = parabola: flat at the crest, bending down toward the free edge. */
-    private static final float FALL_POWER = 2.0f;
-    /** Local change: steepest downward slope (dz/dx) of the free edge itself; lower = flatter right side. */
-    private static final float MAX_TIP_SLOPE = 0.55f;
+    /** Local change: how much the descent after the crest is stretched (1 = upstream, lower = longer and gentler). */
+    private static final float FALL_STRETCH = 0.5f;
+    /** Local change: columns the crest stays short of the free edge; smaller = edge droops less at the end. */
+    private static final float CREST_EDGE_MARGIN = 1.5f;
 
     private PlayLikeCurlGeometry() {
     }
@@ -154,44 +144,33 @@ final class PlayLikeCurlGeometry {
     }
 
     /**
-     * Local change: depth profile of the page being turned, shaped like Google Play Books.
+     * Local change: depth of the page being turned. Same travelling sine hump as upstream (so the motion
+     * and the bend near the spine are unchanged), with two fixes to the free (right) edge:
      *
-     * <p>Upstream used a travelling sine wave, whose far slope dived steeply near the free (right) edge
-     * and whose rising slope tilted that edge up toward the viewer as the page left the screen.
+     * <p>1. The descent after the crest is stretched by {@link #FALL_STRETCH}, so the right side is a long
+     * gentle slope instead of a steep dive.
      *
-     * <p>This profile is one hump: a smooth rise near the spine (left), a crest, then a long descent that
-     * bends progressively downward and reaches the base height at the free edge. The edge itself always
-     * points slightly DOWN (like an upside-down "c"), never up, at every progress value. The hump height is
-     * capped so the edge slope never exceeds {@link #MAX_TIP_SLOPE}, which flattens the page smoothly as it
-     * leaves the screen. The crest is pinned to a fixed screen position via the same x shift that
-     * {@link #frontX} / {@link #leftX} use.
+     * <p>2. The crest stops advancing {@link #CREST_EDGE_MARGIN} columns before the free edge. Upstream let
+     * the crest run past the edge, which put the edge on the rising side and tilted it up toward the
+     * viewer as the page left the screen. Now the edge always droops slightly down, and the droop shrinks
+     * to almost zero as the page is consumed.
      */
     private static float activeDepth(PageRole role, int column, float curlPosition) {
         if (role == PageRole.RIGHT) return PlayLikeCurlModel.RIGHT_DEPTH;
-        int grid = PlayLikeCurlModel.GRID;
-        float rawPercentage = 1f - curlPosition / grid;
+        float rawPercentage = 1f - curlPosition / PlayLikeCurlModel.GRID;
         float percentage = role == PageRole.LEFT ? rawPercentage * 0.75f : rawPercentage;
         float radius = resolvedRadius(percentage);
-        float shift = role == PageRole.LEFT
-                ? percentage
-                : (percentage > 0.05f ? percentage - 0.05f : 0f);
-        float span = 1f - radius;
-        float crest = grid * (CREST_SCREEN_X + shift) / span;
-        crest = Math.max(RISE_COLUMNS, Math.min(crest, grid - MIN_FALL_COLUMNS));
-        float fall = grid - crest;
-        float height = Math.min(
-                radius * PEAK_LIFT,
-                MAX_TIP_SLOPE * fall * (span / grid) / FALL_POWER);
-        float profile;
-        if (column <= crest) {
-            float t = (column - (crest - RISE_COLUMNS)) / RISE_COLUMNS;
-            t = Math.max(0f, Math.min(1f, t));
-            profile = 0.5f * (1f - (float) Math.cos(Math.PI * t));
-        } else {
-            float t = (column - crest) / fall;
-            profile = 1f - (float) Math.pow(t, FALL_POWER);
+        float waveWidth = role == PageRole.LEFT ? 0.50f : 0.60f;
+        float halfPeriod = PlayLikeCurlModel.GRID * waveWidth;
+        float delta = Math.min(
+                PlayLikeCurlModel.GRID - curlPosition,
+                PlayLikeCurlModel.GRID - halfPeriod / 2f - CREST_EDGE_MARGIN);
+        double halfPi = Math.PI / 2.0;
+        double phase = Math.PI / halfPeriod * (column - delta);
+        if (phase > halfPi) {
+            phase = halfPi + (phase - halfPi) * FALL_STRETCH;
         }
-        return radius * BASE_LIFT + height * profile;
+        return (float) (radius * Math.sin(phase) + radius * 1.1f);
     }
 
     private static float resolvedRadius(float percentage) {
