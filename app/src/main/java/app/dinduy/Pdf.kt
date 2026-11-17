@@ -916,6 +916,10 @@ private fun Modifier.curlTouch(
                             pending = scope.launch { delay(300); onTap() }
                         }
                     }
+                } else if (!moved) {
+                    // Tekan lama dilepas (mis. selesai memilih teks): library PageCurl memakai detectTapGestures tanpa onLongPress, yang tetap
+                    // menganggap lepasnya tekan lama sebagai ketukan lalu membalik halaman. Dimakan di sini supaya library tidak melihatnya.
+                    c.consume()
                 }
                 break
             }
@@ -1414,7 +1418,11 @@ private fun Modifier.noFlipWhile(active: () -> Boolean): Modifier = pointerInput
         while (true) {
             val ev = awaitPointerEvent(PointerEventPass.Initial)
             val c = ev.changes.firstOrNull { it.id == down.id } ?: break
-            if (c.changedToUp() || !c.pressed) break
+            if (c.changedToUp() || !c.pressed) {
+                // sentuhan apa pun yang berakhir selagi ada seleksi tidak boleh sampai ke ketukan bawaan library (yang membalik halaman)
+                if (!c.isConsumed && active()) c.consume()
+                break
+            }
             if (ev.changes.count { it.pressed } >= 2) continue
             if (!moved && (c.position - down.position).getDistance() > viewConfiguration.touchSlop) moved = true
             if (moved && !c.isConsumed && active()) c.consume()
@@ -1508,6 +1516,44 @@ private fun PdfSilkCurl(
     // selama ada seleksi teks halaman tidak boleh berpindah (ketukan tepi / geseran hanya boleh menutup seleksi)
     fun idle() = !ctl.busy && cz <= 1.02f && !findNow && ui.sel == null
 
+    // Geseran jari: dicatat untuk menentukan balikan selesai atau dibatalkan (kembali ke halaman semula)
+    val dg = remember { FloatArray(4) }          // 0 = x awal, 1 = x terakhir (untuk kecepatan), 2 = kecepatan x (px/dtk), 3 = arah
+    val dgT = remember { LongArray(1) }
+
+    // Ketukan tepi: halaman maju dijalankan sebagai geseran terskrip yang mulus dan lambat lewat mesin yang sama (drag*),
+    // sehingga kecepatannya setara dengan balikan mundur. Balikan mundur tetap memakai turn() mesin.
+    var tapJob by remember { mutableStateOf<Job?>(null) }
+    fun tapTurn(forward: Boolean) {
+        if (tapJob?.isActive == true || !idle()) return
+        if (if (forward) cur + 1 >= countNow else cur <= 0) return
+        if (!forward) { ctl.turn(false); return }
+        tapJob = scope.launch {
+            val g = geoNow
+            val sx = g.left + g.pw * .9f
+            val sy = g.top + g.ph * .82f
+            val ex = g.left + g.pw * .04f
+            val t0 = android.os.SystemClock.uptimeMillis()
+            var finished = false
+            ctl.dragBegin(1, sx, sy, t0)
+            ctl.dragMove(sx, sy, t0)
+            try {
+                val dur = 760f
+                while (true) {
+                    withFrameNanos { }
+                    val now = android.os.SystemClock.uptimeMillis()
+                    val f = ((now - t0) / dur).coerceIn(0f, 1f)
+                    val e = FastOutSlowInEasing.transform(f)
+                    ctl.dragMove(sx + (ex - sx) * e, sy, now)
+                    if (f >= 1f) break
+                }
+                ctl.dragEnd(ex, sy, android.os.SystemClock.uptimeMillis(), false)
+                finished = true
+            } finally {
+                if (!finished) ctl.dragEnd(sx, sy, android.os.SystemClock.uptimeMillis(), true)
+            }
+        }
+    }
+
     fun cClamp(o: Offset, z: Float): Offset {
         val g = geoNow
         val mx = ((g.pw * z - g.vw) / 2f).coerceAtLeast(0f)
@@ -1538,7 +1584,7 @@ private fun PdfSilkCurl(
             )
             .curlTouch(
                 scope, true, { cz > 1.02f }, { findNow }, { d -> cpan = cClamp(cpan + d, cz) },
-                onEdge = { d -> if (ui.sel != null) ui.sel = null else if (idle()) ctl.turn(d > 0) },   // ketukan tepi: tutup seleksi, atau turn(PageChange) mesin
+                onEdge = { d -> if (ui.sel != null) ui.sel = null else tapTurn(d > 0) },   // ketukan tepi: tutup seleksi, atau turn(PageChange) mesin
                 onTap = { if (ui.sel != null) ui.sel = null else onTapNow() },
                 onDouble = { p ->
                     val z0 = cz
@@ -1550,9 +1596,27 @@ private fun PdfSilkCurl(
             )
             .silkDrag(
                 canStart = { d -> idle() && (if (d > 0) cur + 1 < countNow else cur > 0) },
-                onStart = { d, p, t -> ctl.dragBegin(d, p.x, p.y, t) },
-                onMove = { p, t -> ctl.dragMove(p.x, p.y, t) },
-                onEnd = { p, t, cancelled -> ctl.dragEnd(p.x, p.y, t, cancelled) }
+                onStart = { d, p, t ->
+                    dg[0] = p.x; dg[1] = p.x; dg[2] = 0f; dg[3] = d.toFloat(); dgT[0] = t
+                    ctl.dragBegin(d, p.x, p.y, t)
+                },
+                onMove = { p, t ->
+                    val dtm = t - dgT[0]
+                    if (dtm >= 10L) {
+                        dg[2] = dg[2] * .4f + (p.x - dg[1]) / dtm * 1000f * .6f
+                        dg[1] = p.x; dgT[0] = t
+                    }
+                    ctl.dragMove(p.x, p.y, t)
+                },
+                onEnd = { p, t, cancelled ->
+                    // Balikan hanya selesai bila jari sudah menarik halaman cukup jauh (>= 50% lebar halaman) atau lewat kibasan cepat;
+                    // selain itu dibatalkan sehingga halaman kembali ke posisi semula dan tidak berpindah.
+                    val dir = dg[3]
+                    val prog = (if (dir > 0f) dg[0] - p.x else p.x - dg[0]) / geoNow.pw.coerceAtLeast(1f)
+                    val vel = if (dir > 0f) -dg[2] else dg[2]
+                    val done = !cancelled && (prog >= .5f || (prog >= .12f && vel >= 1400f * dens))
+                    ctl.dragEnd(p.x, p.y, t, !done)
+                }
             )
     ) {
         // GLSurfaceView tak ikut pudar bersama induknya, jadi disembunyikan selama morph buka/tutup dari beranda.
