@@ -1414,6 +1414,7 @@ private fun Modifier.noFlipWhile(active: () -> Boolean): Modifier = pointerInput
     awaitEachGesture {
         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
         if (!active()) return@awaitEachGesture
+        down.consume()   // library tidak boleh melihat sentuhan baru ini sebagai awal ketukan / geseran selagi ada seleksi
         var moved = false
         while (true) {
             val ev = awaitPointerEvent(PointerEventPass.Initial)
@@ -1615,7 +1616,30 @@ private fun PdfSilkCurl(
                     val prog = (if (dir > 0f) dg[0] - p.x else p.x - dg[0]) / geoNow.pw.coerceAtLeast(1f)
                     val vel = if (dir > 0f) -dg[2] else dg[2]
                     val done = !cancelled && (prog >= .5f || (prog >= .12f && vel >= 1400f * dens))
-                    ctl.dragEnd(p.x, p.y, t, !done)
+                    if (done) ctl.dragEnd(p.x, p.y, t, false)
+                    else {
+                        // Batal: jangan memakai dragEnd(cancelled = true) (memotong animasi). Jari "dikembalikan" dengan mulus ke titik awal
+                        // lewat mesin yang sama, lalu dilepas di sana: mesin sendiri yang menganimasikan halaman kembali ke tempatnya.
+                        tapJob?.cancel()
+                        tapJob = scope.launch {
+                            val sx = p.x
+                            val ex = dg[0]
+                            val y = p.y
+                            val t0 = android.os.SystemClock.uptimeMillis()
+                            val dur = 240f + 220f * prog.coerceIn(0f, 1f)
+                            try {
+                                while (true) {
+                                    withFrameNanos { }
+                                    val now = android.os.SystemClock.uptimeMillis()
+                                    val f = ((now - t0) / dur).coerceIn(0f, 1f)
+                                    ctl.dragMove(sx + (ex - sx) * FastOutSlowInEasing.transform(f), y, now)
+                                    if (f >= 1f) break
+                                }
+                            } finally {
+                                ctl.dragEnd(ex, y, android.os.SystemClock.uptimeMillis(), false)
+                            }
+                        }
+                    }
                 }
             )
     ) {
@@ -1926,7 +1950,21 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                 cpan = cClamp((c - origin) * (1f - k) + cpan * k + delta, z1)
                 cz = z1
             }
-            LaunchedEffect(cs) { snapshotFlow { cs.current }.collect { page = it; cz = 1f; cpan = Offset.Zero } }
+            // Pengaman: library PageCurl punya ketukan bawaan yang bisa membalik halaman tepat saat seleksi dibuat / ditutup.
+            // Perpindahan halaman yang bukan dari kita (flip ketukan tepi / geser) dalam 600 ms setelah status seleksi berubah dibatalkan.
+            val selAt = remember { LongArray(1) }
+            LaunchedEffect(ui.sel != null) { selAt[0] = System.currentTimeMillis() }
+            LaunchedEffect(cs) {
+                var prev = cs.current
+                snapshotFlow { cs.current }.collect {
+                    if (it != prev && flip?.isActive != true && System.currentTimeMillis() - selAt[0] < 600L) {
+                        cs.snapTo(prev)
+                        page = prev
+                    } else {
+                        prev = it; page = it; cz = 1f; cpan = Offset.Zero
+                    }
+                }
+            }
             LaunchedEffect(goTo) {
                 val h = goTo ?: return@LaunchedEffect
                 goTo = null
