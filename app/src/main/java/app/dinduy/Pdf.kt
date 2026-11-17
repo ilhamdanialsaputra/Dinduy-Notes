@@ -1629,7 +1629,7 @@ private fun PdfSilkCurl(
                     val dir = dg[3]
                     val prog = (if (dir > 0f) dg[0] - p.x else p.x - dg[0]) / geoNow.pw.coerceAtLeast(1f)
                     val vel = if (dir > 0f) -dg[2] else dg[2]
-                    val done = !cancelled && (prog >= .5f || (prog >= .12f && vel >= 1400f * dens))
+                    val done = !cancelled && (prog >= .22f || (prog >= .05f && vel >= 500f * dens))
                     if (done) ctl.dragEnd(p.x, p.y, t, false)
                     else {
                         // Batal: jangan memakai dragEnd(cancelled = true) (memotong animasi). Jari "dikembalikan" dengan mulus ke titik awal
