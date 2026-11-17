@@ -1534,6 +1534,7 @@ private fun PdfSilkCurl(
     // sehingga kecepatannya setara dengan balikan mundur. Balikan mundur tetap memakai turn() mesin.
     fun tapTurn(forward: Boolean) {
         abortSettle()
+        ctl.interrupt()
         if (tapJob?.isActive == true || !idle()) return
         if (if (forward) cur + 1 >= countNow else cur <= 0) return
         if (!forward) { ctl.turn(false); return }
@@ -1606,7 +1607,7 @@ private fun PdfSilkCurl(
             )
             .silkDrag(
                 canStart = { d ->
-                    (idle() || (settleOn[0] && cz <= 1.02f && !findNow && ui.sel == null)) &&
+                    (idle() || ((settleOn[0] || ctl.interruptible) && cz <= 1.02f && !findNow && ui.sel == null)) &&
                         (if (d > 0) cur + 1 < countNow else cur > 0)
                 },
                 onStart = { d, p, t ->
