@@ -42,10 +42,9 @@ import kotlin.math.sqrt
 // =====================================================================================
 //  Silk curl: balik halaman melengkung halus (OpenGL ES 2.0), ditulis sendiri, tanpa dependency baru.
 //
-//  Model: selembar kertas dengan tulang punggung di kiri. Bagian yang terangkat adalah kurva yang dibentuk dengan
-//  mengintegralkan sudut tangen theta(s) = thetaEnd * (1 - (1 - u)^P): lengkungan paling rapat dekat titik lepas,
-//  makin ke ujung makin lurus, jadi kertas melengkung lembut, bukan digulung jadi silinder rapat. Setelah lengkungan
-//  melewati kira-kira separuh halaman, seluruh lembar ikut meluncur ke kiri sampai keluar layar.
+//  Model: selembar kertas dengan tulang punggung di kiri. Ujung lembar bergelombang sinus: sudut tangen theta(s) = A sin(2 pi s / lambda),
+//  diintegralkan jadi kurva (x menyusut, z naik lalu turun), jadi muka halaman membentuk bukit yang cembung ke arah penonton,
+//  bukan digulung. Gelombang melebar dan makin tinggi seiring kemajuan; setelah kira-kira separuh jalan seluruh lembar ikut meluncur ke kiri sampai keluar layar.
 //  Satu parameter t (0 = datar, 1 = sudah lewat) menentukan semuanya; x terjauh kurva (siluet) dipakai sebagai penggerak
 //  yang bisa dibalik (tFor), jadi tepi halaman mengikuti jari secara linear.
 // =====================================================================================
@@ -112,9 +111,9 @@ internal object SilkShape {
 
     private fun curve(t0: Float, x: FloatArray, z: FloatArray, a: FloatArray, u: FloatArray) {
         val t = t0.coerceIn(0f, 1f)
-        val len = max(t, 1e-3f)
-        val c = 1f - len
-        val te = (PI * t.pow(0.85f)).toFloat()
+        val lam = max(t, 1e-3f)                       // bagian ujung lembar yang ikut bergelombang (satu panjang gelombang)
+        val c = 1f - lam
+        val amp = 1.5f * t.pow(0.7f)                  // sudut tangen maksimum (rad), < 90 derajat: tidak menggulung
         val shift = SHIFT * smooth((t - .55f) / .45f)
         x[0] = -shift; z[0] = 0f; a[0] = 0f; u[0] = 0f
         var cx = c
@@ -122,13 +121,13 @@ internal object SilkShape {
         var prev = 0f
         for (k in 0..N) {
             val f = k / N.toFloat()
-            val ang = te * (1f - (1f - f).pow(P))
+            val ang = amp * sin(2f * PI.toFloat() * f)   // theta(s) = A sin(2 pi s / lambda): naik (cembung ke penonton) lalu turun ke datar
             if (k > 0) {
                 val m = (prev + ang) * .5f
-                cx += cos(m) * len / N
-                cz -= sin(m) * len / N   // z NEGATIF: lembar melengkung ke belakang (ke dalam), muka depan tetap terlihat di sisi cembung
+                cx += cos(m) * lam / N                    // x menyusut: kertas tidak melar, jadi gelombang "memakan" lebar
+                cz += sin(m) * lam / N
             }
-            x[k + 1] = cx - shift; z[k + 1] = cz; a[k + 1] = ang; u[k + 1] = c + f * len
+            x[k + 1] = cx - shift; z[k + 1] = cz; a[k + 1] = ang; u[k + 1] = c + f * lam
             prev = ang
         }
     }
@@ -169,20 +168,19 @@ internal object SilkShape {
         var eT = -99f
         var eB = -99f
         var zm = 0f
-        // urutan kolom dari ujung ke tulang punggung: bagian yang menekuk ke belakang digambar lebih dulu, bagian depan menutupinya (tanpa depth buffer)
-        for (j in N + 1 downTo 0) {
+        for (j in 0 until N + 2) {
             val u = us[j]
             // lipatan miring: sisi bawah / atas maju beda jauh, makin besar ke ujung bebas
             val hd = tilt * env * 0.22f * u * sqrt(u.coerceAtLeast(0f))
             val a = th[j]
-            // cahaya dari kiri atas, muka depan cembung ke penonton: makin ke lipatan makin gelap
-            val sh = 0.55f + 0.45f * (cos(a) - 0.5f * sin(a)).coerceIn(0f, 1f)
+            // cahaya dari kiri atas: lereng yang menghadap kiri terang, lereng yang menghadap kanan gelap
+            val sh = 0.58f + 0.42f * ((0.45f * sin(a) + 0.89f * cos(a)) / 0.894f).coerceIn(0f, 1.06f)
             val cs = cos(a)
             val xt = xs[j] + hd
             val xb = xs[j] - hd
             if (xt > eT) eT = xt
             if (xb > eB) eB = xb
-            if (-zs[j] > zm) zm = -zs[j]
+            if (zs[j] > zm) zm = zs[j]
             b.put(xt); b.put(0f); b.put(u); b.put(0f); b.put(sh); b.put(cs)
             b.put(xb); b.put(1f); b.put(u); b.put(1f); b.put(sh); b.put(cs)
         }
