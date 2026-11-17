@@ -200,7 +200,7 @@ import app.dinduy.silkcurl.SilkController
 import app.dinduy.silkcurl.SilkGl
 import app.dinduy.silkcurl.SilkGlView
 import app.dinduy.silkcurl.SilkPage
-import app.dinduy.silkcurl.SilkShape
+import app.dinduy.silkcurl.silkInverted
 
 // =====================================================================================
 //  PDF di Dinduy: tiap PDF adalah satu "catatan" (Note.pdf = id berkas) supaya ikut label, sematan,
@@ -1327,19 +1327,7 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
     }
 }
 
-// ---------------------------------------------------------------- Silk curl: gaya 3D kedua (OpenGL ES 2.0, kode GL di app.dinduy.silkcurl)
-
-private const val SILK_GAIN_F = 1.1f    // maju: jarak geser jari (pecahan lebar halaman) -> gerak siluet
-private const val SILK_GAIN_B = 1.25f   // mundur
-
-private class SilkSnap(
-    val prev: SilkPage?, val cur: SilkPage?, val next: SilkPage?, val slot: Int,
-    val xr: Float, val tilt: Float, val dark: Boolean, val z: Float, val px: Float, val py: Float
-) {
-    override fun equals(other: Any?): Boolean = other is SilkSnap && other.prev === prev && other.cur === cur && other.next === next &&
-        other.slot == slot && other.xr == xr && other.tilt == tilt && other.dark == dark && other.z == z && other.px == px && other.py == py
-    override fun hashCode(): Int = xr.hashCode() * 31 + slot
-}
+// ---------------------------------------------------------------- Silk curl: gaya 3D kedua (mesin PlayLikeCurl asli, kode di app.dinduy.silkcurl)
 
 private class SilkGeo(
     val pw: Float, val ph: Float, val vw: Float, val vh: Float,
@@ -1348,30 +1336,31 @@ private class SilkGeo(
 
 /**
  * Geser horizontal untuk Silk curl, dipasang SETELAH pinch() dan curlTouch() (pass Main): geseran saat diperbesar, saat mode cari,
- * atau saat dua jari sudah dimakan di pass Initial, jadi tidak pernah sampai sini. [onMove] menerima jarak searah gestur (px, selalu >= 0 bila searah).
+ * atau saat dua jari sudah dimakan di pass Initial, jadi tidak pernah sampai sini. Gestur hanya DITERUSKAN ke mesin (SilkController.drag*):
+ * kurva, drag, fling, dan settlement dikerjakan mesin PlayLikeCurl sendiri. [onEnd] menerima (posisi, waktu, dibatalkan).
  */
 private fun Modifier.silkDrag(
     canStart: (Int) -> Boolean,
-    onStart: (Int, Float) -> Unit,
-    onMove: (Float, Float) -> Unit,
-    onEnd: (Float, Boolean) -> Unit
+    onStart: (Int, Offset, Long) -> Unit,
+    onMove: (Offset, Long) -> Unit,
+    onEnd: (Offset, Long, Boolean) -> Unit
 ): Modifier = pointerInput(Unit) {
     awaitEachGesture {
         val down = awaitFirstDown(requireUnconsumed = false)
         val slop = awaitHorizontalTouchSlopOrCancellation(down.id) { change, _ -> change.consume() } ?: return@awaitEachGesture
         val dir = if (slop.position.x < down.position.x) 1 else -1   // 1 = maju (geser ke kiri)
         if (!canStart(dir)) return@awaitEachGesture
-        val vt = VelocityTracker()
-        vt.addPosition(down.uptimeMillis, down.position)
-        onStart(dir, down.position.y)
+        onStart(dir, down.position, down.uptimeMillis)
+        var lastP = slop.position
+        var lastT = slop.uptimeMillis
+        onMove(lastP, lastT)
         val ok = horizontalDrag(slop.id) { c ->
-            vt.addPosition(c.uptimeMillis, c.position)
-            val dx = c.position.x - down.position.x
-            onMove(if (dir > 0) -dx else dx, c.position.y)
+            lastP = c.position
+            lastT = c.uptimeMillis
+            onMove(lastP, lastT)
             c.consume()
         }
-        val vx = vt.calculateVelocity().x
-        onEnd(if (dir > 0) -vx else vx, !ok)
+        onEnd(lastP, lastT, !ok)
     }
 }
 
@@ -1410,10 +1399,14 @@ private fun silkBake(src: Bitmap, strokes: List<PInk>, dark: Boolean, pal: Pal):
     return SilkPage(out, preInverted = dark)
 }
 
+/** Jendela bitmap untuk mesin: halaman cur-2 .. cur+2 (cur +-1 dipakai deck, +-2 supaya deck halaman tujuan langsung lengkap). */
+private class SilkWin(val cur: Int, val pages: Array<SilkPage?>, val dark: Boolean)
+
 /**
- * Mode halaman 3D gaya Silk. Keadaan: [cur] = halaman yang sedang dibaca; dir 0 = diam, 1 = lembar halaman [cur] sedang dibalik maju,
- * -1 = lembar halaman [cur]-1 sedang dibawa kembali. xr = posisi siluet lembar (1 = datar, XR_GONE = sudah lewat).
- * Hanya tiga halaman (sebelumnya, sekarang, berikutnya) yang dipegang. Teks dan coretan baru tidak aktif di sini (seperti Classic, coret aktif -> pager biasa).
+ * Mode halaman 3D gaya Silk, memakai mesin PlayLikeCurl asli (OpenGL ES 2.0). Mesin yang menggambar kurva dan menjalankan geser / fling / settlement;
+ * di sini hanya: menyuplai bitmap (PdfCache, tidak pernah di-recycle), meneruskan gestur yang valid, dan menyinkronkan [cur] dengan page / goTo / startPage.
+ * Zoom > 1 mematikan curl: halaman diperbesar digambar Compose (pan tetap jalan) di atas GL. Teks dan coretan baru tidak aktif di sini
+ * (seperti Classic, coret aktif -> pager biasa).
  */
 @Composable
 private fun PdfSilkCurl(
@@ -1442,73 +1435,60 @@ private fun PdfSilkCurl(
     val bk = bucket(pwPx.roundToInt())
 
     var cur by remember { mutableIntStateOf(page.coerceIn(0, max(0, count - 1))) }
-    var dir by remember { mutableIntStateOf(0) }
-    var xr by remember { mutableFloatStateOf(1f) }
-    var tilt by remember { mutableFloatStateOf(0f) }
-    var job by remember { mutableStateOf<Job?>(null) }
     var cz by remember { mutableFloatStateOf(1f) }
     var cpan by remember { mutableStateOf(Offset.Zero) }
     val cMul by remember { derivedStateOf { ceil(cz).coerceAtLeast(1f) } }
 
-    val ctl = remember { SilkController { onFailNow() } }
+    val ctl = remember {
+        SilkController { onFailNow() }.also { c -> c.onPage = { p -> cur = p; onPageNow(p) } }   // balikan selesai (mesin) -> state luar
+    }
 
     // seleksi teks tidak jalan di atas GLSurfaceView
     LaunchedEffect(Unit) { ui.sel = null }
 
-    // ---- bitmap: peta kecil, hanya jendela cur-1..cur+1; dibuat ulang bila resolusi / mode gelap / coretan berubah
+    // ---- bitmap: peta kecil, hanya jendela cur-2..cur+2; dibuat ulang bila resolusi / mode gelap / coretan berubah.
+    // Mesin menerima bitmap APA ADANYA (tidak ada shader invert): mode gelap dan coretan dibakar ke salinan di sini, di latar belakang.
     val pages = remember(bk, ui.dark, ui.ink.list) { mutableStateMapOf<Int, SilkPage>() }
     suspend fun make(i: Int, res: Int): SilkPage? {
         val b = silkLoad(ui, i, res) ?: return null
         val strokes = ui.ink.byPage[i]
         val pal = ui.inkPal
-        return if (!strokes.isNullOrEmpty() && pal != null) withContext(Dispatchers.Default) { silkBake(b, strokes, ui.dark, pal) } else SilkPage(b, false)
-    }
-    LaunchedEffect(pages, cur, ui.doc.ok) {
-        for (k in pages.keys.toList()) if (k < cur - 1 || k > cur + 1) pages.remove(k)
-        for (i in intArrayOf(cur, cur + 1, cur - 1)) {
-            if (i !in 0 until countNow || pages[i] != null) continue
-            val sp = make(i, bk) ?: continue
-            if (i in (cur - 1)..(cur + 1)) pages[i] = sp
+        val dk = ui.dark
+        return withContext(Dispatchers.Default) {
+            if (!strokes.isNullOrEmpty() && pal != null) silkBake(b, strokes, dk, pal)
+            else if (dk) SilkPage(silkInverted(b), true)
+            else SilkPage(b, false)
         }
     }
-    // resolusi tinggi hanya untuk halaman yang sedang diperbesar (seperti mul di PdfPage)
+    LaunchedEffect(pages, cur, ui.doc.ok) {
+        for (k in pages.keys.toList()) if (k < cur - 2 || k > cur + 2) pages.remove(k)
+        for (d in intArrayOf(0, 1, -1, 2, -2)) {
+            val i = cur + d
+            if (i !in 0 until countNow || pages[i] != null) continue
+            val sp = make(i, bk) ?: continue
+            if (i in (cur - 2)..(cur + 2)) pages[i] = sp
+        }
+    }
+    // resolusi tinggi hanya untuk halaman yang sedang diperbesar (seperti mul di PdfPage); tidak pernah dikirim ke mesin
     var hi by remember { mutableStateOf<Triple<Int, Float, SilkPage>?>(null) }
     LaunchedEffect(pages, cur, cMul, ui.doc.ok) {
         if (cMul <= 1f) { hi = null; return@LaunchedEffect }
         val sp = make(cur, bucket((pwPx * cMul).roundToInt())) ?: return@LaunchedEffect
         hi = Triple(cur, cMul, sp)
     }
-    val hiPage = hi?.takeIf { it.first == cur && cz > 1.02f }?.third
-    val pPrev = pages[cur - 1]
-    val pCur = hiPage ?: pages[cur]
-    val pNext = pages[cur + 1]
 
     // ---- sinkron dengan state luar: loncat dari pencarian / kapsul, halaman terakhir (page -> vm.upd di PdfReader)
     LaunchedEffect(goTo) {
         val h = goTo ?: return@LaunchedEffect
         clearGoTo()
-        job?.cancel()
-        dir = 0; xr = 1f; tilt = 0f
-        cur = h.page.coerceIn(0, max(0, countNow - 1))
+        cur = h.page.coerceIn(0, max(0, countNow - 1))   // controller.sync membatalkan balikan yang sedang jalan
     }
     LaunchedEffect(page) {
-        if (page != cur && dir == 0 && job?.isActive != true) cur = page.coerceIn(0, max(0, countNow - 1))
+        if (page != cur && !ctl.busy) cur = page.coerceIn(0, max(0, countNow - 1))
     }
     LaunchedEffect(cur) { cz = 1f; cpan = Offset.Zero }
 
-    // ---- gerak
-    fun settle(to: Float, after: () -> Unit) {
-        job?.cancel()
-        val from = xr
-        job = scope.launch {
-            val dur = (220 + 260 * (abs(to - from) / 2.3f).coerceIn(0f, 1f)).toInt()
-            animate(from, to, animationSpec = tween(dur, easing = FastOutSlowInEasing)) { v, _ -> xr = v }
-            after()
-        }
-    }
-    fun finishForward() { cur += 1; dir = 0; xr = 1f; tilt = 0f; onPageNow(cur) }
-    fun finishBackward() { cur -= 1; dir = 0; xr = 1f; tilt = 0f; onPageNow(cur) }
-    fun idle() = job?.isActive != true && cz <= 1.02f && !findNow
+    fun idle() = !ctl.busy && cz <= 1.02f && !findNow
 
     fun cClamp(o: Offset, z: Float): Offset {
         val g = geoNow
@@ -1524,45 +1504,23 @@ private fun PdfSilkCurl(
         cz = z1
     }
 
-    // ---- kirim ke renderer
-    // SideEffect saja TIDAK cukup: state yang dibaca di dalam SideEffect tidak memicu recomposition, jadi xr / tilt / dir yang berubah tiap frame
-    // animasi tidak pernah sampai ke renderer. snapshotFlow memantau semuanya dan mendorong satu update per perubahan.
-    val pagesNow by rememberUpdatedState(pages)
+    // ---- kirim jendela bitmap ke mesin. snapshotFlow memantau cur / isi peta / mode gelap dan mendorong satu sync per perubahan.
     LaunchedEffect(ctl) {
         snapshotFlow {
-            val pg = pagesNow
             val c = cur
-            val hp = hi?.takeIf { it.first == c && cz > 1.02f }?.third
-            SilkSnap(pg[c - 1], hp ?: pg[c], pg[c + 1], if (dir < 0) 0 else 1, xr, tilt, ui.dark, cz, cpan.x, cpan.y)
-        }.collect { n ->
-            val g = geoNow
-            ctl.setPages(n.prev, n.cur, n.next)
-            ctl.setState(n.slot, n.xr, n.tilt, n.dark, n.z, n.px, n.py, g.left, g.top, g.pw, g.ph, g.vw, g.vh)
-        }
-    }
-    // geometri / bitmap yang berubah lewat komposisi (rasio halaman terukur, bitmap baru selesai dirender)
-    SideEffect {
-        ctl.setPages(pPrev, pCur, pNext)
-        ctl.setState(
-            if (dir < 0) 0 else 1, xr, tilt, ui.dark, cz, cpan.x, cpan.y,
-            geo.left, geo.top, geo.pw, geo.ph, geo.vw, geo.vh
-        )
+            SilkWin(c, Array(5) { k -> pages[c - 2 + k] }, ui.dark)
+        }.collect { w -> ctl.sync(w.cur, countNow, w.pages, w.dark) }
     }
 
     Box(
-        Modifier.fillMaxSize()
+        Modifier.fillMaxSize().background(Color.Black)
             .pinch(
                 onPinch = { z, p, c -> cZoom((cz * z).coerceIn(1f, 4f), c, p) },
                 onEnd = { if (cz < 1.05f) { cz = 1f; cpan = Offset.Zero } }
             )
             .curlTouch(
                 scope, true, { cz > 1.02f }, { findNow }, { d -> cpan = cClamp(cpan + d, cz) },
-                onEdge = { d ->
-                    if (idle()) {
-                        if (d > 0 && cur + 1 < countNow) { dir = 1; xr = 1f; tilt = .45f; settle(SilkShape.XR_GONE) { finishForward() } }
-                        else if (d < 0 && cur > 0) { dir = -1; xr = 0f; tilt = .45f; settle(1f) { finishBackward() } }
-                    }
-                },
+                onEdge = { d -> if (idle()) ctl.turn(d > 0) },   // ketukan tepi -> turn(PageChange) mesin
                 onTap = { if (ui.sel != null) ui.sel = null else onTapNow() },
                 onDouble = { p ->
                     val z0 = cz
@@ -1574,48 +1532,49 @@ private fun PdfSilkCurl(
             )
             .silkDrag(
                 canStart = { d -> idle() && (if (d > 0) cur + 1 < countNow else cur > 0) },
-                onStart = { d, y ->
-                    val g = geoNow
-                    dir = d
-                    xr = if (d > 0) 1f else 0f
-                    tilt = (((y - g.top) / g.ph - .5f) * 2f).coerceIn(-1f, 1f) * .9f
-                },
-                onMove = { dist, y ->
-                    val g = geoNow
-                    xr = if (dir > 0) (1f - SILK_GAIN_F * dist / g.pw).coerceIn(SilkShape.XR_GONE, 1f)
-                    else (SILK_GAIN_B * dist / g.pw).coerceIn(0f, 1f)
-                    tilt += ((((y - g.top) / g.ph - .5f) * 2f).coerceIn(-1f, 1f) * .9f - tilt) * .25f
-                },
-                onEnd = { vel, cancelled ->
-                    val d = dir
-                    if (d != 0) {
-                        val commit = !cancelled && when {
-                            vel > 900f -> true
-                            vel < -900f -> false
-                            d > 0 -> xr < .55f
-                            else -> xr > .4f
-                        }
-                        if (d > 0) {
-                            if (commit) settle(SilkShape.XR_GONE) { finishForward() } else settle(1f) { dir = 0; tilt = 0f }
-                        } else {
-                            if (commit) settle(1f) { finishBackward() } else settle(0f) { dir = 0; xr = 1f; tilt = 0f }
-                        }
-                    }
-                }
+                onStart = { d, p, t -> ctl.dragBegin(d, p.x, p.y, t) },
+                onMove = { p, t -> ctl.dragMove(p.x, p.y, t) },
+                onEnd = { p, t, cancelled -> ctl.dragEnd(p.x, p.y, t, cancelled) }
             )
     ) {
-        // GLSurfaceView tak ikut pudar bersama induknya, jadi disembunyikan selama morph buka/tutup dari beranda
-        SilkGlView(ctl, vm.openP.value > .2f, Modifier.fillMaxSize())
+        // GLSurfaceView tak ikut pudar bersama induknya, jadi disembunyikan selama morph buka/tutup dari beranda.
+        // Kamera mesin tetap: view diposisikan supaya halaman diam persis menempati persegi halaman (geo), sisanya hitam.
+        // Halaman yang lebih tinggi dari ~1.55 x lebarnya tak muat di frustum kamera mesin (tinggi dunia 1.657): diperkecil di tengah supaya tidak terpotong.
+        val fit = min(1f, 1.55f / r0)
+        SilkGlView(
+            ctl, vm.openP.value > .2f, Modifier.fillMaxSize(),
+            geo.left + geo.pw * (1f - fit) / 2f, geo.top + geo.ph * (1f - fit) / 2f, geo.pw * fit, geo.ph * fit
+        )
 
-        // penutup warna kertas sampai frame GL pertama tergambar (hindari kedip hitam saat surface dibuat)
+        // penutup warna kertas sampai deck pertama siap (hindari kedip hitam saat surface dibuat)
         val cover by animateFloatAsState(if (ctl.ready) 0f else 1f, tween(140), label = "silkcover")
         if (cover > .001f) Canvas(Modifier.fillMaxSize()) {
             drawRect(if (ui.dark) Color.Black else Color.White, Offset(geo.left, geo.top), Size(geo.pw, geo.ph), alpha = cover)
         }
 
+        // diperbesar: mesin tidak mengenal zoom / pan, jadi halaman beresolusi tinggi digambar Compose di atas GL (curl mati selama cz > 1)
+        if (cz > 1.001f) {
+            val zp = hi?.takeIf { it.first == cur }?.third ?: pages[cur]
+            if (zp != null) {
+                val img = remember(zp) { zp.bitmap.asImageBitmap() }
+                Canvas(Modifier.fillMaxSize()) {
+                    drawRect(Color.Black)
+                    val w = geo.pw * cz
+                    val h = geo.ph * cz
+                    val cx = geo.left + geo.pw / 2f + cpan.x
+                    val cy = geo.top + geo.ph / 2f + cpan.y
+                    drawImage(
+                        img, srcOffset = IntOffset.Zero, srcSize = IntSize(img.width, img.height),
+                        dstOffset = IntOffset((cx - w / 2f).roundToInt(), (cy - h / 2f).roundToInt()),
+                        dstSize = IntSize(w.roundToInt(), h.roundToInt()), filterQuality = FilterQuality.High
+                    )
+                }
+            }
+        }
+
         // sorotan hasil cari (GL tidak menggambar PdfPage): hanya saat halaman diam
         val marks = remember(ui.hits, cur) { ui.hits.withIndex().filter { it.value.page == cur } }
-        if (dir == 0 && marks.isNotEmpty()) Canvas(Modifier.fillMaxSize()) {
+        if (!ctl.busy && marks.isNotEmpty()) Canvas(Modifier.fillMaxSize()) {
             fun mx(f: Float) = geo.left + (f * geo.pw - geo.pw / 2f) * cz + geo.pw / 2f + cpan.x
             fun my(f: Float) = geo.top + (f * geo.ph - geo.ph / 2f) * cz + geo.ph / 2f + cpan.y
             for ((vi, h) in marks) {
