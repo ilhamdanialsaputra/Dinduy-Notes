@@ -247,6 +247,7 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
     if (!on && t0 <= .01f) return
     vm.ghostVer
     val bookOn = vm.morph?.book == true && vm.openId?.let { vm.note(it) }?.pdf?.isNotEmpty() == true
+    val bgeo = if (bookOn) rememberBookGeo() else null
     Box(Modifier.fillMaxSize()) {
     Box(
         Modifier.fillMaxSize().graphicsLayer { translationX = -u * size.width * .26f }.pointerInput(Unit) { }
@@ -294,15 +295,19 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
             // kartu (1 atau 2 kolom): semua tepi bergerak serempak supaya wadah tidak miring/melar;
             // selain kartu (Tambah catatan): tepi kiri-kanan sedikit lebih cepat dari atas-bawah
             val tx = if (m.card) tt else (tt * 1.12f).coerceIn(0f, 1f)
-            val l = lerp(m.l, 0f, tx)
-            val r = lerp(m.r, size.width, tx)
-            val tp = lerp(m.t, 0f, tt)
-            val b = lerp(m.b, size.height, tt)
+            // buku PDF: bingkai = kotak kertas yang sama persis dengan BookPageLayer / sampul 3D (sejajar), baru meluas ke layar penuh di ujung zoom
+            val pr = if (m.book && bgeo != null) bookPageRect(vm, size.width, size.height, tt, bgeo) else null
+            val ev = if (pr != null) bookReveal(tt) else 0f
+            val l = if (pr != null) lerp(pr.left, 0f, ev) else lerp(m.l, 0f, tx)
+            val r = if (pr != null) lerp(pr.right, size.width, ev) else lerp(m.r, size.width, tx)
+            val tp = if (pr != null) lerp(pr.top, 0f, ev) else lerp(m.t, 0f, tt)
+            val b = if (pr != null) lerp(pr.bottom, size.height, ev) else lerp(m.b, size.height, tt)
             val r4 = m.r4 ?: FloatArray(4) { m.rad }
             fun rr(k: Int) = CornerRadius(lerp(r4[k], 0f, tt))
             val path = Path().apply { addRoundRect(RoundRect(Rect(l, tp, r, b), rr(0), rr(1), rr(2), rr(3))) }
             // latar di luar kartu meredup selama morph (ikut progres buka/tutup, jadi memudar balik saat ditutup)
-            drawRect(Color.Black.copy(alpha = (if (pal.dark) .45f else .32f) * tt))
+            val dimA = (if (pal.dark) .45f else .32f) * tt
+            drawRect(Color.Black.copy(alpha = if (pr != null) lerp(dimA, 1f, ev) else dimA))
             // buku PDF, fase sampul terbuka (tt == 0): seluruh adegan 3D (halaman + sampul + bayangan) digambar BookCoverLayer;
             // wadah hitam dan isi layar baca belum dipakai, jadi tidak ada warna hitam di balik sampul
             if (m.book && tt <= .0005f) {
