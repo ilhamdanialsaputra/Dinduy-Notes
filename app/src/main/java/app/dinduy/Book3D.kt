@@ -120,8 +120,9 @@ object BookTex {
         // alur engsel di kiri (sama dengan BookCoverFace)
         p.reset(); p.shader = LinearGradient(0f, 0f, w * .09f, 0f, intArrayOf(blk(.40f), blk(.10f), 0), null, Shader.TileMode.CLAMP)
         c.drawRect(0f, 0f, w * .09f, h, p)
-        p.reset(); p.color = wht(.30f); c.drawRect(w * .095f, 0f, w * .095f + max(1f, w * .006f), h, p)
-        p.reset(); p.color = blk(.18f); c.drawRect(w * .088f, 0f, w * .088f + max(1f, w * .005f), h, p)
+        // lembah engsel: gradasi gelap halus (tanpa garis putih / garis keras 1 px yang tampak seperti retakan di atas foto terang)
+        p.reset(); p.shader = LinearGradient(w * .06f, 0f, w * .125f, 0f, intArrayOf(0, blk(.16f), 0), floatArrayOf(0f, .45f, 1f), Shader.TileMode.CLAMP)
+        c.drawRect(w * .06f, 0f, w * .125f, h, p)
         // kilau matte yang lembut (bukan mengkilap)
         p.reset(); p.shader = LinearGradient(w * .1f, 0f, w * .95f, h * .55f, intArrayOf(wht(.14f), 0, 0), null, Shader.TileMode.CLAMP)
         c.drawRect(0f, 0f, w, h, p)
@@ -150,8 +151,8 @@ object BookTex {
         p.reset(); p.shader = LinearGradient(0f, 0f, w * .10f, 0f, intArrayOf(blk(.24f), 0), null, Shader.TileMode.CLAMP)
         c.drawRect(0f, 0f, w * .10f, h.toFloat(), p)
         // lipatan engsel: garis terang tipis di sebelah garis gelap
-        p.reset(); p.color = blk(.16f); c.drawRect(w * .095f, 0f, w * .095f + 2f, h.toFloat(), p)
-        p.reset(); p.color = wht(.40f); c.drawRect(w * .095f + 2f, 0f, w * .095f + 4f, h.toFloat(), p)
+        p.reset(); p.shader = LinearGradient(w * .07f, 0f, w * .13f, 0f, intArrayOf(0, blk(.14f), 0), floatArrayOf(0f, .5f, 1f), Shader.TileMode.CLAMP)
+        c.drawRect(w * .07f, 0f, w * .13f, h.toFloat(), p)
         p.reset(); p.style = Paint.Style.STROKE; p.strokeWidth = 2f; p.color = blk(.07f)
         c.drawRect(w * .06f, h * .04f, w * .96f, h * .96f, p)
         innerBm = b
@@ -379,9 +380,9 @@ object Book3D {
                 cv.drawPath(path, paint)
                 // sambungan: alur gelap + garis terang di sebelahnya (timbul), di sisi dalam papan depan dan belakang
                 line(-hw, -hh, 0f, -hw, hh, 0f, GROOVE, 1.3f)
-                line(-hw, -hh, tc * .16f, -hw, hh, tc * .16f, 0x2EFFFFFF, 1f)
+                line(-hw, -hh, tc * .16f, -hw, hh, tc * .16f, 0x10FFFFFF, 1f)
                 line(-hw, -hh, -pg, -hw, hh, -pg, GROOVE, 1.3f)
-                line(-hw, -hh, -pg - tc * .16f, -hw, hh, -pg - tc * .16f, 0x2EFFFFFF, 1f)
+                line(-hw, -hh, -pg - tc * .16f, -hw, hh, -pg - tc * .16f, 0x10FFFFFF, 1f)
             }
         }
         // atas, bawah (sepanjang x) dan sisi kanan (sepanjang y): papan belakang + halaman. Papan depan = tepi sampul yang berputar.
