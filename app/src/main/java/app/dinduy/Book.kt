@@ -350,7 +350,6 @@ fun BookCard(
         )
     }
 
-    val total = remember(d.x) { Regex("\\d+").find(d.x)?.value?.toIntOrNull() ?: 0 }
     // tekstur sampul 3D dibuat di latar; sebelum jadi, kartu memakai sampul datar (tanpa kedip)
     val coverKey = "${d.cv}|${d.cx}|${d.cy}|${d.cz}"
     var texVer by remember { mutableIntStateOf(0) }
@@ -440,7 +439,6 @@ fun BookCard(
             }
             Spacer(Modifier.height(6.dp))
             T(d.t.trim().ifBlank { "PDF" }, 14f, 600, pal.os, Modifier.padding(horizontal = 2.dp), lh = 1.25f, maxLines = 2)
-            T(if (total > 0) "p. ${d.pg + 1} / $total" else d.x, 12f, 500, pal.osv, Modifier.padding(horizontal = 2.dp, vertical = 2.dp), maxLines = 1)
         }
     }
 }
