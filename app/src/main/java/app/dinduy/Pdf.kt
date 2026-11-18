@@ -337,8 +337,16 @@ class PdfDoc(private val file: File) {
     var failed by mutableStateOf(false)
     val ratio = androidx.compose.runtime.mutableStateListOf<Float>()   // tinggi / lebar tiap halaman; 0 = belum diketahui
 
+    @Volatile private var opening = false
+
     suspend fun open(seedIdx: Int = -1, seed: Float = 0f) = withContext(Dispatchers.IO) {
+        if (ok || opening) return@withContext   // sudah terbuka / sedang dibuka (dipanggil ulang oleh penjaga di PdfScreen)
+        opening = true
         try {
+            // sisa percobaan sebelumnya yang gagal setengah jalan dibuang dulu
+            try { rend?.close() } catch (e: Throwable) { }
+            try { pfd?.close() } catch (e: Throwable) { }
+            rend = null; pfd = null
             val p = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
             pfd = p
             val r = PdfRenderer(p)
@@ -347,10 +355,11 @@ class PdfDoc(private val file: File) {
             val l = ArrayList<Float>(n)
             repeat(n) { l.add(0f) }
             if (seedIdx in 0 until n && seed > 0f) l[seedIdx] = seed   // rasio halaman awal sudah diketahui: tinggi tidak melompat saat dokumen siap
-            withContext(Dispatchers.Main) { ratio.addAll(l); count = n; ok = n > 0; failed = n <= 0 }
+            // NonCancellable: kalau efek pemanggil dibatalkan tepat di sini, dokumen tetap ditandai siap (dulu bisa menggantung: tidak siap, tidak gagal = layar kosong)
+            withContext(Dispatchers.Main + kotlinx.coroutines.NonCancellable) { ratio.clear(); ratio.addAll(l); count = n; ok = n > 0; failed = n <= 0 }
         } catch (e: Throwable) {
-            withContext(Dispatchers.Main) { failed = true }
-        }
+            withContext(Dispatchers.Main + kotlinx.coroutines.NonCancellable) { if (e !is kotlinx.coroutines.CancellationException) failed = true }
+        } finally { opening = false }
     }
 
     /** Ukur semua halaman di latar belakang supaya tinggi daftar tepat (halaman yang belum terukur memakai halaman pertama). */
@@ -1263,6 +1272,21 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
             launch { doc.loadRatios() }
             PdfBus.hasText = false
             PdfBus.hasText = txt.detect(doc.count)
+        }
+    }
+
+    // penjaga layar kosong (jarang terjadi): bila dokumen belum siap dan belum dinyatakan gagal setelah animasi selesai, coba buka lagi (maks 3 kali)
+    LaunchedEffect(doc) {
+        repeat(3) {
+            delay(1400)
+            if (!doc.ok && !doc.failed && file.exists()) {
+                doc.open(if (BookFx.id == id) BookFx.page else -1, BookFx.ratio)
+                if (doc.ok) {
+                    launch { doc.loadRatios() }
+                    PdfBus.hasText = false
+                    PdfBus.hasText = txt.detect(doc.count)
+                }
+            }
         }
     }
 
