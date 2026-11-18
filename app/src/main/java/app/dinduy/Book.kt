@@ -81,8 +81,8 @@ import kotlin.math.roundToInt
 
 /** Semua angka animasi buku ada di sini. */
 object BookSpec {
-    const val OPEN_MS = 860               // durasi buka total (ms) dari tertutup. Koreografi BERTUMPANG TINDIH: sampul mengayun (0..COVER_END), zoom mulai di tengah ayunan (ZOOM_FROM), kamera mendekat setelah sampul mendarat (DOLLY_FROM)
-    const val CLOSE_MS = 680              // menutup sedikit lebih cepat daripada membuka (keluar = cepat, masuk = ada waktu menikmati)
+    const val OPEN_MS = 780               // durasi buka total (ms) dari tertutup. Koreografi BERTUMPANG TINDIH: sampul mengayun (0..COVER_END), zoom mulai di tengah ayunan (ZOOM_FROM), kamera mendekat setelah sampul mendarat (DOLLY_FROM)
+    const val CLOSE_MS = 620              // menutup sedikit lebih cepat daripada membuka (keluar = cepat, masuk = ada waktu menikmati)
     // Sudut rebah sampul = 180° + asin(PAGES + BOARD) ≈ 191.7°. Sampul TIDAK melayang di bidang halaman (dulu 176°): ia turun mengikuti
     // ketebalan buku sampai ujung bebasnya menyentuh bidang papan belakang (bidang "meja"). Karena itu sampul yang terbuka miring
     // landai menjauh dari kamera, perspektifnya sama dengan buku tertutup, dan ketebalan blok halaman tetap terbaca.
@@ -90,8 +90,8 @@ object BookSpec {
     const val COVER_DEG = 191.7f
     const val COVER_SIGN = -1f            // (tidak dipakai lagi oleh mesin 3D; dibiarkan supaya berkas lain tetap terkompilasi)
     const val COVER_END = .62f            // sampul mengayun dan mendarat pada progres ini
-    const val ZOOM_FROM = .34f            // kertas mulai membesar menuju layar baca saat sampul masih di tengah ayunan (~125 derajat): satu gerak mengalir, bukan dua tahap bergantian
-    const val DOLLY_END = .80f            // lensa + kamera sudah lurus di depan halaman pada progres ini: SELESAI sebelum kertas mendarat, supaya bagian 3D (sampul, punggung) tidak bergeser sendiri di belakang kertas
+    const val ZOOM_FROM = .32f            // kertas mulai membesar menuju layar baca saat sampul masih di tengah ayunan (~125 derajat): satu gerak mengalir, bukan dua tahap bergantian
+    const val DOLLY_END = .76f            // lensa + kamera sudah lurus di depan halaman pada progres ini: SELESAI sebelum kertas mendarat, supaya bagian 3D (sampul, punggung) tidak bergeser sendiri di belakang kertas
     const val DOLLY_FROM = .50f           // lensa memusat + kamera mendekat HANYA setelah sampul menyentuh meja (benda yang masih terangkat tidak boleh kena perspektif yang mengetat)
     const val PEEK_DEG = 7f               // saat jari menekan buku, sampul terangkat sedikit (mengintip). Ayunan buka melanjutkan dari sudut ini, tanpa lompatan
     const val SLIDE_1COL = .5f            // 1 kolom: buku bergeser ke kanan paling banyak setengah lebar buku supaya sampul yang rebah tetap di dalam layar
@@ -115,7 +115,7 @@ object BookSpec {
     const val PAGES = .16f                // tebal blok halaman (x lebar sampul)
     const val PAGE_DONE = .8f             // dalam fase zoom: halaman isi sudah di posisi akhir layar baca
     const val READER_FROM = .85f          // dalam fase zoom: layar baca (bilah, halaman lain) mulai muncul
-    const val ZOOM_CAMERA = 1.0f          // jarak kamera di ujung zoom: kamera MENDEKAT ke halaman (bukan sekadar gambar diperbesar), perspektif mengencang
+    const val ZOOM_CAMERA = 2.0f          // jarak kamera di ujung zoom: kamera MENDEKAT ke halaman (bukan sekadar gambar diperbesar), perspektif mengencang
     const val CAMERA = 2.8f               // jarak kamera 3D = CAMERA x lebar sampul (makin besar = perspektif makin lembut)
     const val ASPECT = .70f               // lebar / tinggi sampul buku
     const val BACK_DRAG = .50f            // progres turun sampai segini selama back gesture ditarik penuh
@@ -181,53 +181,16 @@ fun bookZoomFrac(t: Float): Float {
     val x = ((t - BookSpec.ZOOM_FROM) / (1f - BookSpec.ZOOM_FROM)).coerceIn(0f, 1f)
     val smoother = x * x * x * (x * (6f * x - 15f) + 10f)
     val out = 1f - (1f - x) * (1f - x) * (1f - x)
-    return smoother * (1f - x) + out * x
+    val w = sstep(x / .7f)   // bobot halus 0..1 (kecepatan sambungan kontinu): mulai pelan, lalu cepat, mendarat lembut
+    return smoother * (1f - w) + out * w
 }
 /**
- * Tahap kedatangan di ujung zoom, semuanya berpatokan pada waktu (progres mentah), BUKAN pada kurva zoom yang melambat di ekor.
- * Dulu empat hal (latar hitam meluas, sampul tersapu latar, layar baca muncul, kertas mendarat) menumpuk di ekor kurva yang paling lambat dan terasa patah.
- * Sekarang bertingkat dan saling menyambung: latar hitam mulai meluas lebih dulu, sampul tersapu latar, kertas mendarat, baru isi layar baca muncul.
+ * Kedatangan di ujung zoom. Latar hitam layar baca TIDAK ikut morph: selama kertas membesar, yang bergerak hanya kertas (dan sampul yang menempel di engselnya).
+ * Setelah kertas hampir penuh (~97%) dan sampul sudah di luar layar, latar hitam memudar masuk (pudar biasa, bukan bingkai yang melebar),
+ * sampul sisa ikut memudar, lalu isi layar baca muncul. Berpatokan pada waktu (progres mentah), bukan ekor kurva zoom.
  */
-/** Latar hitam meluas ke seluruh layar (0 = bingkai = kertas, 1 = layar penuh). */
-fun bookReveal(t: Float): Float = sstep((t - .50f) / .42f)
-
-/** Ukuran layar / inset yang dibutuhkan untuk menghitung posisi akhir halaman. */
-class BookGeo(val topPad: Float, val sab: Float, val dens: Float)
-
-@Composable
-fun rememberBookGeo(): BookGeo {
-    val dens = LocalDensity.current
-    val topPad = with(dens) { (satDp() + 64.dp).toPx() }
-    val sab = with(dens) { sabDp().toPx() }
-    return BookGeo(topPad, sab, dens.density)
-}
-
-/**
- * Kotak KERTAS pada progres zoom tt. Bingkai (clip wadah), kertas, dan engsel sampul 3D semuanya memakai kotak yang SAMA ini,
- * jadi tepinya selalu sejajar: yang terlihat adalah kertas yang membesar, bukan bingkai yang membesar lalu kertas menyusul.
- */
-fun bookPageRect(vm: AppVM, w: Float, h: Float, tt: Float, g: BookGeo): Rect {
-    val m = effMorph(vm) ?: return Rect(w * .12f, h * .4f, w * .88f, h * .6f)
-    val fin = BookFx.live ?: bookFinalRect(w, h, g.topPad, g.sab, g.dens, PdfBus.mode.coerceAtLeast(0), BookFx.ratio)
-    val dx = bookSlide(m, w, g.dens, vm.openP.value.coerceIn(0f, 1f))
-    return Rect(lerp(m.l + dx, fin.left, tt), lerp(m.t, fin.top, tt), lerp(m.r + dx, fin.right, tt), lerp(m.b, fin.bottom, tt))
-}
-
-/**
- * Mode 1 kolom: buku di kartu duduk di tengah dengan margin kiri-kanan lebar, tapi sampul yang rebah menjulur selebar buku ke kiri dan akan terpotong tepi layar.
- * Jadi saat sampul terbuka, buku (halaman + sampul rebah) bergeser ke kanan sampai SEMUA yang terbuka berada di dalam layar, seperti membuka buku di tengah meja.
- * Geser hanya sebesar yang diperlukan (maks SLIDE_1COL x lebar buku, dan tidak melewati tepi kanan layar), mengikuti ayunan sampul (satu progres: menutup = kebalikan persis),
- * lalu lenyap sendiri karena kertas bergerak ke posisi layar baca. 2 kolom: tidak bergeser (kolom di sebelahnya tidak boleh terdorong).
- */
-fun bookSlide(m: Morph, w: Float, dens: Float, raw: Float): Float {
-    if (BookFx.cols != 1) return 0f
-    val bw = m.r - m.l
-    if (bw < 2f) return 0f
-    val need = bw * .98f + 12f * dens - m.l
-    val room = (w - 12f * dens - m.r).coerceAtLeast(0f)
-    return need.coerceIn(0f, min(bw * BookSpec.SLIDE_1COL, room)) * bookCoverFrac(raw)
-}
-fun bookReaderAlpha(t: Float): Float = sstep((t - .88f) / .12f)   // kertas sudah ~98% di tempatnya; isi layar baca menyatu dengan halaman yang sama
+fun bookReveal(t: Float): Float = sstep((t - .80f) / .14f)
+fun bookReaderAlpha(t: Float): Float = sstep((t - .84f) / .14f)   // kertas sudah ~98% di tempatnya; isi layar baca menyatu dengan halaman yang sama
 
 private val BOOK_SHAPE = RoundedCornerShape(topStart = 3.dp, bottomStart = 3.dp, topEnd = 8.dp, bottomEnd = 8.dp)
 
@@ -597,20 +560,17 @@ fun BookCoverLayer(vm: AppVM) {
         // halaman terakhir dibuka: hanya sebelum zoom (setelah itu BookPageLayer yang menggambarnya)
         val pageOn = tt <= .0005f
         val page = if (pageOn) PdfCache.best(d.pdf, BookFx.page)?.let { BookTex.pageTex(it, r.width) } else null
-        // TANPA pemudaran (tidak ada transparansi): sampul tetap menempel di engsel kertas dan dihapus oleh latar hitam yang meluas dari kertas,
-        // seperti tirai gelap yang menutupinya (klip geometris, tepinya sama persis dengan wadah di NoteLayer). Sampul rebah ada di luar kertas
-        // pada fase ini, jadi pemotongan tidak menyentuh papan yang sedang mengayun di atas halaman.
-        val ev = bookReveal(tRaw)
-        if (ev >= .999f) return@Canvas
+        // sampul menempel di engsel kertas sepanjang zoom (ikut membesar, keluar layar secara alami). Hanya sisa yang masih terlihat (mis. mode halaman,
+        // engsel tidak di tepi layar) memudar singkat bersama latar hitam yang masuk, SETELAH kertas hampir penuh
+        val fadeA = 1f - bookReveal(tRaw)
+        if (fadeA <= .01f) return@Canvas
         drawIntoCanvas {
             val cnv = it.nativeCanvas
-            val sv = if (ev > .002f) cnv.save() else -1
-            if (sv >= 0) {
-                val cl = lerp(r.left, 0f, ev); val ctp = lerp(r.top, 0f, ev)
-                val cr = lerp(r.right, size.width, ev); val cb = lerp(r.bottom, size.height, ev)
-                if (android.os.Build.VERSION.SDK_INT >= 26) cnv.clipOutRect(cl, ctp, cr, cb)
-                else cnv.clipRect(cl, ctp, cr, cb, android.graphics.Region.Op.DIFFERENCE)
-            }
+            val bw = r.width
+            val sv = if (fadeA < .999f) cnv.saveLayerAlpha(
+                maxOf(0f, r.left - bw * 1.2f), maxOf(0f, r.top - bw * .4f),
+                minOf(size.width, r.right + bw * .4f), minOf(size.height, r.bottom + bw * .4f), (fadeA * 255f).roundToInt()
+            ) else -1
             Book3D.draw(
                 cnv, r.left, r.top, r.right, r.bottom,
                 yaw, pitch, k, deg, ct, page, pageOn, BookFx.dark, lx, ly, bookCamera(tRaw)
