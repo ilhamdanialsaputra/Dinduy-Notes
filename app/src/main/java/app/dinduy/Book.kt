@@ -115,6 +115,8 @@ object BookSpec {
     const val PAGES = .16f                // tebal blok halaman (x lebar sampul)
     const val PAGE_DONE = .8f             // dalam fase zoom: halaman isi sudah di posisi akhir layar baca
     const val READER_FROM = .85f          // dalam fase zoom: layar baca (bilah, halaman lain) mulai muncul
+    const val DIM_EARLY = .68f            // seberapa gelap seluruh layar di luar buku (beranda di balik sampul) pada DIM_FADE_FROM. Menghitam BERTAHAP sejak sampul mulai terbuka, jadi hitam layar baca nanti hanya menyelesaikan sisa (.32), bukan muncul tiba-tiba dari terang
+    const val DIM_FADE_FROM = .80f        // progres saat kertas sudah ~97% layar penuh: dari sini hitam melebur ke penuh (pudar halus sampai progres 1). Jangan dimajukan: hitam tidak boleh bentrok dengan sampul yang masih terlihat di samping kertas
     const val ZOOM_CAMERA = 2.0f          // jarak kamera di ujung zoom: kamera MENDEKAT ke halaman (bukan sekadar gambar diperbesar), perspektif mengencang
     const val CAMERA = 2.8f               // jarak kamera 3D = CAMERA x lebar sampul (makin besar = perspektif makin lembut)
     const val ASPECT = .70f               // lebar / tinggi sampul buku
@@ -186,11 +188,25 @@ fun bookZoomFrac(t: Float): Float {
 }
 /**
  * Kedatangan di ujung zoom. Latar hitam layar baca TIDAK ikut morph: selama kertas membesar, yang bergerak hanya kertas (dan sampul yang menempel di engselnya).
- * Setelah kertas hampir penuh (~97%) dan sampul sudah di luar layar, latar hitam memudar masuk (pudar biasa, bukan bingkai yang melebar),
- * sampul sisa ikut memudar, lalu isi layar baca muncul. Berpatokan pada waktu (progres mentah), bukan ekor kurva zoom.
+ * Setelah kertas hampir penuh (~97%) dan sampul sudah di luar layar, bingkai dilepas (layar penuh) dan sampul sisa memudar. Hitamnya sendiri
+ * TIDAK lagi memakai kurva ini: lihat bookDim (menggelap bertahap sejak awal, lalu melebur halus ke penuh). Berpatokan pada waktu (progres mentah), bukan ekor kurva zoom.
  */
 fun bookReveal(t: Float): Float = sstep((t - .80f) / .14f)
 fun bookReaderAlpha(t: Float): Float = sstep((t - .84f) / .14f)   // kertas sudah ~98% di tempatnya; isi layar baca menyatu dengan halaman yang sama
+
+/**
+ * Gelap latar di luar buku (0 = terang normal, 1 = hitam penuh layar baca). Satu kurva mulus tanpa patahan, buka DAN tutup identik (progres sama):
+ *  - 0 .. DIM_FADE_FROM : beranda di balik sampul menggelap pelan sampai DIM_EARLY (mulai dari awal sampul terbuka, kecepatan nol di kedua ujung)
+ *  - DIM_FADE_FROM .. 1 : sisa gelap melebur ke hitam penuh, saat kertas sudah hampir sebesar layar (kecepatan nol di kedua ujung juga,
+ *    jadi sambungan dengan fase sebelumnya tidak ada patahan dan ujungnya mendarat lembut)
+ * Digambar DI BAWAH buku (kertas dan sampul 3D digambar di atasnya), jadi buku tidak ikut menggelap.
+ */
+fun bookDim(t: Float): Float {
+    val from = BookSpec.DIM_FADE_FROM
+    val early = BookSpec.DIM_EARLY * sstep(t / from)
+    val late = sstep((t - from) / (1f - from))
+    return early + (1f - BookSpec.DIM_EARLY) * late
+}
 
 /** Ukuran layar / inset yang dibutuhkan untuk menghitung posisi akhir halaman. */
 class BookGeo(val topPad: Float, val sab: Float, val dens: Float)
