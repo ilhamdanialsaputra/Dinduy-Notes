@@ -1751,14 +1751,16 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                         val sc2 = 1f + .03f * k
                         scaleX = sc2; scaleY = sc2
                         // bayangan lembut: elevasi lebih besar (lebih menyebar) tetapi warnanya dibuat tipis, bukan gelap & tajam
-                        shadowElevation = 16.dp.toPx() * k
+                        // buku PDF: tanpa bayangan elevasi (bentuknya persegi dan jatuh di luar buku); cukup membesar sedikit
+                        shadowElevation = if (ghostNote.pdf.isNotEmpty()) 0f else 16.dp.toPx() * k
                         ambientShadowColor = Color.Black.copy(alpha = if (pal.dark) .50f else .22f)
                         spotShadowColor = Color.Black.copy(alpha = if (pal.dark) .65f else .32f)
                         shape = RoundedCornerShape(12.dp)
                         clip = false
                     }
             ) {
-                NoteCard(ghostNote, pos[ghostId] ?: 0, "f", true, Modifier, cols = cols) { }
+                if (ghostNote.pdf.isNotEmpty()) BookCard(ghostNote, true, cols, Modifier, needPrep = false, onLong = null, track = null, onClick = { })
+                else NoteCard(ghostNote, pos[ghostId] ?: 0, "f", true, Modifier, cols = cols) { }
             }
         }
 
