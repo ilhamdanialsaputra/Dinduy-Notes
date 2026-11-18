@@ -551,6 +551,9 @@ fun BookPageLayer(vm: AppVM) {
         val tt = bookZoomFrac(tRaw)
         vm.morphTick
         if (tt <= .0005f) return@Canvas   // fase sampul terbuka: halaman digambar mesin 3D di BookCoverLayer (ikut miring bersama buku)
+        // wadah layar baca sudah penuh (alpha 1): ia membawa halamannya sendiri (PdfPage / BookPlaceholder) di kotak yang sama. Halaman statis ini TIDAK boleh
+        // tetap digambar di belakangnya: di mode gulir, begitu daftar bergeser (atau di celah antar halaman) halaman statis ini tembus terlihat sebagai PDF kedua
+        if (tRaw >= BookSpec.READER_ALPHA_TO) return@Canvas
         val c = bookPageRect(vm, size.width, size.height, tt, geo)   // kotak kertas = kotak bingkai (lihat NoteLayer)
         val bmp = PdfCache.best(d.pdf, BookFx.page)?.asImageBitmap()
         if (bmp == null) { drawRect(Color.White, Offset(c.left, c.top), Size(c.width, c.height)); return@Canvas }   // tak pernah hitam
