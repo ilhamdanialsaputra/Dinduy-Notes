@@ -298,10 +298,11 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
             // buku PDF: bingkai = kotak kertas yang sama persis dengan BookPageLayer / sampul 3D (sejajar), baru meluas ke layar penuh di ujung zoom
             val pr = if (m.book && bgeo != null) bookPageRect(vm, size.width, size.height, tt, bgeo) else null
             val ev = if (pr != null) bookReveal(rawT) else 0f
-            val l = if (pr != null) lerp(pr.left, 0f, ev) else lerp(m.l, 0f, tx)
-            val r = if (pr != null) lerp(pr.right, size.width, ev) else lerp(m.r, size.width, tx)
-            val tp = if (pr != null) lerp(pr.top, 0f, ev) else lerp(m.t, 0f, tt)
-            val b = if (pr != null) lerp(pr.bottom, size.height, ev) else lerp(m.b, size.height, tt)
+            val full = ev > .001f   // buku: bingkai TIDAK melebar; baru layar penuh (tanpa klip) saat latar hitam mulai memudar masuk
+            val l = if (pr != null) (if (full) 0f else pr.left) else lerp(m.l, 0f, tx)
+            val r = if (pr != null) (if (full) size.width else pr.right) else lerp(m.r, size.width, tx)
+            val tp = if (pr != null) (if (full) 0f else pr.top) else lerp(m.t, 0f, tt)
+            val b = if (pr != null) (if (full) size.height else pr.bottom) else lerp(m.b, size.height, tt)
             val r4 = m.r4 ?: FloatArray(4) { m.rad }
             fun rr(k: Int) = CornerRadius(lerp(r4[k], 0f, tt))
             val path = Path().apply { addRoundRect(RoundRect(Rect(l, tp, r, b), rr(0), rr(1), rr(2), rr(3))) }
@@ -312,7 +313,7 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
             // wadah hitam dan isi layar baca belum dipakai, jadi tidak ada warna hitam di balik sampul
             if (m.book && tt <= .0005f) {
             } else clipPath(path) {
-                drawRect(if (m.book) Color.Black else androidx.compose.ui.graphics.lerp(m.color, pal.s, tt))
+                if (!m.book) drawRect(androidx.compose.ui.graphics.lerp(m.color, pal.s, tt))   // buku: tanpa isi hitam di wadah (kertas mengisi wadah; hitam layar baca = pudar penuh-layar di atas)
                 this@drawWithContent.drawContent()
             }
         }
