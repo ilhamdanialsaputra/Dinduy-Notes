@@ -4,7 +4,9 @@
  * Original project : https://github.com/karankalsi/PlayLikeCurl
  * Maintained fork  : Arnab11/PlayLikeCurl (GLES2 renderer, production bitmap API v1, release 1.1.4)
  * Local changes    : package declaration (karacken.curl -> app.dinduy.silkcurl). Logic edits are marked "Local change"
- *                    in PageRenderer.updateMvp (fov 45f -> 55f) and PageSurfaceView.completeSettlement only.
+ *                    in PageRenderer (updateMvp fov 45f -> 55f, uShade), PageSurfaceView (gesture / settlement lifecycle),
+ *                    PlayLikeCurlModel, Settlement, SettlementInterpolator, PlayLikeCurlGeometry (rigid hinge rotation),
+ *                    PageGeometry (per-column scratch arrays), FoldShadowModel (variable width).
  *
  * MIT License
  *
@@ -31,8 +33,28 @@
  */
 package app.dinduy.silkcurl;
 
+/**
+ * Local change: the moving sheet is no longer squeezed with an S-shaped wave. It is a (nearly) rigid sheet that rotates
+ * around its left edge (the book spine, world x = 0) in 3D. The free edge rises toward the camera, so the perspective
+ * projection itself makes the sheet grow, tilts the top / bottom edges, and swings it out past the left edge of the view.
+ * A very small bend (the free edge leads slightly) keeps it from looking like a perfectly flat board.
+ *
+ * The same sheet-angle function drives both directions: FRONT (current page, forward) goes flat -> raised, LEFT (previous
+ * page, backward) goes raised -> flat, so backward is the exact time-reverse of forward.
+ */
 final class PlayLikeCurlGeometry {
     static final float CAMERA_DISTANCE = 2f;
+
+    /** Sheet angle (rad) at which the sheet is fully outside the left edge of the view (about 80 deg). */
+    static final float MAX_SHEET_ANGLE = 1.40f;
+    /** Scale of the sheet's rise toward the camera (1 = true rigid rotation). Lower = weaker zoom-in. */
+    static final float SHEET_LIFT = 0.85f;
+    /** Extra angle (rad) at the free edge, relative to the hinge. Small, smooth curvature. */
+    static final float SHEET_BEND = 0.12f;
+    /** How much the raised sheet darkens as it turns away (0 = none). */
+    static final float SHEET_SHADE = 0.30f;
+    /** > 1 so the sheet lifts quickly while the finger drags, and still eases out softly at the far end. */
+    private static final float ANGLE_EXPONENT = 1.5f;
 
     private PlayLikeCurlGeometry() {
     }
@@ -64,23 +86,34 @@ final class PlayLikeCurlGeometry {
 
     static void update(PageGeometry page, float curlPosition, boolean active) {
         int grid = PlayLikeCurlModel.GRID;
+        PageRole role = page.getRole();
         float heightCorrection = (page.getBitmapRatio() - 1f) / 2f;
+        boolean lifted = active && role != PageRole.RIGHT;
+        float[] columnX = page.getColumnX();
+        float[] columnZ = page.getColumnZ();
+        if (lifted) {
+            fillSheet(role, curlPosition, columnX, columnZ);
+        }
+        float baseDepth = depth(role);
+        float[] positions = page.getPositions();
         for (int row = 0; row <= grid; row++) {
+            float y = row / (float) grid * page.getBitmapRatio() - heightCorrection;
             for (int column = 0; column <= grid; column++) {
                 int offset = 3 * (row * (grid + 1) + column);
-                float normalizedX = column / (float) grid;
-                if (page.getRole() == PageRole.FRONT) {
-                    page.getPositions()[offset] = frontX(column, curlPosition);
-                } else if (page.getRole() == PageRole.LEFT) {
-                    page.getPositions()[offset] = leftX(column, curlPosition);
+                float x;
+                float z;
+                if (lifted) {
+                    x = columnX[column];
+                    z = baseDepth + columnZ[column];
                 } else {
-                    page.getPositions()[offset] = normalizedX;
+                    x = column / (float) grid;
+                    // a resting previous page waits flat, fully outside the left edge of the view
+                    if (role == PageRole.LEFT) x -= 1f;
+                    z = baseDepth;
                 }
-                page.getPositions()[offset + 1] =
-                        row / (float) grid * page.getBitmapRatio() - heightCorrection;
-                page.getPositions()[offset + 2] = active
-                        ? activeDepth(page.getRole(), column, curlPosition)
-                        : depth(page.getRole());
+                positions[offset] = x;
+                positions[offset + 1] = y;
+                positions[offset + 2] = z;
             }
         }
     }
@@ -101,18 +134,50 @@ final class PlayLikeCurlGeometry {
                 : width / (float) height;
     }
 
-    static float foldEdgeX(PageRole role, float curlPosition) {
+    /** Rotation of the sheet around the spine, in radians: 0 = lying flat on the right, MAX_SHEET_ANGLE = gone to the left. */
+    static float sheetAngle(PageRole role, float curlPosition) {
+        if (role == PageRole.RIGHT) return 0f;
+        float range = PlayLikeCurlModel.GRID - PlayLikeCurlModel.RIGHT_ENDPOINT_POSITION;
+        float gone;
         if (role == PageRole.FRONT) {
-            return frontX(PlayLikeCurlModel.GRID, curlPosition);
+            gone = (PlayLikeCurlModel.GRID - curlPosition) / range;
+        } else {
+            gone = 1f - (curlPosition - PlayLikeCurlModel.RIGHT_ENDPOINT_POSITION) / range;
         }
-        if (role == PageRole.LEFT) {
-            return leftX(PlayLikeCurlModel.GRID, curlPosition);
+        gone = Math.max(0f, Math.min(1f, gone));
+        return MAX_SHEET_ANGLE * (1f - (float) Math.pow(1f - gone, ANGLE_EXPONENT));
+    }
+
+    /** Brightness multiplier of the moving sheet (1 = untouched). */
+    static float sheetShade(PageRole role, float curlPosition) {
+        float angle = sheetAngle(role, curlPosition);
+        return 1f - SHEET_SHADE * (float) Math.sin(angle);
+    }
+
+    static float foldEdgeX(PageRole role, float curlPosition) {
+        if (role == PageRole.RIGHT) return 1f;
+        float theta = sheetAngle(role, curlPosition);
+        float bend = SHEET_BEND * (float) Math.sin(theta);
+        int grid = PlayLikeCurlModel.GRID;
+        float step = 1f / grid;
+        float x = 0f;
+        for (int i = 1; i <= grid; i++) {
+            x += (float) Math.cos(theta + bend * ((i - 0.5f) * step)) * step;
         }
-        return 1f;
+        return x;
     }
 
     static float foldEdgeDepth(PageRole role, float curlPosition) {
-        return activeDepth(role, PlayLikeCurlModel.GRID, curlPosition);
+        if (role == PageRole.RIGHT) return PlayLikeCurlModel.RIGHT_DEPTH;
+        float theta = sheetAngle(role, curlPosition);
+        float bend = SHEET_BEND * (float) Math.sin(theta);
+        int grid = PlayLikeCurlModel.GRID;
+        float step = 1f / grid;
+        float z = 0f;
+        for (int i = 1; i <= grid; i++) {
+            z += (float) Math.sin(theta + bend * ((i - 0.5f) * step)) * step;
+        }
+        return depth(role) + SHEET_LIFT * z;
     }
 
     static float projectXOntoDepthPlane(
@@ -125,36 +190,19 @@ final class PlayLikeCurlGeometry {
                 / (CAMERA_DISTANCE - sourceDepth);
     }
 
-    private static float frontX(int column, float curlPosition) {
-        float percentage = 1f - curlPosition / PlayLikeCurlModel.GRID;
-        float radius = resolvedRadius(percentage);
-        float movement = percentage > 0.05f ? percentage - 0.05f : 0f;
-        return column / (float) PlayLikeCurlModel.GRID * (1f - radius) - movement;
-    }
-
-    private static float leftX(int column, float curlPosition) {
-        float percentage = (1f - curlPosition / PlayLikeCurlModel.GRID) * 0.75f;
-        float radius = resolvedRadius(percentage);
-        return column / (float) PlayLikeCurlModel.GRID * (1f - radius) - percentage;
-    }
-
-    private static float activeDepth(PageRole role, int column, float curlPosition) {
-        if (role == PageRole.RIGHT) return PlayLikeCurlModel.RIGHT_DEPTH;
-        float rawPercentage = 1f - curlPosition / PlayLikeCurlModel.GRID;
-        float percentage = role == PageRole.LEFT ? rawPercentage * 0.75f : rawPercentage;
-        float radius = resolvedRadius(percentage);
-        float waveWidth = role == PageRole.LEFT ? 0.50f : 0.60f;
-        float delta = PlayLikeCurlModel.GRID - curlPosition;
-        return (float) (
-                radius * Math.sin(
-                        3.14f / (PlayLikeCurlModel.GRID * waveWidth) * (column - delta))
-                        + radius * 1.1f);
-    }
-
-    private static float resolvedRadius(float percentage) {
-        return percentage < 0.20f
-                ? PlayLikeCurlModel.RADIUS * percentage * 5f
-                : PlayLikeCurlModel.RADIUS;
+    /** Integrates the sheet along its width so its arc length stays constant (no stretching / compressing). */
+    private static void fillSheet(PageRole role, float curlPosition, float[] columnX, float[] columnZ) {
+        float theta = sheetAngle(role, curlPosition);
+        float bend = SHEET_BEND * (float) Math.sin(theta);
+        int grid = PlayLikeCurlModel.GRID;
+        float step = 1f / grid;
+        columnX[0] = 0f;
+        columnZ[0] = 0f;
+        for (int i = 1; i <= grid; i++) {
+            float angle = theta + bend * ((i - 0.5f) * step);
+            columnX[i] = columnX[i - 1] + (float) Math.cos(angle) * step;
+            columnZ[i] = columnZ[i - 1] + SHEET_LIFT * (float) Math.sin(angle) * step;
+        }
     }
 
     private static float depth(PageRole role) {
