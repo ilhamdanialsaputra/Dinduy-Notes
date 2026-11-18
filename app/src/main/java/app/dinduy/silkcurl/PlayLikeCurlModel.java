@@ -41,10 +41,10 @@ public final class PlayLikeCurlModel {
     public static final float RADIUS = 0.18f;
     public static final int LEFT_ENDPOINT_PERCENT = 100;
     public static final int RIGHT_ENDPOINT_PERCENT = -5;
-    /** Duration of a fling / release that commits a page change (unchanged from upstream). */
-    public static final long SETTLEMENT_DURATION_MILLIS = 300L;
-    /** Local change: duration of a full edge-tap turn. Soft start, so it reads smooth rather than abrupt. */
-    public static final long TURN_DURATION_MILLIS = 480L;
+    /** Local change: duration of a fling / release that commits a page change (upstream: 300). Still decelerates, because the page already moves with the finger. */
+    public static final long SETTLEMENT_DURATION_MILLIS = 380L;
+    /** Local change: duration of a full edge-tap turn. Ease-in then ease-out, peak speed near the middle (about 0.4 s in). */
+    public static final long TURN_DURATION_MILLIS = 850L;
     /** Local change: duration of a full return to the original page after an uncompleted drag. */
     public static final long REVERT_DURATION_MILLIS = 240L;
     /** Local change: shortest settlement produced by {@link #timed}; keeps tiny corrections visible but quick. */
@@ -242,7 +242,7 @@ public final class PlayLikeCurlModel {
             return timed(
                     LEFT_ENDPOINT_PERCENT,
                     PageChange.PREVIOUS,
-                    SettlementInterpolator.FAST_OUT_SLOW_IN,
+                    SettlementInterpolator.ACCELERATE_DECELERATE,
                     TURN_DURATION_MILLIS);
         }
         if (pageChange == PageChange.NEXT) {
@@ -259,7 +259,7 @@ public final class PlayLikeCurlModel {
             return timed(
                     RIGHT_ENDPOINT_PERCENT,
                     PageChange.NEXT,
-                    SettlementInterpolator.FAST_OUT_SLOW_IN,
+                    SettlementInterpolator.ACCELERATE_DECELERATE,
                     TURN_DURATION_MILLIS);
         }
         return release();
