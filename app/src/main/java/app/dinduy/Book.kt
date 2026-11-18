@@ -109,6 +109,7 @@ object BookSpec {
     const val PAGES = .16f                // tebal blok halaman (x lebar sampul)
     const val PAGE_DONE = .8f             // dalam fase zoom: halaman isi sudah di posisi akhir layar baca
     const val READER_FROM = .85f          // dalam fase zoom: layar baca (bilah, halaman lain) mulai muncul
+    const val ZOOM_CAMERA = 1.0f          // jarak kamera di ujung zoom: kamera MENDEKAT ke halaman (bukan sekadar gambar diperbesar), perspektif mengencang
     const val CAMERA = 2.8f               // jarak kamera 3D = CAMERA x lebar sampul (makin besar = perspektif makin lembut)
     const val ASPECT = .70f               // lebar / tinggi sampul buku
     const val BACK_DRAG = .35f            // progres turun sampai segini selama back gesture ditarik penuh
@@ -154,6 +155,13 @@ fun bookRock(t: Float): Float {
     val u = (x - BookSpec.SWING_IMPACT) / (1f - BookSpec.SWING_IMPACT)
     return sin(u * Math.PI.toFloat()) * (1f - u)
 }
+/**
+ * Jarak kamera. Tetap CAMERA selama sampul mengayun, lalu MENDEKAT ke ZOOM_CAMERA selama zoom (sejalan dengan lensa yang memusat).
+ * Zoom seragam (jarak tetap) membuat sampul rebah / punggung / tebal blok sekadar ikut membesar seperti stiker datar di samping halaman.
+ * Dengan kamera yang sungguh mendekat, benda yang lebih rendah dari bidang halaman membesar lebih lambat daripada halaman: sampul menyempit,
+ * menjauh ke titik hilang, dan tertinggal di sisi layar, sesuai paralaks zoom sebenarnya. Satu fungsi progres: buka dan tutup identik.
+ */
+fun bookCamera(t: Float): Float = lerp(BookSpec.CAMERA, BookSpec.ZOOM_CAMERA, sstep(bookZoomFrac(t) / BookSpec.LENS_DONE))
 fun bookZoomFrac(t: Float): Float {
     val x = ((t - BookSpec.ZOOM_FROM) / (1f - BookSpec.ZOOM_FROM)).coerceIn(0f, 1f)
     return .6f * sstep(x) + .4f * (1f - (1f - x) * (1f - x) * (1f - x))   // lebih cepat di awal, mendarat lembut
@@ -540,7 +548,7 @@ fun BookCoverLayer(vm: AppVM) {
             val sv = if (fadeA < .999f) cnv.saveLayerAlpha(0f, 0f, size.width, size.height, (fadeA * 255f).roundToInt()) else -1
             Book3D.draw(
                 cnv, r.left, r.top, r.right, r.bottom,
-                yaw, pitch, k, deg, ct, page, pageOn, BookFx.dark, lx, ly
+                yaw, pitch, k, deg, ct, page, pageOn, BookFx.dark, lx, ly, bookCamera(tRaw)
             )
             if (sv >= 0) cnv.restoreToCount(sv)
         }
