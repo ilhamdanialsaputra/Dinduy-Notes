@@ -1929,25 +1929,32 @@ fun HomeCard(
             onArchive = { vm.mark(listOf(d.id), "Note archived") { it.copy(a = true, p = false) } },
             onDelete = { vm.mark(listOf(d.id), "Moved to Trash") { it.copy(dt = System.currentTimeMillis()) } }
         ) {
-            NoteCard(
-                d, i, "f", d.id in sel,
-                Modifier.graphicsLayer {
-                    val pv = prog.value
-                    alpha = pv.coerceIn(0f, 1f); translationY = (1f - pv) * 32.dp.toPx()
-                    val sc = .92f + .08f * pv.coerceIn(0f, 1f); scaleX = sc; scaleY = sc
-                },
+            val enter = Modifier.graphicsLayer {
+                val pv = prog.value
+                alpha = pv.coerceIn(0f, 1f); translationY = (1f - pv) * 32.dp.toPx()
+                val sc = .92f + .08f * pv.coerceIn(0f, 1f); scaleX = sc; scaleY = sc
+            }
+            val trackFn = { m: Morph ->
+                // selama kartu lain sedang membuka/menutup, posisi kartu ini jangan ditimpa: nilainya sudah ikut tergeser
+                // (dan terpotong layar) oleh makeRoom sendiri, sehingga klasifikasi atas/bawah bisa berbalik di tengah animasi
+                val busy = vm.openId != null && vm.openId != d.id && vm.openP.value > .001f
+                if (!vm.searchOn && !busy) vm.cardMorph[d.id] = m
+            }
+            val clickFn = { m: Morph ->
+                if (selMode) { if (d.id in sel) sel.remove(d.id) else sel.add(d.id) }
+                else nav.openNote(d.id, m)
+            }
+            if (d.pdf.isNotEmpty()) {
+                BookCard(
+                    d, d.id in sel, cols, enter, needPrep = !selMode,
+                    onLong = { if (d.id !in sel) sel.add(d.id) }, track = trackFn, onClick = clickFn
+                )
+            } else NoteCard(
+                d, i, "f", d.id in sel, enter,
                 onLong = { if (d.id !in sel) sel.add(d.id) },
-                track = { m ->
-                    // selama kartu lain sedang membuka/menutup, posisi kartu ini jangan ditimpa: nilainya sudah ikut tergeser
-                    // (dan terpotong layar) oleh makeRoom sendiri, sehingga klasifikasi atas/bawah bisa berbalik di tengah animasi
-                    val busy = vm.openId != null && vm.openId != d.id && vm.openP.value > .001f
-                    if (!vm.searchOn && !busy) vm.cardMorph[d.id] = m
-                },
+                track = trackFn,
                 cols = cols,
-                onClick = { m ->
-                    if (selMode) { if (d.id in sel) sel.remove(d.id) else sel.add(d.id) }
-                    else nav.openNote(d.id, m)
-                }
+                onClick = clickFn
             )
         }
     }
