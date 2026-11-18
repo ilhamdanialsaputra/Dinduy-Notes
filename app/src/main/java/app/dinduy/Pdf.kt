@@ -1304,7 +1304,9 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
         androidx.compose.material3.LocalContentColor provides cp.os
     ) {
         Box(
-            Modifier.fillMaxSize().background(Color.Black).graphicsLayer {
+            // PENTING: background harus SETELAH graphicsLayer (di dalam layer alpha). Kalau sebelum, latar hitam digambar penuh
+            // walau alpha = 0 dan menutupi halaman terakhir yang digambar BookPageLayer selama zoom buka/tutup buku.
+            Modifier.fillMaxSize().graphicsLayer {
                 // buka/tutup dari beranda: isi PDF berkedip sangat cepat (pudar-silang dengan sampul kartu), bukan ikut membesar dari kartu.
                 // Rentang pudar dipersempit (dulu .20-.45, sekarang .14-.26 dari progres morph) supaya kedipnya singkat.
                 if (vm.morph?.book == true) alpha = bookReaderAlpha(vm.openP.value)
@@ -1312,7 +1314,7 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
                     val x = ((vm.openP.value - .14f) / .12f).coerceIn(0f, 1f)
                     alpha = x * x * (3f - 2f * x)
                 }
-            }
+            }.background(Color.Black)
         ) {
             when {
                 doc.failed -> {
