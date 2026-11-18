@@ -303,7 +303,10 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
             val path = Path().apply { addRoundRect(RoundRect(Rect(l, tp, r, b), rr(0), rr(1), rr(2), rr(3))) }
             // latar di luar kartu meredup selama morph (ikut progres buka/tutup, jadi memudar balik saat ditutup)
             drawRect(Color.Black.copy(alpha = (if (pal.dark) .45f else .32f) * tt))
-            clipPath(path) {
+            // buku PDF, fase sampul terbuka (tt == 0): seluruh adegan 3D (halaman + sampul + bayangan) digambar BookCoverLayer;
+            // wadah hitam dan isi layar baca belum dipakai, jadi tidak ada warna hitam di balik sampul
+            if (m.book && tt <= .0005f) {
+            } else clipPath(path) {
                 drawRect(if (m.book) Color.Black else androidx.compose.ui.graphics.lerp(m.color, pal.s, tt))
                 this@drawWithContent.drawContent()
             }
