@@ -206,13 +206,15 @@ object Book3D {
      * k = skala; deg = sudut buka sampul (0 tertutup, 90 tegak lurus, 180 sejajar halaman, ~191.7 = rebah di bidang papan belakang; lihat BookSpec.COVER_DEG).
      * lx / ly = pergeseran mata kamera (x lebar buku): lx > 0 mata di kiri (punggung terlihat), ly > 0 mata di atas (tepi atas terlihat).
      * Muka depan tetap lurus; 0 = kamera tepat di depan.
+     * cam = jarak kamera (x lebar buku). Bidang halaman (z = 0) tetap pas di kotaknya berapa pun cam; yang berubah adalah kedalaman:
+     * makin kecil cam, makin kuat perspektif, dan benda di bawah bidang halaman (sampul rebah, punggung, tebal blok) makin menjauh / menyempit.
      * page = bitmap halaman yang dibuka terakhir (null = kertas putih); showPage = gambar halaman di balik sampul.
      */
     fun draw(
         cv: android.graphics.Canvas, l: Float, t: Float, r: Float, b: Float,
         yaw: Float, pitch: Float, k: Float, deg: Float,
         cover: CoverTex?, page: Bitmap?, showPage: Boolean, dark: Boolean,
-        lx: Float = 0f, ly: Float = 0f
+        lx: Float = 0f, ly: Float = 0f, cam: Float = BookSpec.CAMERA
     ) {
         val W = r - l
         val H = b - t
@@ -221,7 +223,7 @@ object Book3D {
         val hh = H / 2f
         val cx = (l + r) / 2f
         val cy = (t + b) / 2f
-        val D = BookSpec.CAMERA * W
+        val D = cam * W                  // jarak kamera (x lebar buku); mengecil selama zoom = kamera mendekat (lihat bookCamera)
         val tc = BookSpec.BOARD * W      // tebal papan sampul
         val pg = BookSpec.PAGES * W      // tebal blok halaman
         val ex = -lx * W                 // posisi mata kamera (relatif pusat buku, px)
