@@ -298,7 +298,7 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
             // buku PDF: bingkai = kotak kertas yang sama persis dengan BookPageLayer / sampul 3D (sejajar), baru meluas ke layar penuh di ujung zoom
             val pr = if (m.book && bgeo != null) bookPageRect(vm, size.width, size.height, tt, bgeo) else null
             val ev = if (pr != null) bookReveal(rawT) else 0f
-            val full = ev > .001f   // buku: bingkai TIDAK melebar; baru layar penuh (tanpa klip) saat latar hitam mulai memudar masuk
+            val full = ev > .001f   // buku: bingkai TIDAK melebar; baru layar penuh (tanpa klip) saat kertas hampir penuh, bersamaan dengan fase akhir hitam (bookDim)
             val l = if (pr != null) (if (full) 0f else pr.left) else lerp(m.l, 0f, tx)
             val r = if (pr != null) (if (full) size.width else pr.right) else lerp(m.r, size.width, tx)
             val tp = if (pr != null) (if (full) 0f else pr.top) else lerp(m.t, 0f, tt)
@@ -307,8 +307,10 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
             fun rr(k: Int) = CornerRadius(lerp(r4[k], 0f, tt))
             val path = Path().apply { addRoundRect(RoundRect(Rect(l, tp, r, b), rr(0), rr(1), rr(2), rr(3))) }
             // latar di luar kartu meredup selama morph (ikut progres buka/tutup, jadi memudar balik saat ditutup)
+            // buku PDF: gelap bertahap sejak sampul mulai terbuka (layar di luar buku), lalu melebur halus ke hitam penuh saat kertas hampir penuh (lihat bookDim).
+            // Digambar di bawah kertas dan sampul 3D, jadi buku sendiri tidak ikut menggelap.
             val dimA = (if (pal.dark) .45f else .32f) * tt
-            drawRect(Color.Black.copy(alpha = if (pr != null) lerp(dimA, 1f, ev) else dimA))
+            drawRect(Color.Black.copy(alpha = if (pr != null) bookDim(rawT) else dimA))
             // buku PDF, fase sampul terbuka (tt == 0): seluruh adegan 3D (halaman + sampul + bayangan) digambar BookCoverLayer;
             // wadah hitam dan isi layar baca belum dipakai, jadi tidak ada warna hitam di balik sampul
             if (m.book && tt <= .0005f) {
