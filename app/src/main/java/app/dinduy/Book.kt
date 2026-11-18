@@ -299,8 +299,8 @@ fun BookCoverFace(vm: AppVM, d: Note, modifier: Modifier = Modifier) {
             val h = size.height
             // alur engsel di kiri
             drawRect(Brush.horizontalGradient(listOf(Color.Black.copy(.40f), Color.Black.copy(.10f), Color.Transparent), 0f, w * .09f), size = Size(w * .09f, h))
-            drawRect(Color.White.copy(.30f), Offset(w * .095f, 0f), Size(maxOf(1f, w * .006f), h))
-            drawRect(Color.Black.copy(.18f), Offset(w * .088f, 0f), Size(maxOf(1f, w * .005f), h))
+            // lembah engsel halus, sama dengan BookTex.build (tanpa garis putih)
+            drawRect(Brush.horizontalGradient(listOf(Color.Transparent, Color.Black.copy(.16f), Color.Transparent), w * .06f, w * .125f), Offset(w * .06f, 0f), Size(w * .065f, h))
             // kilau lembut
             drawRect(Brush.linearGradient(listOf(Color.White.copy(.18f), Color.Transparent, Color.Transparent), Offset(w * .1f, 0f), Offset(w * .95f, h * .55f)))
             // tepi bawah / kanan sedikit gelap supaya terasa tebal
