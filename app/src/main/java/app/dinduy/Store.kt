@@ -69,6 +69,7 @@ class Morph(
     val ghost: Ghost? = null,    // gaya teks kartu, supaya teks kartu bisa pudar-silang dengan isi catatan saat morph
     val up: Boolean = false,     // true = kartu "Tambah catatan" dari bawah layar (skala isi mengikuti tinggi, bukan lebar)
     val card: Boolean = false,   // true = asalnya kartu catatan / tombol Baru (wadah + isi mengecil ke dalamnya); false = kartu "Tambah catatan" atau posisi tengah
+    val book: Boolean = false,   // true = asalnya buku PDF di beranda (animasi sampul 3D, lihat Book.kt)
     val fabg: FabGhost? = null   // tidak null = asalnya tombol Baru: wadah ikut menggambar ikon + / label supaya morph-nya utuh (tombol asli disembunyikan)
 )
 
