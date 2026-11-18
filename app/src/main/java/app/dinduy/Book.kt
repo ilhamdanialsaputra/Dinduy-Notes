@@ -117,8 +117,10 @@ object BookSpec {
     const val READER_FROM = .85f          // dalam fase zoom: layar baca (bilah, halaman lain) mulai muncul
     const val DIM_EARLY = .68f            // seberapa gelap seluruh layar di luar buku (beranda di balik sampul) pada DIM_FADE_FROM. Menghitam BERTAHAP sejak sampul mulai terbuka, jadi hitam layar baca nanti hanya menyelesaikan sisa (.32), bukan muncul tiba-tiba dari terang
     const val DIM_FADE_FROM = .76f        // progres saat kertas sudah ~96% layar penuh: dari sini hitam melebur ke penuh. Jangan dimajukan jauh: hitam tidak boleh bentrok dengan sampul yang masih terlihat di samping kertas
-    const val DIM_FADE_TO = .97f          // hitam penuh tercapai di sini (jendela peleburan ~210 ms, dulu ~110 ms). Hitam dibawa SEPENUHNYA oleh bookDim; latar hitam layar baca (PdfScreen) baru masuk setelahnya (READER_ALPHA_FROM), jadi dua pudar tidak menumpuk
-    const val READER_ALPHA_FROM = .88f    // layar baca (latar, bilah, halaman) mulai muncul saat bookDim sudah ~92%: kenaikan terlihat tinggal sisa kecil, bukan lonjakan
+    const val DIM_FADE_TO = .97f          // hitam penuh tercapai di sini (jendela peleburan ~210 ms, dulu ~110 ms). Hitam dibawa SEPENUHNYA oleh bookDim (PdfScreen tidak lagi punya latar hitam sendiri saat animasi buku), jadi tidak ada dua pudar yang menumpuk
+    const val READER_ALPHA_FROM = .82f    // wadah layar baca (halaman, bukan latar hitam) mulai tampil. Latar hitam TIDAK lagi di PdfScreen untuk buku: seluruhnya dibawa bookDim, jadi tidak ada dua pudar hitam bertumpuk
+    const val READER_ALPHA_TO = .90f      // wadah sudah penuh; sesudah ini yang tersisa hanya pudar komponen (UI_ALPHA)
+    const val UI_ALPHA_FROM = .78f        // bilah atas (panah back, judul, cari, titik tiga) dan kapsul halaman mulai pudar masuk, selesai di progres 1 (~170 ms buka, ~135 ms tutup). Dikalikan alpha wadah, jadi terlihat mulai ~.82
     const val ZOOM_CAMERA = 2.0f          // jarak kamera di ujung zoom: kamera MENDEKAT ke halaman (bukan sekadar gambar diperbesar), perspektif mengencang
     const val CAMERA = 2.8f               // jarak kamera 3D = CAMERA x lebar sampul (makin besar = perspektif makin lembut)
     const val ASPECT = .70f               // lebar / tinggi sampul buku
@@ -194,7 +196,14 @@ fun bookZoomFrac(t: Float): Float {
  * TIDAK lagi memakai kurva ini: lihat bookDim (menggelap bertahap sejak awal, lalu melebur halus ke penuh). Berpatokan pada waktu (progres mentah), bukan ekor kurva zoom.
  */
 fun bookReveal(t: Float): Float = sstep((t - .80f) / .14f)
-fun bookReaderAlpha(t: Float): Float = sstep((t - BookSpec.READER_ALPHA_FROM) / (1f - BookSpec.READER_ALPHA_FROM))   // kertas sudah ~99% di tempatnya, dan gelap latar sudah ~92%: isi layar baca menyatu tanpa lonjakan
+fun bookReaderAlpha(t: Float): Float = sstep((t - BookSpec.READER_ALPHA_FROM) / (BookSpec.READER_ALPHA_TO - BookSpec.READER_ALPHA_FROM))   // wadah layar baca (halaman). Hitam dibawa bookDim, komponen dipudarkan bookUiAlpha
+/**
+ * Pudar komponen layar baca (bilah atas: panah back, judul, tombol cari, titik tiga; kapsul halaman di bawah). Terpisah dari alpha wadah supaya
+ * komponen masuk / keluar lebih pelan dan menyusul setelah kertas dan hitam hampir selesai. Buku: dari UI_ALPHA_FROM ke 1; selain buku (PDF dibuka tanpa animasi buku): selalu 1.
+ * Dibaca di fase gambar (graphicsLayer). Menutup = kebalikan persis (progres sama): komponen pudar keluar lebih dulu, baru hitam dan kertas menyusut.
+ */
+fun bookUiAlpha(vm: AppVM): Float =
+    if (vm.morph?.book == true) sstep((vm.openP.value.coerceIn(0f, 1f) - BookSpec.UI_ALPHA_FROM) / (1f - BookSpec.UI_ALPHA_FROM)) else 1f
 
 /**
  * Gelap latar di luar buku (0 = terang normal, 1 = hitam penuh layar baca). Satu kurva mulus tanpa patahan, buka DAN tutup identik (progres sama):
