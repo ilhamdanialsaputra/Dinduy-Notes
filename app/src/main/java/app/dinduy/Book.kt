@@ -84,9 +84,15 @@ object BookSpec {
     const val COVER_END = .56f            // fase 1 (progres 0..COVER_END): sampul terbuka, buku masih di ukuran kartu
     const val ZOOM_FROM = .50f            // fase 2 (ZOOM_FROM..1): buku membesar ke layar baca (sedikit tumpang tindih dengan akhir fase 1)
     const val POSE_DONE = .30f            // pose miring buku di kartu selesai diluruskan pada progres ini (harus < ZOOM_FROM)
-    const val REST_YAW = 18f              // pose buku diam di kartu: diputar sedikit sehingga punggung buku terlihat
-    const val REST_PITCH = -16f           // ... dan dimiringkan sedikit supaya sisi atas (tebal halaman) terlihat
-    const val REST_SCALE = .88f           // buku diperkecil sedikit di kartu supaya siluet miringnya tetap di dalam kotak kartu
+    const val REST_YAW = 5f               // pose buku diam di kartu: hampir lurus, hanya sedikit perspektif supaya tebal buku terasa
+    const val REST_PITCH = -3f            // ... dan sedikit mengintip sisi atas
+    const val REST_SCALE = .94f           // buku sedikit lebih kecil dari kotak kartu supaya ada ruang untuk gerak bobot saat disentuh
+    const val PEEK_YAW = 9f               // tambahan putaran saat disentuh (buku "ditekan" dan condong)
+    const val PEEK_PITCH = 4f             // tambahan condong ke depan saat disentuh
+    const val PEEK_SCALE = -.035f         // buku sedikit menekan ke bawah (mengecil) saat disentuh, seperti benda berat ditekan
+    const val SWING_BOUNCE = .022f        // pantulan kecil papan sampul saat mendarat di akhir ayunan (bobot papan)
+    const val ROCK_YAW = 3.2f             // buku bergoyang sedikit mengimbangi bobot sampul yang berayun (derajat)
+    const val ROCK_SCALE = .018f          // buku terangkat sedikit saat sampul diayun
     const val BOARD = .03f                // tebal papan sampul (x lebar sampul)
     const val PAGES = .10f                // tebal blok halaman (x lebar sampul)
     const val PAGE_DONE = .8f             // dalam fase zoom: halaman isi sudah di posisi akhir layar baca
@@ -100,12 +106,22 @@ object BookSpec {
     val openSpec: AnimationSpec<Float> = tween(OPEN_MS, easing = EASE)
     val closeSpec: AnimationSpec<Float> = tween(CLOSE_MS, easing = EASE)
     val backCancelSpec: AnimationSpec<Float> = spring(1f, 500f)
+    val peekSpec: AnimationSpec<Float> = spring(.42f, 300f)   // pegas agak longgar: ada pantulan kecil, terasa berbobot
 }
 
 private fun sstep(x: Float): Float { val c = x.coerceIn(0f, 1f); return c * c * (3f - 2f * c) }
 /** 0 = pose miring di kartu, 1 = menghadap lurus (selesai sebelum zoom mulai). */
 fun bookPoseFrac(t: Float): Float = sstep(t / BookSpec.POSE_DONE)
 fun bookCoverFrac(t: Float): Float = sstep(t / BookSpec.COVER_END)
+/** Sudut sampul (0..1 dari COVER_DEG) dengan bobot: mulai berat, mempercepat, lalu mendarat dengan pantulan kecil. Dipakai buka DAN tutup (progres sama). */
+fun bookSwing(t: Float): Float {
+    val x = (t / BookSpec.COVER_END).coerceIn(0f, 1f)
+    val e = x * x * x * (x * (x * 6f - 15f) + 10f)                       // smootherstep: awal berat, akhir lembut
+    val land = if (x > .72f) kotlin.math.sin(((x - .72f) / .28f) * Math.PI.toFloat()) else 0f
+    return (e + BookSpec.SWING_BOUNCE * land).coerceAtMost(1.0125f)  // lewat sedikit dari rebah lalu kembali
+}
+/** Goyangan buku mengimbangi ayunan sampul: 0 di awal / akhir, puncak di tengah. */
+fun bookRock(t: Float): Float = kotlin.math.sin(bookCoverFrac(t) * Math.PI.toFloat())
 fun bookZoomFrac(t: Float): Float = sstep((t - BookSpec.ZOOM_FROM) / (1f - BookSpec.ZOOM_FROM))
 fun bookReaderAlpha(t: Float): Float = sstep((bookZoomFrac(t) - BookSpec.READER_FROM) / (1f - BookSpec.READER_FROM))
 
@@ -252,7 +268,7 @@ fun BookCard(
     var busy by remember { mutableStateOf(false) }
     val src = remember { MutableInteractionSource() }
     val pressed by src.collectIsPressedAsState()
-    val peek by animateFloatAsState(if (pressed) 1f else 0f, spring(.6f, 420f), label = "bkpeek")
+    val peek by animateFloatAsState(if (pressed) 1f else 0f, BookSpec.peekSpec, label = "bkpeek")
     val selA by animateFloatAsState(if (selected) 1f else 0f, spring(.6f, 400f), label = "bksel")
     val coords = remember { arrayOfNulls<LayoutCoordinates>(1) }
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
@@ -291,7 +307,7 @@ fun BookCard(
                         try {
                             val r = BookArt.prepare(vm, ctx, d, screenW)
                             BookFx.begin(d.id, r.page, r.ratio, pdark)
-                            BookFx.tilt = 9f * peek
+                            BookFx.tilt = BookSpec.PEEK_YAW * peek
                             onClick(morphNow())
                         } finally { busy = false }
                     }
@@ -307,13 +323,14 @@ fun BookCard(
                     Modifier.fillMaxWidth().aspectRatio(BookSpec.ASPECT)
                         .onGloballyPositioned { coords[0] = it; track?.invoke(morphNow()) }
                         .drawBehind {
-                            // bayangan lembut di lantai di bawah buku (tebal buku digambar mesin 3D di dalam kotak ini)
+                            // bayangan lembut di lantai di bawah buku; saat ditekan bayangan merapat + menggelap (buku menempel ke permukaan)
                             val w = size.width
                             val h = size.height
+                            val pk = peek.coerceIn(0f, 1.3f)
                             for (i in 1..6) {
-                                val e = i * 1.8.dp.toPx()
+                                val e = i * 1.8.dp.toPx() * (1f - .35f * pk)
                                 drawRoundRect(
-                                    Color.Black.copy(alpha = .045f), Offset(w * .07f - e * .2f + 2.dp.toPx(), h * .10f + e * .8f + 2.dp.toPx()),
+                                    Color.Black.copy(alpha = .045f + .012f * pk), Offset(w * .07f - e * .2f + 2.dp.toPx(), h * .10f + e * .8f + 2.dp.toPx()),
                                     Size(w * .88f + e * .4f, h * .86f + e * .3f), CornerRadius(8.dp.toPx() + e)
                                 )
                             }
@@ -329,12 +346,14 @@ fun BookCard(
                     ) {
                         if (ct == null) BookCoverFace(vm, d, Modifier.fillMaxSize())
                         else Canvas(Modifier.fillMaxSize()) {
-                            // buku 3D sungguhan: pose diam miring + mengintip lebih miring saat disentuh
-                            val yaw = BookSpec.REST_YAW + 9f * peek
+                            // buku 3D sungguhan: hampir lurus; saat disentuh ditekan (mengecil), condong, lalu memantul balik (pegas longgar)
+                            val yaw = BookSpec.REST_YAW + BookSpec.PEEK_YAW * peek
+                            val pitch = BookSpec.REST_PITCH + BookSpec.PEEK_PITCH * peek
+                            val k = BookSpec.REST_SCALE + BookSpec.PEEK_SCALE * peek
                             drawIntoCanvas {
                                 Book3D.draw(
                                     it.nativeCanvas, 0f, 0f, size.width, size.height,
-                                    yaw, BookSpec.REST_PITCH, BookSpec.REST_SCALE, 0f, ct, null, false, false
+                                    yaw, pitch, k, 0f, ct, null, false, false
                                 )
                             }
                         }
@@ -367,7 +386,7 @@ fun BookPageLayer(vm: AppVM) {
         val W = size.width
         val H = size.height
         val c = bookRect(vm, W, H, tt)
-        val bmp = PdfCache.best(d.pdf, BookFx.page)?.asImageBitmap() ?: Imgs.peek(d.cv)
+        val bmp = PdfCache.best(d.pdf, BookFx.page)?.asImageBitmap()
         if (bmp == null) { drawRect(Color.White, Offset(c.left, c.top), Size(c.width, c.height)); return@Canvas }   // tak pernah hitam
         val fin = BookFx.live ?: bookFinalRect(W, H, topPad, sab, dens, PdfBus.mode.coerceAtLeast(0), BookFx.ratio)
         val q = sstep(tt / BookSpec.PAGE_DONE)
@@ -428,10 +447,11 @@ fun BookCoverLayer(vm: AppVM) {
         vm.morphTick
         val r = bookRect(vm, size.width, size.height, tt)
         val pe = bookPoseFrac(tRaw)
-        val yaw = (BookSpec.REST_YAW + BookFx.tilt) * (1f - pe)       // melanjutkan kemiringan dari kartu tanpa loncat
-        val pitch = BookSpec.REST_PITCH * (1f - pe)
-        val k = lerp(BookSpec.REST_SCALE, 1f, pe)
-        val deg = BookSpec.COVER_DEG * bookCoverFrac(tRaw)
+        val rock = bookRock(tRaw) * (1f - pe)                          // buku bergoyang mengimbangi bobot sampul (hilang saat sudah lurus)
+        val yaw = (BookSpec.REST_YAW + BookFx.tilt) * (1f - pe) + BookSpec.ROCK_YAW * rock       // melanjutkan kemiringan dari kartu tanpa loncat
+        val pitch = BookSpec.REST_PITCH * (1f - pe) - 1.5f * rock
+        val k = lerp(BookSpec.REST_SCALE, 1f, pe) + BookSpec.ROCK_SCALE * rock
+        val deg = (BookSpec.COVER_DEG * bookSwing(tRaw)).coerceAtMost(179f)
         val ct = BookTex.peek(d) ?: BookTex.ensure(d)
         // halaman terakhir dibuka: hanya sebelum zoom (setelah itu BookPageLayer yang menggambarnya)
         val pageOn = tt <= .0005f
