@@ -260,6 +260,8 @@ fun Modifier.makeRoom(vm: AppVM, id: String, idx: Int, openIdx: () -> Int, h: Fl
     val m = vm.morph
     val p = vm.openP.value.coerceIn(0f, 1f)
     if (p <= 0.001f || oid == null || m == null || oid == id) return@graphicsLayer
+    // buku PDF: kartu lain diam di tempat (tidak bergeser, mengecil, atau memudar); sampul rebah menimpa mereka
+    if (m.book) return@graphicsLayer
     val oi = openIdx()
     if (oi < 0) return@graphicsLayer
     // beranda (1 atau 2 kolom; w > 0 hanya diisi HomeCard): posisi kartu dibaca langsung, bukan sekadar urutan
