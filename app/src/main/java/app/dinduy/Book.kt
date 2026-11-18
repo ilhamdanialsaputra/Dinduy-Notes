@@ -74,19 +74,20 @@ import kotlin.math.roundToInt
 
 /** Semua angka animasi buku ada di sini. */
 object BookSpec {
-    const val OPEN_MS = 620               // durasi buka (ms)
-    const val CLOSE_MS = 540              // durasi tutup (ms)
+    const val OPEN_MS = 700               // durasi buka total (ms): sampul terbuka dulu, baru zoom
+    const val CLOSE_MS = 600              // durasi tutup total (ms)
     const val COVER_DEG = 110f            // sudut ayun sampul
     const val COVER_SIGN = -1f            // -1 = sampul mengayun ke arah penonton; ubah ke 1f kalau arahnya terbalik
-    const val COVER_END = .5f             // sampul selesai terbuka pada progres ini
-    const val PAGE_DONE = .8f             // halaman isi sudah menempati posisi akhir di layar baca pada progres ini
-    const val READER_FROM = .86f          // layar baca (bilah, halaman lain) mulai muncul pada progres ini
+    const val COVER_END = .5f             // fase 1 (progres 0..COVER_END): sampul terbuka, buku masih di ukuran kartu
+    const val ZOOM_FROM = .46f            // fase 2 (ZOOM_FROM..1): buku membesar ke layar baca (sedikit tumpang tindih dengan akhir fase 1)
+    const val PAGE_DONE = .8f             // dalam fase zoom: halaman isi sudah di posisi akhir layar baca
+    const val READER_FROM = .85f          // dalam fase zoom: layar baca (bilah, halaman lain) mulai muncul
     const val CAMERA = 2.8f               // jarak kamera 3D = CAMERA x lebar sampul (makin besar = perspektif makin lembut)
     const val ASPECT = .70f               // lebar / tinggi sampul buku
     const val BACK_DRAG = .35f            // progres turun sampai segini selama back gesture ditarik penuh
     const val TXT_CHANGE = "Ganti sampul"
     const val TXT_RESTORE = "Kembalikan sampul asli"
-    val EASE = CubicBezierEasing(.32f, 0f, .12f, 1f)
+    val EASE = androidx.compose.animation.core.LinearEasing   // easing per fase ada di fungsi smoothstep di bawah
     val openSpec: AnimationSpec<Float> = tween(OPEN_MS, easing = EASE)
     val closeSpec: AnimationSpec<Float> = tween(CLOSE_MS, easing = EASE)
     val backCancelSpec: AnimationSpec<Float> = spring(1f, 500f)
@@ -94,7 +95,8 @@ object BookSpec {
 
 private fun sstep(x: Float): Float { val c = x.coerceIn(0f, 1f); return c * c * (3f - 2f * c) }
 fun bookCoverFrac(t: Float): Float = sstep(t / BookSpec.COVER_END)
-fun bookReaderAlpha(t: Float): Float = sstep((t - BookSpec.READER_FROM) / (1f - BookSpec.READER_FROM))
+fun bookZoomFrac(t: Float): Float = sstep((t - BookSpec.ZOOM_FROM) / (1f - BookSpec.ZOOM_FROM))
+fun bookReaderAlpha(t: Float): Float = sstep((bookZoomFrac(t) - BookSpec.READER_FROM) / (1f - BookSpec.READER_FROM))
 
 private val BOOK_SHAPE = RoundedCornerShape(topStart = 3.dp, bottomStart = 3.dp, topEnd = 8.dp, bottomEnd = 8.dp)
 
@@ -104,11 +106,12 @@ object BookFx {
     var page by mutableIntStateOf(0)       // halaman yang sedang dibaca (diperbarui layar baca)
     var ratio = 1.4142f                    // tinggi / lebar halaman tersebut
     var dark = false
+    var tilt = 0f                          // sudut miring sampul saat disentuh (derajat), dilanjutkan mulus oleh lapisan animasi
     var live: Rect? = null                 // posisi halaman di layar (koordinat jendela) saat menutup; null = posisi awal baca
     var snap: (() -> Rect?)? = null        // diisi layar baca
 
     fun begin(id: String, page: Int, ratio: Float, dark: Boolean) {
-        this.id = id; this.page = page; this.ratio = ratio; this.dark = dark; live = null
+        this.id = id; this.page = page; this.ratio = ratio; this.dark = dark; live = null; tilt = 0f
     }
 
     fun capture(noteId: String) {
@@ -129,7 +132,8 @@ object BookArt {
      * Pastikan bitmap halaman terakhir ada di PdfCache (kunci sama dengan layar baca, jadi layar baca memakai bitmap yang SAMA,
      * tanpa render ulang). Dipanggil sebelum animasi mulai; bila gagal animasi tetap jalan memakai sampul sebagai isi.
      */
-    suspend fun prepare(ctx: Context, d: Note, screenWpx: Int): BookReady = withContext(Dispatchers.IO) {
+    suspend fun prepare(vm: AppVM, ctx: Context, d: Note, screenWpx: Int): BookReady = withContext(Dispatchers.IO) {
+        if (d.cv.isNotEmpty()) try { Imgs.load(vm.imgDir, d.cv) } catch (e: Throwable) { }   // sampul sudah ada di cache sebelum animasi
         val sp = ctx.getSharedPreferences("dinduy", 0)
         if (PdfBus.mode < 0) PdfBus.mode = sp.getInt("pdfmode", 0)
         if (PdfBus.curl < 0) PdfBus.curl = sp.getInt("pdfcurl", 0)
@@ -186,7 +190,20 @@ fun bookRect(vm: AppVM, w: Float, h: Float, tt: Float): Rect {
 @Composable
 fun BookCoverFace(vm: AppVM, d: Note, modifier: Modifier = Modifier) {
     Box(modifier.clip(BOOK_SHAPE).background(Color(0xFFE9E4DA))) {
-        CoverImage(vm, d, Modifier.fillMaxSize())
+        val bmp = Imgs.peek(d.cv)
+        if (bmp == null) CoverImage(vm, d, Modifier.fillMaxSize())
+        else Canvas(Modifier.fillMaxSize()) {
+            // gambar sendiri dari bitmap yang sudah di cache (tanpa pemuatan ulang saat ukuran berubah) -> tidak ada kedip
+            val iw = bmp.width.toFloat(); val ih = bmp.height.toFloat()
+            val s = maxOf(size.width / iw, size.height / ih) * d.cz.coerceAtLeast(1f)
+            val vw = size.width / s; val vh = size.height / s
+            drawImage(
+                bmp, IntOffset(((iw - vw) * d.cx.coerceIn(0f, 1f)).roundToInt(), ((ih - vh) * d.cy.coerceIn(0f, 1f)).roundToInt()),
+                IntSize(vw.roundToInt().coerceAtLeast(1), vh.roundToInt().coerceAtLeast(1)),
+                IntOffset.Zero, IntSize(size.width.roundToInt().coerceAtLeast(1), size.height.roundToInt().coerceAtLeast(1)),
+                filterQuality = FilterQuality.Medium
+            )
+        }
         Canvas(Modifier.fillMaxSize()) {
             val w = size.width
             val h = size.height
@@ -231,7 +248,7 @@ fun BookCard(
     var busy by remember { mutableStateOf(false) }
     val src = remember { MutableInteractionSource() }
     val pressed by src.collectIsPressedAsState()
-    val peek by animateFloatAsState(if (pressed || busy) 1f else 0f, spring(.6f, 420f), label = "bkpeek")
+    val peek by animateFloatAsState(if (pressed) 1f else 0f, spring(.6f, 420f), label = "bkpeek")
     val selA by animateFloatAsState(if (selected) 1f else 0f, spring(.6f, 400f), label = "bksel")
     val coords = remember { arrayOfNulls<LayoutCoordinates>(1) }
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
@@ -255,8 +272,9 @@ fun BookCard(
                     busy = true
                     scope.launch {
                         try {
-                            val r = BookArt.prepare(ctx, d, screenW)
+                            val r = BookArt.prepare(vm, ctx, d, screenW)
                             BookFx.begin(d.id, r.page, r.ratio, pdark)
+                            BookFx.tilt = -9f * peek
                             onClick(morphNow())
                         } finally { busy = false }
                     }
@@ -307,8 +325,6 @@ fun BookCard(
                             transformOrigin = TransformOrigin(0f, .5f)
                             cameraDistance = BookSpec.CAMERA * size.width
                             rotationY = -9f * peek
-                            val s = 1f - .02f * peek
-                            scaleX = s; scaleY = s
                         }.border(2.dp, pal.p.copy(alpha = selA), BOOK_SHAPE)
                     )
                 }
@@ -332,7 +348,8 @@ fun BookPageLayer(vm: AppVM) {
     val sab = with(LocalDensity.current) { sabDp().toPx() }
     remember(id) { if (BookFx.id != id) BookFx.begin(id, d.pg, 1.4142f, false); 0 }
     Canvas(Modifier.fillMaxSize()) {
-        val tt = vm.openP.value.coerceIn(0f, 1f)
+        val tRaw = vm.openP.value.coerceIn(0f, 1f)
+        val tt = bookZoomFrac(tRaw)
         vm.morphTick
         val W = size.width
         val H = size.height
@@ -355,8 +372,8 @@ fun BookPageLayer(vm: AppVM) {
             filterQuality = FilterQuality.Medium, colorFilter = if (BookFx.dark) INVERT else null
         )
         // bayangan sampul yang jatuh di halaman dekat engsel
-        val ang = bookCoverFrac(tt)
-        val a = .30f * kotlin.math.sin(ang * Math.PI.toFloat())
+        val ang = bookCoverFrac(tRaw)
+        val a = .30f * kotlin.math.sin(ang * Math.PI.toFloat() / 2f) * (1f - tt)
         if (a > .005f) {
             val sw2 = (dr - dl) * .28f
             drawRect(Brush.horizontalGradient(listOf(Color.Black.copy(a), Color.Transparent), dl, dl + sw2), Offset(dl, dt), Size(sw2, db - dt))
@@ -394,20 +411,22 @@ fun BookCoverLayer(vm: AppVM) {
         },
         modifier = Modifier.fillMaxSize()
     ) { ms, c ->
-        val tt = vm.openP.value.coerceIn(0f, 1f)
+        val tRaw = vm.openP.value.coerceIn(0f, 1f)
+        val tt = bookZoomFrac(tRaw)
         vm.morphTick
         val r = bookRect(vm, c.maxWidth.toFloat(), c.maxHeight.toFloat(), tt)
         val w = r.width.roundToInt().coerceAtLeast(1)
         val h = r.height.roundToInt().coerceAtLeast(1)
         val ps = ms.map { it.measure(Constraints.fixed(w, h)) }
-        val ang = bookCoverFrac(tt)
+        val ang = bookCoverFrac(tRaw)
         val deg = BookSpec.COVER_DEG * ang
-        val fade = 1f - sstep((tt - .8f) / .15f)
+        val fade = 1f - sstep((tt - .5f) / .4f)
+        val tilt = BookFx.tilt * (1f - sstep(tRaw / .15f))   // melanjutkan kemiringan sampul dari kartu tanpa loncat
         layout(c.maxWidth, c.maxHeight) {
             ps.forEachIndexed { i, p ->
                 p.placeWithLayer(r.left.roundToInt(), r.top.roundToInt()) {
                     transformOrigin = TransformOrigin(0f, .5f)
-                    rotationY = BookSpec.COVER_SIGN * deg
+                    rotationY = BookSpec.COVER_SIGN * deg + tilt
                     cameraDistance = BookSpec.CAMERA * w
                     alpha = fade * when (i) {
                         0 -> if (deg <= 90f) 1f else 0f
