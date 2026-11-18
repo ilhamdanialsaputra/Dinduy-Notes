@@ -1860,6 +1860,15 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
         if (mode == 0) {
             // ---------------- mode gulir (menerus) ----------------
             val list = rememberLazyListState(initialFirstVisibleItemIndex = startPage)
+            // buku: LazyColumn juga menyusun halaman SEBELUM startPage di area padding atas (di balik bilah atas). Selama animasi buka / tutup bilahnya masih
+            // transparan, jadi halaman itu (dan celah antar halaman) tembus terlihat. Selama animasi disembunyikan total, dan baru dipudarkan masuk
+            // setelah buka selesai (progres 1); saat tutup dimulai langsung disembunyikan (tanpa pudar) supaya tidak tertinggal di belakang bilah yang sudah hilang
+            val bookOpen = vm.morph?.book == true
+            val settled by remember { derivedStateOf { vm.openP.value >= .999f } }
+            val leadTarget = if (!bookOpen || settled) 1f else 0f
+            val leadA by animateFloatAsState(
+                leadTarget, if (leadTarget == 1f && bookOpen) tween(260) else androidx.compose.animation.core.snap(), label = "pdflead"
+            )
             SideEffect { ui.scrollBy = { d -> list.dispatchRawDelta(d) } }
             var zoom by remember { mutableFloatStateOf(1f) }
             var hx by remember { mutableFloatStateOf(0f) }   // geseran horizontal (px) saat diperbesar
@@ -1935,11 +1944,16 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     items(count, key = { it }) { i ->
-                        // halaman pertama (startPage) ikut animasi buku lewat BookPageLayer; halaman lain naik pelan + pudar masuk saat buka, turun + pudar saat tutup
-                        val tail = if (i == startPage) Modifier else Modifier.graphicsLayer {
-                            val f = bookTailFrac(vm)
-                            alpha = f
-                            translationY = (1f - f) * BookSpec.TAIL_RISE_DP * density
+                        // halaman pertama (startPage) ikut animasi buku lewat BookPageLayer. Halaman SESUDAHNYA naik pelan + pudar masuk saat buka, turun + pudar saat tutup.
+                        // Halaman SEBELUMNYA (di balik bilah atas) tersembunyi selama animasi (lihat leadA), tanpa gerak
+                        val tail = when {
+                            i == startPage -> Modifier
+                            i < startPage -> Modifier.graphicsLayer { alpha = leadA }
+                            else -> Modifier.graphicsLayer {
+                                val f = bookTailFrac(vm)
+                                alpha = f
+                                translationY = (1f - f) * BookSpec.TAIL_RISE_DP * density
+                            }
                         }
                         PdfPage(ui, i, contentW, 1f, tail.width(contentW).height(contentW * ui.doc.ratioOf(i)))
                     }
