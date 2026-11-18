@@ -91,6 +91,7 @@ object BookSpec {
     const val COVER_SIGN = -1f            // (tidak dipakai lagi oleh mesin 3D; dibiarkan supaya berkas lain tetap terkompilasi)
     const val COVER_END = .62f            // sampul mengayun dan mendarat pada progres ini
     const val ZOOM_FROM = .34f            // kertas mulai membesar menuju layar baca saat sampul masih di tengah ayunan (~125 derajat): satu gerak mengalir, bukan dua tahap bergantian
+    const val DOLLY_END = .80f            // lensa + kamera sudah lurus di depan halaman pada progres ini: SELESAI sebelum kertas mendarat, supaya bagian 3D (sampul, punggung) tidak bergeser sendiri di belakang kertas
     const val DOLLY_FROM = .50f           // lensa memusat + kamera mendekat HANYA setelah sampul menyentuh meja (benda yang masih terangkat tidak boleh kena perspektif yang mengetat)
     const val PEEK_DEG = 7f               // saat jari menekan buku, sampul terangkat sedikit (mengintip). Ayunan buka melanjutkan dari sudut ini, tanpa lompatan
     const val SLIDE_1COL = .5f            // 1 kolom: buku bergeser ke kanan paling banyak setengah lebar buku supaya sampul yang rebah tetap di dalam layar
@@ -140,8 +141,8 @@ fun bookCoverFrac(t: Float): Float = sstep(t / BookSpec.COVER_END)
  * Baru dipusatkan selama zoom (kamera mendekat dan lurus ke halaman). Satu fungsi progres: buka dan tutup identik.
  */
 fun bookLens(t: Float): Float = 1f - bookDolly(t)
-/** 0 = kamera masih di pose kartu, 1 = kamera sudah lurus di depan halaman. Mulai setelah sampul mendarat (DOLLY_FROM), selesai saat kertas hampir penuh. */
-fun bookDolly(t: Float): Float = sstep(((t - BookSpec.DOLLY_FROM) / (1f - BookSpec.DOLLY_FROM)) / BookSpec.LENS_DONE)
+/** 0 = kamera masih di pose kartu, 1 = kamera sudah lurus di depan halaman. Mulai setelah sampul mendarat (DOLLY_FROM), selesai di DOLLY_END (kertas sudah ~93% penuh). */
+fun bookDolly(t: Float): Float = sstep((t - BookSpec.DOLLY_FROM) / (BookSpec.DOLLY_END - BookSpec.DOLLY_FROM))
 /**
  * Sudut sampul (0..1 dari COVER_DEG). Mulai berat, mempercepat, lalu MEMBENTUR bidang papan belakang pada SWING_IMPACT dengan kecepatan masih
  * tersisa. Setelah itu papan terpental sedikit ke ATAS (sudut mengecil, tidak pernah melewati bidang meja), jatuh, pantul lebih kecil, diam.
@@ -182,8 +183,15 @@ fun bookZoomFrac(t: Float): Float {
     val out = 1f - (1f - x) * (1f - x) * (1f - x)
     return smoother * (1f - x) + out * x
 }
-/** Latar hitam + layar baca meluas ke seluruh layar hanya di ujung zoom (0 = bingkai = kertas, 1 = layar penuh). */
-fun bookReveal(tt: Float): Float = sstep((tt - .78f) / .22f)
+/**
+ * Tahap kedatangan di ujung zoom, semuanya berpatokan pada waktu (progres mentah), BUKAN pada kurva zoom yang melambat di ekor.
+ * Dulu empat hal (latar hitam meluas, sampul memudar, layar baca muncul, kertas mendarat) menumpuk di ekor kurva yang paling lambat dan terasa patah.
+ * Sekarang bertingkat dan saling menyambung: latar hitam mulai meluas lebih dulu, sampul memudar, kertas mendarat, baru isi layar baca muncul.
+ */
+/** Latar hitam meluas ke seluruh layar (0 = bingkai = kertas, 1 = layar penuh). */
+fun bookReveal(t: Float): Float = sstep((t - .56f) / .36f)
+/** Bagian 3D (sampul rebah, punggung, tepi) memudar bersama latar yang meluas. */
+fun bookCoverFade(t: Float): Float = sstep((t - .42f) / .40f)
 
 /** Ukuran layar / inset yang dibutuhkan untuk menghitung posisi akhir halaman. */
 class BookGeo(val topPad: Float, val sab: Float, val dens: Float)
@@ -221,7 +229,7 @@ fun bookSlide(m: Morph, w: Float, dens: Float, raw: Float): Float {
     val room = (w - 12f * dens - m.r).coerceAtLeast(0f)
     return need.coerceIn(0f, min(bw * BookSpec.SLIDE_1COL, room)) * bookCoverFrac(raw)
 }
-fun bookReaderAlpha(t: Float): Float = sstep((bookZoomFrac(t) - BookSpec.READER_FROM) / (1f - BookSpec.READER_FROM))
+fun bookReaderAlpha(t: Float): Float = sstep((t - .86f) / .14f)   // kertas sudah ~98% di tempatnya; isi layar baca menyatu dengan halaman yang sama
 
 private val BOOK_SHAPE = RoundedCornerShape(topStart = 3.dp, bottomStart = 3.dp, topEnd = 8.dp, bottomEnd = 8.dp)
 
@@ -534,8 +542,9 @@ fun BookPlaceholder(note: Note) {
     val topPad = with(LocalDensity.current) { (satDp() + 64.dp).toPx() }
     val sab = with(LocalDensity.current) { sabDp().toPx() }
     Canvas(Modifier.fillMaxSize()) {
-        val bmp = PdfCache.best(note.pdf, BookFx.page)?.asImageBitmap() ?: return@Canvas
         val r = BookFx.live ?: bookFinalRect(size.width, size.height, topPad, sab, dens, PdfBus.mode.coerceAtLeast(0), BookFx.ratio)
+        val bmp = PdfCache.best(note.pdf, BookFx.page)?.asImageBitmap()
+        if (bmp == null) { drawRect(Color.White, Offset(r.left, r.top), Size(r.width, r.height)); return@Canvas }   // tak pernah hitam / kosong
         drawImage(
             bmp, IntOffset.Zero, IntSize(bmp.width, bmp.height),
             IntOffset(r.left.roundToInt(), r.top.roundToInt()), IntSize(r.width.roundToInt().coerceAtLeast(1), r.height.roundToInt().coerceAtLeast(1)),
@@ -592,11 +601,16 @@ fun BookCoverLayer(vm: AppVM) {
         val page = if (pageOn) PdfCache.best(d.pdf, BookFx.page)?.let { BookTex.pageTex(it, r.width) } else null
         // sampul tetap menempel di engsel kertas selama zoom; baru memudar bersama latar hitam yang meluas di ujung zoom
         // (mode halaman: engsel tidak di tepi layar, jadi sampul tidak boleh tertinggal di atas layar baca)
-        val fadeA = 1f - bookReveal(tt)
+        val fadeA = 1f - bookCoverFade(tRaw)
         if (fadeA <= .01f) return@Canvas
         drawIntoCanvas {
             val cnv = it.nativeCanvas
-            val sv = if (fadeA < .999f) cnv.saveLayerAlpha(0f, 0f, size.width, size.height, (fadeA * 255f).roundToInt()) else -1
+            // lapisan pemudar dibatasi ke area yang benar-benar tergambar (kertas + sampul rebah + tepi), bukan seluruh layar: lebih ringan di GPU
+            val bw = r.width
+            val sv = if (fadeA < .999f) cnv.saveLayerAlpha(
+                maxOf(0f, r.left - bw * 1.2f), maxOf(0f, r.top - bw * .4f),
+                minOf(size.width, r.right + bw * .4f), minOf(size.height, r.bottom + bw * .4f), (fadeA * 255f).roundToInt()
+            ) else -1
             Book3D.draw(
                 cnv, r.left, r.top, r.right, r.bottom,
                 yaw, pitch, k, deg, ct, page, pageOn, BookFx.dark, lx, ly, bookCamera(tRaw)
