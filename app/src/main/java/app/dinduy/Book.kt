@@ -67,6 +67,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.roundToInt
@@ -78,12 +79,18 @@ import kotlin.math.roundToInt
 
 /** Semua angka animasi buku ada di sini. */
 object BookSpec {
-    const val OPEN_MS = 740               // durasi buka total (ms): sampul terbuka (~500 ms, sama seperti sebelumnya) lalu zoom cepat (~265 ms)
-    const val CLOSE_MS = 640              // durasi tutup total (ms): sampul menutup ~435 ms (hampir sama seperti sebelumnya), zoom ~230 ms
-    const val COVER_DEG = 176f            // sudut ayun sampul: rebah hampir datar di sisi kiri buku
+    const val OPEN_MS = 820               // durasi buka total (ms): sampul mengayun ~540 ms lalu zoom ~280 ms
+    const val CLOSE_MS = 700              // durasi tutup total (ms): sampul menutup ~460 ms, zoom ~240 ms
+    // Sudut rebah sampul = 180° + asin(PAGES + BOARD) ≈ 191.7°. Sampul TIDAK melayang di bidang halaman (dulu 176°): ia turun mengikuti
+    // ketebalan buku sampai ujung bebasnya menyentuh bidang papan belakang (bidang "meja"). Karena itu sampul yang terbuka miring
+    // landai menjauh dari kamera, perspektifnya sama dengan buku tertutup, dan ketebalan blok halaman tetap terbaca.
+    // Kalau PAGES / BOARD diubah, hitung ulang: 180 + asin(PAGES + BOARD) dalam derajat.
+    const val COVER_DEG = 191.7f
     const val COVER_SIGN = -1f            // (tidak dipakai lagi oleh mesin 3D; dibiarkan supaya berkas lain tetap terkompilasi)
-    const val COVER_END = .68f            // fase 1 (progres 0..COVER_END): sampul terbuka, buku masih di ukuran kartu
-    const val ZOOM_FROM = .64f            // fase 2 (ZOOM_FROM..1): buku membesar ke layar baca (sedikit tumpang tindih dengan akhir fase 1)
+    const val COVER_END = .66f            // fase 1 (progres 0..COVER_END): sampul mengayun dan mendarat, buku masih di ukuran kartu, KAMERA DIAM
+    const val ZOOM_FROM = .66f            // fase 2 (ZOOM_FROM..1): kamera mendekat ke halaman. Mulai tepat setelah sampul diam (tanpa tumpang tindih)
+    const val SWING_IMPACT = .80f         // bagian fase 1 (0..1) saat sampul menyentuh bidang papan belakang; sisanya pantulan kecil lalu diam
+    const val LENS_DONE = .80f            // bagian fase zoom (0..1) saat mata kamera sudah di tengah (tepi buku sudah di luar layar / tertutup latar)
     const val POSE_DONE = .365f            // pose miring buku di kartu selesai diluruskan pada progres ini (harus < ZOOM_FROM)
     const val REST_YAW = 0f               // pose buku diam di kartu: LURUS (tidak diputar). Ketebalan terlihat lewat lensa (REST_LENS_*), bukan kemiringan
     const val REST_PITCH = 0f             // ... lurus juga ke atas-bawah
@@ -93,11 +100,11 @@ object BookSpec {
     const val REST_LENS_X = 1.25f         // mata kamera bergeser ke kiri sejauh ini (x lebar buku): punggung terlihat, muka depan tetap lurus
     const val REST_LENS_Y = 1.1f          // ... dan ke atas: tepi atas (halaman bersusun) terlihat
     const val PEEK_LENS = -.45f           // saat disentuh lensa merapat sebesar ini (buku terasa ditekan masuk, tanpa miring)
-    const val ROCK_LENS = .22f            // lensa melebar sedikit saat sampul berayun (buku "bereaksi" tanpa diputar)
+    const val ROCK_LENS = 0f              // (tidak dipakai lagi: kamera tidak boleh bergoyang selama sampul berayun)
     const val PEEK_SCALE = -.035f         // buku sedikit menekan ke bawah (mengecil) saat disentuh, seperti benda berat ditekan
-    const val SWING_BOUNCE = .04f         // pantulan teredam papan sampul saat mendarat di akhir ayunan (bobot papan): sedikit lewat, kembali, diam
-    const val ROCK_YAW = .8f              // goyangan putar buku saat sampul berayun, sangat kecil (derajat)
-    const val ROCK_SCALE = .018f          // buku terangkat sedikit saat sampul diayun
+    const val SWING_BOUNCE = .022f        // pantulan papan sampul saat membentur bidang meja: terangkat sedikit (ke atas, bukan menembus meja), jatuh lagi, diam
+    const val ROCK_YAW = 0f               // (tidak dipakai lagi: buku tidak diputar, supaya bidang halaman selalu pas dengan kotaknya)
+    const val ROCK_SCALE = .012f          // buku sedikit tertekan (mengecil) tepat saat sampul membentur, lalu pulih
     const val BOARD = .042f               // tebal papan sampul (x lebar sampul)
     const val PAGES = .16f                // tebal blok halaman (x lebar sampul)
     const val PAGE_DONE = .8f             // dalam fase zoom: halaman isi sudah di posisi akhir layar baca
@@ -118,19 +125,35 @@ private fun sstep(x: Float): Float { val c = x.coerceIn(0f, 1f); return c * c * 
 /** 0 = pose miring di kartu, 1 = menghadap lurus (selesai sebelum zoom mulai). */
 fun bookPoseFrac(t: Float): Float = sstep(t / BookSpec.POSE_DONE)
 fun bookCoverFrac(t: Float): Float = sstep(t / BookSpec.COVER_END)
-/** Sudut sampul (0..1 dari COVER_DEG) dengan bobot: mulai berat, mempercepat, lalu mendarat dengan osilasi teredam (engsel menahan papan). Dipakai buka DAN tutup (progres sama). */
+/**
+ * Lensa perspektif (ketebalan terlihat). PENUH selama sampul mengayun dan mendarat: kamera diam, jadi punggung, tepi atas, dan tebal papan
+ * konsisten dari kartu sampai sampul rebah (dulu memudar saat sampul masih berayun, sehingga sampul terbuka tampak datar total).
+ * Baru dipusatkan selama zoom (kamera mendekat dan lurus ke halaman). Satu fungsi progres: buka dan tutup identik.
+ */
+fun bookLens(t: Float): Float = 1f - sstep(bookZoomFrac(t) / BookSpec.LENS_DONE)
+/**
+ * Sudut sampul (0..1 dari COVER_DEG). Mulai berat, mempercepat, lalu MEMBENTUR bidang papan belakang pada SWING_IMPACT dengan kecepatan masih
+ * tersisa. Setelah itu papan terpental sedikit ke ATAS (sudut mengecil, tidak pernah melewati bidang meja), jatuh, pantul lebih kecil, diam.
+ * Dipakai buka DAN tutup (progres sama), jadi menutup = kebalikan persis.
+ */
 fun bookSwing(t: Float): Float {
     val x = (t / BookSpec.COVER_END).coerceIn(0f, 1f)
-    val so = x * x * x * (x * (x * 6f - 15f) + 10f)                      // smootherstep: awal berat, akhir lembut
-    val eo = 1f - (1f - x) * (1f - x) * (1f - x)                          // ease-out cubic: langsung bergerak (responsif)
-    val e = .66f * so + .34f * eo
-    // setelah hampir rebah papan terdorong sedikit lewat lalu memantul balik dan diam (dua lengkung yang mengecil, bukan satu)
-    val u = ((x - .84f) / .16f).coerceIn(0f, 1f)
-    val land = sin(u * 2f * Math.PI.toFloat()) * Math.pow((1f - u).toDouble(), 1.2).toFloat()
-    return (e + BookSpec.SWING_BOUNCE * land).coerceIn(0f, 1.0125f)   // lewat sedikit dari rebah lalu kembali
+    val imp = BookSpec.SWING_IMPACT
+    if (x < imp) {
+        val p = x / imp
+        return .55f * sstep(p) + .45f * Math.pow(p.toDouble(), 1.7).toFloat()   // awal berat, akhir masih bergerak saat membentur
+    }
+    val u = ((x - imp) / (1f - imp)).coerceIn(0f, 1f)
+    val hop = abs(sin(u * 2f * Math.PI.toFloat())) * Math.pow((1f - u).toDouble(), 1.5).toFloat()   // dua lompatan mengecil, tajam di titik benturan
+    return (1f - BookSpec.SWING_BOUNCE * hop).coerceIn(0f, 1f)
 }
-/** Goyangan buku mengimbangi ayunan sampul: 0 di awal / akhir, puncak di tengah. */
-fun bookRock(t: Float): Float = kotlin.math.sin(bookCoverFrac(t) * Math.PI.toFloat())
+/** Reaksi buku terhadap bobot sampul: 0 sampai sampul membentur, lalu denyut kecil selama pantulan, kembali 0 tepat saat zoom mulai. */
+fun bookRock(t: Float): Float {
+    val x = (t / BookSpec.COVER_END).coerceIn(0f, 1f)
+    if (x <= BookSpec.SWING_IMPACT) return 0f
+    val u = (x - BookSpec.SWING_IMPACT) / (1f - BookSpec.SWING_IMPACT)
+    return sin(u * Math.PI.toFloat()) * (1f - u)
+}
 fun bookZoomFrac(t: Float): Float {
     val x = ((t - BookSpec.ZOOM_FROM) / (1f - BookSpec.ZOOM_FROM)).coerceIn(0f, 1f)
     return .6f * sstep(x) + .4f * (1f - (1f - x) * (1f - x) * (1f - x))   // lebih cepat di awal, mendarat lembut
@@ -495,15 +518,16 @@ fun BookCoverLayer(vm: AppVM) {
         vm.morphTick
         val r = bookPageRect(vm, size.width, size.height, tt, geo)   // engsel menempel di tepi kiri kertas yang membesar
         val pe = bookPoseFrac(tRaw)
-        val rock = bookRock(tRaw) * (1f - pe)                          // buku bereaksi pada bobot sampul (hilang saat sudah lurus)
+        val rock = bookRock(tRaw)                                      // denyut tekan saat sampul membentur meja (0 sebelum benturan dan saat zoom)
         val pk = if (morphClosing(vm)) 0f else BookFx.peek              // tekanan jari dilanjutkan saat membuka; saat menutup kartu sendiri yang menerima
-        val yaw = (BookSpec.REST_YAW + BookFx.tilt) * (1f - pe) + BookSpec.ROCK_YAW * rock
-        val pitch = BookSpec.REST_PITCH * (1f - pe) - .6f * rock
-        val k = lerp(BookSpec.REST_SCALE + BookSpec.PEEK_SCALE * pk, 1f, pe) + BookSpec.ROCK_SCALE * rock
-        val lensF = (1f + BookSpec.PEEK_LENS * pk) * (1f - pe)         // lensa menutup sampai 0 sebelum zoom: bingkai tetap sejajar
-        val lx = BookSpec.REST_LENS_X * lensF + BookSpec.ROCK_LENS * rock
-        val ly = BookSpec.REST_LENS_Y * lensF + BookSpec.ROCK_LENS * .5f * rock
-        val deg = (BookSpec.COVER_DEG * bookSwing(tRaw)).coerceAtMost(179f)
+        val yaw = (BookSpec.REST_YAW + BookFx.tilt) * (1f - pe)        // tidak ada goyangan putar: bidang halaman (z = 0) selalu persis di kotaknya
+        val pitch = BookSpec.REST_PITCH * (1f - pe)
+        val k = lerp(BookSpec.REST_SCALE + BookSpec.PEEK_SCALE * pk, 1f, pe) - BookSpec.ROCK_SCALE * rock
+        // kamera DIAM selama sampul mengayun (sudut pandang kartu bertahan sampai sampul rebah), baru bergeser ke tengah saat zoom
+        val lensF = bookLens(tRaw) * (1f + BookSpec.PEEK_LENS * pk * (1f - pe))
+        val lx = BookSpec.REST_LENS_X * lensF
+        val ly = BookSpec.REST_LENS_Y * lensF
+        val deg = (BookSpec.COVER_DEG * bookSwing(tRaw)).coerceAtMost(200f)
         // halaman terakhir dibuka: hanya sebelum zoom (setelah itu BookPageLayer yang menggambarnya)
         val pageOn = tt <= .0005f
         val page = if (pageOn) PdfCache.best(d.pdf, BookFx.page)?.let { BookTex.pageTex(it, r.width) } else null
