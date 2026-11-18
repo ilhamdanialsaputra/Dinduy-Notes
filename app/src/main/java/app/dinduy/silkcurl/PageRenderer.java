@@ -4,8 +4,7 @@
  * Original project : https://github.com/karankalsi/PlayLikeCurl
  * Maintained fork  : Arnab11/PlayLikeCurl (GLES2 renderer, production bitmap API v1, release 1.1.4)
  * Local changes    : package declaration (karacken.curl -> app.dinduy.silkcurl), and in PageRenderer.updateMvp the
- * vertical field of view 45f -> 55f (wider frustum so the lifted sheet is not clipped), plus uShade (sheet darkening)
- * in the page fragment shader; the sheet geometry itself lives in PlayLikeCurlGeometry (rigid rotation around the spine).
+ * vertical field of view 45f -> 55f (wider frustum so the lifted sheet is not clipped; curve/geometry untouched).
  *
  * MIT License
  *
@@ -76,13 +75,11 @@ public final class PageRenderer implements GLSurfaceView.Renderer {
                     + "uniform sampler2D uTexture;\n"
                     + "uniform sampler2D uOverlayTexture;\n"
                     + "uniform float uHasOverlay;\n"
-                    + "uniform float uShade;\n"
                     + "varying vec2 vTextureCoordinate;\n"
                     + "void main() {\n"
                     + "  vec4 base = texture2D(uTexture, vTextureCoordinate);\n"
                     + "  vec4 overlay = texture2D(uOverlayTexture, vTextureCoordinate);\n"
-                    + "  vec4 color = mix(base, overlay + base * (1.0 - overlay.a), uHasOverlay);\n"
-                    + "  gl_FragColor = vec4(color.rgb * uShade, color.a);\n"
+                    + "  gl_FragColor = mix(base, overlay + base * (1.0 - overlay.a), uHasOverlay);\n"
                     + "}\n";
 
     private static final String SHADOW_VERTEX_SHADER =
@@ -152,7 +149,6 @@ public final class PageRenderer implements GLSurfaceView.Renderer {
     private int textureUniform;
     private int overlayTextureUniform;
     private int hasOverlayUniform;
-    private int shadeUniform;
     private int shadowProgram;
     private int shadowPositionAttribute;
     private int shadowGradientAttribute;
@@ -352,7 +348,6 @@ public final class PageRenderer implements GLSurfaceView.Renderer {
             overlayTextureUniform =
                     GLES20.glGetUniformLocation(program, "uOverlayTexture");
             hasOverlayUniform = GLES20.glGetUniformLocation(program, "uHasOverlay");
-            shadeUniform = GLES20.glGetUniformLocation(program, "uShade");
             shadowProgram = createProgram(SHADOW_VERTEX_SHADER, SHADOW_FRAGMENT_SHADER);
             shadowPositionAttribute =
                     GLES20.glGetAttribLocation(shadowProgram, "aPosition");
@@ -899,10 +894,6 @@ public final class PageRenderer implements GLSurfaceView.Renderer {
         mesh.uploadPositions();
 
         GLES20.glUniformMatrix4fv(matrixUniform, 1, false, mvpMatrix, 0);
-        // Local change: the raised sheet darkens slightly as it turns away; resting pages are untouched (1.0)
-        GLES20.glUniform1f(
-                shadeUniform,
-                active ? PlayLikeCurlGeometry.sheetShade(mesh.role, state.getCurlPosition()) : 1f);
         drawPageTextures(resource, texture);
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, mesh.positionBufferId);
         GLES20.glEnableVertexAttribArray(positionAttribute);
