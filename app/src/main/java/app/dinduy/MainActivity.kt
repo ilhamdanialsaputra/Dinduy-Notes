@@ -18,6 +18,7 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.PickVisualMediaRequest
@@ -140,6 +141,8 @@ class Nav(private val vm: AppVM) {
             val t = top
             if (t is Scr.Note) {
                 vm.ed?.leave()
+                BookFx.capture(t.id)
+                BookFx.persistPage(vm, t.id)
                 // morph keluar selalu menuju posisi kartu saat ini (bukan posisi saat dibuka),
                 // jadi tetap konsisten walau catatan sudah pindah urutan setelah lama diedit
                 val ex = vm.note(t.id)
@@ -226,12 +229,12 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
             // jam animasi "loncat" dan terasa nyendat. Jadi tunggu sampai ritme frame tenang, baru gerak.
             settleFrames()
             // spring cepat (kaku) dengan sedikit lentur: terasa snappy tapi tetap punya gerak
-            vm.openP.animateTo(1f, spring(.8f, 620f))
+            vm.openP.animateTo(1f, if (vm.morph?.book == true) BookSpec.openSpec else spring(.8f, 620f))
         } else {
             val follow = vm.closing
             val job = if (follow) launch { followCard(vm) } else null
             try {
-                vm.openP.animateTo(0f, if (follow) spring(.9f, 640f) else spring(.95f, 760f))
+                vm.openP.animateTo(0f, if (vm.morph?.book == true) BookSpec.closeSpec else if (follow) spring(.9f, 640f) else spring(.95f, 760f))
             } finally {
                 // finally: kalau animasi tutup dibatalkan di tengah (mis. catatan dibuka lagi), sisa state tidak boleh tertinggal
                 job?.cancel()
@@ -243,6 +246,8 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
     val t0 = vm.openP.value
     if (!on && t0 <= .01f) return
     vm.ghostVer
+    val bookOn = vm.morph?.book == true && vm.openId?.let { vm.note(it) }?.pdf?.isNotEmpty() == true
+    Box(Modifier.fillMaxSize()) {
     Box(
         Modifier.fillMaxSize().graphicsLayer { translationX = -u * size.width * .26f }.pointerInput(Unit) { }
             // catatan masih kosong: seret ke bawah untuk menguncup kembali ke tombol FAB
@@ -298,11 +303,12 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
             // latar di luar kartu meredup selama morph (ikut progres buka/tutup, jadi memudar balik saat ditutup)
             drawRect(Color.Black.copy(alpha = (if (pal.dark) .45f else .32f) * tt))
             clipPath(path) {
-                drawRect(androidx.compose.ui.graphics.lerp(m.color, pal.s, tt))
+                drawRect(if (m.book) Color.Black else androidx.compose.ui.graphics.lerp(m.color, pal.s, tt))
                 this@drawWithContent.drawContent()
             }
         }
     ) {
+        if (bookOn) BookPageLayer(vm)
         Box(
             Modifier.fillMaxSize().graphicsLayer {
                 // isi catatan mulai muncul lebih awal dan bertumpang dengan teks kartu (pudar-silang), bukan menunggu kartu hilang dulu
@@ -311,13 +317,15 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
                 val mm = effMorph(vm)
                 // selama morph, isi dirender sekali ke tekstur lalu hanya ditransformasi (skala / geser / pudar) oleh GPU;
                 // tanpa ini seluruh blok catatan panjang digambar ulang tiap frame. Setelah selesai kembali normal (teks tajam, tanpa buffer ekstra).
-                compositingStrategy = if (tt < .999f) androidx.compose.ui.graphics.CompositingStrategy.Offscreen
+                compositingStrategy = if (tt < .999f && mm?.book != true) androidx.compose.ui.graphics.CompositingStrategy.Offscreen
                     else androidx.compose.ui.graphics.CompositingStrategy.Auto
                 val x = ((vm.openP.value - .08f) / .4f).coerceIn(0f, 1f)
                 val a = x * x * (3f - 2f * x)
                 // morph dari kartu: NoteScreen memudarkan latar + isi sendiri (noteFade) supaya sampulnya tetap buram penuh
                 alpha = if (mm != null && mm.card) 1f else a
-                if (mm != null && mm.card) {
+                if (mm != null && mm.book) {
+                    alpha = 1f   // buku PDF: tanpa skala; halaman digambar BookPageLayer, layar baca muncul di ujung (PdfScreen)
+                } else if (mm != null && mm.card) {
                     // kartu (1 atau 2 kolom): isi editor ikut mengecil ke dalam kartu lalu tumbuh bersama wadah (container transform);
                     // di 1 kolom kartunya lebar, jadi skalanya hanya sedikit di bawah 1 dan yang terasa adalah wadah yang memanjang
                     val l = lerp(mm.l, 0f, tt)
@@ -406,6 +414,8 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
         }
         if (u > .001f) Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = (if (pal.dark) .16f else .05f) * u)))
     }
+    if (bookOn) BookCoverLayer(vm)
+    }
 }
 
 /**
@@ -491,7 +501,7 @@ fun effMorph(vm: AppVM): Morph? {
     val tt = vm.openP.value.coerceIn(0f, 1f)
     return Morph(
         live.l + e[0] * tt, live.t + e[1] * tt, live.r + e[2] * tt, live.b + e[3] * tt,
-        live.rad, live.color, live.r4, live.ghost, card = live.card, up = live.up
+        live.rad, live.color, live.r4, live.ghost, card = live.card, up = live.up, book = live.book
     )
 }
 
@@ -691,6 +701,20 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     isNote && reading -> vm.ed?.let { if (it.selOn) it.clearSel() else it.exitReading() }
                     isNote && imgSel -> vm.ed?.closeImg()
                     else -> nav.pop()
+                }
+            }
+
+            // PDF yang dibuka dari buku di beranda: back gesture menarik progres animasi (kebalikan animasi buka); dilepas = menutup, dibatalkan = kembali terbuka
+            val bookBack = isNote && vm.morph?.book == true && nav.noteId?.let { vm.note(it) }?.pdf?.isNotEmpty() == true
+            PredictiveBackHandler(enabled = bookBack) { prog ->
+                val nid = nav.noteId
+                try {
+                    if (nid != null) BookFx.capture(nid)
+                    prog.collect { e -> vm.openP.snapTo(1f - BookSpec.BACK_DRAG * e.progress) }
+                    nav.pop()
+                } catch (c: kotlinx.coroutines.CancellationException) {
+                    scope.launch { vm.openP.animateTo(1f, BookSpec.backCancelSpec) }
+                    throw c
                 }
             }
 
@@ -907,6 +931,12 @@ class MainActivity : ComponentActivity(), Actions {
             when {
                 img == null -> vm.show(importFailMsg("Couldn't load the image"))
                 vm.note(id) == null -> vm.show("Note not found, so the cover wasn't set")
+                vm.note(id)?.pdf?.isNotEmpty() == true -> {
+                    // PDF: sampul buku dipangkas tengah ke rasio buku (tanpa halaman pangkas)
+                    val ok = vm.setBookCover(id, img.id)
+                    vm.show(if (ok) "Cover changed" else "Couldn't set the cover")
+                    ensureNote(id)
+                }
                 else -> {
                     vm.setCover(id, img.id)
                     ensureNote(id)
