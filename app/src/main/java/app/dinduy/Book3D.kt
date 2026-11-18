@@ -350,16 +350,16 @@ object Book3D {
             }
             // lekuk di dekat punggung (selalu ada saat terbuka)
             sc(-hw, -hh, 0f, W * .07f, 0f, 0f, 0f, H, 0f)
-            gradQuad(-hw, -hw + W * .07f, blk(.22f), blk(.08f), 0, .5f)
+            gradQuad(-hw, -hw + W * .07f, blk(.12f), blk(.04f), 0, .5f)
             // bayangan sampul yang jatuh ke halaman / ke benda di sebelah kirinya
-            val a = (.32f * max(0f, st) + (if (deg > 120f) .10f * ((deg - 120f) / 56f).coerceIn(0f, 1f) else 0f)).coerceAtMost(.42f)
+            val a = (.16f * max(0f, st) + (if (deg > 120f) .04f * ((deg - 120f) / 56f).coerceIn(0f, 1f) else 0f)).coerceAtMost(.22f)
             val xf = -hw + W * ct
             val xe = if (ct < 0f) xf - W * .06f else min(hw, xf + W * .30f * max(0f, st))
             val span = xe + hw
             if (a > .004f && kotlin.math.abs(span) > 1f) {
                 sc(-hw, -hh, 0f, span, 0f, 0f, 0f, H, 0f)
                 val mid = (kotlin.math.abs(xf + hw) / kotlin.math.abs(span)).coerceIn(.02f, .98f)
-                gradQuad(-hw, xe, blk(a), blk(a * .55f), 0, mid)
+                gradQuad(-hw, xe, blk(a), blk(a * .35f), 0, mid)
             }
         }
 
