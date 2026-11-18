@@ -409,6 +409,12 @@ object Book3D {
                 line(-hw, -hh, tc * .16f, -hw, hh, tc * .16f, 0x2EFFFFFF, 1f)
                 line(-hw, -hh, -pg, -hw, hh, -pg, GROOVE, 1.3f)
                 line(-hw, -hh, -pg - tc * .16f, -hw, hh, -pg - tc * .16f, 0x2EFFFFFF, 1f)
+                // gelang punggung: dua pita timbul dekat atas dan bawah (ciri buku bersampul keras), alur gelap + sorot tipis. Tanpa bayangan
+                val b1 = -hh + H * .07f; val b2 = hh - H * .07f; val bt = H * .006f
+                line(-hw, b1, tc, -hw, b1, -pg - tc, 0x40000000, 1.2f)
+                line(-hw, b1 + bt, tc, -hw, b1 + bt, -pg - tc, 0x26FFFFFF, 1f)
+                line(-hw, b2, tc, -hw, b2, -pg - tc, 0x40000000, 1.2f)
+                line(-hw, b2 - bt, tc, -hw, b2 - bt, -pg - tc, 0x26FFFFFF, 1f)
             }
         }
         // atas, bawah (sepanjang x) dan sisi kanan (sepanjang y): papan belakang + halaman. Papan depan = tepi sampul yang berputar.
@@ -428,8 +434,8 @@ object Book3D {
                     } else {
                         // blok halaman: kertas yang makin terang ke arah depan, garis halaman halus berselang-seling
                         solidGrad(BookTex.mul(PAPER, .90f), PAPER, side != 2, s)
-                        for (i in 1..8) {
-                            val f = i / 9f
+                        for (i in 1..11) {
+                            val f = i / 12f
                             val lc = if (i % 2 == 0) PAGE_LINE_A else PAGE_LINE_B
                             when (side) {
                                 0 -> line(-hw, -hh, z0 + dz * f, hw, -hh, z0 + dz * f, lc, 1f)
@@ -465,6 +471,10 @@ object Book3D {
                 roundedPath(W, H)
                 val tex = BookTex.inner()
                 textured(tex, 0f, 0f, tex.width.toFloat(), tex.height.toFloat(), s, false)
+                // kertas pelapis ikut bernada warna sampul (tipis, tonal): sampul dan sisi dalamnya terasa satu bahan, bukan dua benda terpisah
+                paint.reset(); paint.isAntiAlias = true
+                paint.color = (BookTex.mul(edge, 1.7f) and 0xFFFFFF) or (0x38 shl 24)
+                cv.drawPath(path, paint)
             }
         }
         // tepi atas, bawah, dan tepi bebas (tebal papan terlihat): gradasi tonal dari sisi dalam (gelap) ke sisi luar (terang)
