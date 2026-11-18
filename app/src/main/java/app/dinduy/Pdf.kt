@@ -1338,7 +1338,11 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
                     val x = ((vm.openP.value - .14f) / .12f).coerceIn(0f, 1f)
                     alpha = x * x * (3f - 2f * x)
                 }
-            }.background(Color.Black)
+            }.then(
+                // buku: hitam dibawa seluruhnya oleh bookDim di NoteLayer (menggelap bertahap sejak sampul terbuka, hitam penuh di akhir), jadi layar baca
+                // tidak menambah pudar hitam kedua yang bertumpuk. Selain buku (tanpa animasi buku) latar hitam tetap di sini
+                if (vm.morph?.book == true) Modifier else Modifier.background(Color.Black)
+            )
         ) {
             when {
                 doc.failed -> {
@@ -2143,7 +2147,7 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
         val sp = spRaw.coerceIn(0f, 1f)
         val white = Color.White
         AnimatedVisibility(
-            bars || findOn, Modifier.align(Alignment.TopCenter),
+            bars || findOn, Modifier.align(Alignment.TopCenter).graphicsLayer { alpha = bookUiAlpha(vm) },   // pudar masuk / keluar saat buka-tutup buku
             enter = fadeIn(spring(stiffness = 600f)) + androidx.compose.animation.slideInVertically(spring(.72f, 520f)) { -it / 3 },
             exit = fadeOut(spring(stiffness = 800f)) + androidx.compose.animation.slideOutVertically(spring(1f, 800f)) { -it / 3 }
         ) {
@@ -2208,7 +2212,7 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
         CapsuleHost(
             cap,
             kick = when (cap) { Cap.PAGE -> pageOpen; Cap.INK -> ui.inkOn to ui.tool; else -> null },
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = maxOf(sab, imeDp) + 14.dp)
+            modifier = Modifier.align(Alignment.BottomCenter).graphicsLayer { alpha = bookUiAlpha(vm) }.padding(bottom = maxOf(sab, imeDp) + 14.dp)
         ) { c ->
             when (c) {
                 Cap.PAGE -> PageCapsule(page, count, pageOpen, { pageOpen = it }, capW) { i ->
