@@ -116,13 +116,41 @@ fun bookCoverFrac(t: Float): Float = sstep(t / BookSpec.COVER_END)
 /** Sudut sampul (0..1 dari COVER_DEG) dengan bobot: mulai berat, mempercepat, lalu mendarat dengan pantulan kecil. Dipakai buka DAN tutup (progres sama). */
 fun bookSwing(t: Float): Float {
     val x = (t / BookSpec.COVER_END).coerceIn(0f, 1f)
-    val e = x * x * x * (x * (x * 6f - 15f) + 10f)                       // smootherstep: awal berat, akhir lembut
+    val so = x * x * x * (x * (x * 6f - 15f) + 10f)                      // smootherstep: awal berat, akhir lembut
+    val eo = 1f - (1f - x) * (1f - x) * (1f - x)                          // ease-out cubic: langsung bergerak (responsif)
+    val e = .6f * so + .4f * eo
     val land = if (x > .72f) kotlin.math.sin(((x - .72f) / .28f) * Math.PI.toFloat()) else 0f
     return (e + BookSpec.SWING_BOUNCE * land).coerceAtMost(1.0125f)  // lewat sedikit dari rebah lalu kembali
 }
 /** Goyangan buku mengimbangi ayunan sampul: 0 di awal / akhir, puncak di tengah. */
 fun bookRock(t: Float): Float = kotlin.math.sin(bookCoverFrac(t) * Math.PI.toFloat())
-fun bookZoomFrac(t: Float): Float = sstep((t - BookSpec.ZOOM_FROM) / (1f - BookSpec.ZOOM_FROM))
+fun bookZoomFrac(t: Float): Float {
+    val x = ((t - BookSpec.ZOOM_FROM) / (1f - BookSpec.ZOOM_FROM)).coerceIn(0f, 1f)
+    return .6f * sstep(x) + .4f * (1f - (1f - x) * (1f - x) * (1f - x))   // lebih cepat di awal, mendarat lembut
+}
+/** Latar hitam + layar baca meluas ke seluruh layar hanya di ujung zoom (0 = bingkai = kertas, 1 = layar penuh). */
+fun bookReveal(tt: Float): Float = sstep((tt - .78f) / .22f)
+
+/** Ukuran layar / inset yang dibutuhkan untuk menghitung posisi akhir halaman. */
+class BookGeo(val topPad: Float, val sab: Float, val dens: Float)
+
+@Composable
+fun rememberBookGeo(): BookGeo {
+    val dens = LocalDensity.current
+    val topPad = with(dens) { (satDp() + 64.dp).toPx() }
+    val sab = with(dens) { sabDp().toPx() }
+    return BookGeo(topPad, sab, dens.density)
+}
+
+/**
+ * Kotak KERTAS pada progres zoom tt. Bingkai (clip wadah), kertas, dan engsel sampul 3D semuanya memakai kotak yang SAMA ini,
+ * jadi tepinya selalu sejajar: yang terlihat adalah kertas yang membesar, bukan bingkai yang membesar lalu kertas menyusul.
+ */
+fun bookPageRect(vm: AppVM, w: Float, h: Float, tt: Float, g: BookGeo): Rect {
+    val m = effMorph(vm) ?: return Rect(w * .12f, h * .4f, w * .88f, h * .6f)
+    val fin = BookFx.live ?: bookFinalRect(w, h, g.topPad, g.sab, g.dens, PdfBus.mode.coerceAtLeast(0), BookFx.ratio)
+    return Rect(lerp(m.l, fin.left, tt), lerp(m.t, fin.top, tt), lerp(m.r, fin.right, tt), lerp(m.b, fin.bottom, tt))
+}
 fun bookReaderAlpha(t: Float): Float = sstep((bookZoomFrac(t) - BookSpec.READER_FROM) / (1f - BookSpec.READER_FROM))
 
 private val BOOK_SHAPE = RoundedCornerShape(topStart = 3.dp, bottomStart = 3.dp, topEnd = 8.dp, bottomEnd = 8.dp)
@@ -371,43 +399,28 @@ fun BookCard(
 fun BookPageLayer(vm: AppVM) {
     val id = vm.openId ?: return
     val d = vm.note(id) ?: return
-    val dens = LocalDensity.current.density
-    val topPad = with(LocalDensity.current) { (satDp() + 64.dp).toPx() }
-    val sab = with(LocalDensity.current) { sabDp().toPx() }
+    val geo = rememberBookGeo()
     remember(id) { if (BookFx.id != id) BookFx.begin(id, d.pg, 1.4142f, false); 0 }
     Canvas(Modifier.fillMaxSize()) {
         val tRaw = vm.openP.value.coerceIn(0f, 1f)
         val tt = bookZoomFrac(tRaw)
         vm.morphTick
         if (tt <= .0005f) return@Canvas   // fase sampul terbuka: halaman digambar mesin 3D di BookCoverLayer (ikut miring bersama buku)
-        val W = size.width
-        val H = size.height
-        val c = bookRect(vm, W, H, tt)
+        val c = bookPageRect(vm, size.width, size.height, tt, geo)   // kotak kertas = kotak bingkai (lihat NoteLayer)
         val bmp = PdfCache.best(d.pdf, BookFx.page)?.asImageBitmap()
         if (bmp == null) { drawRect(Color.White, Offset(c.left, c.top), Size(c.width, c.height)); return@Canvas }   // tak pernah hitam
-        val fin = BookFx.live ?: bookFinalRect(W, H, topPad, sab, dens, PdfBus.mode.coerceAtLeast(0), BookFx.ratio)
-        val q = sstep(tt / BookSpec.PAGE_DONE)
-        val dl = lerp(c.left, fin.left, q); val dt = lerp(c.top, fin.top, q)
-        val dr = lerp(c.right, fin.right, q); val db = lerp(c.bottom, fin.bottom, q)
         val bw = bmp.width.toFloat()
         val bh = bmp.height.toFloat()
         var cw = bw
         var ch = cw / BookSpec.ASPECT
         if (ch > bh) { ch = bh; cw = ch * BookSpec.ASPECT }
-        val sx = lerp((bw - cw) / 2f, 0f, q); val sy = lerp(0f, 0f, q)
-        val sw = lerp(cw, bw, q); val sh = lerp(ch, bh, q)
+        // potongan rasio sampul -> halaman utuh dengan progres YANG SAMA dengan kotaknya (tidak lebih cepat), jadi isi tidak bergeser terhadap tepi
+        val sx = lerp((bw - cw) / 2f, 0f, tt)
+        val sw = lerp(cw, bw, tt); val sh = lerp(ch, bh, tt)
         drawImage(
-            bmp, IntOffset(sx.roundToInt(), sy.roundToInt()), IntSize(sw.roundToInt().coerceAtLeast(1), sh.roundToInt().coerceAtLeast(1)),
-            IntOffset(dl.roundToInt(), dt.roundToInt()), IntSize((dr - dl).roundToInt().coerceAtLeast(1), (db - dt).roundToInt().coerceAtLeast(1)),
+            bmp, IntOffset(sx.roundToInt(), 0), IntSize(sw.roundToInt().coerceAtLeast(1), sh.roundToInt().coerceAtLeast(1)),
+            IntOffset(c.left.roundToInt(), c.top.roundToInt()), IntSize(c.width.roundToInt().coerceAtLeast(1), c.height.roundToInt().coerceAtLeast(1)),
             filterQuality = FilterQuality.Medium, colorFilter = if (BookFx.dark) INVERT else null
-        )
-        // lekuk di dekat punggung: sama persis dengan yang digambar mesin 3D (Book3D), jadi tidak ada loncatan saat serah-terima
-        val sw2 = (dr - dl) * .07f
-        val fade = 1f - tt
-        if (fade > .01f) drawRect(
-            Brush.horizontalGradient(
-                0f to Color.Black.copy(.12f * fade), .5f to Color.Black.copy(.04f * fade), 1f to Color.Transparent, startX = dl, endX = dl + sw2
-            ), Offset(dl, dt), Size(sw2, db - dt)
         )
     }
 }
@@ -439,11 +452,12 @@ fun BookPlaceholder(note: Note) {
 fun BookCoverLayer(vm: AppVM) {
     val id = vm.openId ?: return
     val d = vm.note(id) ?: return
+    val geo = rememberBookGeo()
     Canvas(Modifier.fillMaxSize()) {
         val tRaw = vm.openP.value.coerceIn(0f, 1f)
         val tt = bookZoomFrac(tRaw)
         vm.morphTick
-        val r = bookRect(vm, size.width, size.height, tt)
+        val r = bookPageRect(vm, size.width, size.height, tt, geo)   // engsel menempel di tepi kiri kertas yang membesar
         val pe = bookPoseFrac(tRaw)
         val rock = bookRock(tRaw) * (1f - pe)                          // buku bergoyang mengimbangi bobot sampul (hilang saat sudah lurus)
         val yaw = (BookSpec.REST_YAW + BookFx.tilt) * (1f - pe) + BookSpec.ROCK_YAW * rock       // melanjutkan kemiringan dari kartu tanpa loncat
@@ -454,11 +468,17 @@ fun BookCoverLayer(vm: AppVM) {
         // halaman terakhir dibuka: hanya sebelum zoom (setelah itu BookPageLayer yang menggambarnya)
         val pageOn = tt <= .0005f
         val page = if (pageOn) PdfCache.best(d.pdf, BookFx.page)?.let { BookTex.pageTex(it, r.width) } else null
+        // sampul memudar keluar selama zoom (mode halaman: engsel tidak di tepi layar, sampul tidak boleh tertinggal)
+        val fadeA = 1f - sstep((tt - .35f) / .5f)
+        if (fadeA <= .01f) return@Canvas
         drawIntoCanvas {
+            val cnv = it.nativeCanvas
+            val sv = if (fadeA < .999f) cnv.saveLayerAlpha(0f, 0f, size.width, size.height, (fadeA * 255f).roundToInt()) else -1
             Book3D.draw(
-                it.nativeCanvas, r.left, r.top, r.right, r.bottom,
+                cnv, r.left, r.top, r.right, r.bottom,
                 yaw, pitch, k, deg, ct, page, pageOn, BookFx.dark
             )
+            if (sv >= 0) cnv.restoreToCount(sv)
         }
     }
 }
