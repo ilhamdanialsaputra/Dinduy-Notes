@@ -229,12 +229,12 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
             // jam animasi "loncat" dan terasa nyendat. Jadi tunggu sampai ritme frame tenang, baru gerak.
             settleFrames()
             // spring cepat (kaku) dengan sedikit lentur: terasa snappy tapi tetap punya gerak
-            vm.openP.animateTo(1f, if (vm.morph?.book == true) BookSpec.openSpec else spring(.8f, 620f))
+            vm.openP.animateTo(1f, if (vm.morph?.book == true) BookSpec.openFrom(vm.openP.value) else spring(.8f, 620f))
         } else {
             val follow = vm.closing
             val job = if (follow) launch { followCard(vm) } else null
             try {
-                vm.openP.animateTo(0f, if (vm.morph?.book == true) BookSpec.closeSpec else if (follow) spring(.9f, 640f) else spring(.95f, 760f))
+                vm.openP.animateTo(0f, if (vm.morph?.book == true) BookSpec.closeFrom(vm.openP.value) else if (follow) spring(.9f, 640f) else spring(.95f, 760f))
             } finally {
                 // finally: kalau animasi tutup dibatalkan di tengah (mis. catatan dibuka lagi), sisa state tidak boleh tertinggal
                 job?.cancel()
