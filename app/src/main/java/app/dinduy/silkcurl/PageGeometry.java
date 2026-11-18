@@ -4,7 +4,9 @@
  * Original project : https://github.com/karankalsi/PlayLikeCurl
  * Maintained fork  : Arnab11/PlayLikeCurl (GLES2 renderer, production bitmap API v1, release 1.1.4)
  * Local changes    : package declaration (karacken.curl -> app.dinduy.silkcurl). Logic edits are marked "Local change"
- *                    in PageRenderer.updateMvp (fov 45f -> 55f) and PageSurfaceView.completeSettlement only.
+ *                    in PageRenderer (updateMvp fov 45f -> 55f, uShade), PageSurfaceView (gesture / settlement lifecycle),
+ *                    PlayLikeCurlModel, Settlement, SettlementInterpolator, PlayLikeCurlGeometry (rigid hinge rotation),
+ *                    PageGeometry (per-column scratch arrays), FoldShadowModel (variable width).
  *
  * MIT License
  *
@@ -37,6 +39,9 @@ final class PageGeometry {
     private final float[] positions;
     private final float[] textureCoordinates;
     private final short[] indices;
+    /** Local change: per-column x / z of the rotated sheet, reused every frame (no allocation). */
+    private final float[] columnX = new float[PlayLikeCurlModel.GRID + 1];
+    private final float[] columnZ = new float[PlayLikeCurlModel.GRID + 1];
 
     PageGeometry(
             PageRole role,
@@ -69,6 +74,14 @@ final class PageGeometry {
 
     short[] getIndices() {
         return indices;
+    }
+
+    float[] getColumnX() {
+        return columnX;
+    }
+
+    float[] getColumnZ() {
+        return columnZ;
     }
 
     float positionY(int column, int row) {
