@@ -1319,8 +1319,8 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
             WindowCompat.getInsetsController(w, view).isAppearanceLightStatusBars = !appPal.dark
         }
     }
-    if (PdfBus.mode < 0) PdfBus.mode = ctx.getSharedPreferences("dinduy", 0).getInt("pdfmode", 0)
-    if (PdfBus.curl < 0) PdfBus.curl = ctx.getSharedPreferences("dinduy", 0).getInt("pdfcurl", 0)
+    if (PdfBus.mode < 0) PdfBus.mode = ctx.getSharedPreferences("dinduy", 0).getInt("pdfmode", 1)
+    if (PdfBus.curl < 0) PdfBus.curl = ctx.getSharedPreferences("dinduy", 0).getInt("pdfcurl", 1)
     if (PdfBus.curlStyle < 0) PdfBus.curlStyle = ctx.getSharedPreferences("dinduy", 0).getInt("pdfcurlstyle", 0)
 
     androidx.compose.runtime.CompositionLocalProvider(
@@ -1603,7 +1603,8 @@ private fun PdfSilkCurl(
     }
 
     Box(
-        Modifier.fillMaxSize().background(Color.Black)
+        Modifier.fillMaxSize()
+            .then(if (vm.morph?.book == true) Modifier else Modifier.background(Color.Black))   // buku: hitam dibawa bookDim, jangan menumpuk
             .pinch(
                 onPinch = { z, p, c -> cZoom((cz * z).coerceIn(1f, 4f), c, p) },
                 onEnd = { if (cz < 1.05f) { cz = 1f; cpan = Offset.Zero } }
@@ -1934,7 +1935,13 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     items(count, key = { it }) { i ->
-                        PdfPage(ui, i, contentW, 1f, Modifier.width(contentW).height(contentW * ui.doc.ratioOf(i)))
+                        // halaman pertama (startPage) ikut animasi buku lewat BookPageLayer; halaman lain naik pelan + pudar masuk saat buka, turun + pudar saat tutup
+                        val tail = if (i == startPage) Modifier else Modifier.graphicsLayer {
+                            val f = bookTailFrac(vm)
+                            alpha = f
+                            translationY = (1f - f) * BookSpec.TAIL_RISE_DP * density
+                        }
+                        PdfPage(ui, i, contentW, 1f, tail.width(contentW).height(contentW * ui.doc.ratioOf(i)))
                     }
                 }
                 PdfFastScrollUi(ui, fs, list, count, topPad, botPad)
@@ -2802,7 +2809,7 @@ fun PdfMenuPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
     val pinned = d?.p == true
     val archived = d?.a == true
     var renaming by remember { mutableStateOf(false) }
-    val mode = if (PdfBus.mode < 0) ctx.getSharedPreferences("dinduy", 0).getInt("pdfmode", 0) else PdfBus.mode
+    val mode = if (PdfBus.mode < 0) ctx.getSharedPreferences("dinduy", 0).getInt("pdfmode", 1) else PdfBus.mode
     val fname = (d?.t?.ifBlank { null } ?: "Document").replace(Regex("[\\\\/:*?\"<>|]"), "_") + ".pdf"
     val file = d?.let { PdfFiles.file(ctx, it.pdf) }
 
@@ -2840,7 +2847,7 @@ fun PdfMenuPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
                     }
                 }
             }
-            val curlOn = (if (PdfBus.curl < 0) ctx.getSharedPreferences("dinduy", 0).getInt("pdfcurl", 0) else PdfBus.curl) == 1
+            val curlOn = (if (PdfBus.curl < 0) ctx.getSharedPreferences("dinduy", 0).getInt("pdfcurl", 1) else PdfBus.curl) == 1
             val curlStyle = if (PdfBus.curlStyle < 0) ctx.getSharedPreferences("dinduy", 0).getInt("pdfcurlstyle", 0) else PdfBus.curlStyle
             AnimatedVisibility(
                 visible = mode == 1,
