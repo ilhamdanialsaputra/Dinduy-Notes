@@ -1822,9 +1822,17 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                         }
                         gridItems(res, key = { "s" + it.id }) { d ->
                             val ri = res.indexOfFirst { it.id == d.id }.coerceAtLeast(0)
-                            NoteCard(
-                                d, pos[d.id] ?: ri, "f", false,
-                                flowItemG().makeRoom(vm, d.id, ri, { res.indexOfFirst { it.id == vm.openId } }, hPx, dens.density).then(stackMove(d.id, false)),
+                            val rm = flowItemG().makeRoom(vm, d.id, ri, { res.indexOfFirst { it.id == vm.openId } }, hPx, dens.density).then(stackMove(d.id, false))
+                            // PDF memakai kartu buku 3D yang sama dengan beranda (bukan kartu catatan biasa)
+                            if (d.pdf.isNotEmpty()) {
+                                BookCard(
+                                    d, false, cols, rm, needPrep = true,
+                                    onLong = null, track = null
+                                ) { m ->
+                                    focusMgr.clearFocus(); vm.cardMorph[d.id] = m; nav.openNote(d.id, m)
+                                }
+                            } else NoteCard(
+                                d, pos[d.id] ?: ri, "f", false, rm,
                                 cols = cols
                             ) { m ->
                                 focusMgr.clearFocus(); vm.cardMorph[d.id] = m; nav.openNote(d.id, m)
