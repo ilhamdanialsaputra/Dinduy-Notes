@@ -4,7 +4,7 @@
  * Original project : https://github.com/karankalsi/PlayLikeCurl
  * Maintained fork  : Arnab11/PlayLikeCurl (GLES2 renderer, production bitmap API v1, release 1.1.4)
  * Local changes    : package declaration (karacken.curl -> app.dinduy.silkcurl). Logic edits are marked "Local change"
- *                    in PageRenderer.updateMvp (fov 45f -> 55f) and PageSurfaceView.completeSettlement only.
+ *                    in PageRenderer.updateMvp (fov 45f -> 55f), uShade, PlayLikeCurlGeometry (rigid hinge rotation), FoldShadowModel (variable width) and PageSurfaceView.completeSettlement only.
  *
  * MIT License
  *
@@ -42,7 +42,10 @@ final class FoldShadowModel {
 
     static State resolve(PageRole role, float curlPosition, boolean mirrored) {
         float progress = progress(role, curlPosition);
-        float opacity = MAX_OPACITY * (float) Math.sin(Math.PI * progress);
+        float lift = (float) Math.sin(Math.PI * progress);
+        float opacity = MAX_OPACITY * lift;
+        // Local change: the shadow widens while the sheet is high above the page and narrows as it lands / leaves
+        float width = WIDTH * (0.6f + 1.2f * lift);
         float edge = PlayLikeCurlGeometry.foldEdgeX(role, curlPosition);
         float edgeDepth = PlayLikeCurlGeometry.foldEdgeDepth(role, curlPosition);
         if (mirrored) edge = 1f - edge;
@@ -51,8 +54,8 @@ final class FoldShadowModel {
                 edgeDepth,
                 SHADOW_DEPTH);
         return mirrored
-                ? new State(edge - WIDTH, edge, edge, opacity, false)
-                : new State(edge, edge + WIDTH, edge, opacity, true);
+                ? new State(edge - width, edge, edge, opacity, false)
+                : new State(edge, edge + width, edge, opacity, true);
     }
 
     private static float progress(PageRole role, float curlPosition) {
