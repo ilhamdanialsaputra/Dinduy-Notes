@@ -192,6 +192,43 @@ fun bookZoomFrac(t: Float): Float {
 fun bookReveal(t: Float): Float = sstep((t - .80f) / .14f)
 fun bookReaderAlpha(t: Float): Float = sstep((t - .84f) / .14f)   // kertas sudah ~98% di tempatnya; isi layar baca menyatu dengan halaman yang sama
 
+/** Ukuran layar / inset yang dibutuhkan untuk menghitung posisi akhir halaman. */
+class BookGeo(val topPad: Float, val sab: Float, val dens: Float)
+
+@Composable
+fun rememberBookGeo(): BookGeo {
+    val dens = LocalDensity.current
+    val topPad = with(dens) { (satDp() + 64.dp).toPx() }
+    val sab = with(dens) { sabDp().toPx() }
+    return BookGeo(topPad, sab, dens.density)
+}
+
+/**
+ * Kotak KERTAS pada progres zoom tt. Bingkai (clip wadah), kertas, dan engsel sampul 3D semuanya memakai kotak yang SAMA ini,
+ * jadi tepinya selalu sejajar: yang terlihat adalah kertas yang membesar, bukan bingkai yang membesar lalu kertas menyusul.
+ */
+fun bookPageRect(vm: AppVM, w: Float, h: Float, tt: Float, g: BookGeo): Rect {
+    val m = effMorph(vm) ?: return Rect(w * .12f, h * .4f, w * .88f, h * .6f)
+    val fin = BookFx.live ?: bookFinalRect(w, h, g.topPad, g.sab, g.dens, PdfBus.mode.coerceAtLeast(0), BookFx.ratio)
+    val dx = bookSlide(m, w, g.dens, vm.openP.value.coerceIn(0f, 1f))
+    return Rect(lerp(m.l + dx, fin.left, tt), lerp(m.t, fin.top, tt), lerp(m.r + dx, fin.right, tt), lerp(m.b, fin.bottom, tt))
+}
+
+/**
+ * Mode 1 kolom: buku di kartu duduk di tengah dengan margin kiri-kanan lebar, tapi sampul yang rebah menjulur selebar buku ke kiri dan akan terpotong tepi layar.
+ * Jadi saat sampul terbuka, buku (halaman + sampul rebah) bergeser ke kanan sampai SEMUA yang terbuka berada di dalam layar, seperti membuka buku di tengah meja.
+ * Geser hanya sebesar yang diperlukan (maks SLIDE_1COL x lebar buku, dan tidak melewati tepi kanan layar), mengikuti ayunan sampul (satu progres: menutup = kebalikan persis),
+ * lalu lenyap sendiri karena kertas bergerak ke posisi layar baca. 2 kolom: tidak bergeser (kolom di sebelahnya tidak boleh terdorong).
+ */
+fun bookSlide(m: Morph, w: Float, dens: Float, raw: Float): Float {
+    if (BookFx.cols != 1) return 0f
+    val bw = m.r - m.l
+    if (bw < 2f) return 0f
+    val need = bw * .98f + 12f * dens - m.l
+    val room = (w - 12f * dens - m.r).coerceAtLeast(0f)
+    return need.coerceIn(0f, min(bw * BookSpec.SLIDE_1COL, room)) * bookCoverFrac(raw)
+}
+
 private val BOOK_SHAPE = RoundedCornerShape(topStart = 3.dp, bottomStart = 3.dp, topEnd = 8.dp, bottomEnd = 8.dp)
 
 /** Keadaan buku yang sedang dibuka (hanya satu catatan terbuka sekaligus). */
