@@ -81,8 +81,8 @@ import kotlin.math.roundToInt
 
 /** Semua angka animasi buku ada di sini. */
 object BookSpec {
-    const val OPEN_MS = 780               // durasi buka total (ms) dari tertutup. Koreografi BERTUMPANG TINDIH: sampul mengayun (0..COVER_END), zoom mulai di tengah ayunan (ZOOM_FROM), kamera mendekat setelah sampul mendarat (DOLLY_FROM)
-    const val CLOSE_MS = 620              // menutup sedikit lebih cepat daripada membuka (keluar = cepat, masuk = ada waktu menikmati)
+    const val OPEN_MS = 840               // durasi buka total (ms) dari tertutup. Koreografi BERTUMPANG TINDIH: sampul mengayun (0..COVER_END), zoom mulai di tengah ayunan (ZOOM_FROM), kamera mendekat setelah sampul mendarat (DOLLY_FROM)
+    const val CLOSE_MS = 660              // menutup sedikit lebih cepat daripada membuka (keluar = cepat, masuk = ada waktu menikmati)
     // Sudut rebah sampul = 180° + asin(PAGES + BOARD) ≈ 191.7°. Sampul TIDAK melayang di bidang halaman (dulu 176°): ia turun mengikuti
     // ketebalan buku sampai ujung bebasnya menyentuh bidang papan belakang (bidang "meja"). Karena itu sampul yang terbuka miring
     // landai menjauh dari kamera, perspektifnya sama dengan buku tertutup, dan ketebalan blok halaman tetap terbaca.
@@ -116,11 +116,13 @@ object BookSpec {
     const val PAGE_DONE = .8f             // dalam fase zoom: halaman isi sudah di posisi akhir layar baca
     const val READER_FROM = .85f          // dalam fase zoom: layar baca (bilah, halaman lain) mulai muncul
     const val DIM_EARLY = .68f            // seberapa gelap seluruh layar di luar buku (beranda di balik sampul) pada DIM_FADE_FROM. Menghitam BERTAHAP sejak sampul mulai terbuka, jadi hitam layar baca nanti hanya menyelesaikan sisa (.32), bukan muncul tiba-tiba dari terang
-    const val DIM_FADE_FROM = .76f        // progres saat kertas sudah ~96% layar penuh: dari sini hitam melebur ke penuh. Jangan dimajukan jauh: hitam tidak boleh bentrok dengan sampul yang masih terlihat di samping kertas
-    const val DIM_FADE_TO = .97f          // hitam penuh tercapai di sini (jendela peleburan ~210 ms, dulu ~110 ms). Hitam dibawa SEPENUHNYA oleh bookDim (PdfScreen tidak lagi punya latar hitam sendiri saat animasi buku), jadi tidak ada dua pudar yang menumpuk
-    const val READER_ALPHA_FROM = .82f    // wadah layar baca (halaman, bukan latar hitam) mulai tampil. Latar hitam TIDAK lagi di PdfScreen untuk buku: seluruhnya dibawa bookDim, jadi tidak ada dua pudar hitam bertumpuk
-    const val READER_ALPHA_TO = .90f      // wadah sudah penuh; sesudah ini yang tersisa hanya pudar komponen (UI_ALPHA)
-    const val UI_ALPHA_FROM = .78f        // bilah atas (panah back, judul, cari, titik tiga) dan kapsul halaman mulai pudar masuk, selesai di progres 1 (~170 ms buka, ~135 ms tutup). Dikalikan alpha wadah, jadi terlihat mulai ~.82
+    const val DIM_FADE_FROM = .75f        // progres saat kertas sudah ~95% layar penuh: dari sini hitam melebur ke penuh. Jangan dimajukan jauh: hitam tidak boleh bentrok dengan sampul yang masih terlihat di samping kertas
+    const val DIM_FADE_TO = .90f          // hitam penuh tercapai di sini, SEBELUM komponen layar baca (UI_ALPHA_FROM) mulai pudar masuk. Hitam dibawa SEPENUHNYA oleh bookDim (PdfScreen tidak punya latar hitam sendiri saat animasi buku)
+    const val READER_ALPHA_FROM = .78f    // wadah layar baca (halaman, bukan latar hitam) mulai tampil
+    const val READER_ALPHA_TO = .86f      // wadah sudah penuh; sesudah ini yang tersisa hanya pudar komponen (UI_ALPHA) dan halaman lanjutan (TAIL_ALPHA)
+    const val UI_ALPHA_FROM = .86f        // bilah atas (panah back, judul, cari, titik tiga) dan kapsul halaman mulai pudar masuk SETELAH hitam hampir penuh (bookDim ~98%), selesai di progres 1
+    const val TAIL_ALPHA_FROM = .82f      // halaman lanjutan di mode gulir (halaman 2 dst, yang ikut terlihat di bawah halaman pertama) pudar masuk sambil naik pelan, supaya tidak muncul tiba-tiba
+    const val TAIL_RISE_DP = 40f          // jarak naik halaman lanjutan (dp) selama pudar masuk
     const val ZOOM_CAMERA = 2.0f          // jarak kamera di ujung zoom: kamera MENDEKAT ke halaman (bukan sekadar gambar diperbesar), perspektif mengencang
     const val CAMERA = 2.8f               // jarak kamera 3D = CAMERA x lebar sampul (makin besar = perspektif makin lembut)
     const val ASPECT = .70f               // lebar / tinggi sampul buku
@@ -204,6 +206,14 @@ fun bookReaderAlpha(t: Float): Float = sstep((t - BookSpec.READER_ALPHA_FROM) / 
  */
 fun bookUiAlpha(vm: AppVM): Float =
     if (vm.morph?.book == true) sstep((vm.openP.value.coerceIn(0f, 1f) - BookSpec.UI_ALPHA_FROM) / (1f - BookSpec.UI_ALPHA_FROM)) else 1f
+
+/**
+ * Halaman lanjutan di mode gulir (halaman 2 dst di bawah halaman pertama): 0 = tersembunyi dan agak ke bawah, 1 = di tempatnya.
+ * Halaman pertama tidak memakai ini (digambar BookPageLayer, mendarat bersama zoom). Mulai setelah kertas pertama hampir penuh dan menyusul bersama
+ * hitam yang melebur; selain buku selalu 1. Menutup = kebalikan persis (halaman lanjutan turun dan pudar lebih dulu).
+ */
+fun bookTailFrac(vm: AppVM): Float =
+    if (vm.morph?.book == true) sstep((vm.openP.value.coerceIn(0f, 1f) - BookSpec.TAIL_ALPHA_FROM) / (1f - BookSpec.TAIL_ALPHA_FROM)) else 1f
 
 /**
  * Gelap latar di luar buku (0 = terang normal, 1 = hitam penuh layar baca). Satu kurva mulus tanpa patahan, buka DAN tutup identik (progres sama):
@@ -299,8 +309,8 @@ object BookArt {
         if (d.cv.isNotEmpty()) try { Imgs.load(vm.imgDir, d.cv) } catch (e: Throwable) { }   // sampul sudah ada di cache sebelum animasi
         try { BookTex.ensure(d) } catch (e: Throwable) { }                                   // tekstur 3D sampul juga siap
         val sp = ctx.getSharedPreferences("dinduy", 0)
-        if (PdfBus.mode < 0) PdfBus.mode = sp.getInt("pdfmode", 0)
-        if (PdfBus.curl < 0) PdfBus.curl = sp.getInt("pdfcurl", 0)
+        if (PdfBus.mode < 0) PdfBus.mode = sp.getInt("pdfmode", 1)
+        if (PdfBus.curl < 0) PdfBus.curl = sp.getInt("pdfcurl", 1)
         if (PdfBus.curlStyle < 0) PdfBus.curlStyle = sp.getInt("pdfcurlstyle", 0)
         var page = d.pg.coerceAtLeast(0)
         var ratio = 1.4142f
