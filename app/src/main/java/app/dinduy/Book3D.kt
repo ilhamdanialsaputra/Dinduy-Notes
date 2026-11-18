@@ -203,7 +203,7 @@ object Book3D {
     /**
      * Gambar buku di kotak (l,t,r,b) = bidang depan buku di layar (px).
      * yaw / pitch (derajat) = putaran buku (hanya dipakai untuk goyangan sangat kecil; pose diam = 0, buku lurus);
-     * k = skala; deg = sudut buka sampul (0 tertutup, 180 rebah ke kiri).
+     * k = skala; deg = sudut buka sampul (0 tertutup, 90 tegak lurus, 180 sejajar halaman, ~191.7 = rebah di bidang papan belakang; lihat BookSpec.COVER_DEG).
      * lx / ly = pergeseran mata kamera (x lebar buku): lx > 0 mata di kiri (punggung terlihat), ly > 0 mata di atas (tepi atas terlihat).
      * Muka depan tetap lurus; 0 = kamera tepat di depan.
      * page = bitmap halaman yang dibuka terakhir (null = kertas putih); showPage = gambar halaman di balik sampul.
@@ -356,6 +356,13 @@ object Book3D {
         }
 
         // ---------------------------------------------------------------- 1. punggung dan tepi blok halaman (diam)
+        // saat zoom halaman digambar BookPageLayer (bukan di sini): punggung / tepi tidak boleh menimpa isi kertas di dalam kotak halaman
+        val cut = !showPage && deg > .5f
+        val cutSave = if (cut) cv.save() else -1
+        if (cut) {
+            if (android.os.Build.VERSION.SDK_INT >= 26) cv.clipOutRect(l, t, r, b)
+            else cv.clipRect(l, t, r, b, android.graphics.Region.Op.DIFFERENCE)
+        }
         // punggung: tiga pita (papan depan | blok halaman | papan belakang) dipisah sambungan, bentuk silinder dengan gradasi tonal
         sc(-hw, -hh, tc, 0f, 0f, -(pg + 2f * tc), 0f, H, 0f)
         run {
@@ -407,6 +414,8 @@ object Book3D {
                 }
             }
         }
+
+        if (cutSave >= 0) cv.restoreToCount(cutSave)
 
         // ---------------------------------------------------------------- 2. halaman terakhir dibuka
         if (deg > .5f) {
