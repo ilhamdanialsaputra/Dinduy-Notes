@@ -348,9 +348,6 @@ object Book3D {
                     }
                 }
             }
-            // lekuk di dekat punggung (selalu ada saat terbuka)
-            sc(-hw, -hh, 0f, W * .07f, 0f, 0f, 0f, H, 0f)
-            gradQuad(-hw, -hw + W * .07f, blk(.12f), blk(.04f), 0, .5f)
         }
 
         // ---------------------------------------------------------------- 3. papan sampul (kaku, tebal)
