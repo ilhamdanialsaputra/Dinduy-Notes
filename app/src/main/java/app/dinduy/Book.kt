@@ -322,22 +322,6 @@ fun BookCard(
                 Box(
                     Modifier.fillMaxWidth().aspectRatio(BookSpec.ASPECT)
                         .onGloballyPositioned { coords[0] = it; track?.invoke(morphNow()) }
-                        .drawBehind {
-                            // bayangan kontak di lantai: cahaya dari kiri-atas, jadi bayangan jatuh tipis ke kanan-bawah buku, rapat dan lembut.
-                            // Saat ditekan buku menempel ke permukaan: bayangan mengecil + sedikit lebih gelap. Total gelap <= ~.12.
-                            val w = size.width
-                            val h = size.height
-                            val pk = peek.coerceIn(0f, 1.3f)
-                            val inset = (1f - BookSpec.REST_SCALE) / 2f
-                            for (i in 1..5) {
-                                val e = i * 1.1.dp.toPx() * (1f - .4f * pk)
-                                drawRoundRect(
-                                    Color.Black.copy(alpha = .022f + .006f * pk),
-                                    Offset(w * (inset + .02f) + e * .35f, h * (inset + .035f) + e * .55f),
-                                    Size(w * (1f - 2f * inset) - e * .1f, h * (1f - 2f * inset) - e * .1f), CornerRadius(7.dp.toPx() + e * .5f)
-                                )
-                            }
-                        }
                 ) {
                     Box(
                         Modifier.fillMaxSize().graphicsLayer {
@@ -345,7 +329,7 @@ fun BookCard(
                             val own = vm.morph?.book == true && vm.openId == d.id &&
                                 (vm.openP.value > .01f || vm.nav.stack.any { it is Scr.Note && it.id == d.id })
                             alpha = if (own) 0f else 1f
-                        }.border(2.dp, pal.p.copy(alpha = selA), BOOK_SHAPE)
+                        }
                     ) {
                         if (ct == null) BookCoverFace(vm, d, Modifier.fillMaxSize())
                         else Canvas(Modifier.fillMaxSize()) {
@@ -359,6 +343,16 @@ fun BookCard(
                                     yaw, pitch, k, 0f, ct, null, false, false
                                 )
                             }
+                        }
+                        // penanda terpilih: cincin yang mengikuti bidang depan buku (bukan bingkai datar bentuk lama)
+                        if (selA > .01f) Canvas(Modifier.fillMaxSize()) {
+                            val inset = (1f - BookSpec.REST_SCALE) / 2f
+                            val sw = 2.dp.toPx()
+                            drawRoundRect(
+                                pal.p.copy(alpha = selA), Offset(size.width * inset, size.height * inset),
+                                Size(size.width * (1f - 2f * inset), size.height * (1f - 2f * inset)),
+                                CornerRadius(6.dp.toPx()), style = androidx.compose.ui.graphics.drawscope.Stroke(sw)
+                            )
                         }
                     }
                 }
