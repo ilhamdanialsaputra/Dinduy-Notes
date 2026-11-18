@@ -1934,13 +1934,13 @@ fun HomeCard(
                 alpha = pv.coerceIn(0f, 1f); translationY = (1f - pv) * 32.dp.toPx()
                 val sc = .92f + .08f * pv.coerceIn(0f, 1f); scaleX = sc; scaleY = sc
             }
-            val trackFn = { m: Morph ->
+            val trackFn: (Morph) -> Unit = { m ->
                 // selama kartu lain sedang membuka/menutup, posisi kartu ini jangan ditimpa: nilainya sudah ikut tergeser
                 // (dan terpotong layar) oleh makeRoom sendiri, sehingga klasifikasi atas/bawah bisa berbalik di tengah animasi
                 val busy = vm.openId != null && vm.openId != d.id && vm.openP.value > .001f
                 if (!vm.searchOn && !busy) vm.cardMorph[d.id] = m
             }
-            val clickFn = { m: Morph ->
+            val clickFn: (Morph) -> Unit = { m ->
                 if (selMode) { if (d.id in sel) sel.remove(d.id) else sel.add(d.id) }
                 else nav.openNote(d.id, m)
             }
