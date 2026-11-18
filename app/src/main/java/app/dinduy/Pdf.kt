@@ -312,11 +312,19 @@ object PdfCache {
     private val c = object : android.util.LruCache<String, Bitmap>(maxOf(32L * 1024 * 1024, Runtime.getRuntime().maxMemory() / 5).toInt()) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
+    private val top = java.util.concurrent.ConcurrentHashMap<String, String>()   // "id:halaman" -> kunci beresolusi tertinggi
     fun get(k: String): Bitmap? = c.get(k)
-    fun put(k: String, b: Bitmap) { c.put(k, b) }
+    fun put(k: String, b: Bitmap) {
+        c.put(k, b)
+        val p = k.substringBefore('@')
+        val cur = top[p]?.let { c.get(it) }
+        if (cur == null || cur.width <= b.width) top[p] = k
+    }
+    /** Bitmap terbaik yang sudah ada untuk halaman ini (resolusi apa pun): placeholder tanpa kosong / kedip sebelum render sebenarnya siap. */
+    fun best(fid: String, index: Int): Bitmap? = top["$fid:$index"]?.let { c.get(it) }
 }
 
-private fun bucket(px: Int): Int = (((px + 255) / 256) * 256).coerceIn(256, 2400)
+internal fun bucket(px: Int): Int = (((px + 255) / 256) * 256).coerceIn(256, 2400)
 
 /** Satu PDF yang sedang dibuka: PdfRenderer (bawaan Android) hanya boleh membuka satu halaman sekaligus, jadi semua akses dikunci. */
 @Stable
@@ -329,7 +337,7 @@ class PdfDoc(private val file: File) {
     var failed by mutableStateOf(false)
     val ratio = androidx.compose.runtime.mutableStateListOf<Float>()   // tinggi / lebar tiap halaman; 0 = belum diketahui
 
-    suspend fun open() = withContext(Dispatchers.IO) {
+    suspend fun open(seedIdx: Int = -1, seed: Float = 0f) = withContext(Dispatchers.IO) {
         try {
             val p = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
             pfd = p
@@ -338,6 +346,7 @@ class PdfDoc(private val file: File) {
             val n = r.pageCount
             val l = ArrayList<Float>(n)
             repeat(n) { l.add(0f) }
+            if (seedIdx in 0 until n && seed > 0f) l[seedIdx] = seed   // rasio halaman awal sudah diketahui: tinggi tidak melompat saat dokumen siap
             withContext(Dispatchers.Main) { ratio.addAll(l); count = n; ok = n > 0; failed = n <= 0 }
         } catch (e: Throwable) {
             withContext(Dispatchers.Main) { failed = true }
@@ -813,7 +822,7 @@ class PdfUi(val doc: PdfDoc, val ink: PInkState, val fid: String) {
     var multi by mutableStateOf(false)   // dua jari (atau lebih) sedang menyentuh layar: gulir / zoom, bukan coretan
 }
 
-private val INVERT = ColorFilter.colorMatrix(
+internal val INVERT = ColorFilter.colorMatrix(
     ColorMatrix(
         floatArrayOf(
             -.88f, 0f, 0f, 0f, 224f,
@@ -946,7 +955,7 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
     val wPx = (widthDp.value * dens * mul).roundToInt()
     val bk = bucket(wPx)
     val key = ui.fid + ":" + index + "@" + bk
-    var bmp by remember(index) { mutableStateOf<ImageBitmap?>(PdfCache.get(key)?.asImageBitmap()) }
+    var bmp by remember(index) { mutableStateOf<ImageBitmap?>((PdfCache.get(key) ?: PdfCache.best(ui.fid, index))?.asImageBitmap()) }
     LaunchedEffect(index, bk, ui.doc.ok, bare) {
         if (!ui.doc.ok) return@LaunchedEffect
         val hit = PdfCache.get(key)
@@ -1249,7 +1258,7 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
             val cvId = withContext(Dispatchers.IO) { makePdfCover(vm, file) }
             if (cvId.isNotEmpty()) vm.upd(id) { if (it.cv.isEmpty()) it.copy(cv = cvId, cx = .5f, cy = 0f, cz = 1f) else it }
         }
-        doc.open()
+        doc.open(if (BookFx.id == id) BookFx.page else -1, BookFx.ratio)
         if (doc.ok) {
             launch { doc.loadRatios() }
             PdfBus.hasText = false
@@ -1298,8 +1307,11 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
             Modifier.fillMaxSize().background(Color.Black).graphicsLayer {
                 // buka/tutup dari beranda: isi PDF berkedip sangat cepat (pudar-silang dengan sampul kartu), bukan ikut membesar dari kartu.
                 // Rentang pudar dipersempit (dulu .20-.45, sekarang .14-.26 dari progres morph) supaya kedipnya singkat.
-                val x = ((vm.openP.value - .14f) / .12f).coerceIn(0f, 1f)
-                alpha = x * x * (3f - 2f * x)
+                if (vm.morph?.book == true) alpha = bookReaderAlpha(vm.openP.value)
+                else {
+                    val x = ((vm.openP.value - .14f) / .12f).coerceIn(0f, 1f)
+                    alpha = x * x * (3f - 2f * x)
+                }
             }
         ) {
             when {
@@ -1334,7 +1346,8 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
                         }
                     }
                 }
-                !doc.ok -> Box(Modifier.fillMaxSize(), Alignment.Center) { LoadingBlob(Modifier.size(56.dp)) }
+                !doc.ok -> if (vm.morph?.book == true && BookFx.id == id) BookPlaceholder(note)
+                    else Box(Modifier.fillMaxSize(), Alignment.Center) { LoadingBlob(Modifier.size(56.dp)) }
                 else -> PdfReader(vm, id, act, ui, txt, note)
             }
         }
@@ -1694,6 +1707,19 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
         if (!on) { ui.drawing = false; ui.styleOpen = false }
     }
 
+    // buku: halaman terkini dan posisinya di layar dibaca animasi tutup (BookFx); simpan halaman seketika
+    SideEffect { if (BookFx.id == id) BookFx.page = page }
+    DisposableEffect(id) {
+        BookFx.snap = {
+            val pc = ui.pageCoords[page]?.takeIf { it.isAttached }
+            if (pc == null) null else {
+                val a = pc.localToWindow(Offset.Zero)
+                val b = pc.localToWindow(Offset(pc.size.width.toFloat(), pc.size.height.toFloat()))
+                androidx.compose.ui.geometry.Rect(a.x, a.y, b.x, b.y)
+            }
+        }
+        onDispose { BookFx.snap = null }
+    }
     // simpan halaman terakhir
     LaunchedEffect(page) { delay(900); if (page != note.pg) vm.upd(id) { it.copy(pg = page) } }
 
@@ -2846,6 +2872,17 @@ fun PdfMenuPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
             }
             MRow(POS_BOT, "label", "Labels", d?.lb?.joinToString(", ")?.ifEmpty { null } ?: "Set labels for this PDF", chevron = true) {
                 nav.push(Scr.NoteLabels(id))
+            }
+        }
+        val customCover = d?.hasCustomBookCover() == true
+        val cscope = rememberCoroutineScope()
+        SGroup("Cover", 150) {
+            MRow(if (customCover) POS_TOP else POS_ONE, "pen", BookSpec.TXT_CHANGE, "Pick an image from your gallery") { act.pickCover(id) }
+            if (customCover) MRow(POS_BOT, "undo", BookSpec.TXT_RESTORE, "Use the first page of the PDF again") {
+                cscope.launch {
+                    val ok = vm.restoreBookCover(id)
+                    vm.show(if (ok) "Original cover restored" else "Couldn't restore the cover")
+                }
             }
         }
         SGroup("Share and save", 180) {
