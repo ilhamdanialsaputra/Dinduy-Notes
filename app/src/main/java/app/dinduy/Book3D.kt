@@ -120,9 +120,8 @@ object BookTex {
         // alur engsel di kiri (sama dengan BookCoverFace)
         p.reset(); p.shader = LinearGradient(0f, 0f, w * .09f, 0f, intArrayOf(blk(.40f), blk(.10f), 0), null, Shader.TileMode.CLAMP)
         c.drawRect(0f, 0f, w * .09f, h, p)
-        // lembah engsel: gradasi gelap halus (tanpa garis putih / garis keras 1 px yang tampak seperti retakan di atas foto terang)
-        p.reset(); p.shader = LinearGradient(w * .06f, 0f, w * .125f, 0f, intArrayOf(0, blk(.16f), 0), floatArrayOf(0f, .45f, 1f), Shader.TileMode.CLAMP)
-        c.drawRect(w * .06f, 0f, w * .125f, h, p)
+        p.reset(); p.color = wht(.30f); c.drawRect(w * .095f, 0f, w * .095f + max(1f, w * .006f), h, p)
+        p.reset(); p.color = blk(.18f); c.drawRect(w * .088f, 0f, w * .088f + max(1f, w * .005f), h, p)
         // kilau matte yang lembut (bukan mengkilap)
         p.reset(); p.shader = LinearGradient(w * .1f, 0f, w * .95f, h * .55f, intArrayOf(wht(.14f), 0, 0), null, Shader.TileMode.CLAMP)
         c.drawRect(0f, 0f, w, h, p)
@@ -151,8 +150,8 @@ object BookTex {
         p.reset(); p.shader = LinearGradient(0f, 0f, w * .10f, 0f, intArrayOf(blk(.24f), 0), null, Shader.TileMode.CLAMP)
         c.drawRect(0f, 0f, w * .10f, h.toFloat(), p)
         // lipatan engsel: garis terang tipis di sebelah garis gelap
-        p.reset(); p.shader = LinearGradient(w * .07f, 0f, w * .13f, 0f, intArrayOf(0, blk(.14f), 0), floatArrayOf(0f, .5f, 1f), Shader.TileMode.CLAMP)
-        c.drawRect(w * .07f, 0f, w * .13f, h.toFloat(), p)
+        p.reset(); p.color = blk(.16f); c.drawRect(w * .095f, 0f, w * .095f + 2f, h.toFloat(), p)
+        p.reset(); p.color = wht(.40f); c.drawRect(w * .095f + 2f, 0f, w * .095f + 4f, h.toFloat(), p)
         p.reset(); p.style = Paint.Style.STROKE; p.strokeWidth = 2f; p.color = blk(.07f)
         c.drawRect(w * .06f, h * .04f, w * .96f, h * .96f, p)
         innerBm = b
@@ -356,7 +355,32 @@ object Book3D {
             cv.drawLine(ax, ay, ps[0], ps[1], paint)
         }
 
-        // ---------------------------------------------------------------- 1. punggung dan tepi blok halaman (diam)
+        // ---------------------------------------------------------------- 1. halaman terakhir dibuka (digambar PALING DULU)
+        // Halaman (z = 0) harus di bawah punggung: pita depan punggung (z 0..tebal papan) tampak sedikit di kiri tepi kiri halaman karena mata kamera
+        // di kiri. Kalau halaman digambar SETELAH punggung (urutan lama), halaman putih menimpa pita itu dan muncul garis putih tipis di sambungan
+        // punggung dan sampul, hanya saat sampul mulai terbuka / hampir tertutup (deg > .5), jadi tampak berkedip.
+        if (deg > .5f) {
+            if (showPage) {
+                sc(-hw, -hh, 0f, W, 0f, 0f, 0f, H, 0f)
+                val s = face(0f, 0f, 1f)
+                if (s > 0f) {
+                    roundedPath(W, H)
+                    if (page == null) {
+                        paint.reset(); paint.isAntiAlias = true; paint.color = 0xFFFFFFFF.toInt()
+                        cv.drawPath(path, paint)
+                    } else {
+                        val bw = page.width.toFloat(); val bh = page.height.toFloat()
+                        var cw = bw; var ch = cw / BookSpec.ASPECT
+                        if (ch > bh) { ch = bh; cw = ch * BookSpec.ASPECT }
+                        val sl = (bw - cw) / 2f
+                        // kertas tidak digelapkan (shade = 1): kecerahannya sama dengan BookPageLayer yang mengambil alih saat zoom
+                        textured(page, sl, 0f, sl + cw, ch, 1f, dark)
+                    }
+                }
+            }
+        }
+
+        // ---------------------------------------------------------------- 2. punggung dan tepi blok halaman (diam)
         // saat zoom halaman digambar BookPageLayer (bukan di sini): punggung / tepi tidak boleh menimpa isi kertas di dalam kotak halaman
         val cut = !showPage && deg > .5f
         val cutSave = if (cut) cv.save() else -1
@@ -380,9 +404,9 @@ object Book3D {
                 cv.drawPath(path, paint)
                 // sambungan: alur gelap + garis terang di sebelahnya (timbul), di sisi dalam papan depan dan belakang
                 line(-hw, -hh, 0f, -hw, hh, 0f, GROOVE, 1.3f)
-                line(-hw, -hh, tc * .16f, -hw, hh, tc * .16f, 0x10FFFFFF, 1f)
+                line(-hw, -hh, tc * .16f, -hw, hh, tc * .16f, 0x2EFFFFFF, 1f)
                 line(-hw, -hh, -pg, -hw, hh, -pg, GROOVE, 1.3f)
-                line(-hw, -hh, -pg - tc * .16f, -hw, hh, -pg - tc * .16f, 0x10FFFFFF, 1f)
+                line(-hw, -hh, -pg - tc * .16f, -hw, hh, -pg - tc * .16f, 0x2EFFFFFF, 1f)
             }
         }
         // atas, bawah (sepanjang x) dan sisi kanan (sepanjang y): papan belakang + halaman. Papan depan = tepi sampul yang berputar.
@@ -417,28 +441,6 @@ object Book3D {
         }
 
         if (cutSave >= 0) cv.restoreToCount(cutSave)
-
-        // ---------------------------------------------------------------- 2. halaman terakhir dibuka
-        if (deg > .5f) {
-            if (showPage) {
-                sc(-hw, -hh, 0f, W, 0f, 0f, 0f, H, 0f)
-                val s = face(0f, 0f, 1f)
-                if (s > 0f) {
-                    roundedPath(W, H)
-                    if (page == null) {
-                        paint.reset(); paint.isAntiAlias = true; paint.color = 0xFFFFFFFF.toInt()
-                        cv.drawPath(path, paint)
-                    } else {
-                        val bw = page.width.toFloat(); val bh = page.height.toFloat()
-                        var cw = bw; var ch = cw / BookSpec.ASPECT
-                        if (ch > bh) { ch = bh; cw = ch * BookSpec.ASPECT }
-                        val sl = (bw - cw) / 2f
-                        // kertas tidak digelapkan (shade = 1): kecerahannya sama dengan BookPageLayer yang mengambil alih saat zoom
-                        textured(page, sl, 0f, sl + cw, ch, 1f, dark)
-                    }
-                }
-            }
-        }
 
         // ---------------------------------------------------------------- 3. papan sampul (kaku, tebal)
         val hh2 = hh
