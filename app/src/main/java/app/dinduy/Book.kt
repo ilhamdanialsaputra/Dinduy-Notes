@@ -468,8 +468,9 @@ fun BookCoverLayer(vm: AppVM) {
         // halaman terakhir dibuka: hanya sebelum zoom (setelah itu BookPageLayer yang menggambarnya)
         val pageOn = tt <= .0005f
         val page = if (pageOn) PdfCache.best(d.pdf, BookFx.page)?.let { BookTex.pageTex(it, r.width) } else null
-        // sampul memudar keluar selama zoom (mode halaman: engsel tidak di tepi layar, sampul tidak boleh tertinggal)
-        val fadeA = 1f - sstep((tt - .35f) / .5f)
+        // sampul tetap menempel di engsel kertas selama zoom; baru memudar bersama latar hitam yang meluas di ujung zoom
+        // (mode halaman: engsel tidak di tepi layar, jadi sampul tidak boleh tertinggal di atas layar baca)
+        val fadeA = 1f - bookReveal(tt)
         if (fadeA <= .01f) return@Canvas
         drawIntoCanvas {
             val cnv = it.nativeCanvas
