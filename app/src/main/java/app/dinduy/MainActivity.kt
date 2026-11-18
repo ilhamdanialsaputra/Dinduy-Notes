@@ -297,7 +297,7 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
             val tx = if (m.card) tt else (tt * 1.12f).coerceIn(0f, 1f)
             // buku PDF: bingkai = kotak kertas yang sama persis dengan BookPageLayer / sampul 3D (sejajar), baru meluas ke layar penuh di ujung zoom
             val pr = if (m.book && bgeo != null) bookPageRect(vm, size.width, size.height, tt, bgeo) else null
-            val ev = if (pr != null) bookReveal(tt) else 0f
+            val ev = if (pr != null) bookReveal(rawT) else 0f
             val l = if (pr != null) lerp(pr.left, 0f, ev) else lerp(m.l, 0f, tx)
             val r = if (pr != null) lerp(pr.right, size.width, ev) else lerp(m.r, size.width, tx)
             val tp = if (pr != null) lerp(pr.top, 0f, ev) else lerp(m.t, 0f, tt)
