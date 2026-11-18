@@ -185,13 +185,11 @@ fun bookZoomFrac(t: Float): Float {
 }
 /**
  * Tahap kedatangan di ujung zoom, semuanya berpatokan pada waktu (progres mentah), BUKAN pada kurva zoom yang melambat di ekor.
- * Dulu empat hal (latar hitam meluas, sampul memudar, layar baca muncul, kertas mendarat) menumpuk di ekor kurva yang paling lambat dan terasa patah.
- * Sekarang bertingkat dan saling menyambung: latar hitam mulai meluas lebih dulu, sampul memudar, kertas mendarat, baru isi layar baca muncul.
+ * Dulu empat hal (latar hitam meluas, sampul tersapu latar, layar baca muncul, kertas mendarat) menumpuk di ekor kurva yang paling lambat dan terasa patah.
+ * Sekarang bertingkat dan saling menyambung: latar hitam mulai meluas lebih dulu, sampul tersapu latar, kertas mendarat, baru isi layar baca muncul.
  */
 /** Latar hitam meluas ke seluruh layar (0 = bingkai = kertas, 1 = layar penuh). */
-fun bookReveal(t: Float): Float = sstep((t - .56f) / .36f)
-/** Bagian 3D (sampul rebah, punggung, tepi) memudar bersama latar yang meluas. */
-fun bookCoverFade(t: Float): Float = sstep((t - .42f) / .40f)
+fun bookReveal(t: Float): Float = sstep((t - .50f) / .42f)
 
 /** Ukuran layar / inset yang dibutuhkan untuk menghitung posisi akhir halaman. */
 class BookGeo(val topPad: Float, val sab: Float, val dens: Float)
@@ -229,7 +227,7 @@ fun bookSlide(m: Morph, w: Float, dens: Float, raw: Float): Float {
     val room = (w - 12f * dens - m.r).coerceAtLeast(0f)
     return need.coerceIn(0f, min(bw * BookSpec.SLIDE_1COL, room)) * bookCoverFrac(raw)
 }
-fun bookReaderAlpha(t: Float): Float = sstep((t - .86f) / .14f)   // kertas sudah ~98% di tempatnya; isi layar baca menyatu dengan halaman yang sama
+fun bookReaderAlpha(t: Float): Float = sstep((t - .88f) / .12f)   // kertas sudah ~98% di tempatnya; isi layar baca menyatu dengan halaman yang sama
 
 private val BOOK_SHAPE = RoundedCornerShape(topStart = 3.dp, bottomStart = 3.dp, topEnd = 8.dp, bottomEnd = 8.dp)
 
@@ -599,18 +597,20 @@ fun BookCoverLayer(vm: AppVM) {
         // halaman terakhir dibuka: hanya sebelum zoom (setelah itu BookPageLayer yang menggambarnya)
         val pageOn = tt <= .0005f
         val page = if (pageOn) PdfCache.best(d.pdf, BookFx.page)?.let { BookTex.pageTex(it, r.width) } else null
-        // sampul tetap menempel di engsel kertas selama zoom; baru memudar bersama latar hitam yang meluas di ujung zoom
-        // (mode halaman: engsel tidak di tepi layar, jadi sampul tidak boleh tertinggal di atas layar baca)
-        val fadeA = 1f - bookCoverFade(tRaw)
-        if (fadeA <= .01f) return@Canvas
+        // TANPA pemudaran (tidak ada transparansi): sampul tetap menempel di engsel kertas dan dihapus oleh latar hitam yang meluas dari kertas,
+        // seperti tirai gelap yang menutupinya (klip geometris, tepinya sama persis dengan wadah di NoteLayer). Sampul rebah ada di luar kertas
+        // pada fase ini, jadi pemotongan tidak menyentuh papan yang sedang mengayun di atas halaman.
+        val ev = bookReveal(tRaw)
+        if (ev >= .999f) return@Canvas
         drawIntoCanvas {
             val cnv = it.nativeCanvas
-            // lapisan pemudar dibatasi ke area yang benar-benar tergambar (kertas + sampul rebah + tepi), bukan seluruh layar: lebih ringan di GPU
-            val bw = r.width
-            val sv = if (fadeA < .999f) cnv.saveLayerAlpha(
-                maxOf(0f, r.left - bw * 1.2f), maxOf(0f, r.top - bw * .4f),
-                minOf(size.width, r.right + bw * .4f), minOf(size.height, r.bottom + bw * .4f), (fadeA * 255f).roundToInt()
-            ) else -1
+            val sv = if (ev > .002f) cnv.save() else -1
+            if (sv >= 0) {
+                val cl = lerp(r.left, 0f, ev); val ctp = lerp(r.top, 0f, ev)
+                val cr = lerp(r.right, size.width, ev); val cb = lerp(r.bottom, size.height, ev)
+                if (android.os.Build.VERSION.SDK_INT >= 26) cnv.clipOutRect(cl, ctp, cr, cb)
+                else cnv.clipRect(cl, ctp, cr, cb, android.graphics.Region.Op.DIFFERENCE)
+            }
             Book3D.draw(
                 cnv, r.left, r.top, r.right, r.bottom,
                 yaw, pitch, k, deg, ct, page, pageOn, BookFx.dark, lx, ly, bookCamera(tRaw)
