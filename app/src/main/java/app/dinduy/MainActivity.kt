@@ -287,9 +287,10 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
                     }
                 }
             }.drawWithContent {
-            val tt = vm.openP.value.coerceIn(0f, 1f)
+            val rawT = vm.openP.value.coerceIn(0f, 1f)
             vm.morphTick
             val m = effMorph(vm) ?: Morph(size.width * .12f, size.height * .4f, size.width * .88f, size.height * .6f, 32.dp.toPx(), pal.s)
+            val tt = if (m.book) bookZoomFrac(rawT) else rawT   // buku: wadah baru membesar di fase zoom, setelah sampul terbuka
             // kartu (1 atau 2 kolom): semua tepi bergerak serempak supaya wadah tidak miring/melar;
             // selain kartu (Tambah catatan): tepi kiri-kanan sedikit lebih cepat dari atas-bawah
             val tx = if (m.card) tt else (tt * 1.12f).coerceIn(0f, 1f)
