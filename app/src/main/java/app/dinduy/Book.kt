@@ -8,6 +8,7 @@ import android.os.ParcelFileDescriptor
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -81,23 +82,23 @@ import kotlin.math.roundToInt
 
 /** Semua angka animasi buku ada di sini. */
 object BookSpec {
-    const val OPEN_MS = 840               // durasi buka total (ms) dari tertutup. Koreografi BERTUMPANG TINDIH: sampul mengayun (0..COVER_END), zoom mulai di tengah ayunan (ZOOM_FROM), kamera mendekat setelah sampul mendarat (DOLLY_FROM)
-    const val CLOSE_MS = 660              // menutup sedikit lebih cepat daripada membuka (keluar = cepat, masuk = ada waktu menikmati)
+    const val OPEN_MS = 540               // durasi buka total (ms) dari tertutup. Koreografi BERTUMPANG TINDIH: sampul mengayun (0..COVER_END), zoom mulai di tengah ayunan (ZOOM_FROM), kamera mendekat setelah sampul mendarat (DOLLY_FROM)
+    const val CLOSE_MS = 400              // menutup sedikit lebih cepat daripada membuka (keluar = cepat, masuk = ada waktu menikmati)
     // Sudut rebah sampul = 180° + asin(PAGES + BOARD) ≈ 191.7°. Sampul TIDAK melayang di bidang halaman (dulu 176°): ia turun mengikuti
     // ketebalan buku sampai ujung bebasnya menyentuh bidang papan belakang (bidang "meja"). Karena itu sampul yang terbuka miring
     // landai menjauh dari kamera, perspektifnya sama dengan buku tertutup, dan ketebalan blok halaman tetap terbaca.
     // Kalau PAGES / BOARD diubah, hitung ulang: 180 + asin(PAGES + BOARD) dalam derajat.
     const val COVER_DEG = 191.7f
     const val COVER_SIGN = -1f            // (tidak dipakai lagi oleh mesin 3D; dibiarkan supaya berkas lain tetap terkompilasi)
-    const val COVER_END = .62f            // sampul mengayun dan mendarat pada progres ini
-    const val ZOOM_FROM = .32f            // kertas mulai membesar menuju layar baca saat sampul masih di tengah ayunan (~125 derajat): satu gerak mengalir, bukan dua tahap bergantian
-    const val DOLLY_END = .76f            // lensa + kamera sudah lurus di depan halaman pada progres ini: SELESAI sebelum kertas mendarat, supaya bagian 3D (sampul, punggung) tidak bergeser sendiri di belakang kertas
-    const val DOLLY_FROM = .50f           // lensa memusat + kamera mendekat HANYA setelah sampul menyentuh meja (benda yang masih terangkat tidak boleh kena perspektif yang mengetat)
+    const val COVER_END = .56f            // sampul mengayun dan mendarat pada progres ini
+    const val ZOOM_FROM = .29f            // kertas mulai membesar menuju layar baca saat sampul masih di tengah ayunan (~125 derajat): satu gerak mengalir, bukan dua tahap bergantian
+    const val DOLLY_END = .72f            // lensa + kamera sudah lurus di depan halaman pada progres ini: SELESAI sebelum kertas mendarat, supaya bagian 3D (sampul, punggung) tidak bergeser sendiri di belakang kertas
+    const val DOLLY_FROM = .45f           // lensa memusat + kamera mendekat HANYA setelah sampul menyentuh meja (benda yang masih terangkat tidak boleh kena perspektif yang mengetat)
     const val PEEK_DEG = 7f               // saat jari menekan buku, sampul terangkat sedikit (mengintip). Ayunan buka melanjutkan dari sudut ini, tanpa lompatan
     const val SLIDE_1COL = .5f            // 1 kolom: buku bergeser ke kanan paling banyak setengah lebar buku supaya sampul yang rebah tetap di dalam layar
     const val SWING_IMPACT = .80f         // bagian fase 1 (0..1) saat sampul menyentuh bidang papan belakang; sisanya pantulan kecil lalu diam
     const val LENS_DONE = .80f            // bagian fase dolly (DOLLY_FROM..1) saat mata kamera sudah di tengah (tepi buku sudah di luar layar / tertutup latar)
-    const val POSE_DONE = .30f            // pose miring buku di kartu selesai diluruskan pada progres ini (harus < ZOOM_FROM)
+    const val POSE_DONE = .26f            // pose miring buku di kartu selesai diluruskan pada progres ini (harus < ZOOM_FROM)
     const val REST_YAW = 0f               // pose buku diam di kartu: LURUS (tidak diputar). Ketebalan terlihat lewat lensa (REST_LENS_*), bukan kemiringan
     const val REST_PITCH = 0f             // ... lurus juga ke atas-bawah
     const val REST_SCALE = .94f           // buku sedikit lebih kecil dari kotak kartu supaya ada ruang untuk gerak bobot saat disentuh
@@ -110,7 +111,7 @@ object BookSpec {
     const val PEEK_SCALE = -.035f         // buku sedikit menekan ke bawah (mengecil) saat disentuh, seperti benda berat ditekan
     const val SWING_BOUNCE = .022f        // pantulan papan sampul saat membentur bidang meja: terangkat sedikit (ke atas, bukan menembus meja), jatuh lagi, diam
     const val ROCK_YAW = 0f               // (tidak dipakai lagi: buku tidak diputar, supaya bidang halaman selalu pas dengan kotaknya)
-    const val ROCK_SCALE = .012f          // buku sedikit tertekan (mengecil) tepat saat sampul membentur, lalu pulih
+    const val ROCK_SCALE = .016f          // buku sedikit tertekan (mengecil) tepat saat sampul membentur, lalu pulih
     const val BOARD = .042f               // tebal papan sampul (x lebar sampul)
     const val PAGES = .16f                // tebal blok halaman (x lebar sampul)
     const val PAGE_DONE = .8f             // dalam fase zoom: halaman isi sudah di posisi akhir layar baca
@@ -131,10 +132,12 @@ object BookSpec {
     const val TXT_RESTORE = "Kembalikan sampul asli"
     val EASE = androidx.compose.animation.core.LinearEasing   // easing per fase ada di fungsi smoothstep di bawah
     val openSpec: AnimationSpec<Float> = tween(OPEN_MS, easing = EASE)
-    val closeSpec: AnimationSpec<Float> = tween(CLOSE_MS, easing = EASE)
+    /** Menutup: kebalikan ease-out ringan. Awalnya langsung melaju (zoom keluar tidak lagi 'menunggu' di kecepatan nol), ujungnya mendarat lembut di kartu. */
+    val CLOSE_EASE = Easing { f -> 1f - Math.pow((1f - f).toDouble(), 1.35).toFloat() }
+    val closeSpec: AnimationSpec<Float> = tween(CLOSE_MS, easing = CLOSE_EASE)
     /** Dibalik di tengah jalan (buka lalu langsung tutup, atau tarik back lalu lepas): durasi mengikuti sisa jarak, jadi kecepatan gerak tetap sama, bukan mengulang dari awal. */
     fun openFrom(p: Float): AnimationSpec<Float> = tween((OPEN_MS * (1f - p.coerceIn(0f, 1f)).coerceAtLeast(.18f)).toInt(), easing = EASE)
-    fun closeFrom(p: Float): AnimationSpec<Float> = tween((CLOSE_MS * p.coerceIn(0f, 1f).coerceAtLeast(.18f)).toInt(), easing = EASE)
+    fun closeFrom(p: Float): AnimationSpec<Float> = tween((CLOSE_MS * p.coerceIn(0f, 1f).coerceAtLeast(.18f)).toInt(), easing = CLOSE_EASE)
     val backCancelSpec: AnimationSpec<Float> = spring(1f, 500f)
     val peekSpec: AnimationSpec<Float> = spring(.42f, 300f)   // pegas agak longgar: ada pantulan kecil, terasa berbobot
 }
@@ -161,7 +164,7 @@ fun bookSwing(t: Float): Float {
     val imp = BookSpec.SWING_IMPACT
     if (x < imp) {
         val p = x / imp
-        return .55f * sstep(p) + .45f * Math.pow(p.toDouble(), 1.7).toFloat()   // awal berat, akhir masih bergerak saat membentur
+        return .42f * sstep(p) + .58f * Math.pow(p.toDouble(), 1.45).toFloat()   // awal ringan (langsung terasa), akhir masih bergerak kencang saat membentur
     }
     val u = ((x - imp) / (1f - imp)).coerceIn(0f, 1f)
     val hop = abs(sin(u * 2f * Math.PI.toFloat())) * Math.pow((1f - u).toDouble(), 1.5).toFloat()   // dua lompatan mengecil, tajam di titik benturan
@@ -189,7 +192,7 @@ fun bookZoomFrac(t: Float): Float {
     val x = ((t - BookSpec.ZOOM_FROM) / (1f - BookSpec.ZOOM_FROM)).coerceIn(0f, 1f)
     val smoother = x * x * x * (x * (6f * x - 15f) + 10f)
     val out = 1f - (1f - x) * (1f - x) * (1f - x)
-    val w = sstep(x / .7f)   // bobot halus 0..1 (kecepatan sambungan kontinu): mulai pelan, lalu cepat, mendarat lembut
+    val w = sstep(x / .5f)   // bobot halus 0..1 (kecepatan sambungan kontinu): mulai pelan, lalu cepat, mendarat lembut
     return smoother * (1f - w) + out * w
 }
 /**
@@ -277,6 +280,8 @@ object BookFx {
     var peek = 0f                          // seberapa dalam kartu sedang ditekan saat diketuk (0..1), dilanjutkan mulus oleh lapisan animasi
     var tex: CoverTex? = null              // tekstur sampul yang dipakai kartu saat diketuk (cadangan bila tekstur baru belum jadi)
     var tilt = 0f                          // sudut miring sampul saat disentuh (derajat), dilanjutkan mulus oleh lapisan animasi
+    /** Kartu yang bukunya sedang digambar lapisan animasi. State supaya kartu langsung menyembunyikan diri di frame yang sama dengan ketukan. */
+    var hideId by mutableStateOf<String?>(null)
     var cols = 2                           // jumlah kolom beranda saat dibuka (1 = buku dipusatkan ulang agar sampul rebah tetap terlihat)
     var live: Rect? = null                 // posisi halaman di layar (koordinat jendela) saat menutup; null = posisi awal baca
     var snap: (() -> Rect?)? = null        // diisi layar baca
@@ -301,17 +306,38 @@ object BookFx {
 class BookReady(val page: Int, val ratio: Float)
 
 object BookArt {
+    private val ready = java.util.concurrent.ConcurrentHashMap<String, BookReady>()
+    private fun rkey(d: Note) = d.pdf + ":" + d.pg
+
+    /**
+     * Hasil prepare yang masih valid (halaman terakhir sudah di PdfCache, sampul + tekstur 3D sudah ada, preferensi sudah terbaca)
+     * atau null. Murni baca memori (tanpa I/O), jadi aman dipanggil di thread utama saat ketukan: animasi bisa mulai SEKETIKA.
+     */
+    fun peekReady(d: Note, screenWpx: Int): BookReady? {
+        val r = ready[rkey(d)] ?: return null
+        if (PdfBus.mode < 0 || PdfBus.curl < 0 || PdfBus.curlStyle < 0) return null
+        if (d.cv.isNotEmpty() && Imgs.peek(d.cv) == null) return null
+        if (BookTex.peek(d) == null) return null
+        val have = PdfCache.best(d.pdf, r.page) ?: return null
+        if (have.width < screenWpx * .8f) return null
+        return r
+    }
+
     /**
      * Pastikan bitmap halaman terakhir ada di PdfCache (kunci sama dengan layar baca, jadi layar baca memakai bitmap yang SAMA,
      * tanpa render ulang). Dipanggil sebelum animasi mulai; bila gagal animasi tetap jalan memakai sampul sebagai isi.
      */
     suspend fun prepare(vm: AppVM, ctx: Context, d: Note, screenWpx: Int): BookReady = withContext(Dispatchers.IO) {
-        if (d.cv.isNotEmpty()) try { Imgs.load(vm.imgDir, d.cv) } catch (e: Throwable) { }   // sampul sudah ada di cache sebelum animasi
-        try { BookTex.ensure(d) } catch (e: Throwable) { }                                   // tekstur 3D sampul juga siap
-        val sp = ctx.getSharedPreferences("dinduy", 0)
-        if (PdfBus.mode < 0) PdfBus.mode = sp.getInt("pdfmode", 1)
-        if (PdfBus.curl < 0) PdfBus.curl = sp.getInt("pdfcurl", 1)
-        if (PdfBus.curlStyle < 0) PdfBus.curlStyle = sp.getInt("pdfcurlstyle", 0)
+        val key = rkey(d)
+        if (d.cv.isNotEmpty()) try { Imgs.load(vm.imgDir, d.cv) } catch (e: Throwable) { }
+        try { BookTex.ensure(d) } catch (e: Throwable) { }
+        run {
+            val sp0 = ctx.getSharedPreferences("dinduy", 0)
+            if (PdfBus.mode < 0) PdfBus.mode = sp0.getInt("pdfmode", 1)
+            if (PdfBus.curl < 0) PdfBus.curl = sp0.getInt("pdfcurl", 1)
+            if (PdfBus.curlStyle < 0) PdfBus.curlStyle = sp0.getInt("pdfcurlstyle", 0)
+        }
+        peekReady(d, screenWpx)?.let { return@withContext it }   // sudah pernah disiapkan: tanpa buka PdfRenderer lagi
         var page = d.pg.coerceAtLeast(0)
         var ratio = 1.4142f
         try {
@@ -336,7 +362,7 @@ object BookArt {
                 } finally { r.close() }
             } finally { pfd.close() }
         } catch (e: Throwable) { }
-        BookReady(page, ratio)
+        BookReady(page, ratio).also { ready[key] = it }
     }
 }
 
@@ -410,6 +436,7 @@ fun BookCard(
     val screenW = (LocalConfiguration.current.screenWidthDp * dens).roundToInt()
     val pdark = when (d.pdk) { 1 -> true; 2 -> false; else -> pal.dark }
     var busy by remember { mutableStateOf(false) }
+    val warmJob = remember { arrayOfNulls<kotlinx.coroutines.Job>(1) }
     val src = remember { MutableInteractionSource() }
     val pressed by src.collectIsPressedAsState()
     val peek by animateFloatAsState(if (pressed) 1f else 0f, BookSpec.peekSpec, label = "bkpeek")
@@ -427,12 +454,34 @@ fun BookCard(
             was = now
         }
     }
+    // penanda sembunyi dilepas setelah animasi tutup selesai dan catatan sudah tidak ada di tumpukan
+    LaunchedEffect(d.id) {
+        snapshotFlow { vm.openP.value <= .01f && vm.nav.stack.none { it is Scr.Note && it.id == d.id } }.collect { done ->
+            if (done && BookFx.hideId == d.id) BookFx.hideId = null
+        }
+    }
     // tekanan jari dilanjutkan mulus oleh lapisan animasi: nilai terkini selalu dibagikan lewat BookFx, jadi tidak ada lompatan saat lapisan mengambil alih
     LaunchedEffect(d.id) {
         snapshotFlow { peek }.collect { v -> if (BookFx.id == d.id && vm.openId == d.id) BookFx.peek = v }
     }
     val coords = remember { arrayOfNulls<LayoutCoordinates>(1) }
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+
+    /** Siapkan semuanya di latar: halaman terakhir, sampul, tekstur 3D, dan halaman yang sudah diperkecil untuk frame pertama. */
+    suspend fun warm(): BookReady {
+        val r = BookArt.prepare(vm, ctx, d, screenW)
+        val cw = coords[0]?.size?.width ?: 0
+        if (cw > 0) withContext(Dispatchers.IO) {
+            try { PdfCache.best(d.pdf, r.page)?.let { BookTex.pageTex(it, cw.toFloat()) } } catch (e: Throwable) { }
+        }
+        return r
+    }
+    // jari baru menyentuh: mulai menyiapkan SEKARANG (jeda sentuh -> lepas ~80-150 ms terpakai), bukan menunggu ketukan selesai
+    LaunchedEffect(pressed, needPrep) {
+        if (pressed && needPrep && BookArt.peekReady(d, screenW) == null && warmJob[0]?.isActive != true) {
+            warmJob[0] = scope.launch { try { warm() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) { } }
+        }
+    }
 
     fun morphNow(): Morph {
         val c = coords[0]
@@ -464,23 +513,29 @@ fun BookCard(
         modifier.fillMaxWidth().combinedClickable(
             interactionSource = src, indication = null,
             onClick = {
+                fun go(r: BookReady) {
+                    BookFx.begin(d.id, r.page, r.ratio, pdark, cols)
+                    BookFx.tilt = BookSpec.PEEK_YAW * peek
+                    BookFx.peek = peek
+                    BookFx.tex = BookTex.peek(d) ?: ct
+                    BookFx.hideId = d.id   // kartu menyembunyikan bukunya di frame yang sama dengan lapisan animasi mulai menggambar
+                    onClick(morphNow())
+                }
                 if (!needPrep) onClick(morphNow())
-                else if (!busy) {
-                    busy = true
-                    scope.launch {
-                        try {
-                            val r = BookArt.prepare(vm, ctx, d, screenW)
-                            // halaman diperkecil sekali di latar supaya frame pertama animasi tidak membuatnya di thread gambar
-                            val cw = coords[0]?.let { it.size.width } ?: 0
-                            if (cw > 0) withContext(Dispatchers.IO) {
-                                try { PdfCache.best(d.pdf, r.page)?.let { BookTex.pageTex(it, cw.toFloat()) } } catch (e: Throwable) { }
-                            }
-                            BookFx.begin(d.id, r.page, r.ratio, pdark, cols)
-                            BookFx.tilt = BookSpec.PEEK_YAW * peek
-                            BookFx.peek = peek
-                            BookFx.tex = BookTex.peek(d) ?: ct
-                            onClick(morphNow())
-                        } finally { busy = false }
+                else {
+                    // jalur cepat: semuanya sudah siap (prewarm saat jari menyentuh / ketukan sebelumnya) -> animasi mulai di frame ini juga
+                    val fast = BookArt.peekReady(d, screenW)
+                    val cw0 = coords[0]?.size?.width ?: 0
+                    val pg0 = fast?.let { PdfCache.best(d.pdf, it.page) }
+                    if (fast != null && (cw0 <= 0 || pg0 == null || pg0.width <= cw0 * 2f || BookFx.pageTexSrc === pg0)) go(fast)
+                    else if (!busy) {
+                        busy = true
+                        scope.launch {
+                            try {
+                                warmJob[0]?.join()   // prewarm yang sudah jalan sejak jari menyentuh tidak diulang
+                                go(warm())
+                            } finally { busy = false }
+                        }
                     }
                 }
             },
@@ -499,7 +554,7 @@ fun BookCard(
                             // selama lapisan animasi memegang buku (buka / menutup), kartu tidak menggambar bukunya sendiri
                             val own = vm.morph?.book == true && vm.openId == d.id &&
                                 (vm.openP.value > .01f || vm.nav.stack.any { it is Scr.Note && it.id == d.id })
-                            alpha = if (own) 0f else 1f
+                            alpha = if (own || BookFx.hideId == d.id) 0f else 1f
                         }
                     ) {
                         if (ct == null) BookCoverFace(vm, d, Modifier.fillMaxSize())
