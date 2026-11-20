@@ -227,7 +227,9 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
             if (FabFx.drag) return@LaunchedEffect
             // komposisi + ukur isi catatan (apalagi yang panjang) memakan beberapa frame. Kalau animasi sudah jalan saat itu,
             // jam animasi "loncat" dan terasa nyendat. Jadi tunggu sampai ritme frame tenang, baru gerak.
-            settleFrames()
+            // buku PDF: jangan menunggu ritme frame (komposisi layar baca yang berat membuat jeda tunggu memanjang sampai ~14 frame, itu yang
+            // terasa sebagai animasi 'telat'). Sampul 3D hanya butuh canvas ringan, jadi mulai setelah 1-2 frame.
+            settleFrames(if (vm.morph?.book == true) 2 else 14)
             // spring cepat (kaku) dengan sedikit lentur: terasa snappy tapi tetap punya gerak
             vm.openP.animateTo(1f, if (vm.morph?.book == true) BookSpec.openFrom(vm.openP.value) else spring(.8f, 620f))
         } else {
@@ -472,10 +474,10 @@ fun fabCovered(vm: AppVM): Boolean =
     vm.morph?.fabg != null && (vm.openP.value > .01f || vm.nav.stack.any { it is Scr.Note })
 
 /** Tunggu sampai ritme frame tenang (komposisi + ukur awal isi catatan selesai), maksimal ~14 frame. */
-suspend fun settleFrames() {
+suspend fun settleFrames(maxFrames: Int = 14) {
     var last = withFrameNanos { it }
     var n = 0
-    while (n < 14) {
+    while (n < maxFrames) {
         val t = withFrameNanos { it }
         val dt = (t - last) / 1_000_000L
         last = t
