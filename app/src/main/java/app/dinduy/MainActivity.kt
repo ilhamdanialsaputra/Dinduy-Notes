@@ -789,7 +789,20 @@ fun AppRoot(vm: AppVM, act: Actions) {
                         val pid = if (id != null) (PdfConv.under[id] ?: id) else null
                         if (pid != null && vm.note(pid)?.pdf?.isNotEmpty() == true) {
                             SideEffect { vm.ed = null }
-                            PdfScreen(vm, pid, act)
+                            // buku: PdfScreen/PdfReader (PdfDoc, PdfText, tinta, mesin curl) sangat berat dikomposisi. Kalau dilakukan di frame ketukan,
+                            // satu frame panjang itu terasa sebagai animasi 'telat' / tersendat. Selama sampul mengayun dan kertas membesar, yang terlihat
+                            // hanya lapisan 3D + halaman yang SAMA (BookPlaceholder), jadi layar baca baru dikomposisi saat kertas hampir mendarat.
+                            val gated = vm.morph?.book == true && BookFx.id == pid
+                            var live by remember(pid) { mutableStateOf(!gated) }
+                            if (!live) {
+                                LaunchedEffect(pid) {
+                                    while (vm.openP.value < .88f) withFrameNanos { }
+                                    live = true
+                                }
+                                vm.note(pid)?.let { n ->
+                                    Box(Modifier.fillMaxSize().graphicsLayer { alpha = bookReaderAlpha(vm.openP.value) }) { BookPlaceholder(n) }
+                                }
+                            } else PdfScreen(vm, pid, act)
                         } else if (id != null && PdfConv.has(id)) {
                             SideEffect { vm.ed = null }
                         } else if (id != null) {
