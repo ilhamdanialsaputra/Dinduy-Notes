@@ -109,7 +109,7 @@ object BookSpec {
     const val PEEK_LENS = -.45f           // saat disentuh lensa merapat sebesar ini (buku terasa ditekan masuk, tanpa miring)
     const val ROCK_LENS = 0f              // (tidak dipakai lagi: kamera tidak boleh bergoyang selama sampul berayun)
     const val PEEK_SCALE = -.035f         // buku sedikit menekan ke bawah (mengecil) saat disentuh, seperti benda berat ditekan
-    const val SWING_BOUNCE = .022f        // pantulan papan sampul saat membentur bidang meja: terangkat sedikit (ke atas, bukan menembus meja), jatuh lagi, diam
+    const val SWING_BOUNCE = .03f        // pantulan papan sampul saat membentur bidang meja: terangkat sedikit (ke atas, bukan menembus meja), jatuh lagi, diam
     const val ROCK_YAW = 0f               // (tidak dipakai lagi: buku tidak diputar, supaya bidang halaman selalu pas dengan kotaknya)
     const val ROCK_SCALE = .016f          // buku sedikit tertekan (mengecil) tepat saat sampul membentur, lalu pulih
     const val BOARD = .042f               // tebal papan sampul (x lebar sampul)
@@ -167,7 +167,7 @@ fun bookSwing(t: Float): Float {
         return .42f * sstep(p) + .58f * Math.pow(p.toDouble(), 1.45).toFloat()   // awal ringan (langsung terasa), akhir masih bergerak kencang saat membentur
     }
     val u = ((x - imp) / (1f - imp)).coerceIn(0f, 1f)
-    val hop = abs(sin(u * 2f * Math.PI.toFloat())) * Math.pow((1f - u).toDouble(), 1.5).toFloat()   // dua lompatan mengecil, tajam di titik benturan
+    val hop = sin(u * Math.PI.toFloat()) * (1f - u)   // SATU pantulan halus: dua lompatan dalam ~60 ms (durasi baru) terbaca sebagai kedip
     return (1f - BookSpec.SWING_BOUNCE * hop).coerceIn(0f, 1f)
 }
 /** Reaksi buku terhadap bobot sampul: 0 sampai sampul membentur, lalu denyut kecil selama pantulan, kembali 0 tepat saat zoom mulai. */
@@ -473,6 +473,7 @@ fun BookCard(
         val cw = coords[0]?.size?.width ?: 0
         if (cw > 0) withContext(Dispatchers.IO) {
             try { PdfCache.best(d.pdf, r.page)?.let { BookTex.pageTex(it, cw.toFloat()) } } catch (e: Throwable) { }
+            try { BookTex.inner() } catch (e: Throwable) { }   // sisi dalam sampul: dibuat sekali di latar, bukan di frame gambar pertama
         }
         return r
     }
