@@ -168,6 +168,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -964,7 +965,12 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
     val wPx = (widthDp.value * dens * mul).roundToInt()
     val bk = bucket(wPx)
     val key = ui.fid + ":" + index + "@" + bk
-    var bmp by remember(index) { mutableStateOf<ImageBitmap?>((PdfCache.get(key) ?: PdfCache.best(ui.fid, index))?.asImageBitmap()) }
+    // BookFx.pinFor: halaman pertama dari animasi buku dipin kuat; kalau cache LRU sempat membuangnya, tetap ada bitmap (tidak putih polos)
+    var bmp by remember(index) { mutableStateOf<ImageBitmap?>((PdfCache.get(key) ?: PdfCache.best(ui.fid, index) ?: BookFx.pinFor(ui.fid, index))?.asImageBitmap()) }
+    // halaman pertama animasi buku sudah punya bitmap di layar baca: kertas statis BookPageLayer boleh dilepas (lihat BookFx.readerReady)
+    LaunchedEffect(bmp, BookFx.readerReady) {   // readerReady ikut kunci: dibuka ulang saat masih menutup (begin() mereset) => disinyalkan lagi seketika
+        if (bmp != null && !bare && !BookFx.readerReady && BookFx.pdfName == ui.fid && index == BookFx.page) BookFx.readerReady = true
+    }
     LaunchedEffect(index, bk, ui.doc.ok, bare) {
         if (!ui.doc.ok) return@LaunchedEffect
         val hit = PdfCache.get(key)
@@ -1007,7 +1013,11 @@ private fun PdfPage(ui: PdfUi, index: Int, widthDp: Dp, mul: Float, modifier: Mo
         modifier
             .onSizeChanged { sizePx = it }
             .onGloballyPositioned { if (active) ui.pageCoords[index] = it }
-            .then(if (bare) Modifier else Modifier.background(if (ui.dark) Color.Black else Color.White))
+            // halaman pertama animasi buku yang belum punya bitmap: tanpa latar putih, supaya kertas statis di bawahnya (BookPageLayer) tetap terlihat
+            .then(
+                if (bare || (bmp == null && !BookFx.readerReady && BookFx.pdfName == ui.fid && index == BookFx.page)) Modifier
+                else Modifier.background(if (ui.dark) Color.Black else Color.White)
+            )
             .then(if (!active) Modifier else Modifier.pointerInput(ui.inkOn, ui.tool, ui.ts, index) {
                 if (!ui.inkOn) return@pointerInput
                 awaitEachGesture {
@@ -1269,11 +1279,16 @@ fun PdfScreen(vm: AppVM, id: String, act: Actions) {
         }
         doc.open(if (BookFx.id == id) BookFx.page else -1, BookFx.ratio)
         if (doc.ok) {
+            // PdfRenderer (pdfium) memakai satu kunci global: mengukur SEMUA halaman (loadRatios) dan mendeteksi teks sambil animasi buka berjalan
+            // membuat render halaman pertama layar baca antre ±2 detik (halaman putih polos). Pekerjaan latar ini ditunda sampai animasi selesai.
+            if (vm.morph?.book == true && BookFx.id == id) snapshotFlow { vm.openP.value >= .999f }.first { it }
             launch { doc.loadRatios() }
             PdfBus.hasText = false
             PdfBus.hasText = txt.detect(doc.count)
         }
     }
+    // jaring pengaman: kertas statis animasi buku tidak boleh tertinggal selamanya (PDF gagal dibuka, atau mode 3D yang tidak memakai PdfPage)
+    LaunchedEffect(doc.failed) { if (doc.failed) BookFx.readerReady = true }
 
     // penjaga layar kosong (jarang terjadi): bila dokumen belum siap dan belum dinyatakan gagal setelah animasi selesai, coba buka lagi (maks 3 kali)
     LaunchedEffect(doc) {

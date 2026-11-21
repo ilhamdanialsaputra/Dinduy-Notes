@@ -68,6 +68,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -291,9 +292,22 @@ object BookFx {
     @Volatile var pinPage = -1
     @Volatile var pageTexSrc: android.graphics.Bitmap? = null   // bitmap halaman asal tekstur 3D (lihat BookTex.pageTex)
     @Volatile var pageTex: android.graphics.Bitmap? = null
+    /** Nama berkas PDF buku yang sedang dibuka (PdfUi.fid). Dipakai PdfPage untuk tahu bahwa ia halaman pertama dari animasi buku. */
+    @Volatile var pdfName: String? = null
+    /**
+     * Layar baca SUDAH menggambar bitmap halaman pertamanya (bukan putih polos / kosong). Selama false, BookPageLayer terus menggambar kertas
+     * statis di bawahnya, jadi tidak pernah ada celah kosong / putih antara kertas animasi dan layar baca (penyebab kedip saat buka).
+     * Diset PdfPage (bitmap tergambar), PdfScreen (gagal buka / batas waktu). Direset di begin().
+     */
+    var readerReady by mutableStateOf(false)
+
+    /** Bitmap yang dipin untuk halaman ini (bila cache LRU sudah membuangnya). Null kalau bukan halaman buku yang sedang dibuka. */
+    fun pinFor(fid: String, index: Int): android.graphics.Bitmap? =
+        if (pdfName == fid && pinPage == index) pin else null
 
     fun begin(id: String, page: Int, ratio: Float, dark: Boolean, cols: Int = 2) {
         this.id = id; this.page = page; this.ratio = ratio; this.dark = dark; this.cols = cols; live = null; tilt = 0f; peek = 0f; tex = null
+        readerReady = false; pdfName = null
     }
 
     fun capture(noteId: String) {
@@ -565,6 +579,7 @@ fun BookCard(
             onClick = {
                 fun go(r: BookReady) {
                     BookFx.begin(d.id, r.page, r.ratio, pdark, cols)
+                    BookFx.pdfName = d.pdf
                     BookFx.tilt = BookSpec.PEEK_YAW * peek
                     BookFx.peek = peek
                     BookFx.tex = BookArt.tex(d) ?: ct
@@ -603,9 +618,13 @@ fun BookCard(
                     Box(
                         Modifier.fillMaxSize().graphicsLayer {
                             // selama lapisan animasi memegang buku (buka / menutup), kartu tidak menggambar bukunya sendiri
-                            val own = vm.morph?.book == true && vm.openId == d.id &&
-                                (vm.openP.value > .01f || vm.nav.stack.any { it is Scr.Note && it.id == d.id })
-                            alpha = if (own || BookFx.hideId == d.id) 0f else 1f
+                            // lapisan animasi masih hidup selama progres > .01 atau catatan masih di tumpukan (NoteLayer berhenti menggambar di luar itu).
+                            // hideId dilepas SATU FRAME LEBIH LAMBAT lewat LaunchedEffect; kalau kartu tetap tersembunyi karena hideId saja, ada 1 frame
+                            // di mana lapisan animasi sudah hilang DAN kartu belum tampil = sampul kosong (kedip di akhir menutup). Jadi hideId hanya
+                            // berlaku selama lapisan animasi memang masih ada.
+                            val layerAlive = vm.openP.value > .01f || vm.nav.stack.any { it is Scr.Note && it.id == d.id }
+                            val own = vm.morph?.book == true && vm.openId == d.id && layerAlive
+                            alpha = if (own || (BookFx.hideId == d.id && layerAlive)) 0f else 1f
                         }
                     ) {
                         if (ct == null) BookCoverFace(vm, d, Modifier.fillMaxSize())
@@ -651,7 +670,15 @@ fun BookPageLayer(vm: AppVM) {
     val id = vm.openId ?: return
     val d = vm.note(id) ?: return
     val geo = rememberBookGeo()
-    remember(id) { if (BookFx.id != id) BookFx.begin(id, d.pg, 1.4142f, false); 0 }
+    remember(id) { if (BookFx.id != id) { BookFx.begin(id, d.pg, 1.4142f, false); BookFx.pdfName = d.pdf }; 0 }
+    // jaring pengaman: kertas statis tidak boleh tertinggal selamanya bila layar baca tak pernah menggambar halaman pertamanya
+    // (mode 3D yang tidak memakai PdfPage, atau render yang tak kunjung selesai). Hitung 3 detik SETELAH animasi buka selesai.
+    LaunchedEffect(id, BookFx.readerReady) {
+        if (BookFx.readerReady) return@LaunchedEffect
+        snapshotFlow { vm.openP.value >= .999f }.first { it }
+        delay(3000)
+        BookFx.readerReady = true
+    }
     Canvas(Modifier.fillMaxSize()) {
         val tRaw = vm.openP.value.coerceIn(0f, 1f)
         val tt = bookZoomFrac(tRaw)
@@ -659,7 +686,11 @@ fun BookPageLayer(vm: AppVM) {
         if (tt <= .0005f) return@Canvas   // fase sampul terbuka: halaman digambar mesin 3D di BookCoverLayer (ikut miring bersama buku)
         // wadah layar baca sudah penuh (alpha 1): ia membawa halamannya sendiri (PdfPage / BookPlaceholder) di kotak yang sama. Halaman statis ini TIDAK boleh
         // tetap digambar di belakangnya: di mode gulir, begitu daftar bergeser (atau di celah antar halaman) halaman statis ini tembus terlihat sebagai PDF kedua
-        if (tRaw >= BookSpec.READER_ALPHA_TO) return@Canvas
+        // DULU: berhenti begitu progres >= READER_ALPHA_TO, tanpa peduli layar baca sudah menggambar halamannya atau belum. Layar baca ternyata baru
+        // punya bitmap ±2 detik kemudian (PdfRenderer antre), jadi yang terlihat: kertas -> kosong -> abu-abu -> putih polos -> baru teks (kedip).
+        // SEKARANG: kertas statis ini baru berhenti setelah layar baca BENAR-BENAR menggambar bitmap halaman pertama (BookFx.readerReady).
+        // Saat menutup readerReady sudah true, jadi perilaku menutup tidak berubah.
+        if (tRaw >= BookSpec.READER_ALPHA_TO && BookFx.readerReady) return@Canvas
         val c = bookPageRect(vm, size.width, size.height, tt, geo)   // kotak kertas = kotak bingkai (lihat NoteLayer)
         val bmp = bookPageBmp(d.pdf)?.asImageBitmap()
         if (bmp == null) { drawRect(Color.White, Offset(c.left, c.top), Size(c.width, c.height)); return@Canvas }   // tak pernah hitam
@@ -688,7 +719,9 @@ fun BookPlaceholder(note: Note) {
     Canvas(Modifier.fillMaxSize()) {
         val r = BookFx.live ?: bookFinalRect(size.width, size.height, topPad, sab, dens, PdfBus.mode.coerceAtLeast(0), BookFx.ratio)
         val bmp = bookPageBmp(note.pdf)?.asImageBitmap()
-        if (bmp == null) { drawRect(Color.White, Offset(r.left, r.top), Size(r.width, r.height)); return@Canvas }   // tak pernah hitam / kosong
+        // tanpa bitmap: JANGAN menggambar putih polos. Kertas statis BookPageLayer masih ada di bawahnya (readerReady belum true), dan putih polos
+        // di atasnya adalah kedip putih yang terlihat saat buka.
+        if (bmp == null) return@Canvas
         drawImage(
             bmp, IntOffset.Zero, IntSize(bmp.width, bmp.height),
             IntOffset(r.left.roundToInt(), r.top.roundToInt()), IntSize(r.width.roundToInt().coerceAtLeast(1), r.height.roundToInt().coerceAtLeast(1)),

@@ -864,6 +864,9 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     ModelDialogHost(vm)
                     PermissionHost(vm)
                     UpdateHost()
+                    // layar muat awal: paling atas, hanya sekali per proses (beranda sudah dikomposisi di baliknya)
+                    LaunchedEffect(Unit) { vm.boot() }
+                    BootSplash(vm)
                 }
             }
         }

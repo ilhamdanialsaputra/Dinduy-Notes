@@ -263,6 +263,42 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     val sel = mutableStateListOf<String>()
     val seen = HashSet<String>()
 
+    // ---------- layar muat awal ----------
+    /** false selama layar muat awal tampil. Beranda sudah dikomposisi di baliknya, jadi saat layar muat memudar semua catatan sudah jadi (tanpa animasi masuk satu-satu). */
+    var bootDone by mutableStateOf(false)
+    private var bootStarted = false
+
+    /**
+     * Pemanasan sekali per proses (dipanggil AppRoot): sampul, tekstur 3D buku, dan halaman terakhir beberapa PDF teratas dimuat DI SINI,
+     * di balik layar muat. Dulu ini terjadi malas (saat kartu pertama kali disentuh / dibuka), itulah jeda di ketukan pertama setelah app dibuka.
+     * Batas waktu 3,5 detik supaya app tidak pernah tertahan; tampil minimal [MIN_MS] supaya layar muat tidak berkedip sekilas.
+     */
+    fun boot() {
+        if (bootStarted) return
+        bootStarted = true
+        val list = docs.toList().filter { it.dt == 0L && !it.a }
+        val wpx = ctx.resources.displayMetrics.widthPixels
+        viewModelScope.launch {
+            val t0 = System.currentTimeMillis()
+            try {
+                kotlinx.coroutines.withTimeoutOrNull(3500L) {
+                    withContext(Dispatchers.IO) {
+                        for (d in list) if (d.cv.isNotEmpty()) { try { Imgs.load(imgDir, d.cv) } catch (e: Throwable) { } }
+                        val books = list.filter { it.pdf.isNotEmpty() }.take(5)
+                        for (d in books) {
+                            try { BookArt.prepare(this@AppVM, ctx, d, wpx) }
+                            catch (e: CancellationException) { throw e } catch (e: Throwable) { }
+                        }
+                        if (books.isNotEmpty()) try { BookTex.inner() } catch (e: Throwable) { }
+                    }
+                }
+            } catch (e: CancellationException) { throw e } catch (e: Throwable) { }
+            val left = 700L - (System.currentTimeMillis() - t0)
+            if (left > 0L) delay(left)
+            bootDone = true
+        }
+    }
+
     // ---------- suara (rekam, putar, model, transkripsi) ----------
     val rec = Rec(ctx, viewModelScope)
     val player = Player(ctx, viewModelScope)
