@@ -297,6 +297,20 @@ object BookFx {
     }
 
     /** Simpan halaman terakhir seketika saat menutup (tanpa menunggu penundaan 900 ms di layar baca). */
+    private var pendingId: String? = null
+    private var pendingPage = 0
+    /** Catat halaman terakhir sekarang, tulis ke catatan SETELAH animasi tutup (vm.upd memicu recompose + urut ulang seluruh daftar). */
+    fun deferPersist(vm: AppVM, noteId: String) {
+        if (id != noteId) return
+        pendingId = noteId; pendingPage = page
+    }
+    fun flushPersist(vm: AppVM) {
+        val nid = pendingId ?: return
+        pendingId = null
+        val n = vm.note(nid) ?: return
+        if (n.pdf.isNotEmpty() && n.pg != pendingPage) vm.upd(nid) { it.copy(pg = pendingPage) }
+    }
+
     fun persistPage(vm: AppVM, noteId: String) {
         val n = vm.note(noteId) ?: return
         if (id == noteId && n.pdf.isNotEmpty() && n.pg != page) vm.upd(noteId) { it.copy(pg = page) }
@@ -672,6 +686,9 @@ fun BookCoverLayer(vm: AppVM) {
         }
     }
     val ct = remember(texVer, coverKey) { BookTex.peek(d) } ?: BookFx.tex ?: BookTex.plain()
+    // tekstur halaman pertama yang berhasil didapat dipakai terus sampai animasi selesai. PdfCache.best bisa berganti bitmap (pembaca merender
+    // ulang) atau kosong sesaat; tanpa kunci ini halaman di bawah sampul berganti / hilang antar frame = kedip, dan pageTex dibangun ulang di fase gambar.
+    val pageHold = remember(id) { arrayOfNulls<android.graphics.Bitmap>(1) }
     Canvas(Modifier.fillMaxSize()) {
         val tRaw = vm.openP.value.coerceIn(0f, 1f)
         val tt = bookZoomFrac(tRaw)
@@ -692,7 +709,7 @@ fun BookCoverLayer(vm: AppVM) {
         val deg = (BookSpec.COVER_DEG * swing + BookSpec.PEEK_DEG * pk.coerceAtLeast(0f) * (1f - swing)).coerceAtMost(200f)
         // halaman terakhir dibuka: hanya sebelum zoom (setelah itu BookPageLayer yang menggambarnya)
         val pageOn = tt <= .0005f
-        val page = if (pageOn) PdfCache.best(d.pdf, BookFx.page)?.let { BookTex.pageTex(it, r.width) } else null
+        val page = if (!pageOn) null else (pageHold[0] ?: PdfCache.best(d.pdf, BookFx.page)?.let { BookTex.pageTex(it, r.width) }?.also { pageHold[0] = it })
         // sampul menempel di engsel kertas sepanjang zoom (ikut membesar, keluar layar secara alami). Hanya sisa yang masih terlihat (mis. mode halaman,
         // engsel tidak di tepi layar) memudar singkat bersama latar hitam yang masuk, SETELAH kertas hampir penuh
         val fadeA = 1f - bookReveal(tRaw)
