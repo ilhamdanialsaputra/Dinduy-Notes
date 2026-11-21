@@ -272,7 +272,7 @@ fun bookSlide(m: Morph, w: Float, dens: Float, raw: Float): Float {
     return need.coerceIn(0f, min(bw * BookSpec.SLIDE_1COL, room)) * bookCoverFrac(raw)
 }
 
-private val BOOK_SHAPE = RoundedCornerShape(topStart = 2.dp, bottomStart = 2.dp, topEnd = 5.dp, bottomEnd = 5.dp)
+private val BOOK_SHAPE = RoundedCornerShape(topStart = 2.5.dp, bottomStart = 2.5.dp, topEnd = 6.dp, bottomEnd = 6.dp)
 
 /** Keadaan buku yang sedang dibuka (hanya satu catatan terbuka sekaligus). */
 object BookFx {
@@ -545,8 +545,8 @@ fun BookCard(
         val c = coords[0]
         val rc = if (c != null && c.isAttached) c.boundsInWindow() else Rect.Zero
         return Morph(
-            rc.left, rc.top, rc.right, rc.bottom, 5f * dens, Color.Black,
-            floatArrayOf(2f * dens, 5f * dens, 5f * dens, 2f * dens), null, card = true, book = true
+            rc.left, rc.top, rc.right, rc.bottom, 6f * dens, Color.Black,
+            floatArrayOf(2.5f * dens, 6f * dens, 6f * dens, 2.5f * dens), null, card = true, book = true
         )
     }
 
@@ -644,7 +644,7 @@ fun BookCard(
                             drawRoundRect(
                                 pal.p.copy(alpha = selA), Offset(size.width * inset, size.height * inset),
                                 Size(size.width * (1f - 2f * inset), size.height * (1f - 2f * inset)),
-                                CornerRadius(3.dp.toPx()), style = androidx.compose.ui.graphics.drawscope.Stroke(sw)
+                                CornerRadius(3.5.dp.toPx()), style = androidx.compose.ui.graphics.drawscope.Stroke(sw)
                             )
                         }
                     }
