@@ -134,8 +134,30 @@ object BookTex {
         p.reset(); p.color = wht(.28f); c.drawRect(w * .10f, 0f, w, rim, p)
         p.reset(); p.color = blk(.26f); c.drawRect(0f, h - rim, w, h, p)
         p.reset(); p.color = blk(.22f); c.drawRect(w - rim, 0f, w, h, p)
-        val px = Bitmap.createScaledBitmap(out, 1, 1, true).getPixel(0, 0)
-        return CoverTex(out, tone(px))
+        return CoverTex(out, tone(dominant(out)))
+    }
+
+    /**
+     * Warna dominan sampul untuk tepi / punggung. DULU: skala langsung ke 1x1 (hanya mencuplik segelintir piksel, warna punggung sering meleset
+     * dan berganti-ganti antar sampul mirip). SEKARANG: rata-rata area seluruh sampul (tanpa alur engsel di kiri), dibobot kejenuhan supaya
+     * warna yang hidup menang atas putih / abu-abu latar.
+     */
+    private fun dominant(b: Bitmap): Int {
+        val gw = 24; val gh = 34
+        val s = try { Bitmap.createScaledBitmap(b, gw, gh, true) } catch (e: Throwable) { return 0xFF6B5A48.toInt() }
+        val a = IntArray(gw * gh)
+        s.getPixels(a, 0, gw, 0, 0, gw, gh)
+        var sr = 0f; var sg = 0f; var sb = 0f; var sw = 0f
+        val hsv = FloatArray(3)
+        for (y in 1 until gh - 1) for (x in 3 until gw - 1) {
+            val p = a[y * gw + x]
+            android.graphics.Color.colorToHSV(p, hsv)
+            val wgt = .15f + hsv[1] * (1f - kotlin.math.abs(hsv[2] - .5f))
+            sr += (p shr 16 and 255) * wgt; sg += (p shr 8 and 255) * wgt; sb += (p and 255) * wgt; sw += wgt
+        }
+        if (s !== b) s.recycle()
+        if (sw <= 0f) return 0xFF6B5A48.toInt()
+        return (0xFF shl 24) or ((sr / sw).roundToInt().coerceIn(0, 255) shl 16) or ((sg / sw).roundToInt().coerceIn(0, 255) shl 8) or (sb / sw).roundToInt().coerceIn(0, 255)
     }
 
     /** Sisi dalam sampul (kertas pelapis): engsel di kiri (u = 0). */
@@ -382,6 +404,24 @@ object Book3D {
             }
         }
 
+        // ---------------------------------------------------------------- 1b. bayangan sampul di atas halaman (cahaya dari kiri-atas)
+        // Sampul yang terangkat melempar bayangan lembut ke halaman di sebelah engsel: paling pekat saat sampul tegak (~90 derajat), hilang saat
+        // rebah (>= 180) atau tertutup. Digambar TERLEPAS dari showPage (bidang halaman z = 0 sama dengan kotak kertas), jadi saat zoom, ketika
+        // halaman diambil alih BookPageLayer, bayangannya tidak lenyap tiba-tiba: ia tetap di atas kertas sampai sampul memudar.
+        if (deg > .5f && st > .02f) {
+            sc(-hw, -hh, 0f, W, 0f, 0f, 0f, H, 0f)
+            val s = face(0f, 0f, 1f)
+            if (s > 0f) {
+                val a = (st * st).coerceIn(0f, 1f)   // kuadrat: awal dan akhir ayunan lebih halus
+                val x0 = dst8[0]; val y0 = dst8[1]
+                val x1 = x0 + (dst8[2] - x0) * .26f; val y1 = y0 + (dst8[3] - y0) * .26f
+                roundedPath(W, H)
+                paint.reset(); paint.isAntiAlias = true
+                paint.shader = LinearGradient(x0, y0, x1, y1, intArrayOf(blk(.30f * a), blk(.11f * a), 0), floatArrayOf(0f, .45f, 1f), Shader.TileMode.CLAMP)
+                cv.drawPath(path, paint)
+            }
+        }
+
         // ---------------------------------------------------------------- 2. punggung dan tepi blok halaman (diam)
         // saat zoom halaman digambar BookPageLayer (bukan di sini): punggung / tepi tidak boleh menimpa isi kertas di dalam kotak halaman
         val cut = !showPage && deg > .5f
@@ -461,6 +501,23 @@ object Book3D {
                 val tex = cover?.bm
                 if (tex != null) textured(tex, 0f, 0f, tex.width.toFloat(), tex.height.toFloat(), s, false)
                 else { paint.reset(); paint.isAntiAlias = true; paint.color = BookTex.mul(0xFFE9E4DA.toInt(), s); cv.drawPath(path, paint) }
+                // kilau yang menyapu muka sampul selama ayunan (pita terang diagonal tipis yang bergerak mengikuti sudut). Nol saat tertutup (kartu
+                // diam tidak berubah sedikit pun) dan nol saat rebah. Memakai bidang depan (dst8) dan lintasan yang baru digambar (path).
+                if (deg > 1f && deg < 150f) {
+                    val f = deg / 150f
+                    val p0 = (f - .28f).coerceIn(0f, 1f)
+                    val p1 = f.coerceIn(p0, 1f)
+                    val p2 = (f + .28f).coerceIn(p1, 1f)
+                    val peak = .20f * sin(f * Math.PI.toFloat()).coerceAtLeast(0f)
+                    if (peak > .004f && p2 > p0) {
+                        paint.reset(); paint.isAntiAlias = true
+                        paint.shader = LinearGradient(
+                            dst8[0], dst8[1], dst8[4], dst8[5],   // diagonal kiri-atas -> kanan-bawah muka sampul
+                            intArrayOf(wht(0f), wht(peak), wht(0f)), floatArrayOf(p0, p1, p2), Shader.TileMode.CLAMP
+                        )
+                        cv.drawPath(path, paint)
+                    }
+                }
             }
         }
         // sisi dalam
