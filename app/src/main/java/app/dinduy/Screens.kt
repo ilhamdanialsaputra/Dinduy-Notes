@@ -258,10 +258,12 @@ fun LazyStaggeredGridItemScope.holdItemG(): Modifier = Modifier.animateItem(
 fun Modifier.makeRoom(vm: AppVM, id: String, idx: Int, openIdx: () -> Int, h: Float, dens: Float, cols: Int = 1, w: Float = 0f, flat: Boolean = false): Modifier = graphicsLayer {
     val oid = vm.openId
     val m = vm.morph
+    // buku PDF: kartu lain diam di tempat (tidak bergeser, mengecil, atau memudar); sampul rebah menimpa mereka.
+    // DIPERIKSA SEBELUM membaca openP: dengan ratusan kartu di beranda, membaca openP di sini membuat SEMUA blok layer kartu
+    // dihitung ulang di setiap frame animasi buka-tutup buku (itu yang membuat berat & tersendat saat catatan banyak).
+    if (m != null && m.book) return@graphicsLayer
     val p = vm.openP.value.coerceIn(0f, 1f)
     if (p <= 0.001f || oid == null || m == null || oid == id) return@graphicsLayer
-    // buku PDF: kartu lain diam di tempat (tidak bergeser, mengecil, atau memudar); sampul rebah menimpa mereka
-    if (m.book) return@graphicsLayer
     val oi = openIdx()
     if (oi < 0) return@graphicsLayer
     // beranda (1 atau 2 kolom; w > 0 hanya diisi HomeCard): posisi kartu dibaca langsung, bukan sekadar urutan
