@@ -1047,6 +1047,12 @@ private fun TwoColLayout(
                     for (k in 0 until n) if (saved[k] >= 0) { hs[saved[k]] += items[k].second.height + gap; cnt++ }
                     if (cnt >= 3 && minOf(hs[0], hs[1]) * 5 < maxOf(hs[0], hs[1])) java.util.Arrays.fill(saved, -1)
                 }
+                // catatan BARU masuk di indeks 0 (kolom kiri atas). Kartu lama harus ikut bergeser seperti aliran Google Keep: kartu yang tadinya teratas
+                // pindah ke kolom KANAN (kiri -> kanan), bukan menumpuk di kiri bawah. Caranya: cerminkan kolom semua kartu lama (kiri <-> kanan);
+                // struktur kolom tetap sama, hanya tertukar sisi, jadi keseimbangan tinggi tidak berubah. Hasilnya ikut disimpan lewat `fresh`.
+                if (dragId == null && n >= 2 && saved[0] < 0 && (1 until n).any { saved[it] >= 0 }) {
+                    for (k in 1 until n) if (saved[k] >= 0) { saved[k] = 1 - saved[k]; fresh[items[k].first] = saved[k] }
+                }
                 // kartu bersimpanan kolom dihitung dulu; kartu baru mengisi kolom yang paling pendek (kosong = paling awal, mulai dari kiri)
                 val hh = intArrayOf(0, 0)
                 for (k in 0 until n) if (saved[k] >= 0) hh[saved[k]] += items[k].second.height + gap
