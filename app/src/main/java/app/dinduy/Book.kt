@@ -109,12 +109,12 @@ object BookSpec {
     const val PEEK_PITCH = 0f
     const val REST_LENS_X = 1.25f         // mata kamera bergeser ke kiri sejauh ini (x lebar buku): punggung terlihat, muka depan tetap lurus
     const val REST_LENS_Y = 1.1f          // ... dan ke atas: tepi atas (halaman bersusun) terlihat
-    const val PEEK_LENS = -.45f           // saat disentuh lensa merapat sebesar ini (buku terasa ditekan masuk, tanpa miring)
+    const val PEEK_LENS = -.80f          // saat disentuh lensa merapat sebesar ini (buku terasa ditekan masuk, tanpa miring)
     const val ROCK_LENS = 0f              // (tidak dipakai lagi: kamera tidak boleh bergoyang selama sampul berayun)
     const val PEEK_SCALE = -.035f         // buku sedikit menekan ke bawah (mengecil) saat disentuh, seperti benda berat ditekan
-    const val SWING_BOUNCE = .03f        // pantulan papan sampul saat membentur bidang meja: terangkat sedikit (ke atas, bukan menembus meja), jatuh lagi, diam
+    const val SWING_BOUNCE = .05f       // pantulan papan sampul saat membentur bidang meja: terangkat sedikit (ke atas, bukan menembus meja), jatuh lagi, diam
     const val ROCK_YAW = 0f               // (tidak dipakai lagi: buku tidak diputar, supaya bidang halaman selalu pas dengan kotaknya)
-    const val ROCK_SCALE = .016f          // buku sedikit tertekan (mengecil) tepat saat sampul membentur, lalu pulih
+    const val ROCK_SCALE = .028f         // buku sedikit tertekan (mengecil) tepat saat sampul membentur, lalu pulih
     const val BOARD = .042f               // tebal papan sampul (x lebar sampul)
     const val PAGES = .16f                // tebal blok halaman (x lebar sampul)
     const val PAGE_DONE = .8f             // dalam fase zoom: halaman isi sudah di posisi akhir layar baca
@@ -272,7 +272,7 @@ fun bookSlide(m: Morph, w: Float, dens: Float, raw: Float): Float {
     return need.coerceIn(0f, min(bw * BookSpec.SLIDE_1COL, room)) * bookCoverFrac(raw)
 }
 
-private val BOOK_SHAPE = RoundedCornerShape(topStart = 3.dp, bottomStart = 3.dp, topEnd = 8.dp, bottomEnd = 8.dp)
+private val BOOK_SHAPE = RoundedCornerShape(topStart = 1.5.dp, bottomStart = 1.5.dp, topEnd = 3.dp, bottomEnd = 3.dp)
 
 /** Keadaan buku yang sedang dibuka (hanya satu catatan terbuka sekaligus). */
 object BookFx {
@@ -460,15 +460,9 @@ fun BookCoverFace(vm: AppVM, d: Note, modifier: Modifier = Modifier) {
         Canvas(Modifier.fillMaxSize()) {
             val w = size.width
             val h = size.height
-            // alur engsel di kiri
-            drawRect(Brush.horizontalGradient(listOf(Color.Black.copy(.40f), Color.Black.copy(.10f), Color.Transparent), 0f, w * .09f), size = Size(w * .09f, h))
-            drawRect(Color.White.copy(.30f), Offset(w * .095f, 0f), Size(maxOf(1f, w * .006f), h))
-            drawRect(Color.Black.copy(.18f), Offset(w * .088f, 0f), Size(maxOf(1f, w * .005f), h))
-            // kilau lembut
-            drawRect(Brush.linearGradient(listOf(Color.White.copy(.18f), Color.Transparent, Color.Transparent), Offset(w * .1f, 0f), Offset(w * .95f, h * .55f)))
-            // tepi bawah / kanan sedikit gelap supaya terasa tebal
-            drawRect(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(.20f)), h * .7f, h))
-            drawRect(Brush.horizontalGradient(listOf(Color.Transparent, Color.Black.copy(.14f)), w * .93f, w), Offset(w * .93f, 0f), Size(w * .07f, h))
+            // gaya kartun datar (sama dengan BookTex.build): satu pita engsel solid tipis + satu garis terang, tanpa gradasi
+            drawRect(Color.Black.copy(.16f), Offset.Zero, Size(w * .07f, h))
+            drawRect(Color.White.copy(.22f), Offset(w * .07f, 0f), Size(maxOf(1.5f, w * .008f), h))
         }
     }
 }
@@ -551,8 +545,8 @@ fun BookCard(
         val c = coords[0]
         val rc = if (c != null && c.isAttached) c.boundsInWindow() else Rect.Zero
         return Morph(
-            rc.left, rc.top, rc.right, rc.bottom, 8f * dens, Color.Black,
-            floatArrayOf(3f * dens, 8f * dens, 8f * dens, 3f * dens), null, card = true, book = true
+            rc.left, rc.top, rc.right, rc.bottom, 3f * dens, Color.Black,
+            floatArrayOf(1.5f * dens, 3f * dens, 3f * dens, 1.5f * dens), null, card = true, book = true
         )
     }
 
