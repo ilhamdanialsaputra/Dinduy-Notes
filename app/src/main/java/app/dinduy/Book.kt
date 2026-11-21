@@ -67,7 +67,9 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.math.abs
@@ -285,6 +287,8 @@ object BookFx {
     var cols = 2                           // jumlah kolom beranda saat dibuka (1 = buku dipusatkan ulang agar sampul rebah tetap terlihat)
     var live: Rect? = null                 // posisi halaman di layar (koordinat jendela) saat menutup; null = posisi awal baca
     var snap: (() -> Rect?)? = null        // diisi layar baca
+    @Volatile var pin: android.graphics.Bitmap? = null          // halaman terakhir yang dipegang kuat selama animasi (PdfCache LRU bisa membuangnya)
+    @Volatile var pinPage = -1
     @Volatile var pageTexSrc: android.graphics.Bitmap? = null   // bitmap halaman asal tekstur 3D (lihat BookTex.pageTex)
     @Volatile var pageTex: android.graphics.Bitmap? = null
 
@@ -319,9 +323,28 @@ object BookFx {
 
 class BookReady(val page: Int, val ratio: Float)
 
+/** Bitmap halaman terakhir untuk animasi: dari PdfCache, atau salinan yang dipin di BookFx bila cache sempat membuangnya (tidak pernah kosong / putih). */
+fun bookPageBmp(pdf: String): android.graphics.Bitmap? =
+    PdfCache.best(pdf, BookFx.page) ?: BookFx.pin?.takeIf { BookFx.pinPage == BookFx.page }
+
 object BookArt {
     private val ready = java.util.concurrent.ConcurrentHashMap<String, BookReady>()
     private fun rkey(d: Note) = d.pdf + ":" + d.pg
+    private fun tkey(d: Note) = "${d.cv}|${d.cx}|${d.cy}|${d.cz}"
+
+    // BookTex.cache hanya 24 MB (~10 sampul): dengan ratusan buku tekstur sering terbuang, lalu setiap ketukan jatuh ke jalur lambat dan
+    // lapisan animasi bisa mulai dengan sampul polos. Tekstur buku yang sudah disiapkan dipegang di sini (maks 8, terlama dibuang).
+    private val pins = object : LinkedHashMap<String, CoverTex>(16, .75f, true) {
+        override fun removeEldestEntry(e: MutableMap.MutableEntry<String, CoverTex>?) = size > 8
+    }
+    @Synchronized fun pinTex(d: Note, t: CoverTex) { pins[tkey(d)] = t }
+    @Synchronized fun pinned(d: Note): CoverTex? = pins[tkey(d)]
+    fun tex(d: Note): CoverTex? = BookTex.peek(d) ?: pinned(d)
+
+    /** Hanya beberapa kartu PDF pertama yang diprapanaskan saat app baru dibuka (jangan merender halaman untuk ratusan buku). */
+    private val idleTaken = java.util.concurrent.atomic.AtomicInteger(0)
+    val idleLock = kotlinx.coroutines.sync.Mutex()
+    fun claimIdle(): Boolean = idleTaken.incrementAndGet() <= 4
 
     /**
      * Hasil prepare yang masih valid (halaman terakhir sudah di PdfCache, sampul + tekstur 3D sudah ada, preferensi sudah terbaca)
@@ -330,8 +353,7 @@ object BookArt {
     fun peekReady(d: Note, screenWpx: Int): BookReady? {
         val r = ready[rkey(d)] ?: return null
         if (PdfBus.mode < 0 || PdfBus.curl < 0 || PdfBus.curlStyle < 0) return null
-        if (d.cv.isNotEmpty() && Imgs.peek(d.cv) == null) return null
-        if (BookTex.peek(d) == null) return null
+        if (tex(d) == null) return null
         val have = PdfCache.best(d.pdf, r.page) ?: return null
         if (have.width < screenWpx * .8f) return null
         return r
@@ -344,7 +366,10 @@ object BookArt {
     suspend fun prepare(vm: AppVM, ctx: Context, d: Note, screenWpx: Int): BookReady = withContext(Dispatchers.IO) {
         val key = rkey(d)
         if (d.cv.isNotEmpty()) try { Imgs.load(vm.imgDir, d.cv) } catch (e: Throwable) { }
-        try { BookTex.ensure(d) } catch (e: Throwable) { }
+        try {
+            val t = BookTex.ensure(d)
+            if (d.cv.isEmpty() || Imgs.peek(d.cv) != null) pinTex(d, t)   // tekstur asli (bukan polos cadangan) dipegang
+        } catch (e: Throwable) { }
         run {
             val sp0 = ctx.getSharedPreferences("dinduy", 0)
             if (PdfBus.mode < 0) PdfBus.mode = sp0.getInt("pdfmode", 1)
@@ -491,6 +516,16 @@ fun BookCard(
         }
         return r
     }
+    // app baru dibuka: siapkan beberapa buku PDF pertama di latar (satu per satu), supaya ketukan pertama tidak menunggu render halaman + tekstur
+    LaunchedEffect(d.id, d.pdf, needPrep) {
+        if (needPrep && BookArt.peekReady(d, screenW) == null && BookArt.claimIdle()) {
+            delay(400)
+            BookArt.idleLock.withLock {
+                try { BookArt.prepare(vm, ctx, d, screenW); BookTex.inner() }
+                catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) { }
+            }
+        }
+    }
     // jari baru menyentuh: mulai menyiapkan SEKARANG (jeda sentuh -> lepas ~80-150 ms terpakai), bukan menunggu ketukan selesai
     LaunchedEffect(pressed, needPrep) {
         if (pressed && needPrep && BookArt.peekReady(d, screenW) == null && warmJob[0]?.isActive != true) {
@@ -532,7 +567,8 @@ fun BookCard(
                     BookFx.begin(d.id, r.page, r.ratio, pdark, cols)
                     BookFx.tilt = BookSpec.PEEK_YAW * peek
                     BookFx.peek = peek
-                    BookFx.tex = BookTex.peek(d) ?: ct
+                    BookFx.tex = BookArt.tex(d) ?: ct
+                    BookFx.pin = PdfCache.best(d.pdf, r.page); BookFx.pinPage = r.page
                     BookFx.hideId = d.id   // kartu menyembunyikan bukunya di frame yang sama dengan lapisan animasi mulai menggambar
                     onClick(morphNow())
                 }
@@ -625,7 +661,7 @@ fun BookPageLayer(vm: AppVM) {
         // tetap digambar di belakangnya: di mode gulir, begitu daftar bergeser (atau di celah antar halaman) halaman statis ini tembus terlihat sebagai PDF kedua
         if (tRaw >= BookSpec.READER_ALPHA_TO) return@Canvas
         val c = bookPageRect(vm, size.width, size.height, tt, geo)   // kotak kertas = kotak bingkai (lihat NoteLayer)
-        val bmp = PdfCache.best(d.pdf, BookFx.page)?.asImageBitmap()
+        val bmp = bookPageBmp(d.pdf)?.asImageBitmap()
         if (bmp == null) { drawRect(Color.White, Offset(c.left, c.top), Size(c.width, c.height)); return@Canvas }   // tak pernah hitam
         val bw = bmp.width.toFloat()
         val bh = bmp.height.toFloat()
@@ -651,7 +687,7 @@ fun BookPlaceholder(note: Note) {
     val sab = with(LocalDensity.current) { sabDp().toPx() }
     Canvas(Modifier.fillMaxSize()) {
         val r = BookFx.live ?: bookFinalRect(size.width, size.height, topPad, sab, dens, PdfBus.mode.coerceAtLeast(0), BookFx.ratio)
-        val bmp = PdfCache.best(note.pdf, BookFx.page)?.asImageBitmap()
+        val bmp = bookPageBmp(note.pdf)?.asImageBitmap()
         if (bmp == null) { drawRect(Color.White, Offset(r.left, r.top), Size(r.width, r.height)); return@Canvas }   // tak pernah hitam / kosong
         drawImage(
             bmp, IntOffset.Zero, IntSize(bmp.width, bmp.height),
@@ -685,7 +721,10 @@ fun BookCoverLayer(vm: AppVM) {
             texVer++
         }
     }
-    val ct = remember(texVer, coverKey) { BookTex.peek(d) } ?: BookFx.tex ?: BookTex.plain()
+    val ctHold = remember(id) { arrayOfNulls<CoverTex>(1) }
+    (BookTex.peek(d) ?: BookFx.tex ?: BookArt.pinned(d))?.let { ctHold[0] = it }   // texVer ikut dibaca: tekstur baru menggantikan yang lama
+    texVer
+    val ct = ctHold[0] ?: BookTex.plain()   // sekali ada tekstur asli, tidak pernah turun lagi ke polos (kedip polos <-> sampul)
     // tekstur halaman pertama yang berhasil didapat dipakai terus sampai animasi selesai. PdfCache.best bisa berganti bitmap (pembaca merender
     // ulang) atau kosong sesaat; tanpa kunci ini halaman di bawah sampul berganti / hilang antar frame = kedip, dan pageTex dibangun ulang di fase gambar.
     val pageHold = remember(id) { arrayOfNulls<android.graphics.Bitmap>(1) }
@@ -709,7 +748,7 @@ fun BookCoverLayer(vm: AppVM) {
         val deg = (BookSpec.COVER_DEG * swing + BookSpec.PEEK_DEG * pk.coerceAtLeast(0f) * (1f - swing)).coerceAtMost(200f)
         // halaman terakhir dibuka: hanya sebelum zoom (setelah itu BookPageLayer yang menggambarnya)
         val pageOn = tt <= .0005f
-        val page = if (!pageOn) null else (pageHold[0] ?: PdfCache.best(d.pdf, BookFx.page)?.let { BookTex.pageTex(it, r.width) }?.also { pageHold[0] = it })
+        val page = if (!pageOn) null else (pageHold[0] ?: bookPageBmp(d.pdf)?.let { BookTex.pageTex(it, r.width) }?.also { pageHold[0] = it })
         // sampul menempel di engsel kertas sepanjang zoom (ikut membesar, keluar layar secara alami). Hanya sisa yang masih terlihat (mis. mode halaman,
         // engsel tidak di tepi layar) memudar singkat bersama latar hitam yang masuk, SETELAH kertas hampir penuh
         val fadeA = 1f - bookReveal(tRaw)
