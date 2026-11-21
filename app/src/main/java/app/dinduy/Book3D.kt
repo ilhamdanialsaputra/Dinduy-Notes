@@ -89,8 +89,8 @@ object BookTex {
     private fun tone(px: Int): Int {
         val hsv = FloatArray(3)
         android.graphics.Color.colorToHSV(px, hsv)
-        hsv[1] = (hsv[1] * 1.08f).coerceAtMost(1f)
-        hsv[2] = (hsv[2] * .58f).coerceIn(.16f, .60f)
+        hsv[1] = (hsv[1] * 1.15f).coerceAtMost(1f)   // lebih jenuh: warna 'bibir' tebal ala tombol kartun
+        hsv[2] = (hsv[2] * .62f).coerceIn(.24f, .64f)
         return android.graphics.Color.HSVToColor(hsv)
     }
 
@@ -116,24 +116,9 @@ object BookTex {
             }
         }
         val w = tw.toFloat(); val h = th.toFloat()
-        val rim = max(1.5f, w * .005f)
-        // alur engsel di kiri (sama dengan BookCoverFace)
-        p.reset(); p.shader = LinearGradient(0f, 0f, w * .09f, 0f, intArrayOf(blk(.40f), blk(.10f), 0), null, Shader.TileMode.CLAMP)
-        c.drawRect(0f, 0f, w * .09f, h, p)
-        p.reset(); p.color = wht(.30f); c.drawRect(w * .095f, 0f, w * .095f + max(1f, w * .006f), h, p)
-        p.reset(); p.color = blk(.18f); c.drawRect(w * .088f, 0f, w * .088f + max(1f, w * .005f), h, p)
-        // kilau matte yang lembut (bukan mengkilap)
-        p.reset(); p.shader = LinearGradient(w * .1f, 0f, w * .95f, h * .55f, intArrayOf(wht(.14f), 0, 0), null, Shader.TileMode.CLAMP)
-        c.drawRect(0f, 0f, w, h, p)
-        // tepi bawah / kanan sedikit gelap (tipis: ketebalan sekarang datang dari geometri, bukan dari bayangan)
-        p.reset(); p.shader = LinearGradient(0f, h * .78f, 0f, h, intArrayOf(0, blk(.12f)), null, Shader.TileMode.CLAMP)
-        c.drawRect(0f, 0f, w, h, p)
-        p.reset(); p.shader = LinearGradient(w * .95f, 0f, w, 0f, intArrayOf(0, blk(.08f)), null, Shader.TileMode.CLAMP)
-        c.drawRect(w * .95f, 0f, w, h, p)
-        // bevel tegas: tepi atas menangkap cahaya, tepi bawah / kanan menggelap (papan terasa kaku dan bersudut rapi)
-        p.reset(); p.color = wht(.28f); c.drawRect(w * .10f, 0f, w, rim, p)
-        p.reset(); p.color = blk(.26f); c.drawRect(0f, h - rim, w, h, p)
-        p.reset(); p.color = blk(.22f); c.drawRect(w - rim, 0f, w, h, p)
+        // gaya kartun datar: tanpa gradasi. Satu pita engsel solid tipis di kiri + satu garis terang di sebelahnya
+        p.reset(); p.color = blk(.16f); c.drawRect(0f, 0f, w * .07f, h, p)
+        p.reset(); p.color = wht(.22f); c.drawRect(w * .07f, 0f, w * .07f + max(1.5f, w * .008f), h, p)
         return CoverTex(out, tone(dominant(out)))
     }
 
@@ -217,6 +202,7 @@ object Book3D {
         0f, 0f, 0f, 1f, 0f
     )))
     private const val PAPER = 0xFFF4F1EA.toInt()
+    private const val INNER_FLAT = 0xFFEFE8D8.toInt()
     private const val PAGE_LINE_A = 0x26000000
     private const val PAGE_LINE_B = 0x12000000
     private const val GROOVE = 0x59000000
@@ -255,8 +241,8 @@ object Book3D {
         val cp = cos(rp).toFloat(); val sp = sin(rp).toFloat()
         val th = Math.toRadians(deg.toDouble())
         val ct = cos(th).toFloat(); val st = sin(th).toFloat()
-        val rL = .018f * W
-        val rR = .045f * W
+        val rL = .010f * W   // sudut kecil sewajarnya (kiri = punggung hampir siku)
+        val rR = .022f * W
         val edge = cover?.edge ?: 0xFF6B5A48.toInt()
 
         fun pt(x: Float, y: Float, z: Float) {
@@ -404,24 +390,6 @@ object Book3D {
             }
         }
 
-        // ---------------------------------------------------------------- 1b. bayangan sampul di atas halaman (cahaya dari kiri-atas)
-        // Sampul yang terangkat melempar bayangan lembut ke halaman di sebelah engsel: paling pekat saat sampul tegak (~90 derajat), hilang saat
-        // rebah (>= 180) atau tertutup. Digambar TERLEPAS dari showPage (bidang halaman z = 0 sama dengan kotak kertas), jadi saat zoom, ketika
-        // halaman diambil alih BookPageLayer, bayangannya tidak lenyap tiba-tiba: ia tetap di atas kertas sampai sampul memudar.
-        if (deg > .5f && st > .02f) {
-            sc(-hw, -hh, 0f, W, 0f, 0f, 0f, H, 0f)
-            val s = face(0f, 0f, 1f)
-            if (s > 0f) {
-                val a = (st * st).coerceIn(0f, 1f)   // kuadrat: awal dan akhir ayunan lebih halus
-                val x0 = dst8[0]; val y0 = dst8[1]
-                val x1 = x0 + (dst8[2] - x0) * .26f; val y1 = y0 + (dst8[3] - y0) * .26f
-                roundedPath(W, H)
-                paint.reset(); paint.isAntiAlias = true
-                paint.shader = LinearGradient(x0, y0, x1, y1, intArrayOf(blk(.30f * a), blk(.11f * a), 0), floatArrayOf(0f, .45f, 1f), Shader.TileMode.CLAMP)
-                cv.drawPath(path, paint)
-            }
-        }
-
         // ---------------------------------------------------------------- 2. punggung dan tepi blok halaman (diam)
         // saat zoom halaman digambar BookPageLayer (bukan di sini): punggung / tepi tidak boleh menimpa isi kertas di dalam kotak halaman
         val cut = !showPage && deg > .5f
@@ -430,34 +398,19 @@ object Book3D {
             if (android.os.Build.VERSION.SDK_INT >= 26) cv.clipOutRect(l, t, r, b)
             else cv.clipRect(l, t, r, b, android.graphics.Region.Op.DIFFERENCE)
         }
-        // punggung: tiga pita (papan depan | blok halaman | papan belakang) dipisah sambungan, bentuk silinder dengan gradasi tonal
+        // punggung: satu bidang warna solid + dua pita datar (ciri buku bersampul keras). Tanpa gradasi, tanpa alur, tanpa sorot
         sc(-hw, -hh, tc, 0f, 0f, -(pg + 2f * tc), 0f, H, 0f)
         run {
             val s = face(-1f, 0f, 0f)
             if (s > 0f) {
-                solid(BookTex.mul(edge, 1.28f), s)
-                quadPath()
-                paint.reset(); paint.isAntiAlias = true
-                paint.shader = LinearGradient(
-                    dst8[0], dst8[1], dst8[2], dst8[3],
-                    intArrayOf(0x66000000, 0x12000000, GLINT, 0x10000000, 0x5C000000),
-                    floatArrayOf(0f, .2f, .42f, .72f, 1f), Shader.TileMode.CLAMP
-                )
-                cv.drawPath(path, paint)
-                // sambungan: alur gelap + garis terang di sebelahnya (timbul), di sisi dalam papan depan dan belakang
-                line(-hw, -hh, 0f, -hw, hh, 0f, GROOVE, 1.3f)
-                line(-hw, -hh, tc * .16f, -hw, hh, tc * .16f, 0x2EFFFFFF, 1f)
-                line(-hw, -hh, -pg, -hw, hh, -pg, GROOVE, 1.3f)
-                line(-hw, -hh, -pg - tc * .16f, -hw, hh, -pg - tc * .16f, 0x2EFFFFFF, 1f)
-                // gelang punggung: dua pita timbul dekat atas dan bawah (ciri buku bersampul keras), alur gelap + sorot tipis. Tanpa bayangan
-                val b1 = -hh + H * .07f; val b2 = hh - H * .07f; val bt = H * .006f
-                line(-hw, b1, tc, -hw, b1, -pg - tc, 0x40000000, 1.2f)
-                line(-hw, b1 + bt, tc, -hw, b1 + bt, -pg - tc, 0x26FFFFFF, 1f)
-                line(-hw, b2, tc, -hw, b2, -pg - tc, 0x40000000, 1.2f)
-                line(-hw, b2 - bt, tc, -hw, b2 - bt, -pg - tc, 0x26FFFFFF, 1f)
+                solid(edge, 1f)
+                val b1 = -hh + H * .09f; val b2 = hh - H * .09f
+                val bc = BookTex.mul(edge, 1.55f)
+                line(-hw, b1, tc, -hw, b1, -pg - tc, bc, 3f)
+                line(-hw, b2, tc, -hw, b2, -pg - tc, bc, 3f)
             }
         }
-        // atas, bawah (sepanjang x) dan sisi kanan (sepanjang y): papan belakang + halaman. Papan depan = tepi sampul yang berputar.
+        // atas, bawah (sepanjang x) dan sisi kanan (sepanjang y): papan belakang + halaman. Warna solid per sisi (atas terang, kanan sedang, bawah gelap).
         for (side in 0..2) {
             for (strip in 0..1) {
                 val z0 = if (strip == 0) -pg - tc else -pg
@@ -469,18 +422,18 @@ object Book3D {
                     else -> { sc(hw, -hh, z0, 0f, 0f, dz, 0f, H, 0f); s = face(1f, 0f, 0f) }
                 }
                 if (s > 0f) {
+                    val sh = when (side) { 0 -> 1.12f; 1 -> .80f; else -> .92f }
                     if (strip == 0) {
-                        solidGrad(BookTex.mul(edge, .78f), BookTex.mul(edge, 1.10f), side != 2, s)
+                        solid(BookTex.mul(edge, .92f), sh)
                     } else {
-                        // blok halaman: kertas yang makin terang ke arah depan, garis halaman halus berselang-seling
-                        solidGrad(BookTex.mul(PAPER, .90f), PAPER, side != 2, s)
-                        for (i in 1..11) {
-                            val f = i / 12f
-                            val lc = if (i % 2 == 0) PAGE_LINE_A else PAGE_LINE_B
+                        // blok halaman: kertas datar dengan hanya dua garis halaman tegas
+                        solid(PAPER, sh)
+                        for (i in 1..2) {
+                            val f = i / 3f
                             when (side) {
-                                0 -> line(-hw, -hh, z0 + dz * f, hw, -hh, z0 + dz * f, lc, 1f)
-                                1 -> line(-hw, hh, z0 + dz * f, hw, hh, z0 + dz * f, lc, 1f)
-                                else -> line(hw, -hh, z0 + dz * f, hw, hh, z0 + dz * f, lc, 1f)
+                                0 -> line(-hw, -hh, z0 + dz * f, hw, -hh, z0 + dz * f, PAGE_LINE_A, 1.5f)
+                                1 -> line(-hw, hh, z0 + dz * f, hw, hh, z0 + dz * f, PAGE_LINE_A, 1.5f)
+                                else -> line(hw, -hh, z0 + dz * f, hw, hh, z0 + dz * f, PAGE_LINE_A, 1.5f)
                             }
                         }
                     }
@@ -492,49 +445,29 @@ object Book3D {
 
         // ---------------------------------------------------------------- 3. papan sampul (kaku, tebal)
         val hh2 = hh
-        // sisi luar (muka sampul)
+        // sisi luar (muka sampul): datar, kecerahan tetap (gaya kartun: tanpa shading menerus, tanpa kilau, tanpa lapisan hiasan)
         cvq(0f, -hh2, tc / 2f, W, 0f, 0f, 0f, H, 0f)
         run {
             val s = face(-st, 0f, ct)
             if (s > 0f) {
                 roundedPath(W, H)
                 val tex = cover?.bm
-                if (tex != null) textured(tex, 0f, 0f, tex.width.toFloat(), tex.height.toFloat(), s, false)
-                else { paint.reset(); paint.isAntiAlias = true; paint.color = BookTex.mul(0xFFE9E4DA.toInt(), s); cv.drawPath(path, paint) }
-                // kilau yang menyapu muka sampul selama ayunan (pita terang diagonal tipis yang bergerak mengikuti sudut). Nol saat tertutup (kartu
-                // diam tidak berubah sedikit pun) dan nol saat rebah. Memakai bidang depan (dst8) dan lintasan yang baru digambar (path).
-                if (deg > 1f && deg < 150f) {
-                    val f = deg / 150f
-                    val p0 = (f - .28f).coerceIn(0f, 1f)
-                    val p1 = f.coerceIn(p0, 1f)
-                    val p2 = (f + .28f).coerceIn(p1, 1f)
-                    val peak = .20f * sin(f * Math.PI.toFloat()).coerceAtLeast(0f)
-                    if (peak > .004f && p2 > p0) {
-                        paint.reset(); paint.isAntiAlias = true
-                        paint.shader = LinearGradient(
-                            dst8[0], dst8[1], dst8[4], dst8[5],   // diagonal kiri-atas -> kanan-bawah muka sampul
-                            intArrayOf(wht(0f), wht(peak), wht(0f)), floatArrayOf(p0, p1, p2), Shader.TileMode.CLAMP
-                        )
-                        cv.drawPath(path, paint)
-                    }
-                }
+                if (tex != null) textured(tex, 0f, 0f, tex.width.toFloat(), tex.height.toFloat(), 1f, false)
+                else { paint.reset(); paint.isAntiAlias = true; paint.color = 0xFFE9E4DA.toInt(); cv.drawPath(path, paint) }
             }
         }
-        // sisi dalam
+        // sisi dalam: satu warna krem datar
         cvq(0f, -hh2, -tc / 2f, W, 0f, 0f, 0f, H, 0f)
         run {
             val s = face(st, 0f, -ct)
             if (s > 0f) {
                 roundedPath(W, H)
-                val tex = BookTex.inner()
-                textured(tex, 0f, 0f, tex.width.toFloat(), tex.height.toFloat(), s, false)
-                // kertas pelapis ikut bernada warna sampul (tipis, tonal): sampul dan sisi dalamnya terasa satu bahan, bukan dua benda terpisah
                 paint.reset(); paint.isAntiAlias = true
-                paint.color = (BookTex.mul(edge, 1.7f) and 0xFFFFFF) or (0x38 shl 24)
+                paint.color = INNER_FLAT
                 cv.drawPath(path, paint)
             }
         }
-        // tepi atas, bawah, dan tepi bebas (tebal papan terlihat): gradasi tonal dari sisi dalam (gelap) ke sisi luar (terang)
+        // tepi papan sampul (tebal terlihat): satu warna solid per sisi (atas lebih terang, bawah lebih gelap), tanpa gradasi
         for (e in 0..2) {
             val s: Float
             when (e) {
@@ -542,7 +475,7 @@ object Book3D {
                 1 -> { cvq(0f, hh2, -tc / 2f, W, 0f, 0f, 0f, 0f, tc); s = face(0f, 1f, 0f) }
                 else -> { cvq(W, -hh2, -tc / 2f, 0f, 0f, tc, 0f, H, 0f); s = face(ct, 0f, st) }
             }
-            if (s > 0f) solidGrad(BookTex.mul(edge, .82f), BookTex.mul(edge, 1.18f), e != 2, s)
+            if (s > 0f) solid(edge, when (e) { 0 -> 1.12f; 1 -> .80f; else -> .92f })
         }
     }
 }
