@@ -119,6 +119,9 @@ object BookTex {
         // gaya kartun datar: tanpa gradasi. Satu pita engsel solid tipis di kiri + satu garis terang di sebelahnya
         p.reset(); p.color = blk(.16f); c.drawRect(0f, 0f, w * .07f, h, p)
         p.reset(); p.color = wht(.22f); c.drawRect(w * .07f, 0f, w * .07f + max(1.5f, w * .008f), h, p)
+        // gaya tombol kartun: pita terang datar di tepi atas (sorot) dan pita gelap datar di tepi bawah ('bibir' tebal). Keduanya solid, tanpa gradasi
+        p.reset(); p.color = wht(.20f); c.drawRect(w * .11f, h * .022f, w * .94f, h * .022f + max(2f, h * .014f), p)
+        p.reset(); p.color = blk(.16f); c.drawRect(0f, h * .955f, w, h, p)
         return CoverTex(out, tone(dominant(out)))
     }
 
@@ -241,8 +244,8 @@ object Book3D {
         val cp = cos(rp).toFloat(); val sp = sin(rp).toFloat()
         val th = Math.toRadians(deg.toDouble())
         val ct = cos(th).toFloat(); val st = sin(th).toFloat()
-        val rL = .010f * W   // sudut kecil sewajarnya (kiri = punggung hampir siku)
-        val rR = .022f * W
+        val rL = .003f * W   // sudut TAJAM (radius hampir nol, hanya cukup untuk tepi anti-alias yang bersih)
+        val rR = .006f * W
         val edge = cover?.edge ?: 0xFF6B5A48.toInt()
 
         fun pt(x: Float, y: Float, z: Float) {
@@ -422,7 +425,7 @@ object Book3D {
                     else -> { sc(hw, -hh, z0, 0f, 0f, dz, 0f, H, 0f); s = face(1f, 0f, 0f) }
                 }
                 if (s > 0f) {
-                    val sh = when (side) { 0 -> 1.12f; 1 -> .80f; else -> .92f }
+                    val sh = when (side) { 0 -> 1.20f; 1 -> .72f; else -> .90f }
                     if (strip == 0) {
                         solid(BookTex.mul(edge, .92f), sh)
                     } else {
@@ -475,7 +478,7 @@ object Book3D {
                 1 -> { cvq(0f, hh2, -tc / 2f, W, 0f, 0f, 0f, 0f, tc); s = face(0f, 1f, 0f) }
                 else -> { cvq(W, -hh2, -tc / 2f, 0f, 0f, tc, 0f, H, 0f); s = face(ct, 0f, st) }
             }
-            if (s > 0f) solid(edge, when (e) { 0 -> 1.12f; 1 -> .80f; else -> .92f })
+            if (s > 0f) solid(edge, when (e) { 0 -> 1.20f; 1 -> .72f; else -> .90f })
         }
     }
 }
