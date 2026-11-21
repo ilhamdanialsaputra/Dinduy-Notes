@@ -87,11 +87,11 @@ import kotlin.math.roundToInt
 object BookSpec {
     const val OPEN_MS = 540               // durasi buka total (ms) dari tertutup. Koreografi BERTUMPANG TINDIH: sampul mengayun (0..COVER_END), zoom mulai di tengah ayunan (ZOOM_FROM), kamera mendekat setelah sampul mendarat (DOLLY_FROM)
     const val CLOSE_MS = 400              // menutup sedikit lebih cepat daripada membuka (keluar = cepat, masuk = ada waktu menikmati)
-    // Sudut rebah sampul = 180° + asin(PAGES + BOARD) ≈ 193.3° (PAGES .18 + BOARD .05). Sampul TIDAK melayang di bidang halaman (dulu 176°): ia turun mengikuti
+    // Sudut rebah sampul = 180° + asin(PAGES + BOARD) ≈ 196.3° (PAGES .22 + BOARD .06). Sampul TIDAK melayang di bidang halaman (dulu 176°): ia turun mengikuti
     // ketebalan buku sampai ujung bebasnya menyentuh bidang papan belakang (bidang "meja"). Karena itu sampul yang terbuka miring
     // landai menjauh dari kamera, perspektifnya sama dengan buku tertutup, dan ketebalan blok halaman tetap terbaca.
     // Kalau PAGES / BOARD diubah, hitung ulang: 180 + asin(PAGES + BOARD) dalam derajat.
-    const val COVER_DEG = 193.3f
+    const val COVER_DEG = 196.3f
     const val COVER_SIGN = -1f            // (tidak dipakai lagi oleh mesin 3D; dibiarkan supaya berkas lain tetap terkompilasi)
     const val COVER_END = .56f            // sampul mengayun dan mendarat pada progres ini
     const val ZOOM_FROM = .29f            // kertas mulai membesar menuju layar baca saat sampul masih di tengah ayunan (~125 derajat): satu gerak mengalir, bukan dua tahap bergantian
@@ -115,8 +115,8 @@ object BookSpec {
     const val SWING_BOUNCE = .05f       // pantulan papan sampul saat membentur bidang meja: terangkat sedikit (ke atas, bukan menembus meja), jatuh lagi, diam
     const val ROCK_YAW = 0f               // (tidak dipakai lagi: buku tidak diputar, supaya bidang halaman selalu pas dengan kotaknya)
     const val ROCK_SCALE = .028f         // buku sedikit tertekan (mengecil) tepat saat sampul membentur, lalu pulih
-    const val BOARD = .050f               // tebal papan sampul (x lebar sampul)
-    const val PAGES = .18f                // tebal blok halaman (x lebar sampul)
+    const val BOARD = .060f               // tebal papan sampul (x lebar sampul)
+    const val PAGES = .22f                // tebal blok halaman (x lebar sampul)
     const val PAGE_DONE = .8f             // dalam fase zoom: halaman isi sudah di posisi akhir layar baca
     const val READER_FROM = .85f          // dalam fase zoom: layar baca (bilah, halaman lain) mulai muncul
     const val DIM_EARLY = .68f            // seberapa gelap seluruh layar di luar buku (beranda di balik sampul) pada DIM_FADE_FROM. Menghitam BERTAHAP sejak sampul mulai terbuka, jadi hitam layar baca nanti hanya menyelesaikan sisa (.32), bukan muncul tiba-tiba dari terang
@@ -272,7 +272,7 @@ fun bookSlide(m: Morph, w: Float, dens: Float, raw: Float): Float {
     return need.coerceIn(0f, min(bw * BookSpec.SLIDE_1COL, room)) * bookCoverFrac(raw)
 }
 
-private val BOOK_SHAPE = RoundedCornerShape(topStart = .5.dp, bottomStart = .5.dp, topEnd = 1.dp, bottomEnd = 1.dp)
+private val BOOK_SHAPE = RoundedCornerShape(topStart = 2.dp, bottomStart = 2.dp, topEnd = 5.dp, bottomEnd = 5.dp)
 
 /** Keadaan buku yang sedang dibuka (hanya satu catatan terbuka sekaligus). */
 object BookFx {
@@ -545,8 +545,8 @@ fun BookCard(
         val c = coords[0]
         val rc = if (c != null && c.isAttached) c.boundsInWindow() else Rect.Zero
         return Morph(
-            rc.left, rc.top, rc.right, rc.bottom, 1f * dens, Color.Black,
-            floatArrayOf(.5f * dens, 1f * dens, 1f * dens, .5f * dens), null, card = true, book = true
+            rc.left, rc.top, rc.right, rc.bottom, 5f * dens, Color.Black,
+            floatArrayOf(2f * dens, 5f * dens, 5f * dens, 2f * dens), null, card = true, book = true
         )
     }
 
@@ -644,7 +644,7 @@ fun BookCard(
                             drawRoundRect(
                                 pal.p.copy(alpha = selA), Offset(size.width * inset, size.height * inset),
                                 Size(size.width * (1f - 2f * inset), size.height * (1f - 2f * inset)),
-                                CornerRadius(1.dp.toPx()), style = androidx.compose.ui.graphics.drawscope.Stroke(sw)
+                                CornerRadius(3.dp.toPx()), style = androidx.compose.ui.graphics.drawscope.Stroke(sw)
                             )
                         }
                     }
