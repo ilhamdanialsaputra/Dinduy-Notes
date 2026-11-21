@@ -66,6 +66,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -142,7 +143,7 @@ class Nav(private val vm: AppVM) {
             if (t is Scr.Note) {
                 vm.ed?.leave()
                 BookFx.capture(t.id)
-                BookFx.persistPage(vm, t.id)
+                BookFx.deferPersist(vm, t.id)
                 // morph keluar selalu menuju posisi kartu saat ini (bukan posisi saat dibuka),
                 // jadi tetap konsisten walau catatan sudah pindah urutan setelah lama diedit
                 val ex = vm.note(t.id)
@@ -238,6 +239,7 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
             try {
                 vm.openP.animateTo(0f, if (vm.morph?.book == true) BookSpec.closeFrom(vm.openP.value) else if (follow) spring(.9f, 640f) else spring(.95f, 760f))
             } finally {
+                BookFx.flushPersist(vm)
                 // finally: kalau animasi tutup dibatalkan di tengah (mis. catatan dibuka lagi), sisa state tidak boleh tertinggal
                 job?.cancel()
                 CloseFx.err = null
@@ -245,8 +247,9 @@ fun NoteLayer(vm: AppVM, on: Boolean, morph: Morph?, under: Boolean = false, con
             }
         }
     }
-    val t0 = vm.openP.value
-    if (!on && t0 <= .01f) return
+    // dibaca lewat derivedState: NoteLayer hanya recompose saat melewati ambang, bukan di setiap frame animasi
+    val shown by remember { derivedStateOf { vm.openP.value > .01f } }
+    if (!on && !shown) return
     vm.ghostVer
     val bookOn = vm.morph?.book == true && vm.openId?.let { vm.note(it) }?.pdf?.isNotEmpty() == true
     val bgeo = if (bookOn) rememberBookGeo() else null
@@ -534,7 +537,7 @@ suspend fun followCard(vm: AppVM) {
             CloseFx.err = floatArrayOf((cur.l - live.l) / k, (cur.t - live.t) / k, (cur.r - live.r) / k, (cur.b - live.b) / k)
             if (cur.ghost == null && live.ghost != null) vm.ghostVer++
         }
-        effMorph(vm)?.let { vm.morph = it }
+        if (vm.morph?.book != true) effMorph(vm)?.let { vm.morph = it }
         vm.morphTick++
     }
 }
