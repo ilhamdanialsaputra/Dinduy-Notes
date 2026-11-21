@@ -794,12 +794,12 @@ fun AppRoot(vm: AppVM, act: Actions) {
                             SideEffect { vm.ed = null }
                             // buku: PdfScreen/PdfReader (PdfDoc, PdfText, tinta, mesin curl) sangat berat dikomposisi. Kalau dilakukan di frame ketukan,
                             // satu frame panjang itu terasa sebagai animasi 'telat' / tersendat. Selama sampul mengayun dan kertas membesar, yang terlihat
-                            // hanya lapisan 3D + halaman yang SAMA (BookPlaceholder), jadi layar baca baru dikomposisi saat kertas hampir mendarat.
+                            // hanya lapisan 3D + halaman yang SAMA (BookPlaceholder), jadi layar baca baru dikomposisi beberapa frame setelah gerak mulai (tetap di balik alpha 0, jadi glitch inisialisasinya tak terlihat).
                             val gated = vm.morph?.book == true && BookFx.id == pid
                             var live by remember(pid) { mutableStateOf(!gated) }
                             if (!live) {
                                 LaunchedEffect(pid) {
-                                    while (vm.openP.value < .88f) withFrameNanos { }
+                                    while (vm.openP.value < .12f) withFrameNanos { }
                                     live = true
                                 }
                                 vm.note(pid)?.let { n ->
