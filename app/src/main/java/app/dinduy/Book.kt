@@ -129,7 +129,9 @@ object BookSpec {
     const val TAIL_RISE_DP = 40f          // jarak naik halaman lanjutan (dp) selama pudar masuk
     const val ZOOM_CAMERA = 2.0f          // jarak kamera di ujung zoom: kamera MENDEKAT ke halaman (bukan sekadar gambar diperbesar), perspektif mengencang
     const val CAMERA = 2.8f               // jarak kamera 3D = CAMERA x lebar sampul (makin besar = perspektif makin lembut)
-    const val ASPECT = .70f               // lebar / tinggi sampul buku
+    const val ASPECT = .70f               // lebar / tinggi sampul buku bila rasio halaman belum diketahui (cadangan)
+    const val MIN_ASPECT = .58f           // batas rasio sampul: paling tinggi / ramping (halaman sangat panjang dipangkas dari atas)
+    const val MAX_ASPECT = 1.55f          // batas rasio sampul: paling lebar (slide 16:9 / panorama dipangkas sedikit di kiri-kanan), supaya sampul rebah tidak melewati layar
     const val BACK_DRAG = .50f            // progres turun sampai segini selama back gesture ditarik penuh
     const val TXT_CHANGE = "Change cover"
     const val TXT_RESTORE = "Restore original cover"
@@ -335,6 +337,39 @@ object BookFx {
     }
 }
 
+/**
+ * Rasio (lebar / tinggi) sampul tiap buku = rasio gambar sampulnya (halaman 1 PDF, atau sampul kustom yang dipangkas ke rasio buku), dibatasi
+ * MIN_ASPECT..MAX_ASPECT. Disimpan di memori per berkas sampul (tidak perlu field baru di Note); bila belum diketahui dipakai rasio standar.
+ * `ver` adalah state: kartu yang membacanya otomatis tersusun ulang sekali saat rasionya baru diketahui.
+ */
+object BookAspect {
+    private val map = java.util.concurrent.ConcurrentHashMap<String, Float>()
+    var ver by mutableIntStateOf(0)
+
+    fun put(cv: String, w: Int, h: Int) {
+        if (cv.isEmpty() || w < 1 || h < 1) return
+        val a = (((w.toFloat() / h) * 1000f).roundToInt() / 1000f).coerceIn(BookSpec.MIN_ASPECT, BookSpec.MAX_ASPECT)
+        if (map.put(cv, a) != a) ver++
+    }
+
+    fun of(cv: String): Float {
+        val v = ver   // dibaca supaya pemanggil di komposisi ikut berubah
+        return if (v < 0 || cv.isEmpty()) BookSpec.ASPECT else (map[cv] ?: BookSpec.ASPECT)
+    }
+    fun of(d: Note): Float = of(d.cv)
+
+    /** Aman dari thread latar. Memakai bitmap di cache bila ada, kalau tidak hanya membaca ukuran berkas (murah, tanpa dekode piksel). */
+    fun ensure(dir: File, cv: String) {
+        if (cv.isEmpty() || map.containsKey(cv)) return
+        Imgs.peek(cv)?.let { put(cv, it.width, it.height); return }
+        val f = File(dir, "$cv.jpg")
+        if (!f.exists()) return
+        val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(f.path, o)
+        put(cv, o.outWidth, o.outHeight)
+    }
+}
+
 class BookReady(val page: Int, val ratio: Float)
 
 /** Bitmap halaman terakhir untuk animasi: dari PdfCache, atau salinan yang dipin di BookFx bila cache sempat membuangnya (tidak pernah kosong / putih). */
@@ -344,7 +379,7 @@ fun bookPageBmp(pdf: String): android.graphics.Bitmap? =
 object BookArt {
     private val ready = java.util.concurrent.ConcurrentHashMap<String, BookReady>()
     private fun rkey(d: Note) = d.pdf + ":" + d.pg
-    private fun tkey(d: Note) = "${d.cv}|${d.cx}|${d.cy}|${d.cz}"
+    private fun tkey(d: Note) = "${d.cv}|${d.cx}|${d.cy}|${d.cz}|${BookAspect.of(d)}"
 
     // BookTex.cache hanya 24 MB (~10 sampul): dengan ratusan buku tekstur sering terbuang, lalu setiap ketukan jatuh ke jalur lambat dan
     // lapisan animasi bisa mulai dengan sampul polos. Tekstur buku yang sudah disiapkan dipegang di sini (maks 8, terlama dibuang).
@@ -550,8 +585,11 @@ fun BookCard(
         )
     }
 
+    // rasio buku mengikuti halaman 1 PDF (dibaca dari gambar sampulnya). Sebelum diketahui memakai rasio standar, lalu menyesuaikan sekali.
+    val asp = BookAspect.of(d)
+    LaunchedEffect(d.cv) { if (d.cv.isNotEmpty()) withContext(Dispatchers.IO) { try { BookAspect.ensure(vm.imgDir, d.cv) } catch (e: Throwable) { } } }
     // tekstur sampul 3D dibuat di latar; sebelum jadi, kartu memakai sampul datar (tanpa kedip)
-    val coverKey = "${d.cv}|${d.cx}|${d.cy}|${d.cz}"
+    val coverKey = "${d.cv}|${d.cx}|${d.cy}|${d.cz}|$asp"
     var texVer by remember { mutableIntStateOf(0) }
     LaunchedEffect(coverKey) {
         if (BookTex.peek(d) == null) {
@@ -603,10 +641,12 @@ fun BookCard(
         ),
         contentAlignment = Alignment.TopCenter
     ) {
-        Column(Modifier.widthIn(max = if (cols == 1) 200.dp else 480.dp).fillMaxWidth().padding(horizontal = 10.dp, vertical = 10.dp)) {
+        // 1 kolom: buku lebar (slide) sedikit lebih lebar dari buku tegak, tapi tetap dibatasi supaya sampul yang rebah tidak melewati layar
+        val maxW1 = 200f + 32f * ((asp - BookSpec.ASPECT) / (BookSpec.MAX_ASPECT - BookSpec.ASPECT)).coerceIn(0f, 1f)
+        Column(Modifier.widthIn(max = if (cols == 1) maxW1.dp else 480.dp).fillMaxWidth().padding(horizontal = 10.dp, vertical = 10.dp)) {
             Box(Modifier.fillMaxWidth().padding(end = 6.dp, bottom = 5.dp)) {
                 Box(
-                    Modifier.fillMaxWidth().aspectRatio(BookSpec.ASPECT)
+                    Modifier.fillMaxWidth().aspectRatio(asp)
                         .onGloballyPositioned { coords[0] = it; track?.invoke(morphNow()) }
                 ) {
                     Box(
@@ -690,9 +730,10 @@ fun BookPageLayer(vm: AppVM) {
         if (bmp == null) { drawRect(Color.White, Offset(c.left, c.top), Size(c.width, c.height)); return@Canvas }   // tak pernah hitam
         val bw = bmp.width.toFloat()
         val bh = bmp.height.toFloat()
+        val asp = BookAspect.of(d)
         var cw = bw
-        var ch = cw / BookSpec.ASPECT
-        if (ch > bh) { ch = bh; cw = ch * BookSpec.ASPECT }
+        var ch = cw / asp
+        if (ch > bh) { ch = bh; cw = ch * asp }
         // potongan rasio sampul -> halaman utuh dengan progres YANG SAMA dengan kotaknya (tidak lebih cepat), jadi isi tidak bergeser terhadap tepi
         val sx = lerp((bw - cw) / 2f, 0f, tt)
         val sw = lerp(cw, bw, tt); val sh = lerp(ch, bh, tt)
@@ -737,7 +778,7 @@ fun BookCoverLayer(vm: AppVM) {
     val geo = rememberBookGeo()
     // tekstur sampul dipegang lapisan ini dan TIDAK PERNAH dibuat di fase gambar. Sampul diganti -> kuncinya berubah -> tekstur baru
     // dicari / dibuat di latar; selama itu tekstur sebelumnya (atau polos) tetap dipakai, jadi tidak ada patah frame
-    val coverKey = "${d.cv}|${d.cx}|${d.cy}|${d.cz}"
+    val coverKey = "${d.cv}|${d.cx}|${d.cy}|${d.cz}|${BookAspect.of(d)}"
     var texVer by remember { mutableIntStateOf(0) }
     LaunchedEffect(coverKey) {
         if (BookTex.peek(d) == null) {
@@ -813,7 +854,8 @@ suspend fun AppVM.setBookCover(id: String, rawId: String): Boolean = withContext
         var s = 1
         while (o.outWidth / (s * 2) >= 1600) s *= 2
         val bm = BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inSampleSize = s }) ?: return@withContext false
-        val a = BookSpec.ASPECT
+        // sampul kustom dipangkas ke rasio buku itu sendiri (bukan rasio tetap), jadi bentuk bukunya tidak berubah
+        val a = BookAspect.of(note(id)?.cv ?: "")
         var cw = bm.width
         var ch = (cw / a).toInt()
         if (ch > bm.height) { ch = bm.height; cw = (ch * a).toInt() }
@@ -824,6 +866,7 @@ suspend fun AppVM.setBookCover(id: String, rawId: String): Boolean = withContext
         File(imgDir, "$nid.jpg").outputStream().use { out.compress(Bitmap.CompressFormat.JPEG, 88, it) }
         f.delete()
         Imgs.load(imgDir, nid)   // sudah ada di cache sebelum dipakai kartu
+        BookAspect.put(nid, out.width, out.height)
         // tekstur 3D sampul baru dibangun SEKARANG di latar, sebelum catatan diperbarui: kartu dan lapisan animasi langsung menemukannya
         // (tidak ada kartu flat, tidak ada pembuatan tekstur di fase gambar). Tekstur lama dibuang supaya tidak ada sisa usang.
         note(id)?.let { old ->
@@ -841,6 +884,7 @@ suspend fun AppVM.restoreBookCover(id: String): Boolean = withContext(Dispatcher
     val cv = makePdfCover(this@restoreBookCover, PdfFiles.file(getApplication<android.app.Application>(), n.pdf))
     if (cv.isEmpty()) return@withContext false
     Imgs.load(imgDir, cv)
+    BookAspect.ensure(imgDir, cv)   // rasio halaman 1 diketahui sebelum catatan diperbarui: tidak ada lompatan bentuk
     BookTex.evict(n.cv)   // bila id sampulnya sama, tekstur usang tidak boleh tersisa
     try { BookTex.ensure(n.copy(cv = cv, cx = .5f, cy = 0f, cz = 1f, cp = "")) } catch (e: Throwable) { }
     withContext(Dispatchers.Main) { upd(id) { it.copy(cv = cv, cx = .5f, cy = 0f, cz = 1f, cp = "") } }
