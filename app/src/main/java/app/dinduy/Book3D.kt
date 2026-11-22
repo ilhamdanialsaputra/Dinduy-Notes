@@ -217,6 +217,10 @@ object Book3D {
     )))
     private const val PAPER = 0xFFFBF8F1.toInt()
     private const val INNER_FLAT = 0xFFEFE8D8.toInt()
+    private const val PAPER_N = 0xFFD2CBBB.toInt()        // mode gelap: kertas krem yang diredupkan (tidak menyilaukan di latar gelap)
+    private const val INNER_N = 0xFFC4BCA9.toInt()
+    // geser garis halaman terhadap posisi seragam (dalam satuan jarak antar garis): sisi halaman terlihat buatan tangan, bukan penggaris
+    private val JIT = floatArrayOf(0f, .22f, -.26f, .18f, -.16f)
     private const val PAGE_LINE_A = 0x26000000
     private const val PAGE_LINE_B = 0x12000000
     private const val GROOVE = 0x59000000
@@ -236,7 +240,8 @@ object Book3D {
         cv: android.graphics.Canvas, l: Float, t: Float, r: Float, b: Float,
         yaw: Float, pitch: Float, k: Float, deg: Float,
         cover: CoverTex?, page: Bitmap?, showPage: Boolean, dark: Boolean,
-        lx: Float = 0f, ly: Float = 0f, cam: Float = BookSpec.CAMERA, attach: Float = 0f, top: Boolean = false
+        lx: Float = 0f, ly: Float = 0f, cam: Float = BookSpec.CAMERA, attach: Float = 0f, top: Boolean = false,
+        thick: Float = 1f, night: Boolean = false
     ) {
         val W = r - l
         val H = b - t
@@ -250,7 +255,7 @@ object Book3D {
         val L = if (top) H else W        // panjang sampul diukur dari engsel
         val T = if (top) W else H        // lebar sampul sepanjang engsel
         val tc = BookSpec.BOARD * L      // tebal papan sampul
-        val pg = BookSpec.PAGES * L      // tebal blok halaman
+        val pg = BookSpec.PAGES * L * thick   // tebal blok halaman: mengikuti jumlah halaman PDF (thick; 1 = ketebalan standar)
         val ex = -lx * W                 // posisi mata kamera (relatif pusat buku, px)
         val ey = -ly * W
         val ry = Math.toRadians(yaw.toDouble()); val rp = Math.toRadians(pitch.toDouble())
@@ -264,6 +269,8 @@ object Book3D {
         val rBL = if (top) rR else rL
         val edge = cover?.edge ?: 0xFF6B5A48.toInt()
         val pageLine = (BookTex.mul(edge, .5f) and 0xFFFFFF) or (0x80 shl 24)
+        val paperC = if (night) PAPER_N else PAPER
+        val innerC = if (night) INNER_N else INNER_FLAT
 
         fun pt(x: Float, y: Float, z: Float) {
             val xs = x * k; val ys = y * k; val zs = z * k
@@ -287,15 +294,18 @@ object Book3D {
             }
         }
         // bidang di koordinat sampul (rx dari engsel, y, rz tebal) lalu diputar mengelilingi engsel di punggung kiri
-        fun cvq(ox: Float, oy: Float, oz: Float, ux: Float, uy: Float, uz: Float, vx: Float, vy: Float, vz: Float) {
+        // cs / sn = cos / sin sudut putar mengelilingi engsel (sampul memakai sudut deg; daun halaman yang terkibas memakai sudutnya sendiri)
+        fun cvqa(cs: Float, sn: Float, ox: Float, oy: Float, oz: Float, ux: Float, uy: Float, uz: Float, vx: Float, vy: Float, vz: Float) {
             for (i in 0..3) {
                 val a = if (i == 1 || i == 2) 1f else 0f
                 val c = if (i >= 2) 1f else 0f
                 val rx = ox + a * ux + c * vx; val y = oy + a * uy + c * vy; val rz = oz + a * uz + c * vz
-                if (top) { q[i * 3] = y; q[i * 3 + 1] = -hh + rx * ct - rz * st; q[i * 3 + 2] = tc / 2f + rx * st + rz * ct }
-                else { q[i * 3] = -hw + rx * ct - rz * st; q[i * 3 + 1] = y; q[i * 3 + 2] = tc / 2f + rx * st + rz * ct }
+                if (top) { q[i * 3] = y; q[i * 3 + 1] = -hh + rx * cs - rz * sn; q[i * 3 + 2] = tc / 2f + rx * sn + rz * cs }
+                else { q[i * 3] = -hw + rx * cs - rz * sn; q[i * 3 + 1] = y; q[i * 3 + 2] = tc / 2f + rx * sn + rz * cs }
             }
         }
+        fun cvq(ox: Float, oy: Float, oz: Float, ux: Float, uy: Float, uz: Float, vx: Float, vy: Float, vz: Float) =
+            cvqa(ct, st, ox, oy, oz, ux, uy, uz, vx, vy, vz)
 
         /** Proyeksikan q ke dst8 dan hitung terang bidang. -1 = membelakangi kamera (dibuang). Muka yang menghadap lurus = 1 (tanpa digelapkan). */
         fun face(nx: Float, ny: Float, nz: Float): Float {
@@ -323,7 +333,7 @@ object Book3D {
         fun ink() {
             paint.reset(); paint.isAntiAlias = true
             paint.style = Paint.Style.STROKE; paint.strokeJoin = Paint.Join.ROUND
-            paint.strokeWidth = max(1.4f, W * .011f); paint.color = BookTex.mul(edge, .42f)
+            paint.strokeWidth = max(1.4f, W * .011f); paint.color = BookTex.mul(edge, if (night) .60f else .42f)
             cv.drawPath(path, paint)
         }
         fun solid(color: Int, shade: Float) {
@@ -469,19 +479,25 @@ object Book3D {
                     if (strip == 0) {
                         solid(BookTex.mul(edge, .92f), sh)
                     } else {
-                        // blok halaman: kertas datar dengan hanya dua garis halaman tegas
-                        solid(PAPER, sh)
-                        for (i in 1..2) {
-                            val f = i / 3f
+                        // blok halaman: kertas datar + garis halaman tegas. Jumlah garis mengikuti tebal (PDF tipis 1 garis, PDF tebal sampai 4),
+                        // posisinya sedikit tidak rata dan ujungnya bergantian lebih pendek, seperti kertas yang tidak persis sejajar
+                        solid(paperC, sh)
+                        val nl = if (thick < .7f) 1 else if (thick < 1.15f) 2 else if (thick < 1.4f) 3 else 4
+                        for (i in 1..nl) {
+                            val f = (i + JIT[i]) / (nl + 1f)
                             val zf = z0 + dz * f
+                            val u0 = if (i % 2 == 0) .04f else 0f
+                            val u1 = if (i % 2 == 1) .05f else 0f
+                            fun pgl(ax: Float, ay: Float, bx: Float, by: Float) =
+                                line(ax + (bx - ax) * u0, ay + (by - ay) * u0, zf, ax + (bx - ax) * (1f - u1), ay + (by - ay) * (1f - u1), zf, pageLine, 1.5f)
                             if (top) when (side) {
-                                0 -> line(-hw, -hh, zf, -hw, hh, zf, pageLine, 1.5f)
-                                1 -> line(hw, -hh, zf, hw, hh, zf, pageLine, 1.5f)
-                                else -> line(-hw, hh, zf, hw, hh, zf, pageLine, 1.5f)
+                                0 -> pgl(-hw, -hh, -hw, hh)
+                                1 -> pgl(hw, -hh, hw, hh)
+                                else -> pgl(-hw, hh, hw, hh)
                             } else when (side) {
-                                0 -> line(-hw, -hh, zf, hw, -hh, zf, pageLine, 1.5f)
-                                1 -> line(-hw, hh, zf, hw, hh, zf, pageLine, 1.5f)
-                                else -> line(hw, -hh, zf, hw, hh, zf, pageLine, 1.5f)
+                                0 -> pgl(-hw, -hh, hw, -hh)
+                                1 -> pgl(-hw, hh, hw, hh)
+                                else -> pgl(hw, -hh, hw, hh)
                             }
                         }
                     }
@@ -499,6 +515,19 @@ object Book3D {
         // jadi nol di kartu / awal ayunan dan penuh saat celahnya terbesar.
         // engsel atas, sampul sudah melewati 180: ia di BELAKANG bidang halaman. Kotak halaman dikeluarkan dari area gambar sampul, jadi kertas (yang digambar
         // lapisan lain di bawah adegan ini) tidak tertimpa dan sampul tampak menghilang di balik buku, bukan tiba-tiba hilang
+        // DAUN HALAMAN TERKIBAS: satu lembar kertas terangkat dari blok halaman mengikuti sampul tapi dengan sudut lebih kecil (maks LEAF_DEG di sekitar
+        // sampul tegak), lalu jatuh lagi. Mengintip di sisi sampul yang sedang naik / turun. Nol di sampul tertutup dan setelah rebah, jadi tidak
+        // ada saat diam / ditahan. Murah: satu bidang datar yang sudutnya dihitung dari deg (buka dan tutup sama persis)
+        if (deg > 2f && deg < 150f) {
+            val la = BookSpec.LEAF_DEG * sin(Math.PI * (deg / 140f).coerceIn(0f, 1f)).toFloat()
+            if (la > .6f) {
+                val lr = Math.toRadians(la.toDouble()); val lc = cos(lr).toFloat(); val ls = sin(lr).toFloat()
+                val ins = .03f
+                cvqa(lc, ls, 0f, -T / 2f + T * ins, -tc / 2f, L * (1f - ins), 0f, 0f, 0f, T * (1f - 2f * ins), 0f)
+                val s = if (top) face(0f, -ls, lc) else face(-ls, 0f, lc)
+                if (s > 0f) solid(paperC, .97f)
+            }
+        }
         val behind = top && deg > 180f
         val bSave = if (behind) cv.save() else -1
         if (behind) {
@@ -538,7 +567,7 @@ object Book3D {
             if (s > 0f) {
                 roundedPath(W, H)
                 paint.reset(); paint.isAntiAlias = true
-                paint.color = INNER_FLAT
+                paint.color = innerC
                 cv.drawPath(path, paint)
                 ink()
             }
