@@ -272,6 +272,7 @@ suspend fun AppVM.importPdfs(uris: List<Uri>): List<Note> = withContext(Dispatch
             val title = pdfName(ctx, u).replace(Regex("\\.pdf$", RegexOption.IGNORE_CASE), "").ifBlank { "PDF" }
             val t = System.currentTimeMillis()
             val cv = makePdfCover(this@importPdfs, f)
+            try { BookAspect.ensure(imgDir, cv) } catch (e: Throwable) { }   // rasio halaman 1 diketahui sebelum kartu muncul
             val n = Note(id = id, t = title, x = "PDF · " + cnt(pages, "page"), u = t, c = t, lb = listOfNotNull(filter), pdf = id, cv = cv, cx = .5f, cy = 0f, cz = 1f)
             withContext(Dispatchers.Main) { docs.add(0, n); save() }
             out.add(n)
