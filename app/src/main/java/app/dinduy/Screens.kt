@@ -1053,6 +1053,13 @@ private fun TwoColLayout(
                 if (dragId == null && n >= 2 && saved[0] < 0 && (1 until n).any { saved[it] >= 0 }) {
                     for (k in 1 until n) if (saved[k] >= 0) { saved[k] = 1 - saved[k]; fresh[items[k].first] = saved[k] }
                 }
+                // Kolom KIRI kosong sama sekali sementara kolom kanan terisi (mis. dua catatan di-pin lalu yang di kiri dihapus; kartu kanan tinggal sendiri):
+                // kartu kolom kanan bergeser ke kiri mengisi ruang kosong itu. Berlaku per blok (disematkan / lainnya). Lalu rebalance di bawah
+                // yang membagi ulang bila perlu. Tidak berlaku saat menyeret kartu (kolom sementara tidak boleh dianggap rusak).
+                // (kartu teratas yang tersimpan di kanan = tidak ada kartu kiri; kartu BARU di indeks 0 tidak tersimpan, jadi tidak terkena aturan ini)
+                if (dragId == null && n >= 1 && saved[0] == 1 && (0 until n).none { saved[it] == 0 }) {
+                    for (k in 0 until n) if (saved[k] == 1) { saved[k] = 0; fresh[items[k].first] = 0 }
+                }
                 // kartu bersimpanan kolom dihitung dulu; kartu baru mengisi kolom yang paling pendek (kosong = paling awal, mulai dari kiri)
                 val hh = intArrayOf(0, 0)
                 for (k in 0 until n) if (saved[k] >= 0) hh[saved[k]] += items[k].second.height + gap
