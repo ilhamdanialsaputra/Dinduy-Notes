@@ -118,13 +118,21 @@ object BookTex {
             }
         }
         val w = tw.toFloat(); val h = th.toFloat()
-        // gaya kartun datar: tanpa gradasi. Satu pita engsel solid tipis di kiri + satu garis terang di sebelahnya
-        p.reset(); p.color = blk(.16f); c.drawRect(0f, 0f, w * .07f, h, p)
-        p.reset(); p.color = wht(.22f); c.drawRect(w * .07f, 0f, w * .07f + max(1.5f, w * .008f), h, p)
-        // gaya tombol kartun: pita terang datar di tepi atas (sorot) dan pita gelap datar di tepi bawah ('bibir' tebal). Keduanya solid, tanpa gradasi
-        p.reset(); p.color = wht(.28f); c.drawRect(w * .12f, h * .024f, w * .93f, h * .024f + max(2.5f, h * .020f), p)
+        // gaya kartun datar: tanpa gradasi. Satu pita engsel solid tipis + satu garis terang di sebelahnya.
+        // Buku lebar (slide / landscape) berengsel di ATAS (sampul terbuka ke atas): pita di tepi atas, bukan di kiri
+        val top = aspect >= BookSpec.TOP_HINGE_ASPECT
+        if (top) {
+            p.reset(); p.color = blk(.16f); c.drawRect(0f, 0f, w, h * .07f, p)
+            p.reset(); p.color = wht(.22f); c.drawRect(0f, h * .07f, w, h * .07f + max(1.5f, h * .008f), p)
+        } else {
+            p.reset(); p.color = blk(.16f); c.drawRect(0f, 0f, w * .07f, h, p)
+            p.reset(); p.color = wht(.22f); c.drawRect(w * .07f, 0f, w * .07f + max(1.5f, w * .008f), h, p)
+            // gaya tombol kartun: pita terang datar di tepi atas (sorot)
+            p.reset(); p.color = wht(.28f); c.drawRect(w * .12f, h * .024f, w * .93f, h * .024f + max(2.5f, h * .020f), p)
+            p.reset(); p.color = wht(.28f); c.drawRect(w * .945f, h * .024f, w * .945f + max(2.5f, h * .020f), h * .024f + max(2.5f, h * .020f), p)
+        }
+        // pita gelap datar di tepi bawah ('bibir' tebal), solid tanpa gradasi
         p.reset(); p.color = blk(.22f); c.drawRect(0f, h * .94f, w, h, p)
-        p.reset(); p.color = wht(.28f); c.drawRect(w * .945f, h * .024f, w * .945f + max(2.5f, h * .020f), h * .024f + max(2.5f, h * .020f), p)
         return CoverTex(out, tone(dominant(out)))
     }
 
@@ -228,7 +236,7 @@ object Book3D {
         cv: android.graphics.Canvas, l: Float, t: Float, r: Float, b: Float,
         yaw: Float, pitch: Float, k: Float, deg: Float,
         cover: CoverTex?, page: Bitmap?, showPage: Boolean, dark: Boolean,
-        lx: Float = 0f, ly: Float = 0f, cam: Float = BookSpec.CAMERA, attach: Float = 0f
+        lx: Float = 0f, ly: Float = 0f, cam: Float = BookSpec.CAMERA, attach: Float = 0f, top: Boolean = false
     ) {
         val W = r - l
         val H = b - t
@@ -238,8 +246,11 @@ object Book3D {
         val cx = (l + r) / 2f
         val cy = (t + b) / 2f
         val D = cam * W                  // jarak kamera (x lebar buku); mengecil selama zoom = kamera mendekat (lihat bookCamera)
-        val tc = BookSpec.BOARD * W      // tebal papan sampul
-        val pg = BookSpec.PAGES * W      // tebal blok halaman
+        // top = engsel di ATAS (buku lebar): sampul terbuka ke atas. Tebal diukur terhadap panjang sampul dari engsel (L), jadi sudut rebah sama untuk semua rasio
+        val L = if (top) H else W        // panjang sampul diukur dari engsel
+        val T = if (top) W else H        // lebar sampul sepanjang engsel
+        val tc = BookSpec.BOARD * L      // tebal papan sampul
+        val pg = BookSpec.PAGES * L      // tebal blok halaman
         val ex = -lx * W                 // posisi mata kamera (relatif pusat buku, px)
         val ey = -ly * W
         val ry = Math.toRadians(yaw.toDouble()); val rp = Math.toRadians(pitch.toDouble())
@@ -249,6 +260,8 @@ object Book3D {
         val ct = cos(th).toFloat(); val st = sin(th).toFloat()
         val rL = .008f * W   // sudut membulat secukupnya (kiri = punggung hampir siku, kanan sedikit lebih bulat)
         val rR = .014f * W
+        val rTR = if (top) rL else rR    // sisi engsel (kiri, atau atas bila top) hampir siku; sisi bebas lebih bulat
+        val rBL = if (top) rR else rL
         val edge = cover?.edge ?: 0xFF6B5A48.toInt()
         val pageLine = (BookTex.mul(edge, .5f) and 0xFFFFFF) or (0x80 shl 24)
 
@@ -279,7 +292,8 @@ object Book3D {
                 val a = if (i == 1 || i == 2) 1f else 0f
                 val c = if (i >= 2) 1f else 0f
                 val rx = ox + a * ux + c * vx; val y = oy + a * uy + c * vy; val rz = oz + a * uz + c * vz
-                q[i * 3] = -hw + rx * ct - rz * st; q[i * 3 + 1] = y; q[i * 3 + 2] = tc / 2f + rx * st + rz * ct
+                if (top) { q[i * 3] = y; q[i * 3 + 1] = -hh + rx * ct - rz * st; q[i * 3 + 2] = tc / 2f + rx * st + rz * ct }
+                else { q[i * 3] = -hw + rx * ct - rz * st; q[i * 3 + 1] = y; q[i * 3 + 2] = tc / 2f + rx * st + rz * ct }
             }
         }
 
@@ -351,9 +365,9 @@ object Book3D {
                     add(ccx + (rad * cos(ang)).toFloat(), ccy + (rad * sin(ang)).toFloat())
                 }
             }
-            arc(lu - rR, rR, rR, -90)
+            arc(lu - rTR, rTR, rTR, -90)
             arc(lu - rR, lv - rR, rR, 0)
-            arc(rL, lv - rL, rL, 90)
+            arc(rBL, lv - rBL, rBL, 90)
             arc(rL, rL, rL, 180)
             path.close()
         }
@@ -415,31 +429,43 @@ object Book3D {
             else cv.clipRect(l, t, r, b, android.graphics.Region.Op.DIFFERENCE)
         }
         // punggung: satu bidang warna solid + dua pita datar (ciri buku bersampul keras). Tanpa gradasi, tanpa alur, tanpa sorot
-        sc(-hw, -hh, tc, 0f, 0f, -(pg + 2f * tc), 0f, H, 0f)
+        // (engsel kiri: punggung di sisi kiri; engsel atas: punggung di sisi atas)
+        val bc = BookTex.mul(edge, 1.55f)
+        if (top) sc(-hw, -hh, tc, W, 0f, 0f, 0f, 0f, -(pg + 2f * tc)) else sc(-hw, -hh, tc, 0f, 0f, -(pg + 2f * tc), 0f, H, 0f)
         run {
-            val s = face(-1f, 0f, 0f)
+            val s = if (top) face(0f, -1f, 0f) else face(-1f, 0f, 0f)
             if (s > 0f) {
                 solid(edge, 1f)
-                val b1 = -hh + H * .09f; val b2 = hh - H * .09f
-                val bc = BookTex.mul(edge, 1.55f)
-                line(-hw, b1, tc, -hw, b1, -pg - tc, bc, 3f)
-                line(-hw, b2, tc, -hw, b2, -pg - tc, bc, 3f)
+                if (top) {
+                    val b1 = -hw + W * .09f; val b2 = hw - W * .09f
+                    line(b1, -hh, tc, b1, -hh, -pg - tc, bc, 3f)
+                    line(b2, -hh, tc, b2, -hh, -pg - tc, bc, 3f)
+                } else {
+                    val b1 = -hh + H * .09f; val b2 = hh - H * .09f
+                    line(-hw, b1, tc, -hw, b1, -pg - tc, bc, 3f)
+                    line(-hw, b2, tc, -hw, b2, -pg - tc, bc, 3f)
+                }
             }
         }
-        // atas, bawah (sepanjang x) dan sisi kanan (sepanjang y): papan belakang + halaman. Bidang LURUS (geometri asli). Warna solid per sisi + garis tinta.
+        // sisi papan belakang + halaman yang terlihat. Bidang LURUS. Warna solid per sisi + garis tinta.
+        // engsel kiri: atas, bawah, kanan. engsel atas: kiri, kanan, bawah.
         // (Prisma bersudut membulat dicoba dan DIBATALKAN: sudut kanan-atasnya berujung runcing karena lensa miring, dan hasilnya tidak nyambung dengan engsel.)
         for (side in 0..2) {
             for (strip in 0..1) {
                 val z0 = if (strip == 0) -pg - tc else -pg
                 val dz = if (strip == 0) tc else pg
                 val s: Float
-                when (side) {
+                if (top) when (side) {
+                    0 -> { sc(-hw, -hh, z0, 0f, 0f, dz, 0f, H, 0f); s = face(-1f, 0f, 0f) }
+                    1 -> { sc(hw, -hh, z0, 0f, 0f, dz, 0f, H, 0f); s = face(1f, 0f, 0f) }
+                    else -> { sc(-hw, hh, z0, W, 0f, 0f, 0f, 0f, dz); s = face(0f, 1f, 0f) }
+                } else when (side) {
                     0 -> { sc(-hw, -hh, z0, W, 0f, 0f, 0f, 0f, dz); s = face(0f, -1f, 0f) }
                     1 -> { sc(-hw, hh, z0, W, 0f, 0f, 0f, 0f, dz); s = face(0f, 1f, 0f) }
                     else -> { sc(hw, -hh, z0, 0f, 0f, dz, 0f, H, 0f); s = face(1f, 0f, 0f) }
                 }
                 if (s > 0f) {
-                    val sh = when (side) { 0 -> 1.30f; 1 -> .62f; else -> .86f }
+                    val sh = if (top) when (side) { 0 -> 1.08f; 1 -> .86f; else -> .62f } else when (side) { 0 -> 1.30f; 1 -> .62f; else -> .86f }
                     if (strip == 0) {
                         solid(BookTex.mul(edge, .92f), sh)
                     } else {
@@ -447,10 +473,15 @@ object Book3D {
                         solid(PAPER, sh)
                         for (i in 1..2) {
                             val f = i / 3f
-                            when (side) {
-                                0 -> line(-hw, -hh, z0 + dz * f, hw, -hh, z0 + dz * f, pageLine, 1.5f)
-                                1 -> line(-hw, hh, z0 + dz * f, hw, hh, z0 + dz * f, pageLine, 1.5f)
-                                else -> line(hw, -hh, z0 + dz * f, hw, hh, z0 + dz * f, pageLine, 1.5f)
+                            val zf = z0 + dz * f
+                            if (top) when (side) {
+                                0 -> line(-hw, -hh, zf, -hw, hh, zf, pageLine, 1.5f)
+                                1 -> line(hw, -hh, zf, hw, hh, zf, pageLine, 1.5f)
+                                else -> line(-hw, hh, zf, hw, hh, zf, pageLine, 1.5f)
+                            } else when (side) {
+                                0 -> line(-hw, -hh, zf, hw, -hh, zf, pageLine, 1.5f)
+                                1 -> line(-hw, hh, zf, hw, hh, zf, pageLine, 1.5f)
+                                else -> line(hw, -hh, zf, hw, hh, zf, pageLine, 1.5f)
                             }
                         }
                     }
@@ -461,24 +492,29 @@ object Book3D {
         if (cutSave >= 0) cv.restoreToCount(cutSave)
 
         // ---------------------------------------------------------------- 3. papan sampul (kaku, tebal)
-        val hh2 = hh
         // MENEMPEL DI ENGSEL saat zoom. Sampul rebah ada di atas bidang halaman di dekat engsel (z > 0), jadi saat kamera mendekat dan lensa memusat,
         // perspektif menggesernya keluar dari titik hilang: pojok engsel sisi dalam sampul terlepas beberapa piksel dari tepi kiri kertas
         // (celah). Celah itu baru terlihat bila tepi kiri kertas masih di dalam layar (kolom kanan, mode 1 kolom); di kolom kiri celahnya jatuh di luar layar.
         // Solusi: geser papan sampul (rigid) sebesar selisih pojok engsel sisi dalam -> pojok kiri-atas kertas (z = 0), berbobot attach (0..1, mengikuti dolly),
         // jadi nol di kartu / awal ayunan dan penuh saat celahnya terbesar.
         val sv3 = if (attach > .001f && deg > 90f) {
-            pt(-hw + (tc / 2f) * st, -hh, tc / 2f - (tc / 2f) * ct)
+            if (top) pt(-hw, -hh + (tc / 2f) * st, tc / 2f - (tc / 2f) * ct)
+            else pt(-hw + (tc / 2f) * st, -hh, tc / 2f - (tc / 2f) * ct)
             val hx = ps[0]; val hy = ps[1]
             pt(-hw, -hh, 0f)
             val sv = cv.save()
             cv.translate((ps[0] - hx) * attach, (ps[1] - hy) * attach)
             sv
         } else -1
+        // muka sampul: U = sepanjang lebar gambar, V = ke bawah gambar (engsel kiri: U sepanjang sampul dari engsel; engsel atas: V sepanjang sampul dari engsel),
+        // jadi tekstur selalu tegak. Koordinat cvq = (jarak dari engsel, melintang, tebal)
+        fun cvFace(rz: Float) {
+            if (top) cvq(0f, -T / 2f, rz, 0f, T, 0f, L, 0f, 0f) else cvq(0f, -T / 2f, rz, L, 0f, 0f, 0f, T, 0f)
+        }
         // sisi luar (muka sampul): datar, kecerahan tetap (gaya kartun: tanpa shading menerus, tanpa kilau, tanpa lapisan hiasan)
-        cvq(0f, -hh2, tc / 2f, W, 0f, 0f, 0f, H, 0f)
+        cvFace(tc / 2f)
         run {
-            val s = face(-st, 0f, ct)
+            val s = if (top) face(0f, -st, ct) else face(-st, 0f, ct)
             if (s > 0f) {
                 roundedPath(W, H)
                 val tex = cover?.bm
@@ -488,9 +524,9 @@ object Book3D {
             }
         }
         // sisi dalam: satu warna krem datar
-        cvq(0f, -hh2, -tc / 2f, W, 0f, 0f, 0f, H, 0f)
+        cvFace(-tc / 2f)
         run {
-            val s = face(st, 0f, -ct)
+            val s = if (top) face(0f, st, -ct) else face(st, 0f, -ct)
             if (s > 0f) {
                 roundedPath(W, H)
                 paint.reset(); paint.isAntiAlias = true
@@ -499,15 +535,15 @@ object Book3D {
                 ink()
             }
         }
-        // tepi atas, bawah, dan tepi bebas (tebal papan terlihat): satu warna solid per sisi + garis tinta
+        // tepi sampul (tebal papan terlihat): dua sisi memanjang + tepi bebas, satu warna solid per sisi + garis tinta
         for (e in 0..2) {
             val s: Float
             when (e) {
-                0 -> { cvq(0f, -hh2, -tc / 2f, W, 0f, 0f, 0f, 0f, tc); s = face(0f, -1f, 0f) }
-                1 -> { cvq(0f, hh2, -tc / 2f, W, 0f, 0f, 0f, 0f, tc); s = face(0f, 1f, 0f) }
-                else -> { cvq(W, -hh2, -tc / 2f, 0f, 0f, tc, 0f, H, 0f); s = face(ct, 0f, st) }
+                0 -> { cvq(0f, -T / 2f, -tc / 2f, L, 0f, 0f, 0f, 0f, tc); s = if (top) face(-1f, 0f, 0f) else face(0f, -1f, 0f) }
+                1 -> { cvq(0f, T / 2f, -tc / 2f, L, 0f, 0f, 0f, 0f, tc); s = if (top) face(1f, 0f, 0f) else face(0f, 1f, 0f) }
+                else -> { cvq(L, -T / 2f, -tc / 2f, 0f, 0f, tc, 0f, T, 0f); s = if (top) face(0f, ct, st) else face(ct, 0f, st) }
             }
-            if (s > 0f) solid(edge, when (e) { 0 -> 1.30f; 1 -> .62f; else -> .86f })
+            if (s > 0f) solid(edge, if (top) when (e) { 0 -> 1.08f; 1 -> .86f; else -> .62f } else when (e) { 0 -> 1.30f; 1 -> .62f; else -> .86f })
         }
         if (sv3 >= 0) cv.restoreToCount(sv3)
     }
