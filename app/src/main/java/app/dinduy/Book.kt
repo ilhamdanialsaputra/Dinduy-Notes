@@ -125,7 +125,7 @@ object BookSpec {
     const val READER_ALPHA_FROM = .78f    // wadah layar baca (halaman, bukan latar hitam) mulai tampil
     const val READER_ALPHA_TO = .86f      // wadah sudah penuh; sesudah ini yang tersisa hanya pudar komponen (UI_ALPHA) dan halaman lanjutan (TAIL_ALPHA)
     const val UI_ALPHA_FROM = .86f        // bilah atas (panah back, judul, cari, titik tiga) dan kapsul halaman mulai pudar masuk SETELAH hitam hampir penuh (bookDim ~98%), selesai di progres 1
-    const val TAIL_ALPHA_FROM = .82f      // halaman lanjutan di mode gulir (halaman 2 dst, yang ikut terlihat di bawah halaman pertama) pudar masuk sambil naik pelan, supaya tidak muncul tiba-tiba
+    const val TAIL_ALPHA_FROM = .72f      // halaman lanjutan di mode gulir (halaman 2 dst, yang ikut terlihat di bawah halaman pertama) pudar masuk sambil naik pelan, supaya tidak muncul tiba-tiba
     const val TAIL_RISE_DP = 40f          // jarak naik halaman lanjutan (dp) selama pudar masuk
     const val ZOOM_CAMERA = 2.0f          // jarak kamera di ujung zoom: kamera MENDEKAT ke halaman (bukan sekadar gambar diperbesar), perspektif mengencang
     const val CAMERA = 2.8f               // jarak kamera 3D = CAMERA x lebar sampul (makin besar = perspektif makin lembut)
@@ -652,7 +652,8 @@ fun BookCard(
         contentAlignment = Alignment.TopCenter
     ) {
         // 1 kolom: buku lebar (slide) sedikit lebih lebar dari buku tegak, tapi tetap dibatasi supaya sampul yang rebah tidak melewati layar
-        val maxW1 = 200f + 32f * ((asp - BookSpec.ASPECT) / (1.8f - BookSpec.ASPECT)).coerceIn(0f, 1f)
+        // buku lebar (engsel atas, sampul tidak menjulur ke kiri) dibuat sebesar layar 1 kolom (sisa margin kartu), bukan kecil
+        val maxW1 = if (BookAspect.isTop(asp)) 440f else 200f + 32f * ((asp - BookSpec.ASPECT) / (BookSpec.TOP_HINGE_ASPECT - BookSpec.ASPECT)).coerceIn(0f, 1f)
         Column(Modifier.widthIn(max = if (cols == 1) maxW1.dp else 480.dp).fillMaxWidth().padding(horizontal = 10.dp, vertical = 10.dp)) {
             Box(Modifier.fillMaxWidth().padding(end = 6.dp, bottom = 5.dp)) {
                 Box(
