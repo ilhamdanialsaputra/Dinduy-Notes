@@ -45,7 +45,7 @@ object BookTex {
     private var innerBm: Bitmap? = null
     private var plainTex: CoverTex? = null
 
-    private fun key(d: Note) = "${d.cv}|${d.cx}|${d.cy}|${d.cz}"
+    private fun key(d: Note) = "${d.cv}|${d.cx}|${d.cy}|${d.cz}|${BookAspect.of(d)}"
 
     /** Tekstur yang sudah jadi (null bila belum dibuat). */
     fun peek(d: Note): CoverTex? = cache.get(key(d))
@@ -60,7 +60,7 @@ object BookTex {
     /** Tekstur polos cadangan (satu salinan untuk seluruh app). Murah dipakai berulang; tidak pernah dibuat per frame. */
     fun plain(): CoverTex {
         plainTex?.let { return it }
-        val t = build(null, .5f, .5f, 1f)
+        val t = build(null, .5f, .5f, 1f, BookSpec.ASPECT)
         plainTex = t
         return t
     }
@@ -71,6 +71,8 @@ object BookTex {
      * JANGAN dipanggil dari fase gambar: membuat tekstur memakan beberapa milidetik.
      */
     fun ensure(d: Note): CoverTex {
+        // rasio dari gambar sampul didaftarkan DULU: kunci tekstur memuat rasio, dan tekstur dipangkas ke rasio itu
+        if (d.cv.isNotEmpty()) try { Imgs.peek(d.cv)?.let { BookAspect.put(d.cv, it.width, it.height) } } catch (e: Throwable) { }
         val k = key(d)
         cache.get(k)?.let { return it }
         if (d.cv.isEmpty()) {
@@ -80,7 +82,7 @@ object BookTex {
         }
         val src = try { Imgs.peek(d.cv)?.asAndroidBitmap() } catch (e: Throwable) { null }
         if (src == null) return plain()
-        val t = build(src, d.cx, d.cy, d.cz)
+        val t = build(src, d.cx, d.cy, d.cz, BookAspect.of(d))
         cache.put(k, t)
         return t
     }
@@ -94,9 +96,9 @@ object BookTex {
         return android.graphics.Color.HSVToColor(hsv)
     }
 
-    private fun build(src0: Bitmap?, cx: Float, cy: Float, cz: Float): CoverTex {
+    private fun build(src0: Bitmap?, cx: Float, cy: Float, cz: Float, aspect: Float): CoverTex {
         val tw = if (src0 != null) min(src0.width, 640).coerceAtLeast(160) else 480
-        val th = (tw / BookSpec.ASPECT).roundToInt()
+        val th = (tw / aspect).roundToInt().coerceAtLeast(1)
         val out = Bitmap.createBitmap(tw, th, Bitmap.Config.ARGB_8888)
         val c = android.graphics.Canvas(out)
         c.drawColor(0xFFE9E4DA.toInt())
@@ -393,8 +395,9 @@ object Book3D {
                         cv.drawPath(path, paint)
                     } else {
                         val bw = page.width.toFloat(); val bh = page.height.toFloat()
-                        var cw = bw; var ch = cw / BookSpec.ASPECT
-                        if (ch > bh) { ch = bh; cw = ch * BookSpec.ASPECT }
+                        val asp = W / H   // rasio buku ini (kotak = bidang depan buku)
+                        var cw = bw; var ch = cw / asp
+                        if (ch > bh) { ch = bh; cw = ch * asp }
                         val sl = (bw - cw) / 2f
                         // kertas tidak digelapkan (shade = 1): kecerahannya sama dengan BookPageLayer yang mengambil alih saat zoom
                         textured(page, sl, 0f, sl + cw, ch, 1f, dark)
