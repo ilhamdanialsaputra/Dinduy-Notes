@@ -87,17 +87,17 @@ import kotlin.math.roundToInt
 object BookSpec {
     const val OPEN_MS = 540               // durasi buka total (ms) dari tertutup. Koreografi BERTUMPANG TINDIH: sampul mengayun (0..COVER_END), zoom mulai di tengah ayunan (ZOOM_FROM), kamera mendekat setelah sampul mendarat (DOLLY_FROM)
     const val CLOSE_MS = 400              // menutup sedikit lebih cepat daripada membuka (keluar = cepat, masuk = ada waktu menikmati)
-    // Sudut rebah sampul = 180° + asin(PAGES + BOARD) ≈ 196.3° (PAGES .22 + BOARD .06). Sampul TIDAK melayang di bidang halaman (dulu 176°): ia turun mengikuti
+    // Sudut rebah sampul = 180° + asin(PAGES + BOARD) ≈ 193.3° (PAGES .18 + BOARD .05). Sampul TIDAK melayang di bidang halaman (dulu 176°): ia turun mengikuti
     // ketebalan buku sampai ujung bebasnya menyentuh bidang papan belakang (bidang "meja"). Karena itu sampul yang terbuka miring
     // landai menjauh dari kamera, perspektifnya sama dengan buku tertutup, dan ketebalan blok halaman tetap terbaca.
     // Kalau PAGES / BOARD diubah, hitung ulang: 180 + asin(PAGES + BOARD) dalam derajat.
-    const val COVER_DEG = 196.3f
+    const val COVER_DEG = 193.3f
     const val COVER_SIGN = -1f            // (tidak dipakai lagi oleh mesin 3D; dibiarkan supaya berkas lain tetap terkompilasi)
     const val COVER_END = .56f            // sampul mengayun dan mendarat pada progres ini
     const val ZOOM_FROM = .29f            // kertas mulai membesar menuju layar baca saat sampul masih di tengah ayunan (~125 derajat): satu gerak mengalir, bukan dua tahap bergantian
     const val DOLLY_END = .72f            // lensa + kamera sudah lurus di depan halaman pada progres ini: SELESAI sebelum kertas mendarat, supaya bagian 3D (sampul, punggung) tidak bergeser sendiri di belakang kertas
     const val DOLLY_FROM = .45f           // lensa memusat + kamera mendekat HANYA setelah sampul menyentuh meja (benda yang masih terangkat tidak boleh kena perspektif yang mengetat)
-    const val PEEK_DEG = 7f               // saat jari menekan buku, sampul terangkat sedikit (mengintip). Ayunan buka melanjutkan dari sudut ini, tanpa lompatan
+    const val PEEK_DEG = 0f               // saat jari menekan buku, sampul terangkat sedikit (mengintip). Ayunan buka melanjutkan dari sudut ini, tanpa lompatan
     const val SLIDE_1COL = .5f            // 1 kolom: buku bergeser ke kanan paling banyak setengah lebar buku supaya sampul yang rebah tetap di dalam layar
     const val SWING_IMPACT = .80f         // bagian fase 1 (0..1) saat sampul menyentuh bidang papan belakang; sisanya pantulan kecil lalu diam
     const val LENS_DONE = .80f            // bagian fase dolly (DOLLY_FROM..1) saat mata kamera sudah di tengah (tepi buku sudah di luar layar / tertutup latar)
@@ -109,14 +109,14 @@ object BookSpec {
     const val PEEK_PITCH = 0f
     const val REST_LENS_X = 1.25f         // mata kamera bergeser ke kiri sejauh ini (x lebar buku): punggung terlihat, muka depan tetap lurus
     const val REST_LENS_Y = 1.1f          // ... dan ke atas: tepi atas (halaman bersusun) terlihat
-    const val PEEK_LENS = -.80f          // saat disentuh lensa merapat sebesar ini (buku terasa ditekan masuk, tanpa miring)
+    const val PEEK_LENS = 0f          // saat disentuh lensa merapat sebesar ini (buku terasa ditekan masuk, tanpa miring)
     const val ROCK_LENS = 0f              // (tidak dipakai lagi: kamera tidak boleh bergoyang selama sampul berayun)
     const val PEEK_SCALE = -.035f         // buku sedikit menekan ke bawah (mengecil) saat disentuh, seperti benda berat ditekan
     const val SWING_BOUNCE = .05f       // pantulan papan sampul saat membentur bidang meja: terangkat sedikit (ke atas, bukan menembus meja), jatuh lagi, diam
     const val ROCK_YAW = 0f               // (tidak dipakai lagi: buku tidak diputar, supaya bidang halaman selalu pas dengan kotaknya)
     const val ROCK_SCALE = .028f         // buku sedikit tertekan (mengecil) tepat saat sampul membentur, lalu pulih
-    const val BOARD = .060f               // tebal papan sampul (x lebar sampul)
-    const val PAGES = .22f                // tebal blok halaman (x lebar sampul)
+    const val BOARD = .050f               // tebal papan sampul (x lebar sampul)
+    const val PAGES = .18f                // tebal blok halaman (x lebar sampul)
     const val PAGE_DONE = .8f             // dalam fase zoom: halaman isi sudah di posisi akhir layar baca
     const val READER_FROM = .85f          // dalam fase zoom: layar baca (bilah, halaman lain) mulai muncul
     const val DIM_EARLY = .68f            // seberapa gelap seluruh layar di luar buku (beranda di balik sampul) pada DIM_FADE_FROM. Menghitam BERTAHAP sejak sampul mulai terbuka, jadi hitam layar baca nanti hanya menyelesaikan sisa (.32), bukan muncul tiba-tiba dari terang
@@ -142,7 +142,7 @@ object BookSpec {
     fun openFrom(p: Float): AnimationSpec<Float> = tween((OPEN_MS * (1f - p.coerceIn(0f, 1f)).coerceAtLeast(.18f)).toInt(), easing = EASE)
     fun closeFrom(p: Float): AnimationSpec<Float> = tween((CLOSE_MS * p.coerceIn(0f, 1f).coerceAtLeast(.18f)).toInt(), easing = CLOSE_EASE)
     val backCancelSpec: AnimationSpec<Float> = spring(1f, 500f)
-    val peekSpec: AnimationSpec<Float> = spring(.36f, 380f)   // pegas agak longgar: ada pantulan kecil, terasa berbobot
+    val peekSpec: AnimationSpec<Float> = spring(.75f, 450f)   // pegas agak longgar: ada pantulan kecil, terasa berbobot
 }
 
 private fun sstep(x: Float): Float { val c = x.coerceIn(0f, 1f); return c * c * (3f - 2f * c) }
@@ -272,7 +272,7 @@ fun bookSlide(m: Morph, w: Float, dens: Float, raw: Float): Float {
     return need.coerceIn(0f, min(bw * BookSpec.SLIDE_1COL, room)) * bookCoverFrac(raw)
 }
 
-private val BOOK_SHAPE = RoundedCornerShape(topStart = 2.5.dp, bottomStart = 2.5.dp, topEnd = 6.dp, bottomEnd = 6.dp)
+private val BOOK_SHAPE = RoundedCornerShape(topStart = 1.5.dp, bottomStart = 1.5.dp, topEnd = 3.dp, bottomEnd = 3.dp)
 
 /** Keadaan buku yang sedang dibuka (hanya satu catatan terbuka sekaligus). */
 object BookFx {
@@ -545,8 +545,8 @@ fun BookCard(
         val c = coords[0]
         val rc = if (c != null && c.isAttached) c.boundsInWindow() else Rect.Zero
         return Morph(
-            rc.left, rc.top, rc.right, rc.bottom, 6f * dens, Color.Black,
-            floatArrayOf(2.5f * dens, 6f * dens, 6f * dens, 2.5f * dens), null, card = true, book = true
+            rc.left, rc.top, rc.right, rc.bottom, 3f * dens, Color.Black,
+            floatArrayOf(1.5f * dens, 3f * dens, 3f * dens, 1.5f * dens), null, card = true, book = true
         )
     }
 
@@ -644,7 +644,7 @@ fun BookCard(
                             drawRoundRect(
                                 pal.p.copy(alpha = selA), Offset(size.width * inset, size.height * inset),
                                 Size(size.width * (1f - 2f * inset), size.height * (1f - 2f * inset)),
-                                CornerRadius(3.5.dp.toPx()), style = androidx.compose.ui.graphics.drawscope.Stroke(sw)
+                                CornerRadius(2.dp.toPx()), style = androidx.compose.ui.graphics.drawscope.Stroke(sw)
                             )
                         }
                     }
