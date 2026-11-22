@@ -38,6 +38,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -112,8 +114,10 @@ object BookSpec {
     const val PEEK_LENS = 0f          // saat disentuh lensa merapat sebesar ini (buku terasa ditekan masuk, tanpa miring)
     const val ROCK_LENS = 0f              // (tidak dipakai lagi: kamera tidak boleh bergoyang selama sampul berayun)
     const val PEEK_SCALE = -.035f         // buku sedikit menekan ke bawah (mengecil) saat disentuh, seperti benda berat ditekan
-    const val SWING_BOUNCE = .05f       // pantulan papan sampul saat membentur bidang meja: terangkat sedikit (ke atas, bukan menembus meja), jatuh lagi, diam
+    const val SWING_BOUNCE = .065f      // pantulan papan sampul saat membentur bidang meja: terangkat sedikit (ke atas, bukan menembus meja), jatuh lagi, diam
     const val ROCK_YAW = 0f               // (tidak dipakai lagi: buku tidak diputar, supaya bidang halaman selalu pas dengan kotaknya)
+    const val ANTIC_SCALE = .02f          // antisipasi: buku menekan sedikit lebih dalam tepat sebelum sampul terangkat, lalu pulih (tanpa jeda tambahan: responsif di layar sentuh)
+    const val LEAF_DEG = 24f              // sudut terangkat maksimum daun halaman yang terkibas saat sampul membuka / menutup
     const val ROCK_SCALE = .028f         // buku sedikit tertekan (mengecil) tepat saat sampul membentur, lalu pulih
     const val BOARD = .050f               // tebal papan sampul (x lebar sampul)
     const val PAGES = .18f                // tebal blok halaman (x lebar sampul)
@@ -171,13 +175,18 @@ fun bookSwing(t: Float): Float {
     val imp = BookSpec.SWING_IMPACT
     if (x < imp) {
         val p = x / imp
-        return .42f * sstep(p) + .58f * Math.pow(p.toDouble(), 1.45).toFloat()   // awal ringan (langsung terasa), akhir masih bergerak kencang saat membentur
+        return .32f * sstep(p) + .68f * Math.pow(p.toDouble(), 1.6).toFloat()   // awal ringan (langsung terasa), akhir masih bergerak kencang saat membentur
     }
     val u = ((x - imp) / (1f - imp)).coerceIn(0f, 1f)
     val hop = sin(u * Math.PI.toFloat()) * (1f - u)   // SATU pantulan halus: dua lompatan dalam ~60 ms (durasi baru) terbaca sebagai kedip
     return (1f - BookSpec.SWING_BOUNCE * hop).coerceIn(0f, 1f)
 }
 /** Reaksi buku terhadap bobot sampul: 0 sampai sampul membentur, lalu denyut kecil selama pantulan, kembali 0 tepat saat zoom mulai. */
+/** Denyut antisipasi 0..1..0 di awal ayunan (sebelum sampul benar-benar terangkat). */
+fun bookAntic(t: Float): Float {
+    val x = (t / BookSpec.COVER_END).coerceIn(0f, 1f) / .25f
+    return if (x >= 1f) 0f else sin(x * Math.PI.toFloat())
+}
 fun bookRock(t: Float): Float {
     val x = (t / BookSpec.COVER_END).coerceIn(0f, 1f)
     if (x <= BookSpec.SWING_IMPACT) return 0f
@@ -362,6 +371,14 @@ object BookAspect {
     }
     fun of(d: Note): Float = of(d.cv)
     fun isTop(a: Float): Boolean = a >= BookSpec.TOP_HINGE_ASPECT
+    /** Tebal blok halaman relatif standar (1 = standar ~20 halaman), dari jumlah halaman di teks catatan ("PDF · 48 pages"). Tidak terbaca => 1. */
+    fun thick(d: Note): Float {
+        val n = Regex("\\d+").find(d.x)?.value?.toIntOrNull() ?: return 1f
+        if (n <= 0) return 1f
+        return .55f + .95f * (Math.log(n.toDouble()) / Math.log(300.0)).toFloat().coerceIn(0f, 1f)
+    }
+    /** Sudut sampul rebah di bidang papan belakang untuk tebal blok halaman tertentu. */
+    fun restDeg(thick: Float): Float = 180f + Math.toDegrees(Math.asin((BookSpec.PAGES * thick + BookSpec.BOARD).toDouble())).toFloat()
 
     /** Aman dari thread latar. Memakai bitmap di cache bila ada, kalau tidak hanya membaca ukuran berkas (murah, tanpa dekode piksel). */
     fun ensure(dir: File, cv: String) {
@@ -597,6 +614,8 @@ fun BookCard(
 
     // rasio buku mengikuti halaman 1 PDF (dibaca dari gambar sampulnya). Sebelum diketahui memakai rasio standar, lalu menyesuaikan sekali.
     val asp = BookAspect.of(d)
+    val thick = remember(d.x) { BookAspect.thick(d) }   // tebal buku mengikuti jumlah halaman
+    val night = LocalPal.current.dark                    // palet sisi halaman untuk mode gelap
     LaunchedEffect(d.cv) { if (d.cv.isNotEmpty()) withContext(Dispatchers.IO) { try { BookAspect.ensure(vm.imgDir, d.cv) } catch (e: Throwable) { } } }
     // tekstur sampul 3D dibuat di latar; sebelum jadi, kartu memakai sampul datar (tanpa kedip)
     val coverKey = "${d.cv}|${d.cx}|${d.cy}|${d.cz}|$asp"
@@ -684,7 +703,8 @@ fun BookCard(
                                 Book3D.draw(
                                     it.nativeCanvas, 0f, 0f, size.width, size.height,
                                     yaw, pitch, k, lift, ct, null, lift > .5f, false,
-                                    BookSpec.REST_LENS_X * lens, BookSpec.REST_LENS_Y * lens, top = BookAspect.isTop(asp)
+                                    BookSpec.REST_LENS_X * lens, BookSpec.REST_LENS_Y * lens, top = BookAspect.isTop(asp),
+                                    thick = thick, night = night
                                 )
                             }
                         }
@@ -800,6 +820,18 @@ fun BookCoverLayer(vm: AppVM) {
             texVer++
         }
     }
+    val thick = remember(d.x) { BookAspect.thick(d) }
+    val night = LocalPal.current.dark
+    val hap = LocalHapticFeedback.current
+    val shadowPaint = remember { android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG) }
+    // haptik ringan tepat saat sampul mendarat (hanya buku engsel kiri: engsel atas tidak membentur meja). Hanya pada peralihan belum->sudah mendarat
+    LaunchedEffect(id) {
+        var prev = vm.openP.value / BookSpec.COVER_END >= BookSpec.SWING_IMPACT
+        snapshotFlow { vm.openP.value / BookSpec.COVER_END >= BookSpec.SWING_IMPACT }.collect { now ->
+            if (now && !prev && !BookAspect.isTop(BookAspect.of(d))) try { hap.performHapticFeedback(HapticFeedbackType.TextHandleMove) } catch (e: Throwable) { }
+            prev = now
+        }
+    }
     val ctHold = remember(id) { arrayOfNulls<CoverTex>(1) }
     (BookTex.peek(d) ?: BookFx.tex ?: BookArt.pinned(d))?.let { ctHold[0] = it }   // texVer ikut dibaca: tekstur baru menggantikan yang lama
     texVer
@@ -818,7 +850,7 @@ fun BookCoverLayer(vm: AppVM) {
         val pk = if (morphClosing(vm)) 0f else BookFx.peek              // tekanan jari dilanjutkan saat membuka; saat menutup kartu sendiri yang menerima
         val yaw = (BookSpec.REST_YAW + BookFx.tilt) * (1f - pe)        // tidak ada goyangan putar: bidang halaman (z = 0) selalu persis di kotaknya
         val pitch = BookSpec.REST_PITCH * (1f - pe)
-        val k = lerp(BookSpec.REST_SCALE + BookSpec.PEEK_SCALE * pk, 1f, pe) - BookSpec.ROCK_SCALE * rock
+        val k = lerp(BookSpec.REST_SCALE + BookSpec.PEEK_SCALE * pk, 1f, pe) - BookSpec.ROCK_SCALE * rock - BookSpec.ANTIC_SCALE * bookAntic(tRaw) * (1f - pe)
         // kamera DIAM selama sampul mengayun (sudut pandang kartu bertahan sampai sampul rebah), baru bergeser ke tengah saat zoom
         val lensF = bookLens(tRaw) * (1f + BookSpec.PEEK_LENS * pk * (1f - pe))
         val lx = BookSpec.REST_LENS_X * lensF
@@ -826,7 +858,7 @@ fun BookCoverLayer(vm: AppVM) {
         // engsel atas: ayunan monoton sampai di belakang buku (tanpa pantulan membentur meja)
         val swing = if (topB && tRaw / BookSpec.COVER_END >= BookSpec.SWING_IMPACT) 1f else bookSwing(tRaw)
         // sudut = ayunan + sisa intipan jari (memudar seiring ayunan), jadi dimulai TEPAT di sudut yang terlihat pada kartu
-        val full = if (topB) BookSpec.TOP_COVER_DEG else BookSpec.COVER_DEG
+        val full = if (topB) BookSpec.TOP_COVER_DEG else BookAspect.restDeg(thick)   // rebah di papan belakang, sesuai tebal buku
         val deg = (full * swing + BookSpec.PEEK_DEG * pk.coerceAtLeast(0f) * (1f - swing)).coerceAtMost(full + 7f)
         // halaman terakhir dibuka: hanya sebelum zoom (setelah itu BookPageLayer yang menggambarnya)
         val pageOn = tt <= .0005f
@@ -842,9 +874,17 @@ fun BookCoverLayer(vm: AppVM) {
                 maxOf(0f, r.left - bw * 1.2f), maxOf(0f, r.top - bw * .4f),
                 minOf(size.width, r.right + bw * .4f), minOf(size.height, r.bottom + bw * .4f), (fadeA * 255f).roundToInt()
             ) else -1
+            // bayangan kontak datar (oval solid, tanpa blur) melebar sesaat saat sampul membentur meja, lalu hilang. Tanpa denyut = tidak digambar
+            val sh = (rock * 2.2f).coerceIn(0f, 1f)
+            if (sh > .01f) {
+                shadowPaint.color = ((if (night) 70 else 46) * sh).toInt() shl 24
+                val gw = bw * (.04f - .05f * sh)
+                cnv.drawOval(r.left + gw, r.bottom - bw * .012f, r.right - gw * .4f, r.bottom + bw * (.035f + .02f * sh), shadowPaint)
+            }
             Book3D.draw(
                 cnv, r.left, r.top, r.right, r.bottom,
-                yaw, pitch, k, deg, ct, page, pageOn, BookFx.dark, lx, ly, bookCamera(tRaw), bookDolly(tRaw), topB
+                yaw, pitch, k, deg, ct, page, pageOn, BookFx.dark, lx, ly, bookCamera(tRaw), bookDolly(tRaw), topB,
+                thick, night
             )
             if (sv >= 0) cnv.restoreToCount(sv)
         }
