@@ -226,7 +226,7 @@ object Book3D {
         cv: android.graphics.Canvas, l: Float, t: Float, r: Float, b: Float,
         yaw: Float, pitch: Float, k: Float, deg: Float,
         cover: CoverTex?, page: Bitmap?, showPage: Boolean, dark: Boolean,
-        lx: Float = 0f, ly: Float = 0f, cam: Float = BookSpec.CAMERA
+        lx: Float = 0f, ly: Float = 0f, cam: Float = BookSpec.CAMERA, attach: Float = 0f
     ) {
         val W = r - l
         val H = b - t
@@ -459,6 +459,19 @@ object Book3D {
 
         // ---------------------------------------------------------------- 3. papan sampul (kaku, tebal)
         val hh2 = hh
+        // MENEMPEL DI ENGSEL saat zoom. Sampul rebah ada di atas bidang halaman di dekat engsel (z > 0), jadi saat kamera mendekat dan lensa memusat,
+        // perspektif menggesernya keluar dari titik hilang: pojok engsel sisi dalam sampul terlepas beberapa piksel dari tepi kiri kertas
+        // (celah). Celah itu baru terlihat bila tepi kiri kertas masih di dalam layar (kolom kanan, mode 1 kolom); di kolom kiri celahnya jatuh di luar layar.
+        // Solusi: geser papan sampul (rigid) sebesar selisih pojok engsel sisi dalam -> pojok kiri-atas kertas (z = 0), berbobot attach (0..1, mengikuti dolly),
+        // jadi nol di kartu / awal ayunan dan penuh saat celahnya terbesar.
+        val sv3 = if (attach > .001f && deg > 90f) {
+            pt(-hw + (tc / 2f) * st, -hh, tc / 2f - (tc / 2f) * ct)
+            val hx = ps[0]; val hy = ps[1]
+            pt(-hw, -hh, 0f)
+            val sv = cv.save()
+            cv.translate((ps[0] - hx) * attach, (ps[1] - hy) * attach)
+            sv
+        } else -1
         // sisi luar (muka sampul): datar, kecerahan tetap (gaya kartun: tanpa shading menerus, tanpa kilau, tanpa lapisan hiasan)
         cvq(0f, -hh2, tc / 2f, W, 0f, 0f, 0f, H, 0f)
         run {
@@ -493,5 +506,6 @@ object Book3D {
             }
             if (s > 0f) solid(edge, when (e) { 0 -> 1.30f; 1 -> .62f; else -> .86f })
         }
+        if (sv3 >= 0) cv.restoreToCount(sv3)
     }
 }
