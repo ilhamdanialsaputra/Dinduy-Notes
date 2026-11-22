@@ -619,18 +619,27 @@ fun BookCard(
     // tekstur sampul 3D dibuat di latar; sebelum jadi, kartu memakai sampul datar (tanpa kedip)
     val coverKey = "${d.cv}|${d.cx}|${d.cy}|${d.cz}|$asp"
     var texVer by remember { mutableIntStateOf(0) }
+    // texVer SELALU dinaikkan setelah pemeriksaan (juga bila tekstur ternyata sudah dibuat pihak lain, mis. pemuatan awal / BookArt / efek sebelumnya yang
+    // dibatalkan saat rasio berubah): dulu hanya dinaikkan bila kita sendiri yang membuatnya, sehingga tekstur yang selesai SETELAH komposisi terakhir
+    // membaca cache tidak pernah terbaca => buku tampak datar (bukan 3D) sampai ditekan. Bila gambar belum sempat termuat, dicoba lagi beberapa kali.
     LaunchedEffect(coverKey) {
-        if (BookTex.peek(d) == null) {
-            withContext(Dispatchers.IO) {
-                if (d.cv.isNotEmpty()) try { Imgs.load(vm.imgDir, d.cv) } catch (e: Throwable) { }
-                try { BookTex.ensure(d) } catch (e: Throwable) { }
+        var tries = 0
+        while (true) {
+            if (BookTex.peek(d) == null) {
+                withContext(Dispatchers.IO) {
+                    if (d.cv.isNotEmpty()) try { Imgs.load(vm.imgDir, d.cv) } catch (e: Throwable) { }
+                    try { BookTex.ensure(d) } catch (e: Throwable) { }
+                }
             }
             texVer++
+            if (BookTex.peek(d) != null || d.cv.isEmpty() || ++tries >= 4) break
+            delay(350L * tries)
         }
     }
     // tekstur terakhir yang valid dipertahankan selama tekstur baru dibuat (ganti sampul): tidak ada kedip flat <-> 3D
     val texHold = remember { arrayOfNulls<CoverTex>(1) }
-    val cur = remember(texVer, coverKey) { BookTex.peek(d) }
+    texVer   // dibaca: setiap kenaikan menyusun ulang dan membaca cache lagi (peek murah; tidak diingat lewat remember supaya tidak basi)
+    val cur = BookTex.peek(d)
     if (cur != null) texHold[0] = cur
     val ct = cur ?: texHold[0]
     Box(
