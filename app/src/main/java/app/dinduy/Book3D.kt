@@ -497,6 +497,14 @@ object Book3D {
         // (celah). Celah itu baru terlihat bila tepi kiri kertas masih di dalam layar (kolom kanan, mode 1 kolom); di kolom kiri celahnya jatuh di luar layar.
         // Solusi: geser papan sampul (rigid) sebesar selisih pojok engsel sisi dalam -> pojok kiri-atas kertas (z = 0), berbobot attach (0..1, mengikuti dolly),
         // jadi nol di kartu / awal ayunan dan penuh saat celahnya terbesar.
+        // engsel atas, sampul sudah melewati 180: ia di BELAKANG bidang halaman. Kotak halaman dikeluarkan dari area gambar sampul, jadi kertas (yang digambar
+        // lapisan lain di bawah adegan ini) tidak tertimpa dan sampul tampak menghilang di balik buku, bukan tiba-tiba hilang
+        val behind = top && deg > 180f
+        val bSave = if (behind) cv.save() else -1
+        if (behind) {
+            if (android.os.Build.VERSION.SDK_INT >= 26) cv.clipOutRect(l, t, r, b)
+            else cv.clipRect(l, t, r, b, android.graphics.Region.Op.DIFFERENCE)
+        }
         val sv3 = if (attach > .001f && deg > 90f) {
             if (top) pt(-hw, -hh + (tc / 2f) * st, tc / 2f - (tc / 2f) * ct)
             else pt(-hw + (tc / 2f) * st, -hh, tc / 2f - (tc / 2f) * ct)
@@ -546,5 +554,6 @@ object Book3D {
             if (s > 0f) solid(edge, if (top) when (e) { 0 -> 1.08f; 1 -> .86f; else -> .62f } else when (e) { 0 -> 1.30f; 1 -> .62f; else -> .86f })
         }
         if (sv3 >= 0) cv.restoreToCount(sv3)
+        if (bSave >= 0) cv.restoreToCount(bSave)
     }
 }
