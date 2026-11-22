@@ -28,22 +28,35 @@ val fetchFonts by tasks.registering {
     doLast {
         val out = File(root, "fonts").apply { mkdirs() }
         val base = "https://raw.githubusercontent.com/google/fonts/main/ofl"
+        val gsf = "GoogleSansFlex%5BROND%2Copsz%2Cslnt%2Cwdth%2Cwght%5D.ttf"
+        val gsfGrad = "GoogleSansFlex%5BGRAD%2CROND%2Copsz%2Cslnt%2Cwdth%2Cwght%5D.ttf"
+        val cdn = "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl"
         val files = listOf(
-            "roboto_flex.ttf" to "$base/robotoflex/RobotoFlex%5BGRAD%2CXOPQ%2CXTRA%2CYOPQ%2CYTAS%2CYTDE%2CYTFI%2CYTLC%2CYTUC%2Copsz%2Cslnt%2Cwdth%2Cwght%5D.ttf",
-            "tinos_regular.ttf" to "$base/tinos/Tinos-Regular.ttf",
-            "tinos_bold.ttf" to "$base/tinos/Tinos-Bold.ttf",
-            "tinos_italic.ttf" to "$base/tinos/Tinos-Italic.ttf",
-            "tinos_bolditalic.ttf" to "$base/tinos/Tinos-BoldItalic.ttf"
+            "roboto_flex.ttf" to listOf("$base/robotoflex/RobotoFlex%5BGRAD%2CXOPQ%2CXTRA%2CYOPQ%2CYTAS%2CYTDE%2CYTFI%2CYTLC%2CYTUC%2Copsz%2Cslnt%2Cwdth%2Cwght%5D.ttf"),
+            // Google Sans Flex (OFL, variabel: wght 1-1000, wdth 25-151, ROND 0-100, opsz 1-144). Dicoba beberapa alamat berurutan.
+            "google_sans_flex.ttf" to listOf(
+                "$base/googlesansflex/$gsf", "$cdn/googlesansflex/$gsf",
+                "$base/googlesansflex/$gsfGrad", "$cdn/googlesansflex/$gsfGrad"
+            ),
+            "tinos_regular.ttf" to listOf("$base/tinos/Tinos-Regular.ttf"),
+            "tinos_bold.ttf" to listOf("$base/tinos/Tinos-Bold.ttf"),
+            "tinos_italic.ttf" to listOf("$base/tinos/Tinos-Italic.ttf"),
+            "tinos_bolditalic.ttf" to listOf("$base/tinos/Tinos-BoldItalic.ttf")
         )
-        for ((name, url) in files) {
+        for ((name, urls) in files) {
             val f = File(out, name)
             if (f.exists() && f.length() > 20_000) continue
-            try {
-                uri(url).toURL().openStream().use { i -> f.outputStream().use { o -> i.copyTo(o) } }
-            } catch (e: Exception) {
+            var ok = false
+            for (url in urls) {
+                try {
+                    uri(url).toURL().openStream().use { i -> f.outputStream().use { o -> i.copyTo(o) } }
+                    if (f.length() > 20_000) { ok = true; break }
+                } catch (e: Exception) {
+                    logger.warn("Font $name failed from $url: ${e.message}")
+                }
                 f.delete()
-                logger.warn("Font $name failed to download: ${e.message}")
             }
+            if (!ok) logger.warn("Font $name could not be downloaded (app falls back to a system font)")
         }
     }
 }
@@ -57,8 +70,8 @@ android {
         applicationId = "app.dinduy"
         minSdk = 26
         targetSdk = 36
-        versionCode = 8
-        versionName = "1.7"
+        versionCode = 9
+        versionName = "1.8"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
