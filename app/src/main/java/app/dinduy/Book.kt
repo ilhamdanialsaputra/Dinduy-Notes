@@ -131,6 +131,7 @@ object BookSpec {
     const val CAMERA = 2.8f               // jarak kamera 3D = CAMERA x lebar sampul (makin besar = perspektif makin lembut)
     const val ASPECT = .70f               // lebar / tinggi sampul buku bila rasio halaman belum diketahui (cadangan)
     const val MIN_ASPECT = .58f           // batas rasio sampul: paling tinggi / ramping (halaman sangat panjang dipangkas dari atas)
+    const val TOP_HINGE_ASPECT = 1.12f    // rasio >= ini (slide / landscape): engsel di ATAS, sampul terbuka ke atas. Di bawahnya: engsel kiri, buka ke kiri
     const val MAX_ASPECT = 1.55f          // batas rasio sampul: paling lebar (slide 16:9 / panorama dipangkas sedikit di kiri-kanan), supaya sampul rebah tidak melewati layar
     const val BACK_DRAG = .50f            // progres turun sampai segini selama back gesture ditarik penuh
     const val TXT_CHANGE = "Change cover"
@@ -266,7 +267,7 @@ fun bookPageRect(vm: AppVM, w: Float, h: Float, tt: Float, g: BookGeo): Rect {
  * lalu lenyap sendiri karena kertas bergerak ke posisi layar baca. 2 kolom: tidak bergeser (kolom di sebelahnya tidak boleh terdorong).
  */
 fun bookSlide(m: Morph, w: Float, dens: Float, raw: Float): Float {
-    if (BookFx.cols != 1) return 0f
+    if (BookFx.cols != 1 || BookFx.top) return 0f   // engsel atas: sampul tidak menjulur ke kiri, tidak perlu bergeser
     val bw = m.r - m.l
     if (bw < 2f) return 0f
     val need = bw * .98f + 12f * dens - m.l
@@ -287,6 +288,7 @@ object BookFx {
     var tilt = 0f                          // sudut miring sampul saat disentuh (derajat), dilanjutkan mulus oleh lapisan animasi
     /** Kartu yang bukunya sedang digambar lapisan animasi. State supaya kartu langsung menyembunyikan diri di frame yang sama dengan ketukan. */
     var hideId by mutableStateOf<String?>(null)
+    var top = false                        // buku ini berengsel di atas (rasio lebar)
     var cols = 2                           // jumlah kolom beranda saat dibuka (1 = buku dipusatkan ulang agar sampul rebah tetap terlihat)
     var live: Rect? = null                 // posisi halaman di layar (koordinat jendela) saat menutup; null = posisi awal baca
     var snap: (() -> Rect?)? = null        // diisi layar baca
@@ -307,7 +309,8 @@ object BookFx {
     fun pinFor(fid: String, index: Int): android.graphics.Bitmap? =
         if (pdfName == fid && pinPage == index) pin else null
 
-    fun begin(id: String, page: Int, ratio: Float, dark: Boolean, cols: Int = 2) {
+    fun begin(id: String, page: Int, ratio: Float, dark: Boolean, cols: Int = 2, top: Boolean = false) {
+        this.top = top
         this.id = id; this.page = page; this.ratio = ratio; this.dark = dark; this.cols = cols; live = null; tilt = 0f; peek = 0f; tex = null
         readerReady = false; pdfName = null
     }
@@ -357,6 +360,7 @@ object BookAspect {
         return if (v < 0 || cv.isEmpty()) BookSpec.ASPECT else (map[cv] ?: BookSpec.ASPECT)
     }
     fun of(d: Note): Float = of(d.cv)
+    fun isTop(a: Float): Boolean = a >= BookSpec.TOP_HINGE_ASPECT
 
     /** Aman dari thread latar. Memakai bitmap di cache bila ada, kalau tidak hanya membaca ukuran berkas (murah, tanpa dekode piksel). */
     fun ensure(dir: File, cv: String) {
@@ -496,8 +500,13 @@ fun BookCoverFace(vm: AppVM, d: Note, modifier: Modifier = Modifier) {
             val w = size.width
             val h = size.height
             // gaya kartun datar (sama dengan BookTex.build): satu pita engsel solid tipis + satu garis terang, tanpa gradasi
-            drawRect(Color.Black.copy(.16f), Offset.Zero, Size(w * .07f, h))
-            drawRect(Color.White.copy(.22f), Offset(w * .07f, 0f), Size(maxOf(1.5f, w * .008f), h))
+            if (BookAspect.isTop(BookAspect.of(d))) {   // buku lebar: pita engsel di atas
+                drawRect(Color.Black.copy(.16f), Offset.Zero, Size(w, h * .07f))
+                drawRect(Color.White.copy(.22f), Offset(0f, h * .07f), Size(w, maxOf(1.5f, h * .008f)))
+            } else {
+                drawRect(Color.Black.copy(.16f), Offset.Zero, Size(w * .07f, h))
+                drawRect(Color.White.copy(.22f), Offset(w * .07f, 0f), Size(maxOf(1.5f, w * .008f), h))
+            }
         }
     }
 }
@@ -610,7 +619,7 @@ fun BookCard(
             interactionSource = src, indication = null,
             onClick = {
                 fun go(r: BookReady) {
-                    BookFx.begin(d.id, r.page, r.ratio, pdark, cols)
+                    BookFx.begin(d.id, r.page, r.ratio, pdark, cols, BookAspect.isTop(asp))
                     BookFx.pdfName = d.pdf
                     BookFx.tilt = BookSpec.PEEK_YAW * peek
                     BookFx.peek = peek
@@ -673,7 +682,7 @@ fun BookCard(
                                 Book3D.draw(
                                     it.nativeCanvas, 0f, 0f, size.width, size.height,
                                     yaw, pitch, k, lift, ct, null, lift > .5f, false,
-                                    BookSpec.REST_LENS_X * lens, BookSpec.REST_LENS_Y * lens
+                                    BookSpec.REST_LENS_X * lens, BookSpec.REST_LENS_Y * lens, top = BookAspect.isTop(asp)
                                 )
                             }
                         }
@@ -704,7 +713,7 @@ fun BookPageLayer(vm: AppVM) {
     val id = vm.openId ?: return
     val d = vm.note(id) ?: return
     val geo = rememberBookGeo()
-    remember(id) { if (BookFx.id != id) { BookFx.begin(id, d.pg, 1.4142f, false); BookFx.pdfName = d.pdf }; 0 }
+    remember(id) { if (BookFx.id != id) { BookFx.begin(id, d.pg, 1.4142f, false, 2, BookAspect.isTop(BookAspect.of(d))); BookFx.pdfName = d.pdf }; 0 }
     // jaring pengaman: kertas statis tidak boleh tertinggal selamanya bila layar baca tak pernah menggambar halaman pertamanya
     // (mode 3D yang tidak memakai PdfPage, atau render yang tak kunjung selesai). Hitung 3 detik SETELAH animasi buka selesai.
     LaunchedEffect(id, BookFx.readerReady) {
@@ -830,7 +839,7 @@ fun BookCoverLayer(vm: AppVM) {
             ) else -1
             Book3D.draw(
                 cnv, r.left, r.top, r.right, r.bottom,
-                yaw, pitch, k, deg, ct, page, pageOn, BookFx.dark, lx, ly, bookCamera(tRaw), bookDolly(tRaw)
+                yaw, pitch, k, deg, ct, page, pageOn, BookFx.dark, lx, ly, bookCamera(tRaw), bookDolly(tRaw), BookAspect.isTop(BookAspect.of(d))
             )
             if (sv >= 0) cnv.restoreToCount(sv)
         }
