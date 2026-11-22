@@ -1897,14 +1897,23 @@ private fun PdfReader(vm: AppVM, id: String, act: Actions, ui: PdfUi, txt: PdfTe
                 zoom = z1
                 if (panY != 0f) list.dispatchRawDelta(-panY)
             }
+            // halaman terkini = halaman di titik acuan. Titik acuan = tengah area baca, TAPI tidak lebih dalam dari setengah tinggi halaman paling atas.
+            // DULU: selalu tengah layar. Halaman landscape (PPT) pendek, jadi tengah layar jatuh di halaman ke-2 / ke-3 begitu layar baca terbuka:
+            // `page` langsung melompat dari halaman yang dibuka (BookFx.page ikut berubah: kertas animasi berganti halaman / kosong, animasi tutup menuju
+            // halaman yang salah) dan halaman tersimpan maju terus tiap dibuka.
+            val tPx = topPad.value * dens; val bPx = botPad.value * dens
             val curPage by remember(list) {
                 derivedStateOf {
                     val li = list.layoutInfo
-                    val mid = li.viewportStartOffset + li.viewportSize.height / 2
-                    li.visibleItemsInfo.firstOrNull { it.offset <= mid && it.offset + it.size >= mid }?.index ?: list.firstVisibleItemIndex
+                    val vis = li.visibleItemsInfo
+                    val usable = (li.viewportSize.height - tPx - bPx).coerceAtLeast(1f)
+                    val topItem = vis.firstOrNull { it.offset + it.size > 0 }
+                    val probe = if (topItem != null) minOf(usable / 2f, topItem.size / 2f) else usable / 2f
+                    vis.firstOrNull { it.offset <= probe && it.offset + it.size >= probe }?.index ?: list.firstVisibleItemIndex
                 }
             }
-            LaunchedEffect(curPage) { page = curPage }
+            // selama animasi buka / tutup buku halaman terkini DITAHAN (halaman yang sedang dianimasikan), baru mengikuti gulir setelah layar baca menetap
+            LaunchedEffect(curPage, bookOpen, settled) { if (!bookOpen || settled) page = curPage }
             LaunchedEffect(goTo) {
                 val h = goTo ?: return@LaunchedEffect
                 goTo = null
