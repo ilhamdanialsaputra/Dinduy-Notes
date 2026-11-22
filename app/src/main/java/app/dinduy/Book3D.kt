@@ -515,19 +515,6 @@ object Book3D {
         // jadi nol di kartu / awal ayunan dan penuh saat celahnya terbesar.
         // engsel atas, sampul sudah melewati 180: ia di BELAKANG bidang halaman. Kotak halaman dikeluarkan dari area gambar sampul, jadi kertas (yang digambar
         // lapisan lain di bawah adegan ini) tidak tertimpa dan sampul tampak menghilang di balik buku, bukan tiba-tiba hilang
-        // DAUN HALAMAN TERKIBAS: satu lembar kertas terangkat dari blok halaman mengikuti sampul tapi dengan sudut lebih kecil (maks LEAF_DEG di sekitar
-        // sampul tegak), lalu jatuh lagi. Mengintip di sisi sampul yang sedang naik / turun. Nol di sampul tertutup dan setelah rebah, jadi tidak
-        // ada saat diam / ditahan. Murah: satu bidang datar yang sudutnya dihitung dari deg (buka dan tutup sama persis)
-        if (deg > 2f && deg < 150f) {
-            val la = BookSpec.LEAF_DEG * sin(Math.PI * (deg / 140f).coerceIn(0f, 1f)).toFloat()
-            if (la > .6f) {
-                val lr = Math.toRadians(la.toDouble()); val lc = cos(lr).toFloat(); val ls = sin(lr).toFloat()
-                val ins = .03f
-                cvqa(lc, ls, 0f, -T / 2f + T * ins, -tc / 2f, L * (1f - ins), 0f, 0f, 0f, T * (1f - 2f * ins), 0f)
-                val s = if (top) face(0f, -ls, lc) else face(-ls, 0f, lc)
-                if (s > 0f) solid(paperC, .97f)
-            }
-        }
         val behind = top && deg > 180f
         val bSave = if (behind) cv.save() else -1
         if (behind) {
