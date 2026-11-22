@@ -131,8 +131,8 @@ object BookSpec {
     const val CAMERA = 2.8f               // jarak kamera 3D = CAMERA x lebar sampul (makin besar = perspektif makin lembut)
     const val ASPECT = .70f               // lebar / tinggi sampul buku
     const val BACK_DRAG = .50f            // progres turun sampai segini selama back gesture ditarik penuh
-    const val TXT_CHANGE = "Ganti sampul"
-    const val TXT_RESTORE = "Kembalikan sampul asli"
+    const val TXT_CHANGE = "Change cover"
+    const val TXT_RESTORE = "Restore original cover"
     val EASE = androidx.compose.animation.core.LinearEasing   // easing per fase ada di fungsi smoothstep di bawah
     val openSpec: AnimationSpec<Float> = tween(OPEN_MS, easing = EASE)
     /** Menutup: kebalikan ease-out ringan. Awalnya langsung melaju (zoom keluar tidak lagi 'menunggu' di kecepatan nol), ujungnya mendarat lembut di kartu. */
