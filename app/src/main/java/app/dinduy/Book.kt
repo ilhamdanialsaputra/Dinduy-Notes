@@ -789,7 +789,7 @@ fun BookCoverLayer(vm: AppVM) {
             ) else -1
             Book3D.draw(
                 cnv, r.left, r.top, r.right, r.bottom,
-                yaw, pitch, k, deg, ct, page, pageOn, BookFx.dark, lx, ly, bookCamera(tRaw)
+                yaw, pitch, k, deg, ct, page, pageOn, BookFx.dark, lx, ly, bookCamera(tRaw), bookDolly(tRaw)
             )
             if (sv >= 0) cnv.restoreToCount(sv)
         }
