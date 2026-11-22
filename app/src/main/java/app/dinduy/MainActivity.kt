@@ -632,12 +632,14 @@ fun AppRoot(vm: AppVM, act: Actions) {
     val nav = vm.nav
     val ctx = LocalContext.current
     // default: ikuti perangkat (Material You). Warna kustom dipakai hanya jika pengguna memilihnya, atau perangkat < Android 12.
-    val dynOn = vm.pr.dyn && Build.VERSION.SDK_INT >= 31
+    val dynOn = vm.pr.dyn && Build.VERSION.SDK_INT >= 31 && !vm.pr.mono && !vm.pr.ex
+    val exOn = vm.pr.ex && !vm.pr.mono
     // mode "auto" = ikuti terang/gelap perangkat
     val sysDark = androidx.compose.foundation.isSystemInDarkTheme()
     val effMode = normMode(vm.pr.mode).let { if (it == "auto") (if (sysDark) "dark" else "light") else it }
-    val target = remember(effMode, vm.pr.seed, dynOn, vm.pr.mono) {
-        val base = (if (dynOn) dynamicPal(ctx, effMode) else null) ?: buildPal(effMode, vm.pr.seed)
+    val target = remember(effMode, vm.pr.seed, dynOn, vm.pr.mono, exOn) {
+        val base = if (exOn) expressivePal(effMode == "dark")
+            else (if (dynOn) dynamicPal(ctx, effMode) else null) ?: buildPal(effMode, vm.pr.seed)
         if (vm.pr.mono) base.toMono() else base
     }
     val anim = remember { Animatable(1f) }
@@ -666,7 +668,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
     // Fallback memakai `to` (target yang stabil), bukan `pal` yang berubah tiap frame saat tema beralih.
     val curNote = (nav.noteId ?: vm.openId)?.let { vm.note(it) }
     val curCp = curNote?.takeIf { it.cv.isNotEmpty() && it.pdf.isEmpty() }?.cp.orEmpty()
-    val noteTarget = remember(curCp, pal.dark, pal.mono, to) { if (curCp.isEmpty()) to else coverPal(pal.dark, curCp, pal.mono) }
+    val noteTarget = remember(curCp, pal.dark, pal.mono, pal.ex, to) { if (curCp.isEmpty()) to else coverPal(pal.dark, curCp, pal.mono, pal.ex) }
     val notePal = animPal(noteTarget, curNote?.id)
     val cs = remember(pal) {
         if (pal.dark) darkColorScheme(primary = pal.p, onPrimary = pal.op, surface = pal.s, onSurface = pal.os, background = pal.bg)
@@ -674,6 +676,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
     }
 
     val am = ctx.assets
+    GSX.init(am)
     val ff = remember(vm.pr.ff) { loadFont(am, vm.pr.ff) }
     MaterialTheme(colorScheme = cs) {
         CompositionLocalProvider(

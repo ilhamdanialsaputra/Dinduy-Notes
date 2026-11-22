@@ -1,6 +1,23 @@
 package app.dinduy
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.size
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.geometry.Size
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
@@ -53,6 +70,18 @@ val LocalVM = staticCompositionLocalOf<AppVM?> { null }
 
 /** Rasio lebar/tinggi banner sampul di editor. */
 const val EDIT_RATIO = 1.28f
+
+// ---------- sampul gaya Frame (kotak bersudut bundar seperti Google Keep) ----------
+/** Rasio lebar/tinggi frame di editor (sedikit lebih lebar dari banner gradasi). */
+const val FRAME_EDIT_RATIO = 1.86f
+/** Jarak frame ke tepi layar di editor (dp), dan sudutnya (sedang, tidak terlalu bundar). */
+const val FRAME_EDIT_PAD = 24f
+const val FRAME_EDIT_R = 20f
+/** Jarak frame ke tepi kartu di beranda (dp), dan sudutnya. */
+const val FRAME_CARD_PAD = 8f
+const val FRAME_CARD_R = 14f
+/** Rasio frame di kartu beranda: 2 kolom hampir persegi, 1 kolom lebar. */
+fun frameAspect(c2: Boolean): Float = if (c2) 1.05f else 1.9f
 
 /** Rasio lebar/tinggi sampul di kartu beranda: 2 kolom lebih tinggi, 1 kolom berbentuk banner. */
 fun coverAspect(c2: Boolean): Float = if (c2) .8f else 1.6f
@@ -220,19 +249,97 @@ fun EditorCover(vm: AppVM, d: Note, scroll: () -> Int) {
     }
 }
 
+/**
+ * Geometri frame di editor (px) pada progres morph t: [x, y, lebar, tinggi, radius].
+ * t = 1: tata letak editor (24dp dari tepi, tepat di bawah bilah atas). t = 0 (morph dari kartu): persis frame di kartu.
+ * Isi editor diskalakan ke dalam kartu selama morph (skala = lebar kartu / lebar layar), jadi ukuran kartu dibagi skala itu
+ * supaya setelah diskalakan frame ini jatuh tepat di atas frame kartu, lalu tumbuh ke posisi akhirnya.
+ */
+private fun frameGeo(vm: AppVM, w: Float, den: Float, satPx: Float): FloatArray {
+    val t = vm.openP.value.coerceIn(0f, 1f)
+    val contentW = minOf(w, 700f * den)
+    val x1 = (w - contentW) / 2f + FRAME_EDIT_PAD * den
+    val w1 = (w - 2f * x1).coerceAtLeast(1f)
+    val h1 = w1 / FRAME_EDIT_RATIO
+    val y1 = satPx + 72f * den
+    var x0 = x1; var y0 = y1; var w0 = w1; var h0 = h1; var r0 = FRAME_EDIT_R * den
+    val mo = vm.morph
+    val g = mo?.ghost
+    if (mo != null && mo.card && g != null) {
+        val s0 = ((mo.r - mo.l) / w).coerceIn(.05f, 1f)
+        x0 = FRAME_CARD_PAD * den / s0
+        y0 = x0
+        w0 = (w - 2f * x0).coerceAtLeast(1f)
+        h0 = w0 / frameAspect(g.c2)
+        r0 = FRAME_CARD_R * den / s0
+    }
+    fun l(a: Float, b: Float) = a + (b - a) * t
+    return floatArrayOf(l(x0, x1), l(y0, y1), l(w0, w1), l(h0, h1), l(r0, FRAME_EDIT_R * den))
+}
+
+/**
+ * Sampul Frame di atas editor: kotak bersudut bundar yang ikut tergulir bersama isi. Seperti EditorCover, ia buram penuh sejak awal morph
+ * dan menimpa frame di kartu (kartu bayangan hanya menyisakan ruangnya). Ruang frame di alur isi dipesan Spacer di NoteScreen
+ * (4dp + tinggi frame), jadi label dan judul otomatis turun di bawahnya dan bilah atas tidak ikut berubah ukuran.
+ */
+@Composable
+fun EditorFrame(vm: AppVM, d: Note, scroll: () -> Int) {
+    val pal = LocalPal.current
+    val bmp = rememberImg(vm, d.cv)
+    val sat = satDp()
+    val den = LocalDensity.current.density
+    val wPx = LocalConfiguration.current.screenWidthDp * den
+    Box(
+        Modifier.fillMaxWidth()
+            .layout { m, c ->
+                val w = c.maxWidth
+                val g = frameGeo(vm, w.toFloat(), density, sat.toPx())
+                val p = m.measure(Constraints.fixed(g[2].roundToInt().coerceAtLeast(1), g[3].roundToInt().coerceAtLeast(1)))
+                layout(w, (g[1] + g[3]).roundToInt()) { p.place(g[0].roundToInt(), g[1].roundToInt()) }
+            }
+            .graphicsLayer {
+                val k = cSmooth((vm.openP.value - .5f) / .5f)
+                translationY = -scroll().toFloat() * k
+            }
+    ) {
+        Canvas(
+            Modifier.fillMaxSize()
+                .graphicsLayer {
+                    val g = frameGeo(vm, wPx, density, sat.toPx())
+                    shape = RoundedCornerShape(g[4])
+                    clip = true
+                }
+                .background(pal.c3)
+        ) { if (bmp != null) drawCover(bmp, d.cz, d.cx, d.cy, soft = !pal.dark) }
+    }
+}
+
 /** Halaman Sampul: pilih foto, geser dan cubit untuk memangkas (beranda dan catatan memakai titik fokus yang sama). */
 @Composable
 fun CoverPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
     val d = vm.note(id)
     val cv = d?.cv ?: ""
+    val pal = LocalPal.current
     PageScaffold("Cover", d?.t?.ifEmpty { null } ?: "Untitled", { nav.pop() }) {
         if (d == null || cv.isEmpty()) {
             SGroup("Cover image", 0) {
                 MRow(POS_ONE, "img", "Choose photo", "Shown on the home card and at the top of the note") { act.pickCover(id) }
             }
         } else key(cv) {
+            SGroup("Style", 0) {
+                SCard(POS_ONE) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        CoverStyleTile(Modifier.weight(1f), "Gradient", false, d.cm != "f", vm, d) { vm.setCoverMode(d.id, "") }
+                        CoverStyleTile(Modifier.weight(1f), "Frame", true, d.cm == "f", vm, d) { vm.setCoverMode(d.id, "f") }
+                    }
+                    T(
+                        if (d.cm == "f") "A rounded picture above the title, like Google Keep." else "The picture fades into the note, edge to edge.",
+                        13f, 400, pal.osv, Modifier.padding(top = 12.dp), lh = 1.4f
+                    )
+                }
+            }
             CoverEditor(vm, d)
-            SGroup("Manage", 60) {
+            SGroup("Manage", 80) {
                 MRow(POS_TOP, "swap", "Change photo", "Pick another image from your gallery") { act.pickCover(id) }
                 MRow(POS_BOT, "del", "Remove cover", "The image is removed from this note", danger = true) {
                     vm.removeCover(id)
@@ -252,7 +359,12 @@ private fun CoverEditor(vm: AppVM, d: Note) {
     var z by remember { mutableFloatStateOf(d.cz) }
     var frame by remember { mutableIntStateOf(0) }
     val cur = remember { floatArrayOf(d.cx, d.cy, d.cz) }
-    val a = if (frame == 0) coverAspect(vm.pr.cols.coerceIn(1, 2) == 2) else EDIT_RATIO
+    val fr = d.cm == "f"
+    val c2 = vm.pr.cols.coerceIn(1, 2) == 2
+    val a = if (frame == 0) (if (fr) frameAspect(c2) else coverAspect(c2)) else (if (fr) FRAME_EDIT_RATIO else EDIT_RATIO)
+    val pr by animateDpAsState(
+        if (!fr) 12.dp else (if (frame == 0) FRAME_CARD_R else FRAME_EDIT_R).dp, M3E.spatial(), label = "pvr"
+    )
 
     // simpan dengan jeda saat digeser, dan sekali lagi saat halaman ditutup
     LaunchedEffect(x, y, z) {
@@ -263,14 +375,14 @@ private fun CoverEditor(vm: AppVM, d: Note) {
         onDispose { vm.setCoverCrop(d.id, d.cv, cur[0], cur[1], cur[2]) }
     }
 
-    SGroup("Adjust position", 0) {
+    SGroup("Adjust position", 40) {
         SCard(POS_ONE) {
             SegPill(2, frame, { frame = it }) { i, fg -> T(if (i == 0) "Home" else "Note", 15f, 500, fg) }
             Spacer(Modifier.height(14.dp))
             Box(Modifier.fillMaxWidth(), Alignment.Center) {
                 Box(
                     Modifier.fillMaxWidth(if (a < 1f) .62f else 1f).aspectRatio(a)
-                        .clip(RoundedCornerShape(12.dp)).background(pal.c3)
+                        .clip(RoundedCornerShape(pr.nn())).background(pal.c3)
                         .pointerInput(bmp) {
                             detectTransformGestures { _, pan, zoom, _ ->
                                 val b = bmp ?: return@detectTransformGestures
@@ -342,4 +454,56 @@ fun coverSeed(src: android.graphics.Bitmap): String {
     val sat = (s / wsum.coerceAtLeast(1e-4f)).coerceIn(.2f, 1f)
     val c = android.graphics.Color.HSVToColor(floatArrayOf(hue, sat, .8f))
     return String.format("#%06X", c and 0xFFFFFF)
+}
+
+
+/**
+ * Pratinjau gaya sampul (Material 3 Expressive): ubin kecil berisi catatan mini. Terpilih = sudut membulat besar dan berwarna wadah utama;
+ * ditekan = lebih kotak; berpindah = pegas memantul.
+ */
+@Composable
+private fun CoverStyleTile(modifier: Modifier, label: String, frame: Boolean, on: Boolean, vm: AppVM, d: Note, onClick: () -> Unit) {
+    val pal = LocalPal.current
+    val bmp = rememberImg(vm, d.cv)
+    val src = remember { MutableInteractionSource() }
+    val pr by src.collectIsPressedAsState()
+    val r by animateDpAsState(if (pr) 12.dp else if (on) 30.dp else 20.dp, M3E.spatialFast(), label = "tr")
+    val k by animateFloatAsState(if (on) 1f else 0f, M3E.spatial(), label = "tk")
+    val sc by animateFloatAsState(if (pr) .96f else 1f, M3E.spatialFast(), label = "ts")
+    val fg = if (on) pal.opc else pal.os
+    Column(
+        modifier.graphicsLayer { scaleX = sc; scaleY = sc }
+            .clip(RoundedCornerShape(r.nn()))
+            .background(androidx.compose.ui.graphics.lerp(pal.c3, pal.pc, k))
+            .clickable(interactionSource = src, indication = LocalIndication.current, onClick = onClick)
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Box(Modifier.fillMaxWidth().aspectRatio(.95f).clip(RoundedCornerShape(14.dp)).background(pal.s)) {
+            if (frame) {
+                Column(Modifier.fillMaxSize().padding(7.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Canvas(Modifier.fillMaxWidth().aspectRatio(1.7f).clip(RoundedCornerShape(8.dp)).background(pal.c3)) {
+                        if (bmp != null) drawCover(bmp, d.cz, d.cx, d.cy)
+                    }
+                    Box(Modifier.fillMaxWidth(.7f).height(7.dp).clip(RoundedCornerShape(50)).background(pal.os.copy(alpha = .55f)))
+                    Box(Modifier.fillMaxWidth(.9f).height(5.dp).clip(RoundedCornerShape(50)).background(pal.os.copy(alpha = .22f)))
+                    Box(Modifier.fillMaxWidth(.5f).height(5.dp).clip(RoundedCornerShape(50)).background(pal.os.copy(alpha = .22f)))
+                }
+            } else {
+                Canvas(Modifier.fillMaxWidth().aspectRatio(1.25f).background(pal.c3)) {
+                    if (bmp != null) drawCover(bmp, d.cz, d.cx, d.cy)
+                    drawRect(Brush.verticalGradient(0f to Color.Transparent, 1f to pal.s))
+                }
+                Column(Modifier.fillMaxSize().padding(start = 7.dp, end = 7.dp, bottom = 7.dp), verticalArrangement = Arrangement.Bottom) {
+                    Box(Modifier.fillMaxWidth(.7f).height(7.dp).clip(RoundedCornerShape(50)).background(pal.os.copy(alpha = .55f)))
+                    Spacer(Modifier.height(6.dp))
+                    Box(Modifier.fillMaxWidth(.9f).height(5.dp).clip(RoundedCornerShape(50)).background(pal.os.copy(alpha = .22f)))
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            T(label, 15f, 600, fg, Modifier.weight(1f))
+            Box(Modifier.size(20.dp).graphicsLayer { scaleX = k; scaleY = k }) { Ic("ok", fg, 20.dp) }
+        }
+    }
 }

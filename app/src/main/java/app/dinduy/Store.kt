@@ -540,6 +540,13 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         upd(id) { if (it.cv == cv) it.copy(cx = x, cy = y, cz = z) else it }
     }
 
+    /** Gaya sampul per catatan: "" = gradasi, "f" = frame. */
+    fun setCoverMode(id: String, m: String) {
+        val n = note(id) ?: return
+        if (n.cm == m) return
+        upd(id) { it.copy(cm = m) }
+    }
+
     fun removeCover(id: String) {
         val n = note(id) ?: return
         if (n.cv.isEmpty()) return

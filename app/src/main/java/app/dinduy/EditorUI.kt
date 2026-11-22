@@ -12,6 +12,8 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.shrinkHorizontally
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.withFrameNanos
+import kotlinx.coroutines.flow.first
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.fadeIn
@@ -907,12 +909,7 @@ fun BlockView(ed: Ed, vm: AppVM, b: Blk, ordN: Int, dm: Dm, fold: Fold? = null, 
             ParaRow(ed, b, ordN, dm, pal, fold, mk, if (only) "Write a note…" else null)
         }
         "h" -> {
-            val st = when (b.lv) {
-                1 -> baseStyle(pal, dm, pal.p, fs * 2.5f, 1000, 1.02f, -.02f)
-                2 -> baseStyle(pal, dm, pal.os, fs * 1.85f, 1000, 1.02f, -.02f)
-                3 -> baseStyle(pal, dm, pal.p, fs * 1.45f, 1000, 1.02f, -.02f)
-                else -> baseStyle(pal, dm, pal.os, fs * 1.15f, 1000, 1.02f, -.02f)
-            }
+            val st = headStyle(pal, dm, b.lv)
             val (il, ir) = fitInd(b.il, b.ir, ed.widthDp)
             TF(ed, b.id, st.aligned(b), Modifier.fillMaxWidth().padding(start = il.dp, end = ir.dp, top = (fs * .4f).dp, bottom = (fs * .5f).dp))
         }
@@ -1749,12 +1746,7 @@ private fun blockBM(b: Blk, pal: Pal, dm: Dm): BM? {
     return when (b.ty) {
         "p" -> BM(baseStyle(pal, dm), 0f, fs * 1.1f, 0f)
         "h" -> {
-            val st = when (b.lv) {
-                1 -> baseStyle(pal, dm, pal.p, fs * 2.5f, 1000, 1.02f, -.02f)
-                2 -> baseStyle(pal, dm, pal.os, fs * 1.85f, 1000, 1.02f, -.02f)
-                3 -> baseStyle(pal, dm, pal.p, fs * 1.45f, 1000, 1.02f, -.02f)
-                else -> baseStyle(pal, dm, pal.os, fs * 1.15f, 1000, 1.02f, -.02f)
-            }
+            val st = headStyle(pal, dm, b.lv)
             BM(st, fs * .4f, fs * .5f, 0f)
         }
         "li" -> {
@@ -2994,15 +2986,20 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     // sampul: lapisan di belakang bilah atas, ikut tergulir; judul turun supaya menimpa bagian bawah banner
     val coverNote = vm.note(ed.noteId)?.takeIf { it.cv.isNotEmpty() }
     val sat = satDp()
-    val coverInset = if (coverNote == null) 0.dp
-    else (LocalConfiguration.current.screenWidthDp.dp / EDIT_RATIO - sat - 64.dp - 72.dp - 48.dp).coerceAtLeast(0.dp)
+    // sampul frame: kotak bersudut bundar di dalam alur isi (ruangnya dipesan Spacer di bawah), judul turun di bawahnya.
+    // Sampul gradasi: banner penuh di belakang bilah atas, judul menimpa bagian bawahnya (coverInset).
+    val frameOn = coverNote?.cm == "f"
+    val screenWdp = LocalConfiguration.current.screenWidthDp.dp
+    val frameSpace = if (frameOn) 4.dp + (minOf(screenWdp.value, 700f) - 2f * FRAME_EDIT_PAD).dp / FRAME_EDIT_RATIO else 0.dp
+    val coverInset = if (coverNote == null || frameOn) 0.dp
+    else (screenWdp / EDIT_RATIO - sat - 64.dp - 72.dp - 48.dp).coerceAtLeast(0.dp)
     // Latar dan isi memudar sendiri-sendiri (noteFade), sedangkan sampul TIDAK ikut memudar: ia buram penuh sejak awal morph,
     // persis menimpa sampul kartu. Dulu seluruh isi (termasuk sampul) memudar sambil bayangan kartu juga memudar, dan dua lapisan
     // setengah-transparan yang identik itu bertumpuk menjadi ~75% sehingga sampul tampak pucat sesaat = "kedip".
     Box(Modifier.fillMaxSize()) {
     // latar: alpha digambar langsung (tanpa layer offscreen layar penuh yang dibuat ulang tiap frame morph)
     Box(Modifier.fillMaxSize().drawBehind { drawRect(pal.s, alpha = noteFade(vm)) })
-    if (coverNote != null) EditorCover(vm, coverNote) { scroll.value }
+    if (coverNote != null) { if (frameOn) EditorFrame(vm, coverNote) { scroll.value } else EditorCover(vm, coverNote) { scroll.value } }
     Box(Modifier.fillMaxSize().graphicsLayer { alpha = noteFade(vm) }) {
     Column(Modifier.fillMaxSize()) {
         TopBar()
@@ -3045,6 +3042,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                     DropGhost(ed)
                     Column(Modifier.fillMaxWidth()) {
                         val firstText = { ed.blocks.firstOrNull { it.isText }?.let { ed.focusAt(it.id, 0) } }
+                        if (frameOn) Spacer(Modifier.fillMaxWidth().height(frameSpace))
                         // lencana label di atas judul; ketuk untuk membuka halaman label
                         val headNote = vm.note(ed.noteId)
                         val noteLb = headNote?.lb ?: emptyList()
@@ -3074,51 +3072,10 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                             Modifier.onGloballyPositioned { c ->
                                 val cc = ed.contentCoords
                                 ed.titleRect = if (cc != null && cc.isAttached && c.isAttached) cc.localBoundingBoxOf(c) else null
-                            }.padding(top = 48.dp + coverInset, bottom = 20.dp)
+                            }.padding(top = if (frameOn) 28.dp else 48.dp + coverInset, bottom = 20.dp)
                         ) {
                             // judul memakai efek seleksi yang sama dengan isi catatan (selGlow); sorotan bawaan field disembunyikan, pegangan tetap
-                            var tfv by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(ed.title)) }
-                            if (tfv.text != ed.title) tfv = androidx.compose.ui.text.input.TextFieldValue(ed.title, TextRange(minOf(tfv.selection.end, ed.title.length)))
-                            var tLay by remember { mutableStateOf<TextLayoutResult?>(null) }
-                            val tSel = tfv.selection.takeIf { !it.collapsed && ed.titleFocus && !ed.reading }?.let { it.min to it.max }
-                            val tCols = androidx.compose.foundation.text.selection.LocalTextSelectionColors.current
-                            CompositionLocalProvider(
-                                androidx.compose.foundation.text.selection.LocalTextSelectionColors provides
-                                    androidx.compose.foundation.text.selection.TextSelectionColors(tCols.handleColor, Color.Transparent)
-                            ) {
-                            if (ed.title.isEmpty()) {
-                                Box(Modifier.fillMaxWidth(), tPh) {
-                                    T("Title", 46f, if (tBold) 1000 else 400, pal.osv, alpha = .5f, ls = -.02f)
-                                }
-                            }
-                            androidx.compose.foundation.text.BasicTextField(
-                                value = tfv,
-                                onValueChange = { v ->
-                                    tfv = v
-                                    if (v.text != ed.title) { val nl = v.text.contains('\n'); ed.titleChanged(v.text); if (nl) firstText() }
-                                },
-                                onTextLayout = { tLay = it },
-                                readOnly = ed.reading,
-                                visualTransformation = titleVt,
-                                textStyle = TextStyle(
-                                    color = tColor, fontFamily = dm.ff, fontSize = 46.sp, fontWeight = FontWeight(if (tBold) 1000 else 400),
-                                    fontStyle = if (tItal) FontStyle.Italic else FontStyle.Normal,
-                                    lineHeight = (46 * 1.1f).sp, letterSpacing = (-.02f).em,
-                                    textAlign = tTa
-                                ),
-                                cursorBrush = SolidColor(pal.p),
-                                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
-                                keyboardActions = KeyboardActions(onNext = { firstText() }),
-                                modifier = Modifier.fillMaxWidth().selGlow(tSel, pal.p, { it }, { tLay }, { tfv.selection }).focusProperties { canFocus = !ed.ink.on }.focusRequester(titleFr)
-                                    .onFocusChanged { ed.titleFocus = it.isFocused; if (it.isFocused) { ed.selImg = null; ed.selObj = null } }
-                                    .then(
-                                        if (ed.reading) Modifier.wordTap(
-                                            onTap = { if (ed.selOn) ed.clearSel() else { ed.exitReading(); ed.titleReq++ } },
-                                            onDouble = { if (ed.selOn) ed.clearSel() else { ed.exitReading(); ed.titleReq++ } }
-                                        ) else Modifier
-                                    )
-                            )
-                            }
+                            TitleEditor(ed, vm, titleFr, tBold, tItal, tColor, tTa, tPh, titleVt) { firstText() }
                         }
                         for ((sb, splan) in ed.slotsOf(plans)) {
                             key(sb.id) {
@@ -3482,5 +3439,118 @@ fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boole
             // dock: SATU wadah untuk ketik / gambar / tabel / kutipan / objek / coret. Morph antar toolbar ada di ToolDock (DocBar.kt)
             ToolDock(ed, vm, act, showBar)
         }
+    }
+}
+
+
+// ---------- judul catatan (Google Sans Flex expressive, animasi per kata) ----------
+/**
+ * Judul catatan. Dipisah dari NoteScreen supaya animasi per-frame hanya me-recompose fungsi ini (bukan seluruh layar catatan).
+ * Tidak beranimasi = keluarga huruf tunggal (tanpa span). Beranimasi = tiap kata diberi keluarga huruf dari kurva GSX lewat span
+ * di VisualTransformation, jadi teks, kursor, seleksi, dan IME tidak tersentuh.
+ */
+@OptIn(androidx.compose.ui.text.ExperimentalTextApi::class)
+@Composable
+private fun TitleEditor(
+    ed: Ed, vm: AppVM, titleFr: FocusRequester, tBold: Boolean, tItal: Boolean, tColor: Color,
+    tTa: androidx.compose.ui.text.style.TextAlign, tPh: Alignment, findVt: VisualTransformation, firstText: () -> Unit
+) {
+    val pal = LocalPal.current
+    val ffNow = LocalFF.current
+    val gsx = GSX.available()
+    val rest = if (tBold) GSX.REST_BOLD else GSX.REST_LIGHT
+    val restIx = GSX.idx(rest)
+    val anim = remember(ed) { TitleAnim(gsx && ed.title.isNotBlank() && TitleFx.played !== ed) }
+    val reading = ed.reading
+
+    // siapkan semua Typeface di latar belakang supaya animasi pertama tidak tersendat
+    val resolver = androidx.compose.ui.platform.LocalFontFamilyResolver.current
+    LaunchedEffect(gsx) {
+        if (!gsx) return@LaunchedEffect
+        try { for (i in 0..GSX.N) GSX.curve(i)?.let { resolver.preload(it) } } catch (e: Throwable) { }
+    }
+    // intro: mulai begitu catatan terbuka separuh jalan (morph), diputar sekali per pembukaan catatan
+    LaunchedEffect(ed) {
+        if (!anim.introOn) return@LaunchedEffect
+        androidx.compose.runtime.snapshotFlow { vm.openP.value > .5f }.first { it }
+        TitleFx.played = ed
+        val t0 = withFrameNanos { it }
+        while (true) {
+            val n = withFrameNanos { it }
+            anim.t = (n - t0) / 1_000_000_000f
+            if (anim.t > 2.4f) break
+        }
+        anim.introOn = false
+    }
+    // mode baca: huruf bernafas pelan; keluar dari mode baca: meredam balik ke bentuk diam
+    LaunchedEffect(reading, gsx) {
+        if (!gsx) return@LaunchedEffect
+        if (reading) {
+            anim.loopOn = true
+            val t0 = withFrameNanos { it }
+            kotlinx.coroutines.coroutineScope {
+                launch { androidx.compose.animation.core.animate(anim.loop, 1f, animationSpec = tween(700)) { v, _ -> anim.loop = v } }
+                while (true) { val n = withFrameNanos { it }; anim.lt = (n - t0) / 1_000_000_000f }
+            }
+        } else if (anim.loopOn) {
+            androidx.compose.animation.core.animate(anim.loop, 0f, animationSpec = tween(500)) { v, _ -> anim.loop = v }
+            anim.loopOn = false
+        }
+    }
+
+    var tfv by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(ed.title)) }
+    if (tfv.text != ed.title) tfv = androidx.compose.ui.text.input.TextFieldValue(ed.title, TextRange(minOf(tfv.selection.end, ed.title.length)))
+    var tLay by remember { mutableStateOf<TextLayoutResult?>(null) }
+    val tSel = tfv.selection.takeIf { !it.collapsed && ed.titleFocus && !ed.reading }?.let { it.min to it.max }
+    val tCols = androidx.compose.foundation.text.selection.LocalTextSelectionColors.current
+
+    // keluarga huruf diam (juga dipakai kursor dan placeholder). Tanpa font Google Sans Flex: jatuh ke font aplikasi seperti dulu.
+    val baseFam = if (gsx) (GSX.curve(restIx) ?: ffNow) else ffNow
+    val baseW = if (gsx) GSX.curveW(restIx) else if (tBold) 1000 else 400
+    val vt: VisualTransformation = if (!gsx || !anim.animating || tfv.text.isBlank()) findVt
+    else VisualTransformation { t ->
+        val base = findVt.filter(t)
+        TransformedText(
+            buildAnnotatedString { append(base.text); addWordStyles(t.text) { k -> anim.u(k, rest) } },
+            base.offsetMapping
+        )
+    }
+
+    CompositionLocalProvider(
+        androidx.compose.foundation.text.selection.LocalTextSelectionColors provides
+            androidx.compose.foundation.text.selection.TextSelectionColors(tCols.handleColor, Color.Transparent)
+    ) {
+        if (ed.title.isEmpty()) {
+            Box(Modifier.fillMaxWidth(), tPh) {
+                T("Title", 46f, if (tBold) 1000 else 400, pal.osv, alpha = .5f, ls = -.02f)
+            }
+        }
+        androidx.compose.foundation.text.BasicTextField(
+            value = tfv,
+            onValueChange = { v ->
+                tfv = v
+                if (v.text != ed.title) { val nl = v.text.contains('\n'); ed.titleChanged(v.text); if (nl) firstText() }
+            },
+            onTextLayout = { tLay = it },
+            readOnly = ed.reading,
+            visualTransformation = vt,
+            textStyle = TextStyle(
+                color = tColor, fontFamily = baseFam, fontSize = 46.sp, fontWeight = FontWeight(baseW),
+                fontStyle = if (tItal) FontStyle.Italic else FontStyle.Normal,
+                lineHeight = (46 * 1.1f).sp, letterSpacing = (-.02f).em,
+                textAlign = tTa
+            ),
+            cursorBrush = SolidColor(pal.p),
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
+            keyboardActions = KeyboardActions(onNext = { firstText() }),
+            modifier = Modifier.fillMaxWidth().selGlow(tSel, pal.p, { it }, { tLay }, { tfv.selection }).focusProperties { canFocus = !ed.ink.on }.focusRequester(titleFr)
+                .onFocusChanged { ed.titleFocus = it.isFocused; if (it.isFocused) { ed.selImg = null; ed.selObj = null } }
+                .then(
+                    if (ed.reading) Modifier.wordTap(
+                        onTap = { if (ed.selOn) ed.clearSel() else { ed.exitReading(); ed.titleReq++ } },
+                        onDouble = { if (ed.selOn) ed.clearSel() else { ed.exitReading(); ed.titleReq++ } }
+                    ) else Modifier
+                )
+        )
     }
 }

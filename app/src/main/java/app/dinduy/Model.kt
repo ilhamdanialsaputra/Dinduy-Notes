@@ -284,7 +284,8 @@ data class Note(
     val o: Long = 0L,                    // posisi manual hasil seret di beranda (kunci urut, besar = di atas); 0 = ikut waktu ubah / dibuat
     val pdf: String = "",                // dokumen PDF: id berkas (filesDir/pdf/<id>.pdf); "" = catatan biasa
     val pg: Int = 0,                     // PDF: halaman terakhir dibaca (mulai 0)
-    val pdk: Int = 0                     // PDF: halaman gelap (AMOLED): 0 ikut tema aplikasi, 1 gelap, 2 terang
+    val pdk: Int = 0,                    // PDF: halaman gelap (AMOLED): 0 ikut tema aplikasi, 1 gelap, 2 terang
+    val cm: String = ""                  // gaya sampul: "" gradasi (bawaan), "f" frame (kotak bersudut bundar seperti Keep)
 )
 
 @Serializable
@@ -294,7 +295,7 @@ data class Prefs(
     val fs: Int = 15,
     val sort: String = "u",
     val cd: String = "f",
-    val ff: String = "def",  // jenis huruf: def / flex / times / reenie
+    val ff: String = "def",  // jenis huruf: def / gsflex / flex / times / reenie
     val cols: Int = 1,       // jumlah kolom kartu di beranda (1 / 2)
     val dyn: Boolean = true, // true = warna mengikuti perangkat (Material You, Android 12+); false = warna kustom (seed)
     val mono: Boolean = false, // true = Monochrome: seluruh warna aplikasi jadi abu-abu (terang dan gelap)
@@ -307,7 +308,8 @@ data class Prefs(
     val iw: List<Float> = listOf(3f, 16f, 18f),       // ukuran terakhir per alat (dp)
     val isd: String = "r",   // sisi toolbar coret: r kanan / l kiri
     val iat: Int = 0,        // detik sampai mode coret mati sendiri (0 = tidak)
-    val isn: Boolean = false // Rapihkan otomatis saat ujung goresan ditahan
+    val isn: Boolean = false, // Rapihkan otomatis saat ujung goresan ditahan
+    val ex: Boolean = false   // true = palet Expressive (Material 3 Expressive); saling meniadakan dengan Monochrome dan Dynamic color
     // CATATAN KEAMANAN: API key TIDAK PERNAH disimpan di sini (Prefs ikut masuk ke berkas cadangan).
 )
 

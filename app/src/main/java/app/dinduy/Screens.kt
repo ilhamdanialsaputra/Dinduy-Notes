@@ -308,7 +308,7 @@ fun NoteCard(
 ) {
     // catatan bersampul: kartu memakai palet dari warna foto sampulnya (terpisah dari palet aplikasi)
     val gp = LocalPal.current
-    val pal = if (d.cp.isEmpty() || d.cv.isEmpty()) gp else remember(d.cp, gp.dark, gp.mono) { coverPal(gp.dark, d.cp, gp.mono) }
+    val pal = if (d.cp.isEmpty() || d.cv.isEmpty()) gp else remember(d.cp, gp.dark, gp.mono, gp.ex) { coverPal(gp.dark, d.cp, gp.mono, gp.ex) }
     val cvm = LocalVM.current
     LaunchedEffect(d.id, d.cv, d.cp) { if (d.cv.isNotEmpty() && d.cp.isEmpty()) cvm?.ensureCoverPal(d.id) }
     val c2 = cols == 2
@@ -373,7 +373,14 @@ fun CardBody(d: Note, kind: String, c2: Boolean, fg: Color, padH: Dp, padV: Dp, 
     Column(Modifier.fillMaxWidth()) {
         // drawCover = false (bayangan morph): ruangnya tetap ada supaya teks berada di tempat yang sama, tapi gambarnya tidak digambar
         // dua kali; sampul di editor sudah menimpanya dengan buram penuh (lihat EditorCover), jadi tidak ada pudar-silang yang kedip.
-        if (drawCover) CoverImage(vm, d, Modifier.fillMaxWidth().aspectRatio(coverAspect(c2)))
+        if (d.cm == "f") {
+            // gaya Frame: gambar kotak bersudut bundar di dalam kartu (jarak FRAME_CARD_PAD); editor menimpanya persis (lihat EditorFrame)
+            val fm = Modifier.fillMaxWidth()
+                .padding(start = FRAME_CARD_PAD.dp, top = FRAME_CARD_PAD.dp, end = FRAME_CARD_PAD.dp, bottom = if (hasText) 0.dp else FRAME_CARD_PAD.dp)
+                .aspectRatio(frameAspect(c2))
+            if (drawCover) CoverImage(vm, d, fm.clip(RoundedCornerShape(FRAME_CARD_R.dp)))
+            else Spacer(fm)
+        } else if (drawCover) CoverImage(vm, d, Modifier.fillMaxWidth().aspectRatio(coverAspect(c2)))
         else Spacer(Modifier.fillMaxWidth().aspectRatio(coverAspect(c2)))
         if (hasText) CardText(d, kind, c2, fg, padH, padV, insTL, insBL, delTime)
     }
@@ -2542,11 +2549,12 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                     SCard(POS_MID) {
                         T("Colors", 16f, 500, pal.os, Modifier.padding(bottom = 12.dp))
                         val dynAvail = android.os.Build.VERSION.SDK_INT >= 31
-                        val dynOn = pr.dyn && dynAvail
+                        val dynOn = pr.dyn && dynAvail && !pr.mono && !pr.ex
                         if (dynAvail) {
                             Row(
                                 Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
-                                    .clickable { vm.setPr(pr.copy(dyn = !dynOn)) }
+                                    // Dynamic menyala = Expressive dan Monochrome otomatis mati
+                                    .clickable { vm.setPr(if (dynOn) pr.copy(dyn = false) else pr.copy(dyn = true, ex = false, mono = false)) }
                                     .padding(vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
@@ -2559,7 +2567,7 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                         }
                         // satu-satunya pilihan warna manual: tombol warna kustom (dengan slider), hanya tampil saat Material You mati
                         AnimatedVisibility(
-                            visible = !dynOn,
+                            visible = !dynOn && !pr.ex,
                             enter = expandVertically(spring(.9f, 420f)) + fadeIn(tween(220)),
                             exit = shrinkVertically(spring(1f, 500f)) + fadeOut(tween(140))
                         ) {
@@ -2579,7 +2587,26 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                             }
                         }
                     }
-                    SCard(POS_MID, onClick = { vm.setPr(pr.copy(mono = !pr.mono)) }) {
+                    // Expressive: menyala = Monochrome dan Dynamic color otomatis mati
+                    SCard(POS_MID, onClick = { vm.setPr(if (pr.ex) pr.copy(ex = false) else pr.copy(ex = true, mono = false, dyn = false)) }) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Column(Modifier.weight(1f)) {
+                                T("Expressive", 16f, 500, pal.os)
+                                T("Bold, playful colors from Material 3 Expressive", 14f, 400, pal.osv)
+                            }
+                            MorphSwitch(pr.ex)
+                        }
+                        // pratinjau palet: kapsul berubah bentuk (kotak -> bulat penuh) saat Expressive menyala
+                        val ep = remember(pal.dark) { expressivePal(pal.dark) }
+                        val er by animateDpAsState(if (pr.ex) 16.dp else 8.dp, spring(.6f, 500f), label = "exr")
+                        Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf(ep.pc, ep.sc, ep.tc, ep.tb2, ep.p).forEach { c ->
+                                Box(Modifier.weight(1f).height(30.dp).clip(RoundedCornerShape(er)).background(if (pal.mono) c.gray() else c))
+                            }
+                        }
+                    }
+                    // Monochrome: menyala = Expressive dan Dynamic color otomatis mati
+                    SCard(POS_MID, onClick = { vm.setPr(if (pr.mono) pr.copy(mono = false) else pr.copy(mono = true, ex = false, dyn = false)) }) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             Column(Modifier.weight(1f)) {
                                 T("Monochrome", 16f, 500, pal.os)
@@ -2591,7 +2618,7 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                     SCard(POS_BOT, pad = PaddingValues(start = 12.dp, end = 12.dp, top = 18.dp, bottom = 12.dp)) {
                         T("Font", 16f, 500, pal.os, Modifier.padding(start = 8.dp, bottom = 10.dp))
                         val am = LocalContext.current.assets
-                        listOf("def" to "Default", "flex" to "Roboto Flex", "times" to "Times New Roman", "reenie" to "Reenie Beanie").forEach { (id, name) ->
+                        listOf("def" to "Default", "gsflex" to "Google Sans Flex", "flex" to "Roboto Flex", "times" to "Times New Roman", "reenie" to "Reenie Beanie").forEach { (id, name) ->
                             val fam = remember(id) { loadFont(am, id) }
                             FontChoice(name, fam, pr.ff == id) { vm.setPr(pr.copy(ff = id)) }
                         }
@@ -2716,7 +2743,7 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
             },
             confirmButton = {
                 TextButton(onClick = {
-                    vm.setPr(pr.copy(seed = String.format("#%06X", hsl(h, s, 50f).toArgb() and 0xFFFFFF), dyn = false)); custom = false
+                    vm.setPr(pr.copy(seed = String.format("#%06X", hsl(h, s, 50f).toArgb() and 0xFFFFFF), dyn = false, ex = false)); custom = false
                 }) { T("Use", 15f, 600, pal.p) }
             },
             dismissButton = { TextButton(onClick = { custom = false }) { T("Cancel", 15f, 500, pal.osv) } }

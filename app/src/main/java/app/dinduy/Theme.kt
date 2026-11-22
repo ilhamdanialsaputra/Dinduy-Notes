@@ -93,6 +93,12 @@ fun loadFont(am: AssetManager, id: String): FontFamily {
                     Font("fonts/roboto_flex.ttf", am, FontWeight(w), FontStyle.Normal, FontVariation.Settings(FontVariation.weight(w)))
                 }
             ) else FontFamily.SansSerif
+            // Google Sans Flex (variabel). Untuk tampilan "expressive" yang sebenarnya (judul), lihat GSX di ExpressiveType.kt.
+            "gsflex" -> if (has("google_sans_flex.ttf")) FontFamily(
+                (100..1000 step 50).map { w ->
+                    Font("fonts/google_sans_flex.ttf", am, FontWeight(w), FontStyle.Normal, FontVariation.Settings(FontVariation.weight(w), FontVariation.width(100f)))
+                }
+            ) else FontFamily.SansSerif
             // Times New Roman bersifat proprietary; Tinos adalah padanan metrik resminya (ukuran & bentuk huruf nyaris identik)
             "times" -> if (has("tinos_regular.ttf") && has("tinos_bold.ttf")) FontFamily(
                 Font("fonts/tinos_regular.ttf", am, FontWeight.Normal, FontStyle.Normal),
@@ -122,7 +128,9 @@ class Pal(
     val tb: Color,
     val tb2: Color,
     // true = mode Monochrome: seluruh warna sudah dijadikan abu-abu (dipakai untuk warna tetap seperti titik rekam / tinta)
-    val mono: Boolean = false
+    val mono: Boolean = false,
+    // true = palet Expressive (lihat expressivePal)
+    val ex: Boolean = false
 )
 
 /** Warna toolbar editor: mengikuti warna kertas (pal.s), hanya digeser sangat tipis ke warna teks supaya tetap terbaca sebagai bilah. */
@@ -142,7 +150,7 @@ fun Color.gray(): Color {
 fun Pal.toMono(): Pal = Pal(
     dark, p.gray(), op.gray(), pc.gray(), opc.gray(), sc.gray(), osc.gray(), tc.gray(), otc.gray(),
     s.gray(), os.gray(), osv.gray(), ol.gray(), c1.gray(), c2.gray(), c3.gray(), c4.gray(),
-    wc.gray(), owc.gray(), ec.gray(), oec.gray(), ac.gray(), oac.gray(), bg.gray(), tb.gray(), tb2.gray(), true
+    wc.gray(), owc.gray(), ec.gray(), oec.gray(), ac.gray(), oac.gray(), bg.gray(), tb.gray(), tb2.gray(), true, false
 )
 
 fun hsl(h: Float, s: Float, l: Float): Color {
@@ -229,9 +237,52 @@ fun buildPal(mode: String, seed: String, cover: Boolean = false): Pal {
 }
 
 /** Palet satu catatan bersampul, dari warna dominan foto (lihat coverSeed). Terang/gelap dan Monochrome ikut palet aplikasi. */
-fun coverPal(dark: Boolean, seed: String, mono: Boolean): Pal {
-    val p = buildPal(if (dark) "dark" else "light", seed, cover = true)
+fun coverPal(dark: Boolean, seed: String, mono: Boolean, ex: Boolean = false): Pal {
+    // Expressive: palet catatan bersampul memakai rona foto (kalau fotonya hampir abu-abu, pakai ungu bawaan Expressive)
+    val (hh, ss) = hueSat(seed)
+    val p = if (ex && !mono) expressivePal(dark, if (ss < 12f) 272f else hh)
+        else buildPal(if (dark) "dark" else "light", seed, cover = true)
     return if (mono) p.toMono() else p
+}
+
+/**
+ * Palet Expressive (Material 3 Expressive): rona ungu / pink / lilac / ungu tua / periwinkle seperti palet pada materi M3 Expressive.
+ * Aturan kontras (sama dengan palet biasa, supaya morph kartu <-> catatan tetap logis):
+ *  - kertas (s = kartu = latar catatan) SATU warna, bg (latar beranda) selalu beda tingkat dengannya, teks (os) hampir hitam / hampir putih.
+ *  - terang: kertas hsl(L 97.5), beranda hsl(L 90, pekat); gelap: kertas HITAM (AMOLED), beranda plum gelap.
+ * [hue] = rona dasar (272 = ungu). Dipakai juga oleh catatan bersampul (rona dari foto).
+ */
+fun expressivePal(dark: Boolean, hue: Float = 272f): Pal {
+    fun c(o: Float, s: Float, l: Float) = hsl(hue + o, s, l)
+    val cl = if (dark) 22f else 90f
+    val ol = if (dark) 90f else 14f
+    val wc = hsl(38f, 90f, cl); val owc = hsl(38f, 80f, ol)
+    val ec = hsl(4f, 85f, cl); val oec = hsl(4f, 80f, ol)
+    val ac = hsl(hue + 150f, 65f, cl); val oac = hsl(hue + 150f, 60f, ol)
+    return if (!dark) {
+        val paper = c(0f, 100f, 97.5f)
+        Pal(
+            false, c(0f, 72f, 46f), Color.White, c(0f, 100f, 80f), c(0f, 85f, 13f),
+            c(80f, 100f, 83f), c(80f, 85f, 14f), c(-30f, 100f, 88f), c(-30f, 75f, 18f),
+            paper, c(0f, 55f, 9f), c(0f, 28f, 36f), c(0f, 35f, 74f),
+            c(0f, 100f, 95f), paper, c(10f, 100f, 92f), c(10f, 95f, 86f),
+            wc, owc, ec, oec, ac, oac,
+            c(5f, 62f, 90f),
+            c(20f, 100f, 86f), c(30f, 100f, 78f),
+            false, true
+        )
+    } else {
+        Pal(
+            true, c(0f, 100f, 81f), c(0f, 80f, 17f), c(10f, 48f, 25f), c(0f, 100f, 91f),
+            c(80f, 55f, 30f), c(80f, 100f, 91f), c(-30f, 45f, 32f), c(-30f, 100f, 91f),
+            Color.Black, c(0f, 100f, 95f), c(0f, 30f, 76f), c(0f, 28f, 36f),
+            c(8f, 45f, 9f), Color.Black, c(8f, 48f, 15f), c(8f, 50f, 21f),
+            wc, owc, ec, oec, ac, oac,
+            c(8f, 50f, 12f),
+            c(10f, 55f, 19f), c(15f, 60f, 27f),
+            false, true
+        )
+    }
 }
 
 /** Animasi pindah palet (dipakai palet catatan, yang bisa berganti saat sampul dipasang / diganti / dilepas). */
@@ -309,7 +360,7 @@ fun lerpPal(a: Pal, b: Pal, f: Float): Pal = Pal(
     lerp(a.wc, b.wc, f), lerp(a.owc, b.owc, f), lerp(a.ec, b.ec, f), lerp(a.oec, b.oec, f),
     lerp(a.ac, b.ac, f), lerp(a.oac, b.oac, f),
     lerp(a.bg, b.bg, f),
-    lerp(a.tb, b.tb, f), lerp(a.tb2, b.tb2, f), b.mono
+    lerp(a.tb, b.tb, f), lerp(a.tb2, b.tb2, f), b.mono, b.ex
 )
 
 val LocalPal = compositionLocalOf { buildPal("light", "#6750A4") }
