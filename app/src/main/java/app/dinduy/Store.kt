@@ -283,7 +283,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             try {
                 kotlinx.coroutines.withTimeoutOrNull(3500L) {
                     withContext(Dispatchers.IO) {
-                        for (d in list) if (d.cv.isNotEmpty()) { try { Imgs.load(imgDir, d.cv) } catch (e: Throwable) { } }
+                        for (d in list) if (d.cv.isNotEmpty()) { try { Imgs.load(imgDir, d.cv); BookAspect.ensure(imgDir, d.cv) } catch (e: Throwable) { } }
                         val books = list.filter { it.pdf.isNotEmpty() }.take(5)
                         for (d in books) {
                             try { BookArt.prepare(this@AppVM, ctx, d, wpx) }
