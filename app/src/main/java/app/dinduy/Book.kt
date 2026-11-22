@@ -132,6 +132,7 @@ object BookSpec {
     const val ASPECT = .70f               // lebar / tinggi sampul buku bila rasio halaman belum diketahui (cadangan)
     const val MIN_ASPECT = .58f           // batas rasio sampul: paling tinggi / ramping (halaman sangat panjang dipangkas dari atas)
     const val TOP_HINGE_ASPECT = 1.12f    // rasio >= ini (slide / landscape): engsel di ATAS, sampul terbuka ke atas. Di bawahnya: engsel kiri, buka ke kiri
+    const val TOP_COVER_DEG = 320f        // buku berengsel atas: sampul terus berayun ke BELAKANG buku (melewati 180 = rebah di atas, 270 = menggantung di belakang), jadi menghilang di balik kertas, bukan terpotong layar
     const val MAX_ASPECT = 1.55f          // batas rasio sampul: paling lebar (slide 16:9 / panorama dipangkas sedikit di kiri-kanan), supaya sampul rebah tidak melewati layar
     const val BACK_DRAG = .50f            // progres turun sampai segini selama back gesture ditarik penuh
     const val TXT_CHANGE = "Change cover"
@@ -811,7 +812,8 @@ fun BookCoverLayer(vm: AppVM) {
         vm.morphTick
         val r = bookPageRect(vm, size.width, size.height, tt, geo)   // engsel menempel di tepi kiri kertas yang membesar
         val pe = bookPoseFrac(tRaw)
-        val rock = bookRock(tRaw)                                      // denyut tekan saat sampul membentur meja (0 sebelum benturan dan saat zoom)
+        val topB = BookAspect.isTop(BookAspect.of(d))
+        val rock = if (topB) 0f else bookRock(tRaw)                    // denyut tekan saat sampul membentur meja (0 sebelum benturan dan saat zoom; buku engsel atas tidak membentur meja)
         val pk = if (morphClosing(vm)) 0f else BookFx.peek              // tekanan jari dilanjutkan saat membuka; saat menutup kartu sendiri yang menerima
         val yaw = (BookSpec.REST_YAW + BookFx.tilt) * (1f - pe)        // tidak ada goyangan putar: bidang halaman (z = 0) selalu persis di kotaknya
         val pitch = BookSpec.REST_PITCH * (1f - pe)
@@ -820,9 +822,11 @@ fun BookCoverLayer(vm: AppVM) {
         val lensF = bookLens(tRaw) * (1f + BookSpec.PEEK_LENS * pk * (1f - pe))
         val lx = BookSpec.REST_LENS_X * lensF
         val ly = BookSpec.REST_LENS_Y * lensF
-        val swing = bookSwing(tRaw)
+        // engsel atas: ayunan monoton sampai di belakang buku (tanpa pantulan membentur meja)
+        val swing = if (topB && tRaw / BookSpec.COVER_END >= BookSpec.SWING_IMPACT) 1f else bookSwing(tRaw)
         // sudut = ayunan + sisa intipan jari (memudar seiring ayunan), jadi dimulai TEPAT di sudut yang terlihat pada kartu
-        val deg = (BookSpec.COVER_DEG * swing + BookSpec.PEEK_DEG * pk.coerceAtLeast(0f) * (1f - swing)).coerceAtMost(200f)
+        val full = if (topB) BookSpec.TOP_COVER_DEG else BookSpec.COVER_DEG
+        val deg = (full * swing + BookSpec.PEEK_DEG * pk.coerceAtLeast(0f) * (1f - swing)).coerceAtMost(full + 7f)
         // halaman terakhir dibuka: hanya sebelum zoom (setelah itu BookPageLayer yang menggambarnya)
         val pageOn = tt <= .0005f
         val page = if (!pageOn) null else (pageHold[0] ?: bookPageBmp(d.pdf)?.let { BookTex.pageTex(it, r.width) }?.also { pageHold[0] = it })
@@ -839,7 +843,7 @@ fun BookCoverLayer(vm: AppVM) {
             ) else -1
             Book3D.draw(
                 cnv, r.left, r.top, r.right, r.bottom,
-                yaw, pitch, k, deg, ct, page, pageOn, BookFx.dark, lx, ly, bookCamera(tRaw), bookDolly(tRaw), BookAspect.isTop(BookAspect.of(d))
+                yaw, pitch, k, deg, ct, page, pageOn, BookFx.dark, lx, ly, bookCamera(tRaw), bookDolly(tRaw), topB
             )
             if (sv >= 0) cnv.restoreToCount(sv)
         }
