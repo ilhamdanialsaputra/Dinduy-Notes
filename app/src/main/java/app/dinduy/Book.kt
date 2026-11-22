@@ -117,7 +117,6 @@ object BookSpec {
     const val SWING_BOUNCE = .065f      // pantulan papan sampul saat membentur bidang meja: terangkat sedikit (ke atas, bukan menembus meja), jatuh lagi, diam
     const val ROCK_YAW = 0f               // (tidak dipakai lagi: buku tidak diputar, supaya bidang halaman selalu pas dengan kotaknya)
     const val ANTIC_SCALE = .02f          // antisipasi: buku menekan sedikit lebih dalam tepat sebelum sampul terangkat, lalu pulih (tanpa jeda tambahan: responsif di layar sentuh)
-    const val LEAF_DEG = 24f              // sudut terangkat maksimum daun halaman yang terkibas saat sampul membuka / menutup
     const val ROCK_SCALE = .028f         // buku sedikit tertekan (mengecil) tepat saat sampul membentur, lalu pulih
     const val BOARD = .050f               // tebal papan sampul (x lebar sampul)
     const val PAGES = .18f                // tebal blok halaman (x lebar sampul)
