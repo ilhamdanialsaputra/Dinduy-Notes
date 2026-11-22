@@ -130,10 +130,10 @@ object BookSpec {
     const val ZOOM_CAMERA = 2.0f          // jarak kamera di ujung zoom: kamera MENDEKAT ke halaman (bukan sekadar gambar diperbesar), perspektif mengencang
     const val CAMERA = 2.8f               // jarak kamera 3D = CAMERA x lebar sampul (makin besar = perspektif makin lembut)
     const val ASPECT = .70f               // lebar / tinggi sampul buku bila rasio halaman belum diketahui (cadangan)
-    const val MIN_ASPECT = .58f           // batas rasio sampul: paling tinggi / ramping (halaman sangat panjang dipangkas dari atas)
+    const val MIN_ASPECT = .30f           // HANYA pengaman geometri (halaman rusak / ukuran 0): rasio asli halaman dipakai apa adanya di atas ini
     const val TOP_HINGE_ASPECT = 1.12f    // rasio >= ini (slide / landscape): engsel di ATAS, sampul terbuka ke atas. Di bawahnya: engsel kiri, buka ke kiri
     const val TOP_COVER_DEG = 320f        // buku berengsel atas: sampul terus berayun ke BELAKANG buku (melewati 180 = rebah di atas, 270 = menggantung di belakang), jadi menghilang di balik kertas, bukan terpotong layar
-    const val MAX_ASPECT = 1.55f          // batas rasio sampul: paling lebar (slide 16:9 / panorama dipangkas sedikit di kiri-kanan), supaya sampul rebah tidak melewati layar
+    const val MAX_ASPECT = 3.5f           // pengaman geometri; slide 16:9 (1,78), 4:3, A4 landscape semuanya akurat tanpa dipangkas
     const val BACK_DRAG = .50f            // progres turun sampai segini selama back gesture ditarik penuh
     const val TXT_CHANGE = "Change cover"
     const val TXT_RESTORE = "Restore original cover"
@@ -652,7 +652,7 @@ fun BookCard(
         contentAlignment = Alignment.TopCenter
     ) {
         // 1 kolom: buku lebar (slide) sedikit lebih lebar dari buku tegak, tapi tetap dibatasi supaya sampul yang rebah tidak melewati layar
-        val maxW1 = 200f + 32f * ((asp - BookSpec.ASPECT) / (BookSpec.MAX_ASPECT - BookSpec.ASPECT)).coerceIn(0f, 1f)
+        val maxW1 = 200f + 32f * ((asp - BookSpec.ASPECT) / (1.8f - BookSpec.ASPECT)).coerceIn(0f, 1f)
         Column(Modifier.widthIn(max = if (cols == 1) maxW1.dp else 480.dp).fillMaxWidth().padding(horizontal = 10.dp, vertical = 10.dp)) {
             Box(Modifier.fillMaxWidth().padding(end = 6.dp, bottom = 5.dp)) {
                 Box(
