@@ -79,7 +79,7 @@ private val GoogleProvider by lazy {
 }
 
 @OptIn(ExperimentalTextApi::class)
-private val ReenieFamily: FontFamily by lazy {
+val ReenieFamily: FontFamily by lazy {
     FontFamily(GFont(GoogleFont("Reenie Beanie"), GoogleProvider, FontWeight.Normal, FontStyle.Normal))
 }
 
