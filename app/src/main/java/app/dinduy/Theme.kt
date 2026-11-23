@@ -93,12 +93,20 @@ fun loadFont(am: AssetManager, id: String): FontFamily {
                     Font("fonts/roboto_flex.ttf", am, FontWeight(w), FontStyle.Normal, FontVariation.Settings(FontVariation.weight(w)))
                 }
             ) else FontFamily.SansSerif
-            // Google Sans Flex (variabel). Untuk tampilan "expressive" yang sebenarnya (judul), lihat GSX di ExpressiveType.kt.
-            "gsflex" -> if (has("google_sans_flex.ttf")) FontFamily(
+            // Google Sans Flex (variabel) = font bawaan aplikasi. Bobot 100..1000, sudut huruf agak membulat (ROND) dan sedikit lebih lebar
+            // supaya terasa Google Sans Flex, bukan sekadar sans-serif. Judul expressive: lihat GSX di ExpressiveType.kt.
+            "def", "gsflex" -> if (has("google_sans_flex.ttf")) FontFamily(
                 (100..1000 step 50).map { w ->
-                    Font("fonts/google_sans_flex.ttf", am, FontWeight(w), FontStyle.Normal, FontVariation.Settings(FontVariation.weight(w), FontVariation.width(100f)))
+                    Font(
+                        "fonts/google_sans_flex.ttf", am, FontWeight(w), FontStyle.Normal,
+                        FontVariation.Settings(
+                            FontVariation.weight(w), FontVariation.width(104f),
+                            FontVariation.Setting("ROND", 60f), FontVariation.Setting("opsz", 16f)
+                        )
+                    )
                 }
-            ) else FontFamily.SansSerif
+            ) else FontFamily.Default
+            "sys" -> FontFamily.Default
             // Times New Roman bersifat proprietary; Tinos adalah padanan metrik resminya (ukuran & bentuk huruf nyaris identik)
             "times" -> if (has("tinos_regular.ttf") && has("tinos_bold.ttf")) FontFamily(
                 Font("fonts/tinos_regular.ttf", am, FontWeight.Normal, FontStyle.Normal),
@@ -246,43 +254,63 @@ fun coverPal(dark: Boolean, seed: String, mono: Boolean, ex: Boolean = false): P
 }
 
 /**
- * Palet Expressive (Material 3 Expressive): rona ungu / pink / lilac / ungu tua / periwinkle seperti palet pada materi M3 Expressive.
- * Aturan kontras (sama dengan palet biasa, supaya morph kartu <-> catatan tetap logis):
- *  - kertas (s = kartu = latar catatan) SATU warna, bg (latar beranda) selalu beda tingkat dengannya, teks (os) hampir hitam / hampir putih.
- *  - terang: kertas hsl(L 97.5), beranda hsl(L 90, pekat); gelap: kertas HITAM (AMOLED), beranda plum gelap.
- * [hue] = rona dasar (272 = ungu). Dipakai juga oleh catatan bersampul (rona dari foto).
+ * Palet Expressive (Material 3 Expressive), diturunkan dari rona benih ([hue]) = rona warna Dynamic sistem ATAU warna Kustom pilihan pengguna.
+ * Rumusnya diambil dari palet contoh M3 Expressive (ungu 270 sebagai rona benih):
+ *   wadah utama   hsl(h,      100%, 77%)   ungu
+ *   wadah kedua   hsl(h + 84, 100%, 81%)   pink
+ *   wadah ketiga  hsl(h - 30, 100%, 89%)   periwinkle
+ *   aksen lilac   hsl(h + 15, 100%, 81%)
+ *   plum gelap    hsl(h + 19,  44%, 20%)   teks di atas wadah dan warna wadah gelap
+ *   latar         hsl(h + 15,  45%, 94%)   lavender tipis (permukaan HAMPIR netral; yang pekat hanya wadahnya)
+ * Kontras: kertas (= kartu = latar catatan) satu warna; latar beranda selalu beda tingkat; teks hampir hitam / hampir putih.
+ * [sat] 0..100 = intensitas (Kustom: dari slider; Dynamic: 100). Dipakai juga oleh catatan bersampul (rona dari foto).
  */
-fun expressivePal(dark: Boolean, hue: Float = 272f): Pal {
-    fun c(o: Float, s: Float, l: Float) = hsl(hue + o, s, l)
+fun expressivePal(dark: Boolean, hue: Float = 270f, sat: Float = 100f): Pal {
+    val k = sat.coerceIn(40f, 100f) / 100f
+    fun c(o: Float, s: Float, l: Float) = hsl(hue + o, s * k, l)
     val cl = if (dark) 22f else 90f
     val ol = if (dark) 90f else 14f
-    val wc = hsl(38f, 90f, cl); val owc = hsl(38f, 80f, ol)
-    val ec = hsl(4f, 85f, cl); val oec = hsl(4f, 80f, ol)
-    val ac = hsl(hue + 150f, 65f, cl); val oac = hsl(hue + 150f, 60f, ol)
+    val wc = hsl(38f, 90f * k, cl); val owc = hsl(38f, 80f, ol)
+    val ec = hsl(4f, 85f * k, cl); val oec = hsl(4f, 80f, ol)
+    val ac = hsl(hue + 150f, 65f * k, cl); val oac = hsl(hue + 150f, 60f, ol)
     return if (!dark) {
-        val paper = c(0f, 100f, 97.5f)
+        val paper = c(15f, 70f, 98.5f)
+        val plum = c(19f, 44f, 15f)
         Pal(
-            false, c(0f, 72f, 46f), Color.White, c(0f, 100f, 80f), c(0f, 85f, 13f),
-            c(80f, 100f, 83f), c(80f, 85f, 14f), c(-30f, 100f, 88f), c(-30f, 75f, 18f),
-            paper, c(0f, 55f, 9f), c(0f, 28f, 36f), c(0f, 35f, 74f),
-            c(0f, 100f, 95f), paper, c(10f, 100f, 92f), c(10f, 95f, 86f),
+            false, c(0f, 78f, 40f), Color.White, c(0f, 100f, 77f), plum,
+            c(84f, 100f, 81f), plum, c(-30f, 100f, 89f), plum,
+            paper, c(19f, 40f, 8f), c(19f, 18f, 36f), c(19f, 25f, 76f),
+            c(15f, 60f, 96f), paper, c(15f, 75f, 94f), c(15f, 90f, 88f),
             wc, owc, ec, oec, ac, oac,
-            c(5f, 62f, 90f),
-            c(20f, 100f, 86f), c(30f, 100f, 78f),
+            c(15f, 40f, 92.5f),
+            c(15f, 100f, 87f), c(15f, 100f, 81f),
             false, true
         )
     } else {
         Pal(
-            true, c(0f, 100f, 81f), c(0f, 80f, 17f), c(10f, 48f, 25f), c(0f, 100f, 91f),
-            c(80f, 55f, 30f), c(80f, 100f, 91f), c(-30f, 45f, 32f), c(-30f, 100f, 91f),
-            Color.Black, c(0f, 100f, 95f), c(0f, 30f, 76f), c(0f, 28f, 36f),
-            c(8f, 45f, 9f), Color.Black, c(8f, 48f, 15f), c(8f, 50f, 21f),
+            true, c(0f, 100f, 80f), c(19f, 60f, 13f), c(19f, 44f, 22f), c(0f, 100f, 88f),
+            c(84f, 50f, 28f), c(84f, 100f, 90f), c(-30f, 42f, 30f), c(-30f, 100f, 91f),
+            Color.Black, c(15f, 60f, 95f), c(15f, 25f, 74f), c(19f, 24f, 34f),
+            c(19f, 40f, 8f), Color.Black, c(19f, 44f, 15f), c(19f, 46f, 21f),
             wc, owc, ec, oec, ac, oac,
-            c(8f, 50f, 12f),
-            c(10f, 55f, 19f), c(15f, 60f, 27f),
+            c(19f, 42f, 11f),
+            c(19f, 48f, 19f), c(19f, 52f, 26f),
             false, true
         )
     }
+}
+
+/** Rona dan intensitas benih untuk Expressive: Dynamic menyala -> rona aksen sistem; selain itu -> warna Kustom (slider intensitas 35..88 dipetakan ke 55..100). */
+fun exSeed(ctx: android.content.Context, dyn: Boolean, seed: String): Pair<Float, Float> {
+    if (dyn && android.os.Build.VERSION.SDK_INT >= 31) {
+        try {
+            val id = ctx.resources.getIdentifier("system_accent1_500", "color", "android")
+            val col = ctx.getColor(id)
+            return hueSat(String.format("#%06X", col and 0xFFFFFF)).first to 100f
+        } catch (e: Exception) { }
+    }
+    val (h, s) = hueSat(seed)
+    return h to (55f + 45f * ((s.coerceIn(35f, 88f) - 35f) / 53f))
 }
 
 /** Animasi pindah palet (dipakai palet catatan, yang bisa berganti saat sampul dipasang / diganti / dilepas). */
