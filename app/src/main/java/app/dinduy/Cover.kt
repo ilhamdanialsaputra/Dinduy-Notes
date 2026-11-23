@@ -76,10 +76,10 @@ const val EDIT_RATIO = 1.28f
 const val FRAME_EDIT_RATIO = 1.86f
 /** Jarak frame ke tepi layar di editor (dp), dan sudutnya (sedang, tidak terlalu bundar). */
 const val FRAME_EDIT_PAD = 24f
-const val FRAME_EDIT_R = 20f
+const val FRAME_EDIT_R = 12f
 /** Jarak frame ke tepi kartu di beranda (dp), dan sudutnya. */
 const val FRAME_CARD_PAD = 8f
-const val FRAME_CARD_R = 14f
+const val FRAME_CARD_R = 8f
 /** Rasio frame di kartu beranda: 2 kolom hampir persegi, 1 kolom lebar. */
 fun frameAspect(c2: Boolean): Float = if (c2) 1.05f else 1.9f
 
