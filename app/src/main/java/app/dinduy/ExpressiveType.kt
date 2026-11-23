@@ -1,6 +1,6 @@
 package app.dinduy
 
-import android.content.res.AssetManager
+import java.io.File
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -28,39 +28,47 @@ import kotlin.math.sqrt
 // =====================================================================================
 @OptIn(ExperimentalTextApi::class)
 object GSX {
-    private const val FILE = "fonts/google_sans_flex.ttf"
-    /** Anak tangga kurva animasi (0..N) dan jumlah tingkat miring. Semua kata berbagi (N+1) x SL keluarga huruf. */
-    const val N = 30
-    const val SL = 3
+    /** Anak tangga kurva animasi (0..N) dan jumlah tingkat miring. Semua kata berbagi (N+1) x SL keluarga huruf (sengaja sedikit: hemat memori). */
+    const val N = 20
+    const val SL = 2
     /** Tingkat acuan tata letak judul (tebal sedang, tegak). Lebar SEMUA kata judul disamakan dengan lebar kata ini, apa pun gayanya. */
-    const val REF_IX = 16
-    const val REST_BOLD_IX = 19
-    const val REST_LIGHT_IX = 7
+    const val REF_IX = 11
+    const val REST_BOLD_IX = 13
+    const val REST_LIGHT_IX = 5
 
-    @Volatile private var am: AssetManager? = null
-    private var has: Boolean? = null
+    // Font disalin SEKALI dari assets ke filesDir lalu dibuka lewat berkas (mmap, dipakai bersama oleh semua varian).
+    // Lewat assets, tiap varian sumbu mengekstrak ulang seluruh TTF (terkompresi di APK) ke memori -> lag parah dan OOM / force close.
+    @Volatile private var file: File? = null
+    private var tried = false
     private val cache = HashMap<String, FontFamily?>()
 
-    fun init(a: AssetManager) { if (am == null) am = a }
-
-    fun available(): Boolean {
-        has?.let { return it }
-        val a = am ?: return false
-        val r = try { a.open("fonts/google_sans_flex.ttf").close(); true } catch (e: Exception) { false }
-        has = r
-        return r
+    fun init(ctx: android.content.Context) {
+        if (tried) return
+        tried = true
+        try {
+            val out = File(ctx.filesDir, "google_sans_flex_v1.ttf")
+            if (!out.exists() || out.length() < 20_000) {
+                val tmp = File(out.path + ".tmp")
+                ctx.assets.open("fonts/google_sans_flex.ttf").use { i -> tmp.outputStream().use { o -> i.copyTo(o) } }
+                if (tmp.length() > 20_000) tmp.renameTo(out) else tmp.delete()
+            }
+            if (out.exists() && out.length() > 20_000) file = out
+        } catch (e: Exception) { }
     }
+
+    fun file(): File? = file
+    fun available(): Boolean = file != null
 
     /** Keluarga huruf dengan sumbu tetap. null = font tidak tersedia. */
     fun fam(w: Int, wd: Float, r: Float, o: Float, sl: Float = 0f): FontFamily? {
         if (!available()) return null
-        val a = am ?: return null
+        val fl = file ?: return null
         val key = "$w/$wd/$r/$o/$sl"
         if (cache.containsKey(key)) return cache[key]
         val f = try {
             FontFamily(
                 Font(
-                    FILE, a, FontWeight(w.coerceIn(1, 1000)), FontStyle.Normal,
+                    fl, FontWeight(w.coerceIn(1, 1000)), FontStyle.Normal,
                     FontVariation.Settings(
                         FontVariation.weight(w.coerceIn(1, 1000)),
                         FontVariation.width(wd.coerceIn(25f, 151f)),
@@ -80,7 +88,7 @@ object GSX {
     fun curveW(i: Int): Int = (200f + 800f * (i.coerceIn(0, N) / N.toFloat())).roundToInt()
     fun curve(i: Int, s: Int = 0): FontFamily? {
         val u = i.coerceIn(0, N) / N.toFloat()
-        return fam(curveW(i), 118f - 38f * u, 100f * u, 72f, -5f * s.coerceIn(0, SL - 1))
+        return fam(curveW(i), 118f - 38f * u, 100f * u, 72f, -8f * s.coerceIn(0, SL - 1))
     }
     fun idx(u: Float): Int = (u.coerceIn(0f, 1f) * N).roundToInt()
 }
@@ -158,6 +166,6 @@ class TitleAnim(intro: Boolean) {
     fun slant(k: Int): Int {
         if (loop < .05f) return 0
         val v = sin(lt * .5f + k * 1.7f)
-        return if (v > .8f) 2 else if (v > .35f) 1 else 0
+        return if (v > .45f) 1 else 0
     }
 }
