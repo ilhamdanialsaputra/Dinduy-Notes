@@ -2598,7 +2598,8 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                         }
                         // pratinjau palet: kapsul berubah bentuk (kotak -> bulat penuh) saat Expressive menyala
                         val exCtx = androidx.compose.ui.platform.LocalContext.current
-                        val ep = remember(pal.dark, dynOn, pr.seed) { val (h, s) = exSeed(exCtx, dynOn, pr.seed); expressivePal(pal.dark, h, s) }
+                        val exDyn = pr.dyn && android.os.Build.VERSION.SDK_INT >= 31 && !pr.mono
+                        val ep = remember(pal.dark, exDyn, pr.seed) { val (h, s) = exSeed(exCtx, exDyn, pr.seed); expressivePal(pal.dark, h, s) }
                         val er by animateDpAsState(if (pr.ex) 16.dp else 8.dp, spring(.6f, 500f), label = "exr")
                         Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             listOf(ep.pc, ep.sc, ep.tb2, if (pal.dark) ep.pc else ep.opc, ep.tc).forEach { c ->
