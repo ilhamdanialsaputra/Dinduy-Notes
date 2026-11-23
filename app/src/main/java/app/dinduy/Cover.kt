@@ -52,6 +52,8 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.inset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
@@ -312,10 +314,10 @@ fun EditorFrame(vm: AppVM, d: Note, scroll: () -> Int) {
                 androidx.compose.ui.geometry.CornerRadius(g[4], g[4])
             )
         )
-        androidx.compose.ui.graphics.drawscope.clipPath(path) {
+        clipPath(path) {
             drawRect(pal.c3)
             if (bmp != null) {
-                androidx.compose.ui.graphics.drawscope.inset(g[0], g[1], size.width - g[0] - fw, size.height - g[1] - fh) {
+                inset(g[0], g[1], size.width - g[0] - fw, size.height - g[1] - fh) {
                     drawCover(bmp, d.cz, d.cx, d.cy, soft = !pal.dark)
                 }
             }
