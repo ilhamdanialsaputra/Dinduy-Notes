@@ -632,13 +632,14 @@ fun AppRoot(vm: AppVM, act: Actions) {
     val nav = vm.nav
     val ctx = LocalContext.current
     // default: ikuti perangkat (Material You). Warna kustom dipakai hanya jika pengguna memilihnya, atau perangkat < Android 12.
-    val dynOn = vm.pr.dyn && Build.VERSION.SDK_INT >= 31 && !vm.pr.mono && !vm.pr.ex
+    val dynOn = vm.pr.dyn && Build.VERSION.SDK_INT >= 31 && !vm.pr.mono
     val exOn = vm.pr.ex && !vm.pr.mono
     // mode "auto" = ikuti terang/gelap perangkat
     val sysDark = androidx.compose.foundation.isSystemInDarkTheme()
     val effMode = normMode(vm.pr.mode).let { if (it == "auto") (if (sysDark) "dark" else "light") else it }
     val target = remember(effMode, vm.pr.seed, dynOn, vm.pr.mono, exOn) {
-        val base = if (exOn) expressivePal(effMode == "dark")
+        // Expressive = lapisan di atas Dynamic / Kustom: rona benihnya dari warna sistem (Dynamic) atau warna pilihan (Kustom)
+        val base = if (exOn) { val (eh, es) = exSeed(ctx, dynOn, vm.pr.seed); expressivePal(effMode == "dark", eh, es) }
             else (if (dynOn) dynamicPal(ctx, effMode) else null) ?: buildPal(effMode, vm.pr.seed)
         if (vm.pr.mono) base.toMono() else base
     }
