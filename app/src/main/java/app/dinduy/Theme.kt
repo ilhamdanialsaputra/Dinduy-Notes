@@ -271,8 +271,8 @@ fun expressivePal(dark: Boolean, hue: Float = 270f, sat: Float = 100f): Pal {
     val ec = hsl(4f, 85f * k, cl); val oec = hsl(4f, 80f, ol)
     val ac = hsl(hue + 150f, 65f * k, cl); val oac = hsl(hue + 150f, 60f, ol)
     return if (!dark) {
-        // kertas LEBIH pekat (L 74, kejenuhan penuh); latar beranda juga pekat tapi lebih gelap dan rona bergeser -26 (periwinkle, L 66),
-        // jadi jelas beda dari kartu dan bukan putih
+        // kertas (kartu & catatan) tetap PEKAT (L 74, kejenuhan penuh); latar beranda sengaja kalem: agak desaturated (sat 45) dan lebih terang
+        // (L 80), rona bergeser -26 (periwinkle), jadi kartu pekat tampil menonjol di atasnya
         val paper = c(0f, 100f, 74f)
         val plum = c(19f, 70f, 16f)
         Pal(
@@ -281,7 +281,7 @@ fun expressivePal(dark: Boolean, hue: Float = 270f, sat: Float = 100f): Pal {
             paper, c(19f, 70f, 6f), c(19f, 45f, 20f), c(10f, 45f, 50f),
             c(-22f, 85f, 86f), paper, c(-22f, 90f, 90f), c(-22f, 100f, 82f),
             wc, owc, ec, oec, ac, oac,
-            c(-26f, 78f, 66f),
+            c(-26f, 45f, 80f),
             c(0f, 100f, 86f), c(0f, 100f, 91f),
             false, true, hue, sat
         )
