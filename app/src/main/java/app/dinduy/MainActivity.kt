@@ -669,7 +669,11 @@ fun AppRoot(vm: AppVM, act: Actions) {
     // Fallback memakai `to` (target yang stabil), bukan `pal` yang berubah tiap frame saat tema beralih.
     val curNote = (nav.noteId ?: vm.openId)?.let { vm.note(it) }
     val curCp = curNote?.takeIf { it.cv.isNotEmpty() && it.pdf.isEmpty() }?.cp.orEmpty()
-    val noteTarget = remember(curCp, pal.dark, pal.mono, pal.ex, to) { if (curCp.isEmpty()) to else coverPal(pal.dark, curCp, pal.mono, pal.ex) }
+    val curId = curNote?.id
+    val noteTarget = remember(curCp, curId, pal.dark, pal.mono, pal.ex, pal.exH, pal.exS, to) {
+        if (curCp.isEmpty()) { if (pal.ex && curId != null) expressivePal(pal.dark, pal.exH + exOff(curId), pal.exS) else to }
+        else coverPal(pal.dark, curCp, pal.mono, pal.ex)
+    }
     val notePal = animPal(noteTarget, curNote?.id)
     val cs = remember(pal) {
         if (pal.dark) darkColorScheme(primary = pal.p, onPrimary = pal.op, surface = pal.s, onSurface = pal.os, background = pal.bg)
