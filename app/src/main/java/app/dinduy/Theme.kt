@@ -297,8 +297,8 @@ fun expressivePal(dark: Boolean, hue: Float = 270f, sat: Float = 100f): Pal {
     }
 }
 
-/** Pergeseran rona per catatan (dari id) untuk Expressive: ungu / pink / periwinkle / lilac-hangat. Kartu dan catatan memakai fungsi yang sama. */
-fun exOff(id: String): Float = floatArrayOf(0f, 84f, -32f, 40f)[(id.hashCode() and 0x7fffffff) % 4]
+/** Pergeseran rona per catatan (dari id) untuk Expressive. Sengaja tipis (+-16 derajat) supaya semua kartu tetap satu keluarga warna. Kartu dan catatan memakai fungsi yang sama. */
+fun exOff(id: String): Float = floatArrayOf(0f, 16f, -16f, 8f)[(id.hashCode() and 0x7fffffff) % 4]
 
 /** Rona dan intensitas benih untuk Expressive: Dynamic menyala -> rona aksen sistem; selain itu -> warna Kustom (slider intensitas 35..88 dipetakan ke 55..100). */
 fun exSeed(ctx: android.content.Context, dyn: Boolean, seed: String): Pair<Float, Float> {
