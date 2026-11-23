@@ -32,7 +32,6 @@ val fetchFonts by tasks.registering {
         val gsfGrad = "GoogleSansFlex%5BGRAD%2CROND%2Copsz%2Cslnt%2Cwdth%2Cwght%5D.ttf"
         val cdn = "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl"
         val files = listOf(
-            "roboto_flex.ttf" to listOf("$base/robotoflex/RobotoFlex%5BGRAD%2CXOPQ%2CXTRA%2CYOPQ%2CYTAS%2CYTDE%2CYTFI%2CYTLC%2CYTUC%2Copsz%2Cslnt%2Cwdth%2Cwght%5D.ttf"),
             // Google Sans Flex (OFL, variabel: wght 1-1000, wdth 25-151, ROND 0-100, opsz 1-144). Dicoba beberapa alamat berurutan.
             "google_sans_flex.ttf" to listOf(
                 "$base/googlesansflex/$gsf", "$cdn/googlesansflex/$gsf",
