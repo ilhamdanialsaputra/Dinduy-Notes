@@ -3443,11 +3443,17 @@ fun BottomBars(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean, imeOpen: Boole
 }
 
 
-// ---------- judul catatan (Google Sans Flex expressive, animasi per kata) ----------
+// ---------- judul catatan (Google Sans Flex expressive, animasi per kata, tata letak terkunci) ----------
+/** Satu kata judul yang diberi gaya: rentang, tingkat kurva, tingkat miring, jarak huruf (em). */
+private class TWord(val s: Int, val e: Int, val ix: Int, val sl: Int, val ls: Float)
+
 /**
- * Judul catatan. Dipisah dari NoteScreen supaya animasi per-frame hanya me-recompose fungsi ini (bukan seluruh layar catatan).
- * Tidak beranimasi = keluarga huruf tunggal (tanpa span). Beranimasi = tiap kata diberi keluarga huruf dari kurva GSX lewat span
- * di VisualTransformation, jadi teks, kursor, seleksi, dan IME tidak tersentuh.
+ * Judul catatan. Dipisah dari NoteScreen supaya animasi per-frame hanya me-recompose fungsi ini.
+ *
+ * TATA LETAK TERKUNCI: lebar tiap kata SELALU sama dengan lebar kata itu pada gaya acuan (GSX.REF_IX, tegak). Gaya apa pun
+ * (tebal / tipis / miring / sedang beranimasi) hanya mengubah bentuk huruf; selisih lebarnya dibayar dengan jarak antar huruf.
+ * Akibatnya pemenggalan baris dan tinggi judul tidak pernah berubah, jadi isi catatan di bawahnya tidak loncat saat judul
+ * di-bold, dimiringkan, atau beranimasi.
  */
 @OptIn(androidx.compose.ui.text.ExperimentalTextApi::class)
 @Composable
@@ -3458,16 +3464,14 @@ private fun TitleEditor(
     val pal = LocalPal.current
     val ffNow = LocalFF.current
     val gsx = GSX.available()
-    val rest = if (tBold) GSX.REST_BOLD else GSX.REST_LIGHT
-    val restIx = GSX.idx(rest)
+    val restIx = if (tBold) GSX.REST_BOLD_IX else GSX.REST_LIGHT_IX
     val anim = remember(ed) { TitleAnim(gsx && ed.title.isNotBlank() && TitleFx.played !== ed) }
-    val reading = ed.reading
 
     // siapkan semua Typeface di latar belakang supaya animasi pertama tidak tersendat
     val resolver = androidx.compose.ui.platform.LocalFontFamilyResolver.current
     LaunchedEffect(gsx) {
         if (!gsx) return@LaunchedEffect
-        try { for (i in 0..GSX.N) GSX.curve(i)?.let { resolver.preload(it) } } catch (e: Throwable) { }
+        try { for (s in 0 until GSX.SL) for (i in 0..GSX.N) GSX.curve(i, s)?.let { resolver.preload(it) } } catch (e: Throwable) { }
     }
     // intro: mulai begitu catatan terbuka separuh jalan (morph), diputar sekali per pembukaan catatan
     LaunchedEffect(ed) {
@@ -3482,20 +3486,22 @@ private fun TitleEditor(
         }
         anim.introOn = false
     }
-    // mode baca: huruf bernafas pelan; keluar dari mode baca: meredam balik ke bentuk diam
-    LaunchedEffect(reading, gsx) {
+    // jam gelombang: berjalan terus selama catatan terbuka (~30 fps cukup, tebal-tipisnya berundak halus)
+    LaunchedEffect(gsx) {
         if (!gsx) return@LaunchedEffect
-        if (reading) {
-            anim.loopOn = true
-            val t0 = withFrameNanos { it }
-            kotlinx.coroutines.coroutineScope {
-                launch { androidx.compose.animation.core.animate(anim.loop, 1f, animationSpec = tween(700)) { v, _ -> anim.loop = v } }
-                while (true) { val n = withFrameNanos { it }; anim.lt = (n - t0) / 1_000_000_000f }
-            }
-        } else if (anim.loopOn) {
-            androidx.compose.animation.core.animate(anim.loop, 0f, animationSpec = tween(500)) { v, _ -> anim.loop = v }
-            anim.loopOn = false
+        val t0 = withFrameNanos { it }
+        var last = 0L
+        while (true) {
+            val n = withFrameNanos { it }
+            if (n - last >= 33_000_000L) { last = n; anim.lt = (n - t0) / 1_000_000_000f }
         }
+    }
+    // kekuatan gelombang: menyala pelan setelah intro, meredup saat judul sedang diketik (kursor diam, huruf tenang)
+    val typing = ed.titleFocus
+    LaunchedEffect(typing, anim.introOn, gsx) {
+        if (!gsx) return@LaunchedEffect
+        val target = if (typing || anim.introOn) 0f else 1f
+        androidx.compose.animation.core.animate(anim.loop, target, animationSpec = tween(if (target > 0f) 1200 else 450)) { v, _ -> anim.loop = v }
     }
 
     var tfv by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(ed.title)) }
@@ -3503,18 +3509,60 @@ private fun TitleEditor(
     var tLay by remember { mutableStateOf<TextLayoutResult?>(null) }
     val tSel = tfv.selection.takeIf { !it.collapsed && ed.titleFocus && !ed.reading }?.let { it.min to it.max }
     val tCols = androidx.compose.foundation.text.selection.LocalTextSelectionColors.current
+    val text = tfv.text
 
-    // keluarga huruf diam (juga dipakai kursor dan placeholder). Tanpa font Google Sans Flex: jatuh ke font aplikasi seperti dulu.
-    val baseFam = if (gsx) (GSX.curve(restIx) ?: ffNow) else ffNow
-    val baseW = if (gsx) GSX.curveW(restIx) else if (tBold) 1000 else 400
-    val vt: VisualTransformation = if (!gsx || !anim.animating || tfv.text.isBlank()) findVt
-    else VisualTransformation { t ->
-        val base = findVt.filter(t)
-        TransformedText(
-            buildAnnotatedString { append(base.text); addWordStyles(t.text) { k -> anim.u(k, rest) } },
-            base.offsetMapping
-        )
+    // gaya tiap kata (ix * 4 + miring). derivedStateOf: membaca jam animasi, tapi hanya memicu recompose bila hasil berundaknya berubah.
+    val specs by remember(text, restIx, tItal, gsx) {
+        androidx.compose.runtime.derivedStateOf {
+            if (!gsx) emptyList<Int>()
+            else List(wordRanges(text).size) { k ->
+                val ix = GSX.idx(anim.u(k, restIx / GSX.N.toFloat()))
+                ix * 4 + (if (tItal) 2 else anim.slant(k))
+            }
+        }
     }
+    // pengukur lebar kata (di-cache): lebar pada gaya acuan vs lebar pada gaya sekarang -> jarak huruf pengganti selisihnya
+    val tm = androidx.compose.ui.text.rememberTextMeasurer()
+    val wCache = remember { HashMap<String, Float>() }
+    val fontPx = with(androidx.compose.ui.platform.LocalDensity.current) { 46.sp.toPx() }
+    val words = remember(text, specs, gsx) {
+        if (!gsx) emptyList<TWord>()
+        else {
+            fun wid(word: String, ix: Int, sl: Int): Float = wCache.getOrPut("$word|$ix|$sl") {
+                tm.measure(
+                    androidx.compose.ui.text.AnnotatedString(word),
+                    TextStyle(fontFamily = GSX.curve(ix, sl) ?: FontFamily.Default, fontWeight = FontWeight(GSX.curveW(ix)), fontSize = 46.sp)
+                ).size.width.toFloat()
+            }
+            wordRanges(text).mapIndexed { k, r ->
+                val word = text.substring(r.first, r.last + 1)
+                val sp = specs.getOrElse(k) { GSX.REF_IX * 4 }
+                val ix = sp / 4
+                val sl = sp % 4
+                val dPx = wid(word, GSX.REF_IX, 0) - wid(word, ix, sl)
+                TWord(r.first, r.last + 1, ix, sl, (dPx / word.length / fontPx).coerceIn(-.14f, .14f))
+            }
+        }
+    }
+    val vt: VisualTransformation = if (!gsx) findVt else remember(words, findVt) {
+        VisualTransformation { t ->
+            val base = findVt.filter(t)
+            TransformedText(
+                buildAnnotatedString {
+                    append(base.text)
+                    for (w in words) {
+                        if (w.e > base.text.length) continue
+                        val f = GSX.curve(w.ix, w.sl) ?: continue
+                        addStyle(androidx.compose.ui.text.SpanStyle(fontFamily = f, fontWeight = FontWeight(GSX.curveW(w.ix)), letterSpacing = w.ls.em), w.s, w.e)
+                    }
+                },
+                base.offsetMapping
+            )
+        }
+    }
+    // keluarga huruf dasar (spasi, kursor): TETAP gaya acuan, tidak ikut tebal / miring, supaya lebar spasi pun tidak berubah
+    val baseFam = if (gsx) (GSX.curve(GSX.REF_IX, 0) ?: ffNow) else ffNow
+    val baseW = if (gsx) GSX.curveW(GSX.REF_IX) else if (tBold) 1000 else 400
 
     CompositionLocalProvider(
         androidx.compose.foundation.text.selection.LocalTextSelectionColors provides
@@ -3536,7 +3584,8 @@ private fun TitleEditor(
             visualTransformation = vt,
             textStyle = TextStyle(
                 color = tColor, fontFamily = baseFam, fontSize = 46.sp, fontWeight = FontWeight(baseW),
-                fontStyle = if (tItal) FontStyle.Italic else FontStyle.Normal,
+                // dengan Google Sans Flex, miring = sumbu slnt asli (lihat specs), bukan miring buatan
+                fontStyle = if (tItal && !gsx) FontStyle.Italic else FontStyle.Normal,
                 lineHeight = (46 * 1.1f).sp, letterSpacing = (-.02f).em,
                 textAlign = tTa
             ),
