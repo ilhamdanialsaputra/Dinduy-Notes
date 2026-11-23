@@ -255,7 +255,7 @@ fun EditorCover(vm: AppVM, d: Note, scroll: () -> Int) {
  * Isi editor diskalakan ke dalam kartu selama morph (skala = lebar kartu / lebar layar), jadi ukuran kartu dibagi skala itu
  * supaya setelah diskalakan frame ini jatuh tepat di atas frame kartu, lalu tumbuh ke posisi akhirnya.
  */
-private fun frameGeo(vm: AppVM, w: Float, den: Float, satPx: Float): FloatArray {
+private fun frameGeo(vm: AppVM, w: Float, den: Float, satPx: Float, o: FloatArray) {
     val t = vm.openP.value.coerceIn(0f, 1f)
     val contentW = minOf(w, 700f * den)
     val x1 = (w - contentW) / 2f + FRAME_EDIT_PAD * den
@@ -273,8 +273,11 @@ private fun frameGeo(vm: AppVM, w: Float, den: Float, satPx: Float): FloatArray 
         h0 = w0 / frameAspect(g.c2)
         r0 = FRAME_CARD_R * den / s0
     }
-    fun l(a: Float, b: Float) = a + (b - a) * t
-    return floatArrayOf(l(x0, x1), l(y0, y1), l(w0, w1), l(h0, h1), l(r0, FRAME_EDIT_R * den))
+    o[0] = x0 + (x1 - x0) * t
+    o[1] = y0 + (y1 - y0) * t
+    o[2] = w0 + (w1 - w0) * t
+    o[3] = h0 + (h1 - h0) * t
+    o[4] = r0 + (FRAME_EDIT_R * den - r0) * t
 }
 
 /**
@@ -287,30 +290,36 @@ fun EditorFrame(vm: AppVM, d: Note, scroll: () -> Int) {
     val pal = LocalPal.current
     val bmp = rememberImg(vm, d.cv)
     val sat = satDp()
-    val den = LocalDensity.current.density
-    val wPx = LocalConfiguration.current.screenWidthDp * den
-    Box(
-        Modifier.fillMaxWidth()
-            .layout { m, c ->
-                val w = c.maxWidth
-                val g = frameGeo(vm, w.toFloat(), density, sat.toPx())
-                val p = m.measure(Constraints.fixed(g[2].roundToInt().coerceAtLeast(1), g[3].roundToInt().coerceAtLeast(1)))
-                layout(w, (g[1] + g[3]).roundToInt()) { p.place(g[0].roundToInt(), g[1].roundToInt()) }
-            }
+    val screenW = LocalConfiguration.current.screenWidthDp.dp
+    // tinggi lapisan TETAP (geometri akhir); animasi buka/tutup hanya menggambar ulang (draw phase), tanpa relayout tiap frame
+    val layerH = sat + 72.dp + (minOf(screenW.value, 700f) - 2f * FRAME_EDIT_PAD).dp / FRAME_EDIT_RATIO
+    val g = remember { FloatArray(5) }
+    val path = remember { androidx.compose.ui.graphics.Path() }
+    Canvas(
+        Modifier.fillMaxWidth().height(layerH)
             .graphicsLayer {
                 val k = cSmooth((vm.openP.value - .5f) / .5f)
                 translationY = -scroll().toFloat() * k
             }
     ) {
-        Canvas(
-            Modifier.fillMaxSize()
-                .graphicsLayer {
-                    val g = frameGeo(vm, wPx, density, sat.toPx())
-                    shape = RoundedCornerShape(g[4])
-                    clip = true
+        frameGeo(vm, size.width, density, sat.toPx(), g)
+        val fw = g[2]; val fh = g[3]
+        if (fw < 2f || fh < 2f) return@Canvas
+        path.reset()
+        path.addRoundRect(
+            androidx.compose.ui.geometry.RoundRect(
+                g[0], g[1], g[0] + fw, g[1] + fh,
+                androidx.compose.ui.geometry.CornerRadius(g[4], g[4])
+            )
+        )
+        androidx.compose.ui.graphics.drawscope.clipPath(path) {
+            drawRect(pal.c3)
+            if (bmp != null) {
+                androidx.compose.ui.graphics.drawscope.inset(g[0], g[1], size.width - g[0] - fw, size.height - g[1] - fh) {
+                    drawCover(bmp, d.cz, d.cx, d.cy, soft = !pal.dark)
                 }
-                .background(pal.c3)
-        ) { if (bmp != null) drawCover(bmp, d.cz, d.cx, d.cy, soft = !pal.dark) }
+            }
+        }
     }
 }
 
