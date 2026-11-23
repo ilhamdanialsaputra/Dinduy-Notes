@@ -2756,7 +2756,8 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     val pal = LocalPal.current
     val ffNow = LocalFF.current
     val nfs = vm.noteFs(ed.noteId)
-    val dm = remember(nfs, ffNow) { Dm(nfs.toFloat(), LH, ffNow) }   // instance stabil: blok tidak recompose tanpa sebab
+    // Reenie Beanie berukuran sangat kecil dibanding font lain pada ukuran yang sama -> isi catatan diperbesar 1.5x
+    val dm = remember(nfs, ffNow) { Dm(nfs.toFloat() * (if (ffNow === ReenieFamily) 1.5f else 1f), LH, ffNow) }   // instance stabil: blok tidak recompose tanpa sebab
     val scroll = rememberScrollState()
     val trFx = rememberTranscriptFx(vm, ed, scroll)   // transkrip selesai: gulir + sorot
     InkSetup(ed)
