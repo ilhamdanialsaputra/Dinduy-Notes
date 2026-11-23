@@ -2549,12 +2549,12 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                     SCard(POS_MID) {
                         T("Colors", 16f, 500, pal.os, Modifier.padding(bottom = 12.dp))
                         val dynAvail = android.os.Build.VERSION.SDK_INT >= 31
-                        val dynOn = pr.dyn && dynAvail && !pr.mono && !pr.ex
+                        val dynOn = pr.dyn && dynAvail && !pr.mono
                         if (dynAvail) {
                             Row(
                                 Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
-                                    // Dynamic menyala = Expressive dan Monochrome otomatis mati
-                                    .clickable { vm.setPr(if (dynOn) pr.copy(dyn = false) else pr.copy(dyn = true, ex = false, mono = false)) }
+                                    // Dynamic menyala = Monochrome otomatis mati (Expressive boleh ikut menyala: ia memakai warna Dynamic)
+                                    .clickable { vm.setPr(if (dynOn) pr.copy(dyn = false) else pr.copy(dyn = true, mono = false)) }
                                     .padding(vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
@@ -2567,7 +2567,7 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                         }
                         // satu-satunya pilihan warna manual: tombol warna kustom (dengan slider), hanya tampil saat Material You mati
                         AnimatedVisibility(
-                            visible = !dynOn && !pr.ex,
+                            visible = !dynOn,
                             enter = expandVertically(spring(.9f, 420f)) + fadeIn(tween(220)),
                             exit = shrinkVertically(spring(1f, 500f)) + fadeOut(tween(140))
                         ) {
@@ -2587,21 +2587,22 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                             }
                         }
                     }
-                    // Expressive: menyala = Monochrome dan Dynamic color otomatis mati
-                    SCard(POS_MID, onClick = { vm.setPr(if (pr.ex) pr.copy(ex = false) else pr.copy(ex = true, mono = false, dyn = false)) }) {
+                    // Expressive: lapisan di atas Dynamic / warna Kustom (rona diambil dari keduanya). Menyala = Monochrome otomatis mati
+                    SCard(POS_MID, onClick = { vm.setPr(if (pr.ex) pr.copy(ex = false) else pr.copy(ex = true, mono = false)) }) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             Column(Modifier.weight(1f)) {
                                 T("Expressive", 16f, 500, pal.os)
-                                T("Bold, playful colors from Material 3 Expressive", 14f, 400, pal.osv)
+                                T("Bolder, playful colors built from your Dynamic or custom color", 14f, 400, pal.osv)
                             }
                             MorphSwitch(pr.ex)
                         }
                         // pratinjau palet: kapsul berubah bentuk (kotak -> bulat penuh) saat Expressive menyala
-                        val ep = remember(pal.dark) { expressivePal(pal.dark) }
+                        val exCtx = androidx.compose.ui.platform.LocalContext.current
+                        val ep = remember(pal.dark, dynOn, pr.seed) { val (h, s) = exSeed(exCtx, dynOn, pr.seed); expressivePal(pal.dark, h, s) }
                         val er by animateDpAsState(if (pr.ex) 16.dp else 8.dp, spring(.6f, 500f), label = "exr")
                         Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf(ep.pc, ep.sc, ep.tc, ep.tb2, ep.p).forEach { c ->
-                                Box(Modifier.weight(1f).height(30.dp).clip(RoundedCornerShape(er)).background(if (pal.mono) c.gray() else c))
+                            listOf(ep.pc, ep.sc, ep.tb2, if (pal.dark) ep.pc else ep.opc, ep.tc).forEach { c ->
+                                Box(Modifier.weight(1f).height(30.dp).clip(RoundedCornerShape(er)).background(c))
                             }
                         }
                     }
@@ -2618,7 +2619,7 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                     SCard(POS_BOT, pad = PaddingValues(start = 12.dp, end = 12.dp, top = 18.dp, bottom = 12.dp)) {
                         T("Font", 16f, 500, pal.os, Modifier.padding(start = 8.dp, bottom = 10.dp))
                         val am = LocalContext.current.assets
-                        listOf("def" to "Default", "gsflex" to "Google Sans Flex", "flex" to "Roboto Flex", "times" to "Times New Roman", "reenie" to "Reenie Beanie").forEach { (id, name) ->
+                        listOf("def" to "Google Sans Flex", "sys" to "System font", "flex" to "Roboto Flex", "times" to "Times New Roman", "reenie" to "Reenie Beanie").forEach { (id, name) ->
                             val fam = remember(id) { loadFont(am, id) }
                             FontChoice(name, fam, pr.ff == id) { vm.setPr(pr.copy(ff = id)) }
                         }
@@ -2743,7 +2744,7 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
             },
             confirmButton = {
                 TextButton(onClick = {
-                    vm.setPr(pr.copy(seed = String.format("#%06X", hsl(h, s, 50f).toArgb() and 0xFFFFFF), dyn = false, ex = false)); custom = false
+                    vm.setPr(pr.copy(seed = String.format("#%06X", hsl(h, s, 50f).toArgb() and 0xFFFFFF), dyn = false)); custom = false
                 }) { T("Use", 15f, 600, pal.p) }
             },
             dismissButton = { TextButton(onClick = { custom = false }) { T("Cancel", 15f, 500, pal.osv) } }
