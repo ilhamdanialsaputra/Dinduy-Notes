@@ -2599,16 +2599,6 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                             }
                             MorphSwitch(pr.ex)
                         }
-                        // pratinjau palet: kapsul berubah bentuk (kotak -> bulat penuh) saat Expressive menyala
-                        val exCtx = androidx.compose.ui.platform.LocalContext.current
-                        val exDyn = pr.dyn && android.os.Build.VERSION.SDK_INT >= 31 && !pr.mono
-                        val ep = remember(pal.dark, exDyn, pr.seed) { val (h, s) = exSeed(exCtx, exDyn, pr.seed); expressivePal(pal.dark, h, s) }
-                        val er by animateDpAsState(if (pr.ex) 16.dp else 8.dp, spring(.6f, 500f), label = "exr")
-                        Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf(ep.s, ep.bg, ep.pc, ep.sc, ep.tc).forEach { c ->
-                                Box(Modifier.weight(1f).height(30.dp).clip(RoundedCornerShape(er)).background(c))
-                            }
-                        }
                     }
                     // Monochrome: menyala = Expressive dan Dynamic color otomatis mati
                     SCard(POS_MID, onClick = { vm.setPr(if (pr.mono) pr.copy(mono = false) else pr.copy(mono = true, ex = false, dyn = false)) }) {
