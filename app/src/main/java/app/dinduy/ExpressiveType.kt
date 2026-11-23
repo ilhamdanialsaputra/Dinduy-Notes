@@ -5,9 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.ExperimentalTextApi
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -25,14 +23,19 @@ import kotlin.math.sqrt
 // =====================================================================================
 //  Google Sans Flex "expressive": judul catatan dan heading H1-H3.
 //  Berkas fontnya diunduh Gradle saat build (assets/fonts/google_sans_flex.ttf), TIDAK ada di repository.
-//  Sumbu yang dipakai: wght (tebal-tipis), wdth (sempit-lebar), ROND (sudut tajam-bulat), opsz (ukuran optik).
+//  Sumbu yang dipakai: wght (tebal-tipis), wdth (sempit-lebar), ROND (sudut tajam-bulat), opsz (ukuran optik), slnt (miring).
 //  Kalau berkas tidak ada, semuanya jatuh ke font aplikasi (tidak crash, tidak ada animasi huruf).
 // =====================================================================================
 @OptIn(ExperimentalTextApi::class)
 object GSX {
     private const val FILE = "fonts/google_sans_flex.ttf"
-    /** Jumlah anak tangga kurva animasi. Semua kata berbagi N+1 keluarga huruf ini, jadi hanya ada N+1 Typeface di memori. */
-    const val N = 24
+    /** Anak tangga kurva animasi (0..N) dan jumlah tingkat miring. Semua kata berbagi (N+1) x SL keluarga huruf. */
+    const val N = 30
+    const val SL = 3
+    /** Tingkat acuan tata letak judul (tebal sedang, tegak). Lebar SEMUA kata judul disamakan dengan lebar kata ini, apa pun gayanya. */
+    const val REF_IX = 16
+    const val REST_BOLD_IX = 19
+    const val REST_LIGHT_IX = 7
 
     @Volatile private var am: AssetManager? = null
     private var has: Boolean? = null
@@ -49,10 +52,10 @@ object GSX {
     }
 
     /** Keluarga huruf dengan sumbu tetap. null = font tidak tersedia. */
-    fun fam(w: Int, wd: Float, r: Float, o: Float): FontFamily? {
+    fun fam(w: Int, wd: Float, r: Float, o: Float, sl: Float = 0f): FontFamily? {
         if (!available()) return null
         val a = am ?: return null
-        val key = "$w/$wd/$r/$o"
+        val key = "$w/$wd/$r/$o/$sl"
         if (cache.containsKey(key)) return cache[key]
         val f = try {
             FontFamily(
@@ -62,7 +65,8 @@ object GSX {
                         FontVariation.weight(w.coerceIn(1, 1000)),
                         FontVariation.width(wd.coerceIn(25f, 151f)),
                         FontVariation.Setting("ROND", r.coerceIn(0f, 100f)),
-                        FontVariation.Setting("opsz", o.coerceIn(1f, 144f))
+                        FontVariation.Setting("opsz", o.coerceIn(1f, 144f)),
+                        FontVariation.Setting("slnt", sl.coerceIn(-10f, 0f))
                     )
                 )
             )
@@ -71,16 +75,29 @@ object GSX {
         return f
     }
 
-    // Kurva satu dimensi u (0..1): tipis-sempit-tajam -> gendut-lebar-bulat. Semua kata bergerak di kurva ini.
+    // Kurva satu dimensi u (0..1): tipis, lebar, tajam -> gendut, ramping, bulat. Lebar huruf dibuat berlawanan dengan ketebalan
+    // supaya lebar total kata nyaris tetap; sisa selisihnya dikunci oleh jarak antar huruf (lihat TitleEditor).
     fun curveW(i: Int): Int = (200f + 800f * (i.coerceIn(0, N) / N.toFloat())).roundToInt()
-    fun curve(i: Int): FontFamily? {
+    fun curve(i: Int, s: Int = 0): FontFamily? {
         val u = i.coerceIn(0, N) / N.toFloat()
-        return fam(curveW(i), 80f + 60f * u, 100f * u, 72f)
+        return fam(curveW(i), 118f - 38f * u, 100f * u, 72f, -5f * s.coerceIn(0, SL - 1))
     }
     fun idx(u: Float): Int = (u.coerceIn(0f, 1f) * N).roundToInt()
+}
 
-    const val REST_BOLD = .55f
-    const val REST_LIGHT = .2f
+/** Rentang tiap kata (tanpa spasi) di [text]. */
+fun wordRanges(text: String): List<IntRange> {
+    val o = ArrayList<IntRange>()
+    var i = 0
+    val n = text.length
+    while (i < n) {
+        while (i < n && text[i].isWhitespace()) i++
+        if (i >= n) break
+        val s = i
+        while (i < n && !text[i].isWhitespace()) i++
+        o.add(s until i)
+    }
+    return o
 }
 
 /**
@@ -108,17 +125,16 @@ fun headStyle(pal: Pal, dm: Dm, lv: Int): TextStyle {
 object TitleFx { @JvmField var played: Any? = null }
 
 /**
- * Animasi judul: tiap KATA punya fase sendiri. Intro (saat catatan dibuka): kata melompat dari tipis-sempit ke gendut-lebar dengan pegas
- * yang memantul. Mode baca: bernafas pelan (tebal-tipis bergelombang antar kata). Dibaca hanya oleh TitleEditor, jadi yang recompose per frame
- * cuma judulnya.
+ * Jam animasi judul. Tiap KATA punya fase sendiri (ketebalan, bentuk, miring).
+ * Intro: kata melompat dari tipis ke gendut dengan pegas memantul. Setelah itu terus bergelombang pelan selama catatan terbuka
+ * ([loop] 0..1 = seberapa kuat; 0 saat judul sedang diketik).
+ * PENTING: nilainya HARUS dibaca saat komposisi (lewat derivedStateOf di TitleEditor), bukan di dalam VisualTransformation.
  */
 class TitleAnim(intro: Boolean) {
     var t by mutableFloatStateOf(if (intro) -1f else 0f)
     var introOn by mutableStateOf(intro)
     var lt by mutableFloatStateOf(0f)
     var loop by mutableFloatStateOf(0f)
-    var loopOn by mutableStateOf(false)
-    val animating: Boolean get() = introOn || loopOn
 
     private fun spring(tau: Float, rest: Float): Float {
         val z = .36f
@@ -134,23 +150,14 @@ class TitleAnim(intro: Boolean) {
             val tau = t - k * .07f
             u = if (tau <= 0f) .02f else spring(tau, rest)
         }
-        if (loop > 0f) u += loop * .17f * sin(lt * 1.4f - k * .9f)
+        if (loop > 0f) u += loop * (.30f * sin(lt * .9f - k * 1.1f) + .10f * sin(lt * 1.7f + k * 2.3f))
         return u
     }
-}
 
-/** Beri gaya Google Sans Flex per kata. [uOf] = posisi kata di kurva (0..1) menurut nomor kata. */
-fun AnnotatedString.Builder.addWordStyles(text: String, uOf: (Int) -> Float) {
-    var k = 0
-    var i = 0
-    val n = text.length
-    while (i < n) {
-        while (i < n && text[i].isWhitespace()) i++
-        if (i >= n) break
-        val s = i
-        while (i < n && !text[i].isWhitespace()) i++
-        val ix = GSX.idx(uOf(k))
-        GSX.curve(ix)?.let { addStyle(SpanStyle(fontFamily = it, fontWeight = FontWeight(GSX.curveW(ix))), s, i) }
-        k++
+    /** Tingkat miring kata (0 tegak .. SL-1 paling miring). */
+    fun slant(k: Int): Int {
+        if (loop < .05f) return 0
+        val v = sin(lt * .5f + k * 1.7f)
+        return if (v > .8f) 2 else if (v > .35f) 1 else 0
     }
 }
