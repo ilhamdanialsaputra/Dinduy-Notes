@@ -3502,7 +3502,15 @@ private fun TitleEditor(
     }
     // kekuatan gelombang: menyala pelan setelah intro, meredup saat judul sedang diketik (kursor diam, huruf tenang)
     // gelombang berhenti selama ada yang diketik (judul atau isi): hemat CPU, kursor dan keyboard tidak berebut dengan animasi
-    val typing = ed.titleFocus || ed.focus != null
+    // tidak menganimasikan bila pengguna mematikan animasi sistem atau sedang mode hemat daya
+    val appCtx = androidx.compose.ui.platform.LocalContext.current
+    val calm = remember {
+        try {
+            android.provider.Settings.Global.getFloat(appCtx.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) > 0f &&
+                !(appCtx.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager).isPowerSaveMode
+        } catch (e: Exception) { true }
+    }
+    val typing = ed.titleFocus || ed.focus != null || !calm
     LaunchedEffect(typing, anim.introOn, gsx) {
         if (!gsx) return@LaunchedEffect
         val target = if (typing || anim.introOn) 0f else 1f
