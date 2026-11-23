@@ -95,17 +95,19 @@ fun loadFont(am: AssetManager, id: String): FontFamily {
             ) else FontFamily.SansSerif
             // Google Sans Flex (variabel) = font bawaan aplikasi. Bobot 100..1000, sudut huruf agak membulat (ROND) dan sedikit lebih lebar
             // supaya terasa Google Sans Flex, bukan sekadar sans-serif. Judul expressive: lihat GSX di ExpressiveType.kt.
-            "def", "gsflex" -> if (has("google_sans_flex.ttf")) FontFamily(
-                (100..1000 step 50).map { w ->
-                    Font(
-                        "fonts/google_sans_flex.ttf", am, FontWeight(w), FontStyle.Normal,
-                        FontVariation.Settings(
-                            FontVariation.weight(w), FontVariation.width(104f),
-                            FontVariation.Setting("ROND", 60f), FontVariation.Setting("opsz", 16f)
+            "def", "gsflex" -> GSX.file()?.let { gf ->
+                FontFamily(
+                    (100..1000 step 100).map { w ->
+                        Font(
+                            gf, FontWeight(w), FontStyle.Normal,
+                            FontVariation.Settings(
+                                FontVariation.weight(w), FontVariation.width(104f),
+                                FontVariation.Setting("ROND", 60f), FontVariation.Setting("opsz", 16f)
+                            )
                         )
-                    )
-                }
-            ) else FontFamily.Default
+                    }
+                )
+            } ?: FontFamily.Default
             "sys" -> FontFamily.Default
             // Times New Roman bersifat proprietary; Tinos adalah padanan metrik resminya (ukuran & bentuk huruf nyaris identik)
             "times" -> if (has("tinos_regular.ttf") && has("tinos_bold.ttf")) FontFamily(
