@@ -295,7 +295,7 @@ data class Prefs(
     val fs: Int = 15,
     val sort: String = "u",
     val cd: String = "f",
-    val ff: String = "def",  // jenis huruf: def / gsflex / flex / times / reenie
+    val ff: String = "def",  // jenis huruf: def (= Google Sans Flex) / sys (font sistem) / flex / times / reenie
     val cols: Int = 1,       // jumlah kolom kartu di beranda (1 / 2)
     val dyn: Boolean = true, // true = warna mengikuti perangkat (Material You, Android 12+); false = warna kustom (seed)
     val mono: Boolean = false, // true = Monochrome: seluruh warna aplikasi jadi abu-abu (terang dan gelap)
