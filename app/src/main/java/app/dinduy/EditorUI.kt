@@ -3471,7 +3471,11 @@ private fun TitleEditor(
     val resolver = androidx.compose.ui.platform.LocalFontFamilyResolver.current
     LaunchedEffect(gsx) {
         if (!gsx) return@LaunchedEffect
-        try { for (s in 0 until GSX.SL) for (i in 0..GSX.N) GSX.curve(i, s)?.let { resolver.preload(it) } } catch (e: Throwable) { }
+        // pelan-pelan dan setelah catatan selesai terbuka, supaya tidak berebut dengan animasi buka
+        try {
+            kotlinx.coroutines.delay(900)
+            for (s in 0 until GSX.SL) for (i in 0..GSX.N) { GSX.curve(i, s)?.let { resolver.preload(it) }; kotlinx.coroutines.delay(20) }
+        } catch (e: Throwable) { }
     }
     // intro: mulai begitu catatan terbuka separuh jalan (morph), diputar sekali per pembukaan catatan
     LaunchedEffect(ed) {
@@ -3493,11 +3497,12 @@ private fun TitleEditor(
         var last = 0L
         while (true) {
             val n = withFrameNanos { it }
-            if (n - last >= 33_000_000L) { last = n; anim.lt = (n - t0) / 1_000_000_000f }
+            if (n - last >= 40_000_000L) { last = n; anim.lt = (n - t0) / 1_000_000_000f }
         }
     }
     // kekuatan gelombang: menyala pelan setelah intro, meredup saat judul sedang diketik (kursor diam, huruf tenang)
-    val typing = ed.titleFocus
+    // gelombang berhenti selama ada yang diketik (judul atau isi): hemat CPU, kursor dan keyboard tidak berebut dengan animasi
+    val typing = ed.titleFocus || ed.focus != null
     LaunchedEffect(typing, anim.introOn, gsx) {
         if (!gsx) return@LaunchedEffect
         val target = if (typing || anim.introOn) 0f else 1f
@@ -3517,7 +3522,7 @@ private fun TitleEditor(
             if (!gsx) emptyList<Int>()
             else List(wordRanges(text).size) { k ->
                 val ix = GSX.idx(anim.u(k, restIx / GSX.N.toFloat()))
-                ix * 4 + (if (tItal) 2 else anim.slant(k))
+                ix * 4 + (if (tItal) 1 else anim.slant(k))
             }
         }
     }
