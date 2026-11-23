@@ -965,134 +965,123 @@ private fun Modifier.slideTo(): Modifier = composed {
  * menukar dua kartu hanya mengubah dua kartu itu; kartu lain tetap di kolomnya (hanya menyesuaikan tinggi).
  * Posisi hasil ukur ditulis ke `rects` (id -> [x, y, lebar, tinggi] dalam isi yang tergulir), kolom yang dipakai ke `lanesOut`,
  * dan kolom yang baru dihitung (belum tersimpan) ke `fresh`.
+ *
+ * VIRTUALISASI (supaya seringan 1 kolom): yang dikomposisi hanya kartu di sekitar layar (setengah layar di atas & di bawah area tampil),
+ * lewat SubcomposeLayout. Kartu di luar jendela itu TIDAK ada di komposisi sama sekali (tanpa animasi, tanpa callback posisi, tanpa
+ * state), tetapi tetap punya posisi di `rects`: tingginya diambil dari cache hasil ukur sebelumnya, atau perkiraan (estH) kalau belum
+ * pernah diukur. Jendela hanya dihitung ulang tiap `bucketPx` gulir, bukan tiap frame.
  */
-/** Pembungkus yang bisa dilewati (skippable): selama k dan content tidak berubah, kartu yang sudah ada tidak dikomposisi ulang. */
-@Composable
-private fun TwoColCell(k: String, content: @Composable (String) -> Unit) { content(k) }
-
 @Composable
 private fun TwoColLayout(
-    isEmpty: Boolean, sections: Boolean, pinnedIds: List<String>, othersIds: List<String>, limit: () -> Int,
+    isEmpty: Boolean, sections: Boolean, pinnedIds: List<String>, othersIds: List<String>,
+    bucket: () -> Int, bucketPx: Int, viewH: () -> Int, estH: Int,
     laneOf: (String) -> Int?, dragId: String?,
     padS: Int, padTop: Int, padBottom: Int, gap: Int,
     rects: HashMap<String, IntArray>, lanesOut: HashMap<String, Int>, fresh: HashMap<String, Int>,
     modifier: Modifier = Modifier, content: @Composable (String) -> Unit
 ) {
-    // `limit` (jumlah kartu yang boleh dikomposisi) hanya dibaca DI SINI: menambah kartu bertahap hanya me-recompose layout ini,
-    // bukan seluruh HomeScreen. Kartu yang sudah ada dilewati (lihat TwoColCell), jadi tiap langkah hanya mengomposisi kartu baru.
-    val lim = limit()
-    val full = lim >= pinnedIds.size + othersIds.size
-    val rebalance = full
-    // Pemilihan kartu awal PER KOLOM (bukan sekadar urutan daftar): tiap kartu punya kolom tetap (laneOf), jadi mengambil
-    // `lim` kartu pertama menurut urutan bisa menghasilkan hampir semuanya di kolom kiri, dan kolom kanan kosong/telat muncul.
-    // Di sini kuota dibagi rata: tiap kolom mendapat sekitar lim/2 kartu terdepannya, urutan relatif tetap.
-    val pinC: List<String>
-    val othC: List<String>
-    if (full) { pinC = pinnedIds; othC = othersIds } else {
-        val cap = (lim + 1) / 2
-        val cnt = intArrayOf(0, 0)
-        var alt = 0
-        fun pick(ids: List<String>): List<String> {
-            val out = ArrayList<String>()
-            for (id in ids) {
-                if (cnt[0] >= cap && cnt[1] >= cap) break
-                // kartu tanpa kolom tersimpan: bergantian kiri/kanan (kartu pertama selalu kiri)
-                val ln = laneOf(id)?.takeIf { it == 0 || it == 1 } ?: (alt++ and 1)
-                if (cnt[ln] < cap) { cnt[ln]++; out.add(id) }
-            }
-            return out
-        }
-        pinC = pick(pinnedIds)
-        othC = pick(othersIds)
-    }
+    // isi kartu dibaca lewat State: bila lambda `content` berganti, hanya kartu yang sedang dikomposisi (sekitar layar) yang ikut diperbarui
+    val contentS = rememberUpdatedState(content)
+    val dragS = rememberUpdatedState(dragId)
+    val slotFns = remember { HashMap<String, @Composable () -> Unit>() }   // lambda isi per kartu, DIPAKAI ULANG (instance sama = tidak dikomposisi ulang)
+    val hCache = remember { HashMap<String, Int>() }                       // id -> tinggi hasil ukur terakhir (px)
+    val hW = remember { IntArray(1) }                                      // lebar kolom saat cache dibuat; berubah = cache dibuang
     val blocks = ArrayList<HBlock>().also { bl ->
         if (isEmpty) bl.add(HBlock("empty", emptyList()))
         if (sections) bl.add(HBlock("h-pin", emptyList()))
-        bl.add(HBlock(null, pinC))
+        bl.add(HBlock(null, pinnedIds))
         if (sections) bl.add(HBlock("h-other", emptyList()))
-        bl.add(HBlock(null, othC))
+        bl.add(HBlock(null, othersIds))
     }
-    val flatKeys = ArrayList<String>().also { l -> for (b in blocks) { val h = b.head; if (h != null) l.add(h) else l.addAll(b.ids) } }
-    androidx.compose.ui.layout.Layout(
-        modifier = modifier,
-        content = {
-            // satu daftar datar ber-key: kartu yang pindah blok (mis. di-pin) tetap instance yang sama, jadi slideTo bisa
-            // menganimasikannya dari posisi lama ke posisi baru (sebelumnya kartu dibuang & dibuat ulang = kedip)
-            for (k in flatKeys) {
-                androidx.compose.runtime.key(k) {
-                    Box(
-                        Modifier.layoutId(k).then(if (k == dragId) Modifier else Modifier.slideTo()),
-                        propagateMinConstraints = true
-                    ) { TwoColCell(k, content) }
-                }
-            }
-        }
-    ) { ms, c ->
+    val allKeys = HashSet<String>()
+    for (b in blocks) { val h = b.head; if (h != null) allKeys.add(h) else allKeys.addAll(b.ids) }
+    if (slotFns.size > allKeys.size + 32) slotFns.keys.retainAll(allKeys)
+    if (hCache.size > allKeys.size + 32) hCache.keys.retainAll(allKeys)
+
+    androidx.compose.ui.layout.SubcomposeLayout(modifier) { c ->
         val w = c.maxWidth
-        val byId = HashMap<String, androidx.compose.ui.layout.Measurable>(ms.size * 2)
-        for (m in ms) { val k = m.layoutId as? String ?: continue; byId[k] = m }
         val colW = ((w - 2 * padS - gap) / 2).coerceAtLeast(0)
-        rects.clear(); lanesOut.clear(); fresh.clear()
-        val placed = ArrayList<Triple<androidx.compose.ui.layout.Placeable, Int, Int>>(ms.size)
-        var y = padTop
-        for (b in blocks) {
-            val h = b.head
-            if (h != null) {
-                val m = byId[h] ?: continue
-                val pl = m.measure(androidx.compose.ui.unit.Constraints.fixedWidth((w - 2 * padS).coerceAtLeast(0)))
-                placed.add(Triple(pl, padS, y))
-                rects[h] = intArrayOf(padS, y, pl.width, pl.height)
-                y += pl.height + gap
-            } else {
-                val items = ArrayList<Pair<String, androidx.compose.ui.layout.Placeable>>(b.ids.size)
-                for (id in b.ids) {
-                    val m = byId[id] ?: continue
-                    items.add(id to m.measure(androidx.compose.ui.unit.Constraints.fixedWidth(colW)))
+        val fullW = (w - 2 * padS).coerceAtLeast(0)
+        if (hW[0] != colW) { hCache.clear(); hW[0] = colW }
+        val vh = viewH().let { if (it > 0) it else 1800 }
+        // jendela komposisi: setengah layar di atas sampai setengah layar di bawah area tampil (bucket() hanya berubah tiap bucketPx gulir).
+        // Kartu yang masuk jendela dikomposisi & diukur di frame yang sama, jadi tidak pernah ada kartu kosong di layar.
+        val sy = bucket() * bucketPx
+        val lo = sy - vh / 2
+        val hi = sy + bucketPx + vh + vh / 2
+
+        fun hOf(k: String): Int = hCache[k] ?: estH
+
+        fun slotFn(k: String): @Composable () -> Unit = slotFns.getOrPut(k) {
+            val f: @Composable () -> Unit = {
+                // satu daftar datar ber-key: kartu yang pindah blok (mis. di-pin) tetap instance yang sama, jadi slideTo bisa
+                // menganimasikannya dari posisi lama ke posisi baru
+                val fnc = contentS.value
+                Box(
+                    if (k == dragS.value) Modifier else Modifier.slideTo(),
+                    propagateMinConstraints = true
+                ) { fnc(k) }
+            }
+            f
+        }
+
+        // menghitung kolom + posisi SEMUA kartu (yang belum diukur memakai perkiraan tinggi). Hasil ke rects / lanesOut / fresh.
+        fun runLayout(): Int {
+            rects.clear(); lanesOut.clear(); fresh.clear()
+            var y = padTop
+            for (b in blocks) {
+                val hd = b.head
+                if (hd != null) {
+                    val hh0 = hOf(hd)
+                    rects[hd] = intArrayOf(padS, y, fullW, hh0)
+                    y += hh0 + gap
+                    continue
                 }
-                val n = items.size
-                val saved = IntArray(n) { laneOf(items[it].first)?.takeIf { v -> v == 0 || v == 1 } ?: -1 }
-                // kolom tersimpan yang timpang parah (satu kolom hampir kosong) dianggap rusak: dihitung ulang seimbang
-                if (dragId == null && full && n >= 3) {
-                    val hs = intArrayOf(0, 0); var cnt = 0
-                    for (k in 0 until n) if (saved[k] >= 0) { hs[saved[k]] += items[k].second.height + gap; cnt++ }
-                    if (cnt >= 3 && minOf(hs[0], hs[1]) * 5 < maxOf(hs[0], hs[1])) java.util.Arrays.fill(saved, -1)
+                val ids = b.ids
+                val n = ids.size
+                val hs = IntArray(n) { hOf(ids[it]) }
+                val real = BooleanArray(n) { hCache.containsKey(ids[it]) }   // tinggi sungguhan (sudah pernah diukur)?
+                val saved = IntArray(n) { laneOf(ids[it])?.takeIf { v -> v == 0 || v == 1 } ?: -1 }
+                // kolom tersimpan yang timpang parah (satu kolom hampir kosong) dianggap rusak: dihitung ulang seimbang.
+                // Hanya dipercaya kalau SEMUA tinggi sungguhan (bukan perkiraan).
+                if (dragId == null && n >= 3 && real.all { it }) {
+                    val sm = intArrayOf(0, 0); var cnt = 0
+                    for (k in 0 until n) if (saved[k] >= 0) { sm[saved[k]] += hs[k] + gap; cnt++ }
+                    if (cnt >= 3 && minOf(sm[0], sm[1]) * 5 < maxOf(sm[0], sm[1])) java.util.Arrays.fill(saved, -1)
                 }
                 // catatan BARU masuk di indeks 0 (kolom kiri atas). Kartu lama harus ikut bergeser seperti aliran Google Keep: kartu yang tadinya teratas
                 // pindah ke kolom KANAN (kiri -> kanan), bukan menumpuk di kiri bawah. Caranya: cerminkan kolom semua kartu lama (kiri <-> kanan);
                 // struktur kolom tetap sama, hanya tertukar sisi, jadi keseimbangan tinggi tidak berubah. Hasilnya ikut disimpan lewat `fresh`.
                 if (dragId == null && n >= 2 && saved[0] < 0 && (1 until n).any { saved[it] >= 0 }) {
-                    for (k in 1 until n) if (saved[k] >= 0) { saved[k] = 1 - saved[k]; fresh[items[k].first] = saved[k] }
+                    for (k in 1 until n) if (saved[k] >= 0) { saved[k] = 1 - saved[k]; fresh[ids[k]] = saved[k] }
                 }
                 // Kolom KIRI kosong sama sekali sementara kolom kanan terisi (mis. dua catatan di-pin lalu yang di kiri dihapus; kartu kanan tinggal sendiri):
-                // kartu kolom kanan bergeser ke kiri mengisi ruang kosong itu. Berlaku per blok (disematkan / lainnya). Lalu rebalance di bawah
-                // yang membagi ulang bila perlu. Tidak berlaku saat menyeret kartu (kolom sementara tidak boleh dianggap rusak).
-                // (kartu teratas yang tersimpan di kanan = tidak ada kartu kiri; kartu BARU di indeks 0 tidak tersimpan, jadi tidak terkena aturan ini)
+                // kartu kolom kanan bergeser ke kiri mengisi ruang kosong itu. Berlaku per blok (disematkan / lainnya).
                 if (dragId == null && n >= 1 && saved[0] == 1 && (0 until n).none { saved[it] == 0 }) {
-                    for (k in 0 until n) if (saved[k] == 1) { saved[k] = 0; fresh[items[k].first] = 0 }
+                    for (k in 0 until n) if (saved[k] == 1) { saved[k] = 0; fresh[ids[k]] = 0 }
                 }
                 // kartu bersimpanan kolom dihitung dulu; kartu baru mengisi kolom yang paling pendek (kosong = paling awal, mulai dari kiri)
                 val hh = intArrayOf(0, 0)
-                for (k in 0 until n) if (saved[k] >= 0) hh[saved[k]] += items[k].second.height + gap
+                for (k in 0 until n) if (saved[k] >= 0) hh[saved[k]] += hs[k] + gap
                 val lane = IntArray(n)
                 val cn = intArrayOf(0, 0)
                 for (k in 0 until n) if (saved[k] >= 0) cn[saved[k]]++
                 for (k in 0 until n) {
                     if (saved[k] >= 0) { lane[k] = saved[k]; continue }
-                    // seri tinggi (atau tinggi belum terukur = 0): kolom dengan kartu lebih sedikit, bukan selalu kiri
                     // kartu paling atas (catatan baru selalu masuk di indeks 0) selalu mulai dari kolom KIRI, seperti Google Keep
                     val v = if (k == 0) 0 else if (hh[0] < hh[1]) 0 else if (hh[0] > hh[1]) 1 else if (cn[0] <= cn[1]) 0 else 1
                     cn[v]++
                     lane[k] = v
-                    hh[v] += items[k].second.height + gap
-                    fresh[items[k].first] = v
+                    hh[v] += hs[k] + gap
+                    // kolom hanya disimpan untuk kartu yang tingginya sudah sungguhan; yang masih perkiraan dihitung ulang tiap tata letak
+                    if (real[k]) fresh[ids[k]] = v
                 }
-                // seimbangkan ulang (mis. setelah catatan dihapus). Dihitung dulu di salinan (dry-run): kartu baru benar-benar
-                // dipindah kalau hasil akhirnya memang lebih seimbang. Jadi tidak ada kartu yang pindah lalu balik lagi ke tempat asal.
-                // Hanya kartu paling bawah di kolom yang lebih tinggi yang dicoba; kalau tidak muat, berhenti.
-                if (dragId == null && rebalance && n >= 2 && items.all { it.second.height > 0 }) {
+                // seimbangkan ulang (mis. setelah catatan dihapus). Dihitung dulu di salinan (dry-run); hanya kartu paling bawah di kolom
+                // yang lebih tinggi yang dicoba, dan hanya bila tingginya sudah sungguhan.
+                if (dragId == null && n >= 2) {
                     val plan = lane.copyOf()
                     val bh = intArrayOf(0, 0)
-                    for (k in 0 until n) bh[plan[k]] += items[k].second.height + gap
+                    for (k in 0 until n) bh[plan[k]] += hs[k] + gap
                     val startDiff = kotlin.math.abs(bh[0] - bh[1])
                     var guard = n
                     while (guard-- > 0) {
@@ -1100,32 +1089,57 @@ private fun TwoColLayout(
                         val diff = bh[tall] - bh[1 - tall]
                         var pick = -1
                         for (k in n - 1 downTo 0) if (plan[k] == tall) { pick = k; break }
-                        if (pick < 0) break
-                        val eff = items[pick].second.height + gap
+                        if (pick < 0 || !real[pick]) break
+                        val eff = hs[pick] + gap
                         if (eff >= diff) break
                         plan[pick] = 1 - tall
                         bh[tall] -= eff; bh[1 - tall] += eff
                     }
                     if (kotlin.math.abs(bh[0] - bh[1]) < startDiff) {
-                        for (k in 0 until n) if (plan[k] != lane[k]) { lane[k] = plan[k]; fresh[items[k].first] = plan[k] }
+                        for (k in 0 until n) if (plan[k] != lane[k]) { lane[k] = plan[k]; fresh[ids[k]] = plan[k] }
                     }
                 }
                 val ly = intArrayOf(y, y)
                 for (k in 0 until n) {
-                    val (id, pl) = items[k]
+                    val id = ids[k]
                     val ln = lane[k]
                     lanesOut[id] = ln
                     val x = padS + ln * (colW + gap)
-                    placed.add(Triple(pl, x, ly[ln]))
-                    rects[id] = intArrayOf(x, ly[ln], pl.width, pl.height)
-                    ly[ln] += pl.height + gap
+                    rects[id] = intArrayOf(x, ly[ln], colW, hs[k])
+                    ly[ln] += hs[k] + gap
                 }
                 y = maxOf(ly[0], ly[1])
             }
+            return maxOf(padTop, y - gap) + padBottom
         }
-        val total = maxOf(padTop, y - gap) + padBottom
+
+        // 1) tata letak awal (cache / perkiraan) -> tentukan kartu mana yang masuk jendela
+        var total = runLayout()
+        val pls = HashMap<String, androidx.compose.ui.layout.Placeable>()
+        var changed = false
+        fun mount(k: String, cw: Int) {
+            val m = subcompose(k, slotFn(k)).firstOrNull() ?: return
+            val pl = m.measure(androidx.compose.ui.unit.Constraints.fixedWidth(cw))
+            pls[k] = pl
+            val old = hCache.put(k, pl.height)
+            if (old == null || old != pl.height) changed = true
+        }
+        for (b in blocks) {
+            val hd = b.head
+            if (hd != null) { mount(hd, fullW); continue }
+            for (id in b.ids) {
+                val r = rects[id] ?: continue
+                // kartu yang sedang diseret selalu tetap dikomposisi
+                if (id == dragId || (r[1] + r[3] > lo && r[1] < hi)) mount(id, colW)
+            }
+        }
+        // 2) ada tinggi sungguhan yang berbeda dari perkiraan: hitung ulang posisi supaya semuanya konsisten
+        if (changed) total = runLayout()
         layout(w, total) {
-            for ((pl, px, py) in placed) pl.place(px, py)
+            for ((k, pl) in pls) {
+                val r = rects[k] ?: continue
+                pl.place(r[0], r[1])
+            }
         }
     }
 }
@@ -1148,8 +1162,9 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
     val lanesNew = remember { HashMap<String, Int>() }         // kolom yang baru dihitung (kartu belum punya kolom); disimpan setelah tata letak
     val vpH = remember { IntArray(1) }                         // tinggi area tampil
     // tween tanpa overshoot supaya buka/tutup pencarian tidak bergetar
-    val saRaw by animateFloatAsState(if (vm.searchOn) 1f else 0f, if (vm.searchOn) spring(.9f, 380f) else spring(.95f, 460f), label = "sa")
-    val sa = saRaw.coerceIn(0f, 1f)
+    // State, BUKAN delegasi: nilainya hanya dibaca di fase gambar / tata letak (lewat saF), jadi animasi pencarian tidak me-recompose HomeScreen tiap frame
+    val saS = animateFloatAsState(if (vm.searchOn) 1f else 0f, if (vm.searchOn) spring(.9f, 380f) else spring(.95f, 460f), label = "sa")
+    val saF: () -> Float = { saS.value.coerceIn(0f, 1f) }
     val fabConn = remember {
         object : NestedScrollConnection {
             var acc = 0f
@@ -1263,7 +1278,11 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
     }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val imeH = with(dens) { WindowInsets.ime.getBottom(dens).toDp() }
+        // tinggi keyboard dibulatkan per 32dp: animasi keyboard hanya memicu beberapa rekomposisi, bukan satu per frame
+        val imeH = run {
+            val q = 32f * dens.density
+            ((WindowInsets.ime.getBottom(dens) / q).roundToInt() * 32).dp
+        }
         val hPx = with(dens) { maxHeight.toPx() }
         val wPx = with(dens) { maxWidth.toPx() }
         // ---- gerak tumpukan kartu saat bilah cari dibuka / ditutup ----
@@ -1333,11 +1352,6 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
             val t0 = with(dens) { (sat + 78.dp).toPx() }
             vm.topSlot = Morph(padS, t0, padS + cw, t0 + 92f * dens.density, 12f * dens.density, pal.s, card = true)
         }
-        val livePanelH = (maxHeight - imeH - (sat + 8.dp) - 10.dp).coerceAtLeast(160.dp)
-        // saat menutup, tinggi panel dibekukan agar tidak ikut naik-turun mengikuti keyboard yang menghilang
-        val panelHold = remember { arrayOf(livePanelH) }
-        if (vm.searchOn) panelHold[0] = livePanelH
-        val panelH = panelHold[0]
 
         // daftar (grid 1 atau 2 kolom)
         val np = live.count { it.p }
@@ -1659,18 +1673,12 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     }
                 }
         if (cols == 2) {
-            val noteById = live.associateBy { it.id }
-            // 2 kolom menyusun SEMUA kartu sekaligus (bukan lazy): saat app baru dibuka, puluhan kartu dikomposisi dalam satu frame
-            // (itu yang bikin lag awal). Jadi mulai dari layar pertama saja, sisanya ditambah bertahap per beberapa frame.
-            // Awalnya hanya satu layar pertama (10 kartu). Sisanya ditambah bertahap SETELAH animasi masuk selesai (atau langsung kalau
-            // pengguna mulai menggulir), 4 kartu per 2 frame, supaya animasi awal tidak berebut frame dengan komposisi kartu.
-            val grow = remember { androidx.compose.runtime.mutableIntStateOf(10) }
-            LaunchedEffect(live.size) {
-                if (grow.intValue >= live.size) return@LaunchedEffect
-                val t0 = withFrameNanos { it }
-                while (scroll.value == 0 && !scroll.isScrollInProgress && withFrameNanos { it } - t0 < 700_000_000L) { }
-                while (grow.intValue < live.size) { withFrameNanos { }; withFrameNanos { }; grow.intValue += 4 }
-            }
+            val noteById = remember(live) { live.associateBy { it.id } }
+            // 2 kolom: hanya kartu di sekitar layar yang dikomposisi (lihat TwoColLayout), jadi biayanya sebanding dengan 1 kolom (lazy).
+            // `bucketS` berubah tiap 120dp gulir, bukan tiap frame: jendela komposisi hanya dihitung ulang di situ.
+            val bucketPx = with(dens) { 120.dp.roundToPx() }
+            val bucketS = remember(bucketPx) { androidx.compose.runtime.derivedStateOf { scroll.value / bucketPx } }
+            val estH = with(dens) { 150.dp.roundToPx() }
             val pinnedIds = pinned.map { it.id }
             val othersIds = others.map { it.id }
             val laneOf: (String) -> Int? = { id -> if (useLanes) (nd.laneOv[id] ?: vm.lanes[id]) else null }
@@ -1685,7 +1693,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                 Column(Modifier.fillMaxSize().onSizeChanged { vpH[0] = it.height }.verticalScroll(scroll)) {
                     TwoColLayout(
                         isEmpty = live.isEmpty(), sections = sections, pinnedIds = pinnedIds, othersIds = othersIds,
-                        limit = { grow.intValue },
+                        bucket = { bucketS.value }, bucketPx = bucketPx, viewH = { vpH[0] }, estH = estH,
                         laneOf = laneOf, dragId = nd.id,
                         padS = padS, padTop = padTop, padBottom = padBottom, gap = padS,
                         rects = rects, lanesOut = lanesCur, fresh = lanesNew,
@@ -1793,13 +1801,13 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         Box(Modifier.fillMaxWidth().height(sat + 72.dp).background(pal.bg))
         Box(
             Modifier.padding(start = 10.dp, top = sat + 10.dp)
-                .graphicsLayer { translationX = -84.dp.toPx() * sa; scaleX = 1f - .4f * sa; scaleY = 1f - .4f * sa; alpha = 1f - sa }
-        ) { IconBtn("menu", pal.osv, { if (sa < .5f) openDrawer() }) }
+                .graphicsLayer { val sa = saF(); translationX = -84.dp.toPx() * sa; scaleX = 1f - .4f * sa; scaleY = 1f - .4f * sa; alpha = 1f - sa }
+        ) { IconBtn("menu", pal.osv, { if (saF() < .5f) openDrawer() }) }
 
         Box(
             Modifier.align(Alignment.TopEnd).padding(end = 10.dp, top = sat + 10.dp)
-                .graphicsLayer { translationX = 84.dp.toPx() * sa; scaleX = 1f - .4f * sa; scaleY = 1f - .4f * sa; alpha = 1f - sa }
-        ) { IconBtn(if (cols == 1) "cols" else "rows", pal.osv, { if (sa < .5f) vm.setPr(vm.pr.copy(cols = if (cols == 1) 2 else 1)) }) }
+                .graphicsLayer { val sa = saF(); translationX = 84.dp.toPx() * sa; scaleX = 1f - .4f * sa; scaleY = 1f - .4f * sa; alpha = 1f - sa }
+        ) { IconBtn(if (cols == 1) "cols" else "rows", pal.osv, { if (saF() < .5f) vm.setPr(vm.pr.copy(cols = if (cols == 1) 2 else 1)) }) }
 
         val q = vm.query.trim().lowercase()
         val res by remember(vm) {
@@ -1871,7 +1879,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         Box(
             Modifier.fillMaxSize()
                 .drawBehind {
-                    val k = sa
+                    val k = saF()
                     val l = androidx.compose.ui.util.lerp(padStartIdle, 0f, k)
                     val r = androidx.compose.ui.util.lerp(size.width - padEndIdle, size.width, k)
                     val rad = androidx.compose.ui.util.lerp(radIdle, 0f, k)
@@ -1883,18 +1891,24 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         ) {
             // baris bilah: posisinya mengikuti tepi kiri/kanan wadah yang melebar
             Row(
-                Modifier.padding(
-                    top = sat + 8.dp,
-                    start = androidx.compose.ui.unit.lerp(76.dp, 4.dp, sa),
-                    end = androidx.compose.ui.unit.lerp(80.dp, 8.dp, sa)
-                ).fillMaxWidth().height(56.dp)
+                Modifier.padding(top = sat + 8.dp)
+                    // tepi kiri/kanan baris mengikuti animasi di fase tata letak (bukan lewat rekomposisi)
+                    .layout { m, c ->
+                        val sa = saF()
+                        val st = androidx.compose.ui.unit.lerp(76.dp, 4.dp, sa).roundToPx()
+                        val en = androidx.compose.ui.unit.lerp(80.dp, 8.dp, sa).roundToPx()
+                        val cw = (c.maxWidth - st - en).coerceAtLeast(0)
+                        val pl = m.measure(c.copy(minWidth = cw, maxWidth = cw))
+                        layout(c.maxWidth, pl.height) { pl.place(st, 0) }
+                    }
+                    .fillMaxWidth().height(56.dp)
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !vm.searchOn) { vm.searchOn = true },
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // ikon kiri: kaca pembesar berputar jadi panah kembali (seperti Keep)
                 Box(Modifier.size(48.dp).clip(CircleShape).clickable(enabled = vm.searchOn) { vm.searchOn = false }, Alignment.Center) {
-                    Box(Modifier.graphicsLayer { alpha = 1f - sa; scaleX = 1f - .5f * sa; scaleY = 1f - .5f * sa; rotationZ = -90f * sa }) { Ic("search", pal.osv) }
-                    Box(Modifier.graphicsLayer { alpha = sa; scaleX = .5f + .5f * sa; scaleY = .5f + .5f * sa; rotationZ = 90f * (1f - sa) }) { Ic("back", pal.os) }
+                    Box(Modifier.graphicsLayer { val sa = saF(); alpha = 1f - sa; scaleX = 1f - .5f * sa; scaleY = 1f - .5f * sa; rotationZ = -90f * sa }) { Ic("search", pal.osv) }
+                    Box(Modifier.graphicsLayer { val sa = saF(); alpha = sa; scaleX = .5f + .5f * sa; scaleY = .5f + .5f * sa; rotationZ = 90f * (1f - sa) }) { Ic("back", pal.os) }
                 }
                 Spacer(Modifier.width(6.dp))
                 BasicTextField(
