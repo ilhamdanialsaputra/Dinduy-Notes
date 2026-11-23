@@ -1876,7 +1876,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     val r = androidx.compose.ui.util.lerp(size.width - padEndIdle, size.width, k)
                     val rad = androidx.compose.ui.util.lerp(radIdle, 0f, k)
                     drawRoundRect(
-                        androidx.compose.ui.graphics.lerp(pal.s, pal.bg, (k * 1.6f).coerceAtMost(1f)),
+                        androidx.compose.ui.graphics.lerp(pal.sb, pal.bg, (k * 1.6f).coerceAtMost(1f)),
                         topLeft = Offset(l, topBar), size = Size(r - l, botBar - topBar), cornerRadius = CornerRadius(rad)
                     )
                 }
