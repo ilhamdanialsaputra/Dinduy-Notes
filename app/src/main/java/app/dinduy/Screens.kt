@@ -308,7 +308,10 @@ fun NoteCard(
 ) {
     // catatan bersampul: kartu memakai palet dari warna foto sampulnya (terpisah dari palet aplikasi)
     val gp = LocalPal.current
-    val pal = if (d.cp.isEmpty() || d.cv.isEmpty()) gp else remember(d.cp, gp.dark, gp.mono, gp.ex) { coverPal(gp.dark, d.cp, gp.mono, gp.ex) }
+    val pal = if (d.cp.isEmpty() || d.cv.isEmpty()) {
+        // Expressive: tiap kartu punya rona sendiri (sama persis dengan catatannya saat dibuka, lihat MainActivity)
+        if (gp.ex) remember(d.id, gp.dark, gp.exH, gp.exS) { expressivePal(gp.dark, gp.exH + exOff(d.id), gp.exS) } else gp
+    } else remember(d.cp, gp.dark, gp.mono, gp.ex) { coverPal(gp.dark, d.cp, gp.mono, gp.ex) }
     val cvm = LocalVM.current
     LaunchedEffect(d.id, d.cv, d.cp) { if (d.cv.isNotEmpty() && d.cp.isEmpty()) cvm?.ensureCoverPal(d.id) }
     val c2 = cols == 2
@@ -2592,7 +2595,7 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             Column(Modifier.weight(1f)) {
                                 T("Expressive", 16f, 500, pal.os)
-                                T("Bolder, playful colors built from your Dynamic or custom color", 14f, 400, pal.osv)
+                                T("Colorful notes and surfaces built from your Dynamic or custom color", 14f, 400, pal.osv)
                             }
                             MorphSwitch(pr.ex)
                         }
@@ -2602,7 +2605,7 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                         val ep = remember(pal.dark, exDyn, pr.seed) { val (h, s) = exSeed(exCtx, exDyn, pr.seed); expressivePal(pal.dark, h, s) }
                         val er by animateDpAsState(if (pr.ex) 16.dp else 8.dp, spring(.6f, 500f), label = "exr")
                         Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf(ep.pc, ep.sc, ep.tb2, if (pal.dark) ep.pc else ep.opc, ep.tc).forEach { c ->
+                            listOf(ep.s, ep.bg, ep.pc, ep.sc, ep.tc).forEach { c ->
                                 Box(Modifier.weight(1f).height(30.dp).clip(RoundedCornerShape(er)).background(c))
                             }
                         }
@@ -2620,7 +2623,7 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
                     SCard(POS_BOT, pad = PaddingValues(start = 12.dp, end = 12.dp, top = 18.dp, bottom = 12.dp)) {
                         T("Font", 16f, 500, pal.os, Modifier.padding(start = 8.dp, bottom = 10.dp))
                         val am = LocalContext.current.assets
-                        listOf("def" to "Google Sans Flex", "sys" to "System font", "flex" to "Roboto Flex", "times" to "Times New Roman", "reenie" to "Reenie Beanie").forEach { (id, name) ->
+                        listOf("def" to "Google Sans Flex", "sys" to "System font", "times" to "Times New Roman", "reenie" to "Reenie Beanie").forEach { (id, name) ->
                             val fam = remember(id) { loadFont(am, id) }
                             FontChoice(name, fam, pr.ff == id) { vm.setPr(pr.copy(ff = id)) }
                         }
