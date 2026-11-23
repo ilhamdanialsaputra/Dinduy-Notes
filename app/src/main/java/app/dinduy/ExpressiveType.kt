@@ -29,12 +29,12 @@ import kotlin.math.sqrt
 @OptIn(ExperimentalTextApi::class)
 object GSX {
     /** Anak tangga kurva animasi (0..N) dan jumlah tingkat miring. Semua kata berbagi (N+1) x SL keluarga huruf (sengaja sedikit: hemat memori). */
-    const val N = 20
-    const val SL = 2
+    const val N = 16
+    const val SL = 5
     /** Tingkat acuan tata letak judul (tebal sedang, tegak). Lebar SEMUA kata judul disamakan dengan lebar kata ini, apa pun gayanya. */
-    const val REF_IX = 11
-    const val REST_BOLD_IX = 13
-    const val REST_LIGHT_IX = 5
+    const val REF_IX = 9
+    const val REST_BOLD_IX = 10
+    const val REST_LIGHT_IX = 4
 
     // Font disalin SEKALI dari assets ke filesDir lalu dibuka lewat berkas (mmap, dipakai bersama oleh semua varian).
     // Lewat assets, tiap varian sumbu mengekstrak ulang seluruh TTF (terkompresi di APK) ke memori -> lag parah dan OOM / force close.
@@ -63,6 +63,7 @@ object GSX {
     fun fam(w: Int, wd: Float, r: Float, o: Float, sl: Float = 0f): FontFamily? {
         if (!available()) return null
         val fl = file ?: return null
+        val sl = if (sl == 0f) 0f else sl   // -0.0 dan 0.0 satu kunci
         val key = "$w/$wd/$r/$o/$sl"
         if (cache.containsKey(key)) return cache[key]
         val f = try {
@@ -88,7 +89,7 @@ object GSX {
     fun curveW(i: Int): Int = (200f + 800f * (i.coerceIn(0, N) / N.toFloat())).roundToInt()
     fun curve(i: Int, s: Int = 0): FontFamily? {
         val u = i.coerceIn(0, N) / N.toFloat()
-        return fam(curveW(i), 118f - 38f * u, 100f * u, 72f, -8f * s.coerceIn(0, SL - 1))
+        return fam(curveW(i), 118f - 38f * u, 100f * u, 72f, -2f * s.coerceIn(0, SL - 1))
     }
     fun idx(u: Float): Int = (u.coerceIn(0f, 1f) * N).roundToInt()
 }
@@ -164,8 +165,69 @@ class TitleAnim(intro: Boolean) {
 
     /** Tingkat miring kata (0 tegak .. SL-1 paling miring). */
     fun slant(k: Int): Int {
-        if (loop < .05f) return 0
-        val v = sin(lt * .5f + k * 1.7f)
-        return if (v > .45f) 1 else 0
+        if (loop < .02f) return 0
+        val v = (sin(lt * .5f + k * 1.7f) + 1f) / 2f
+        return (v * v * (GSX.SL - 1) * loop).roundToInt()   // naik-turun bertahap lewat tingkat antara: miringnya mengalir, tidak patah
     }
 }
+
+
+// =====================================================================================
+//  Animasi heading H1-H3 di dalam catatan (sama gayanya dengan judul, hemat dan stabil).
+//  Satu jam dipakai bersama semua heading yang tampil. Gaya diam (d = 0, tegak) = persis gaya heading statis (headStyle),
+//  jadi animasi berangkat dan kembali ke tampilan yang sama. Lebar tiap kata dikunci ke lebar diamnya (jarak antar huruf), jadi
+//  baris dan tinggi heading tidak pernah berubah.
+// =====================================================================================
+const val HEAD_SL = 3
+
+class HeadVar(val fam: FontFamily?, val w: Int)
+
+/** Sumbu heading statis per level: bobot, lebar, bulat, ukuran optik. Harus sama dengan headStyle. */
+private fun headBase(lv: Int): FloatArray = when (lv) {
+    1 -> floatArrayOf(900f, 118f, 100f, 96f)
+    2 -> floatArrayOf(800f, 108f, 70f, 72f)
+    else -> floatArrayOf(700f, 100f, 40f, 48f)
+}
+
+/** d = langkah bobot dari gaya diam (negatif = lebih tipis, 40 satuan per langkah), sl = tingkat miring 0..HEAD_SL-1. */
+fun GSX.headVar(lv: Int, d: Int, sl: Int): HeadVar {
+    val b = headBase(lv)
+    val w = (b[0] + d * 40f).toInt().coerceIn(200, 1000)
+    val wd = b[1] - (w - b[0]) * .05f
+    val r = (b[2] + (w - b[0]) * .08f).coerceIn(0f, 100f)
+    return HeadVar(fam(w, wd, r, b[3], -4f * sl.coerceIn(0, HEAD_SL - 1)), w)
+}
+
+class HeadAnim {
+    var lt by mutableFloatStateOf(0f)
+    var loop by mutableFloatStateOf(0f)
+    val wc = HashMap<String, Float>()
+    private val preloaded = HashSet<Int>()
+
+    fun below(lv: Int): Int = ((headBase(lv)[0] - 250f) / 40f).toInt().coerceIn(2, 9)
+    fun above(lv: Int): Int = ((1000f - headBase(lv)[0]) / 40f).toInt().coerceIn(1, 4)
+
+    /** Gaya tiap kata: (d + 16) * 4 + miring. Dibaca lewat derivedStateOf supaya hanya berubah saat tingkatnya berundak. */
+    fun specs(lv: Int, n: Int): List<Int> = List(n) { k ->
+        val s = if (loop <= 0f) 0f else (loop * (.8f * sin(lt * .8f - k * 1.3f) + .2f * sin(lt * 1.5f + k * 2.1f))).coerceIn(-1f, 1f)
+        val d = if (s < 0f) (s * below(lv)).roundToInt() else (s * above(lv)).roundToInt()
+        val v = (sin(lt * .45f + k * 1.9f) + 1f) / 2f
+        val sl = (v * v * (HEAD_SL - 1) * loop).roundToInt()
+        (d + 16) * 4 + sl
+    }
+
+    suspend fun preload(lv: Int, res: androidx.compose.ui.text.font.FontFamily.Resolver) {
+        if (!preloaded.add(lv)) return
+        try {
+            kotlinx.coroutines.delay(1200)
+            for (sl in 0 until HEAD_SL) for (d in -below(lv)..above(lv)) {
+                GSX.headVar(lv, d, sl).fam?.let { res.preload(it) }
+                kotlinx.coroutines.delay(20)
+            }
+        } catch (e: Throwable) { }
+    }
+}
+
+private val headFxMap = java.util.WeakHashMap<Any, HeadAnim>()
+/** Jam animasi heading milik satu editor (tanpa mengubah kelas Ed). */
+fun headFxOf(ed: Any): HeadAnim = headFxMap.getOrPut(ed) { HeadAnim() }

@@ -635,7 +635,7 @@ private object NoTextToolbar : TextToolbar {
 @Composable
 fun TF(
     ed: Ed, key: String, base: TextStyle, modifier: Modifier = Modifier,
-    hint: String? = null, wrap: Boolean = true, fold: Fold? = null
+    hint: String? = null, wrap: Boolean = true, fold: Fold? = null, hl: Int = 0   // hl = level heading (1..3) bila blok ini heading: ikut animasi Google Sans Flex
 ) {
     val pal = LocalPal.current
     val v = ed.tf[key] ?: return
@@ -682,12 +682,18 @@ fun TF(
             if (fold == null) (if (just && jw > 0) justifySpans(a2, base2, jw, tm, dn) else a2)
             else fold.applyTo(a2, 1).let { fa -> if (just && jw > 0) justifySpans(fa, base2, jw, tm, dn, fold.cutR) else fa }
         }
+        // heading: tiap kata punya tebal / bentuk / miring sendiri yang bergelombang pelan (hanya di mode tampil, bukan saat diketik)
+        val hfx = if (hl in 1..3 && fold == null && GSX.available()) headFxOf(ed) else null
+        val hS = hfx?.let { h -> remember(key, rt.t, hl) { androidx.compose.runtime.derivedStateOf { h.specs(hl, wordRanges(rt.t).size) } }.value }
+        val fres = androidx.compose.ui.platform.LocalFontFamilyResolver.current
+        if (hfx != null) LaunchedEffect(hl) { hfx.preload(hl, fres) }
+        val annF = if (hfx == null || hS == null) ann else remember(ann, hS) { headWords(ann, rt.t, hl, hS, hfx, tm, dn, base) }
         val uri = LocalUriHandler.current
         var lay by remember { mutableStateOf<TextLayoutResult?>(null) }
         LaunchedEffect(lay) { lay?.let { ed.layLen.remove(key); ed.lays[key] = it; ed.lsh[key] = 1 } }   // lsh = 1: sama dengan mode ketik (ada Z)
         // BasicText, bukan material3 Text: Text menggabungkan gaya tema (LocalTextStyle) ke gaya kita, BasicTextField (mode ketik) tidak.
         androidx.compose.foundation.text.BasicText(
-            ann,
+            annF,
             modifier.selGlow(sr, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }, { ed.selSig() }, { ed.selWave(key) }, { ed.selFresh() }, { ed.tl != null }).fxGlow(ed.fx?.takeIf { key in it.keys }, key, pal.p, { fold?.o2t(it, 1) ?: it }, { lay }).heightIn(min = base.lineHeight.value.dp)
                 .onGloballyPositioned { c ->
                     val cc = ed.contentCoords
@@ -911,7 +917,7 @@ fun BlockView(ed: Ed, vm: AppVM, b: Blk, ordN: Int, dm: Dm, fold: Fold? = null, 
         "h" -> {
             val st = headStyle(pal, dm, b.lv)
             val (il, ir) = fitInd(b.il, b.ir, ed.widthDp)
-            TF(ed, b.id, st.aligned(b), Modifier.fillMaxWidth().padding(start = il.dp, end = ir.dp, top = (fs * .4f).dp, bottom = (fs * .5f).dp))
+            TF(ed, b.id, st.aligned(b), Modifier.fillMaxWidth().padding(start = il.dp, end = ir.dp, top = (fs * .4f).dp, bottom = (fs * .5f).dp), hl = b.lv)
         }
         "q", "code", "hr", "lnk" -> BoxBlock(ed, b, dm, pal)
         "tbl" -> TableView(ed, b, dm, pal)
@@ -2761,6 +2767,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     val scroll = rememberScrollState()
     val trFx = rememberTranscriptFx(vm, ed, scroll)   // transkrip selesai: gulir + sorot
     InkSetup(ed)
+    HeadFxDriver(ed)
     // Tombol back Android: tutup yang paling atas dulu. Mode ketik -> mode baca (tampilan penuh) -> baru keluar catatan.
     BackHandler(true) {
         when {
@@ -3465,7 +3472,11 @@ private fun TitleEditor(
     val pal = LocalPal.current
     val ffNow = LocalFF.current
     val gsx = GSX.available()
-    val restIx = if (tBold) GSX.REST_BOLD_IX else GSX.REST_LIGHT_IX
+    // tebal / miring berpindah MULUS (bukan tiba-tiba): nilai target dianimasikan, lalu dibaca di derivedStateOf di bawah
+    val restS = androidx.compose.animation.core.animateFloatAsState(
+        (if (tBold) GSX.REST_BOLD_IX else GSX.REST_LIGHT_IX) / GSX.N.toFloat(), tween(450), label = "tRest"
+    )
+    val italS = androidx.compose.animation.core.animateFloatAsState(if (tItal && gsx) 1f else 0f, tween(550), label = "tItal")
     val anim = remember(ed) { TitleAnim(gsx && ed.title.isNotBlank() && TitleFx.played !== ed) }
 
     // siapkan semua Typeface di latar belakang supaya animasi pertama tidak tersendat
@@ -3525,13 +3536,13 @@ private fun TitleEditor(
     val tCols = androidx.compose.foundation.text.selection.LocalTextSelectionColors.current
     val text = tfv.text
 
-    // gaya tiap kata (ix * 4 + miring). derivedStateOf: membaca jam animasi, tapi hanya memicu recompose bila hasil berundaknya berubah.
-    val specs by remember(text, restIx, tItal, gsx) {
+    // gaya tiap kata (ix * 8 + miring). derivedStateOf: membaca jam animasi, tapi hanya memicu recompose bila hasil berundaknya berubah.
+    val specs by remember(text, gsx) {
         androidx.compose.runtime.derivedStateOf {
             if (!gsx) emptyList<Int>()
             else List(wordRanges(text).size) { k ->
-                val ix = GSX.idx(anim.u(k, restIx / GSX.N.toFloat()))
-                ix * 4 + (if (tItal) 1 else anim.slant(k))
+                val ix = GSX.idx(anim.u(k, restS.value))
+                ix * 8 + maxOf(anim.slant(k), (italS.value * (GSX.SL - 1)).roundToInt())
             }
         }
     }
@@ -3550,9 +3561,9 @@ private fun TitleEditor(
             }
             wordRanges(text).mapIndexed { k, r ->
                 val word = text.substring(r.first, r.last + 1)
-                val sp = specs.getOrElse(k) { GSX.REF_IX * 4 }
-                val ix = sp / 4
-                val sl = sp % 4
+                val sp = specs.getOrElse(k) { GSX.REF_IX * 8 }
+                val ix = sp / 8
+                val sl = sp % 8
                 val dPx = wid(word, GSX.REF_IX, 0) - wid(word, ix, sl)
                 TWord(r.first, r.last + 1, ix, sl, (dPx / word.length / fontPx).coerceIn(-.14f, .14f))
             }
@@ -3615,5 +3626,67 @@ private fun TitleEditor(
                     ) else Modifier
                 )
         )
+    }
+}
+
+
+// ---------- animasi heading ----------
+/** Menyusun ulang teks heading dengan gaya per kata; lebar tiap kata dikunci ke lebar gaya diamnya (jarak huruf menutup selisih). */
+private fun headWords(
+    ann: androidx.compose.ui.text.AnnotatedString, text: String, lv: Int, specs: List<Int>, h: HeadAnim,
+    tm: TextMeasurer, dn: Density, base: TextStyle
+): androidx.compose.ui.text.AnnotatedString {
+    val size = base.fontSize
+    val fontPx = with(dn) { size.toPx() }
+    fun wid(word: String, d: Int, sl: Int): Float = h.wc.getOrPut("$lv|${size.value.toInt()}|$word|$d|$sl") {
+        val v = GSX.headVar(lv, d, sl)
+        tm.measure(
+            androidx.compose.ui.text.AnnotatedString(word),
+            TextStyle(fontFamily = v.fam ?: FontFamily.Default, fontWeight = FontWeight(v.w), fontSize = size)
+        ).size.width.toFloat()
+    }
+    return buildAnnotatedString {
+        append(ann)
+        wordRanges(text).forEachIndexed { k, r ->
+            val sp = specs.getOrElse(k) { 16 * 4 }
+            val d = sp / 4 - 16
+            val sl = sp % 4
+            val v = GSX.headVar(lv, d, sl)
+            val fam = v.fam ?: return@forEachIndexed
+            val word = text.substring(r.first, r.last + 1)
+            // -.02em = jarak huruf bawaan heading (headStyle)
+            val ls = ((wid(word, 0, 0) - wid(word, d, sl)) / word.length / fontPx - .02f).coerceIn(-.16f, .1f)
+            // +1: teks mode tampil diawali satu huruf tak terlihat (Z)
+            addStyle(androidx.compose.ui.text.SpanStyle(fontFamily = fam, fontWeight = FontWeight(v.w), letterSpacing = ls.em), r.first + 1, r.last + 2)
+        }
+    }
+}
+
+/** Penggerak jam animasi heading: jalan terus, menyala pelan setelah catatan terbuka, berhenti selama ada yang diketik atau animasi sistem mati. */
+@Composable
+private fun HeadFxDriver(ed: Ed) {
+    val h = headFxOf(ed)
+    val gsx = GSX.available()
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val calm = remember {
+        try {
+            android.provider.Settings.Global.getFloat(ctx.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) > 0f &&
+                !(ctx.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager).isPowerSaveMode
+        } catch (e: Exception) { true }
+    }
+    LaunchedEffect(gsx) {
+        if (!gsx) return@LaunchedEffect
+        val t0 = withFrameNanos { it }
+        var last = 0L
+        while (true) {
+            val n = withFrameNanos { it }
+            if (n - last >= 40_000_000L) { last = n; h.lt = (n - t0) / 1_000_000_000f }
+        }
+    }
+    val busy = ed.titleFocus || ed.focus != null || !calm
+    LaunchedEffect(busy, gsx) {
+        if (!gsx) return@LaunchedEffect
+        if (!busy) kotlinx.coroutines.delay(900)
+        androidx.compose.animation.core.animate(h.loop, if (busy) 0f else 1f, animationSpec = tween(if (busy) 450 else 1200)) { v, _ -> h.loop = v }
     }
 }
