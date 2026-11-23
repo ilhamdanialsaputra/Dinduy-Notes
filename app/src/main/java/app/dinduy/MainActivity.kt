@@ -677,7 +677,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
     }
 
     val am = ctx.assets
-    GSX.init(am)
+    GSX.init(ctx)
     val ff = remember(vm.pr.ff) { loadFont(am, vm.pr.ff) }
     MaterialTheme(colorScheme = cs) {
         CompositionLocalProvider(
