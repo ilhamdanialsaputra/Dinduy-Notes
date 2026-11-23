@@ -138,7 +138,9 @@ class Pal(
     val ex: Boolean = false,
     // rona benih dan intensitas Expressive (dipakai untuk memvariasikan warna tiap catatan, lihat exOff)
     val exH: Float = 0f,
-    val exS: Float = 100f
+    val exS: Float = 100f,
+    // sb = warna bilah cari di beranda (di palet biasa sama dengan kertas s; di Expressive disamakan dengan palet biasa, bukan kertas pekat)
+    val sb: Color = s
 )
 
 /** Warna toolbar editor: mengikuti warna kertas (pal.s), hanya digeser sangat tipis ke warna teks supaya tetap terbaca sebagai bilah. */
@@ -158,7 +160,7 @@ fun Color.gray(): Color {
 fun Pal.toMono(): Pal = Pal(
     dark, p.gray(), op.gray(), pc.gray(), opc.gray(), sc.gray(), osc.gray(), tc.gray(), otc.gray(),
     s.gray(), os.gray(), osv.gray(), ol.gray(), c1.gray(), c2.gray(), c3.gray(), c4.gray(),
-    wc.gray(), owc.gray(), ec.gray(), oec.gray(), ac.gray(), oac.gray(), bg.gray(), tb.gray(), tb2.gray(), true, false
+    wc.gray(), owc.gray(), ec.gray(), oec.gray(), ac.gray(), oac.gray(), bg.gray(), tb.gray(), tb2.gray(), true, false, 0f, 100f, sb.gray()
 )
 
 fun hsl(h: Float, s: Float, l: Float): Color {
@@ -271,7 +273,7 @@ fun expressivePal(dark: Boolean, hue: Float = 270f, sat: Float = 100f): Pal {
     val ec = hsl(4f, 85f * k, cl); val oec = hsl(4f, 80f, ol)
     val ac = hsl(hue + 150f, 65f * k, cl); val oac = hsl(hue + 150f, 60f, ol)
     return if (!dark) {
-        // kertas (kartu & catatan) tetap PEKAT (L 74, kejenuhan penuh); latar beranda PUTIH BERSIH, jadi kartu pekat tampil menonjol di atasnya
+        // kertas (kartu & catatan) tetap PEKAT (L 74, kejenuhan penuh); latar beranda dan bilah cari SAMA dengan palet biasa (hsl(h,20,94) dan hsl(h,60,98))
         val paper = c(0f, 100f, 74f)
         val plum = c(19f, 70f, 16f)
         Pal(
@@ -280,9 +282,9 @@ fun expressivePal(dark: Boolean, hue: Float = 270f, sat: Float = 100f): Pal {
             paper, c(19f, 70f, 6f), c(19f, 45f, 20f), c(10f, 45f, 50f),
             c(-22f, 85f, 86f), paper, c(-22f, 90f, 90f), c(-22f, 100f, 82f),
             wc, owc, ec, oec, ac, oac,
-            Color.White,
+            hsl(hue, 20f, 94f),
             c(0f, 100f, 86f), c(0f, 100f, 91f),
-            false, true, hue, sat
+            false, true, hue, sat, hsl(hue, 60f, 98f)
         )
     } else {
         Pal(
@@ -291,9 +293,9 @@ fun expressivePal(dark: Boolean, hue: Float = 270f, sat: Float = 100f): Pal {
             c(12f, 60f, 16f), c(10f, 100f, 95f), c(10f, 45f, 78f), c(10f, 30f, 40f),
             c(14f, 58f, 12f), c(12f, 60f, 16f), c(14f, 55f, 21f), c(14f, 55f, 27f),
             wc, owc, ec, oec, ac, oac,
-            c(14f, 60f, 8f),
+            hsl(hue, minOf(sat * .35f, 26f), 7f),
             c(14f, 55f, 25f), c(14f, 58f, 32f),
-            false, true, hue, sat
+            false, true, hue, sat, Color.Black
         )
     }
 }
@@ -389,7 +391,7 @@ fun lerpPal(a: Pal, b: Pal, f: Float): Pal = Pal(
     lerp(a.wc, b.wc, f), lerp(a.owc, b.owc, f), lerp(a.ec, b.ec, f), lerp(a.oec, b.oec, f),
     lerp(a.ac, b.ac, f), lerp(a.oac, b.oac, f),
     lerp(a.bg, b.bg, f),
-    lerp(a.tb, b.tb, f), lerp(a.tb2, b.tb2, f), b.mono, b.ex, b.exH, b.exS
+    lerp(a.tb, b.tb, f), lerp(a.tb2, b.tb2, f), b.mono, b.ex, b.exH, b.exS, lerp(a.sb, b.sb, f)
 )
 
 val LocalPal = compositionLocalOf { buildPal("light", "#6750A4") }
