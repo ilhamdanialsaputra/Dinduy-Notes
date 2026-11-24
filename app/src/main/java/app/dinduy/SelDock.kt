@@ -71,6 +71,14 @@ object SelDockFx {
     val p = Animatable(0f)
     /** Lebar FAB terakhir (px), dilaporkan oleh Fab. */
     var fabW = 0f
+    /** Lebar FAB saat DIAM (animasi kecil/besar sudah selesai), per keadaan. Dipakai kapsul sebagai ukuran awal / akhir, bukan lebar sesaat di tengah animasi. */
+    var wSmall = 0f
+    var wLarge = 0f
+    /** Keadaan FAB (kecil = hanya "+") yang sedang berlaku; ditulis oleh MainActivity. */
+    var small = false
+    /** Kapan kapsul terakhir selesai menutup (ms); FAB menunggu sebentar sesudahnya sebelum boleh mengecil / melebar. */
+    var closedAt = 0L
+    fun restW(): Float = (if (small) wSmall else wLarge).takeIf { it > 0f } ?: fabW
 }
 
 private fun sm(x: Float): Float { val k = x.coerceIn(0f, 1f); return k * k * (3f - 2f * k) }
@@ -208,6 +216,28 @@ fun CountChip(n: Int) {
     }
 }
 
+
+/** Pegangan pilihan sebelum "pilih semua" ditekan, supaya ketukan kedua bisa membatalkannya (kembali ke pilihan semula). */
+private val selAllMemo = object { var home: List<String> = emptyList(); var list: List<String> = emptyList() }
+
+/**
+ * Pilih semua yang bisa dibalik: bila belum semua terpilih -> pilih semua (pilihan lama disimpan dan dikembalikan sebagai [prev] baru);
+ * bila SEMUA sudah terpilih -> batalkan: kembali ke pilihan sebelum "pilih semua"; tidak ada pilihan sebelumnya -> kosongkan (keluar mode pilih).
+ */
+private fun toggleSelectAll(sel: androidx.compose.runtime.snapshots.SnapshotStateList<String>, ids: List<String>, prev: List<String>): List<String> {
+    val allSel = ids.isNotEmpty() && ids.all { it in sel }
+    return if (allSel) {
+        val keep = prev.filter { it in ids }
+        sel.clear()
+        if (keep.isNotEmpty() && keep.size < ids.size) sel.addAll(keep)
+        emptyList()
+    } else {
+        val snap = sel.toList()
+        ids.forEach { if (it !in sel) sel.add(it) }
+        snap
+    }
+}
+
 /** Kapsul beranda: morph dari FAB. */
 @Composable
 fun HomeSelDock(vm: AppVM, act: Actions, lift: Dp = 0.dp) {
@@ -221,7 +251,7 @@ fun HomeSelDock(vm: AppVM, act: Actions, lift: Dp = 0.dp) {
     val single = ids.size == 1
     val note = if (single) vm.note(ids[0]) else null
     val allPinned = ids.isNotEmpty() && ids.all { vm.note(it)?.p == true }
-    val fromW = if (SelDockFx.fabW > 0f) with(dens) { SelDockFx.fabW.toDp() } else 88.dp
+    val fromW = SelDockFx.restW().let { if (it > 0f) with(dens) { it.toDp() } else 88.dp }
     SelDockShell(on, SelDockFx.p, fromW, 88.dp, 20.dp, lift) {
         XBtn(onClick = { vm.sel.clear() }) { c -> Ic("x", c) }
         CountChip(ids.size)
@@ -239,7 +269,9 @@ fun HomeSelDock(vm: AppVM, act: Actions, lift: Dp = 0.dp) {
             }
         }
         XGroup {
-            XBtn(onClick = { vm.liveF().forEach { if (it.id !in vm.sel) vm.sel.add(it.id) } }) { c -> Ic("all", c) }
+            // menyala saat semua catatan sudah terpilih; ketuk lagi = batalkan pilih semua
+            val allSelNow = on && vm.liveF().let { l -> l.isNotEmpty() && l.all { it.id in vm.sel } }
+            XBtn(on = allSelNow, onClick = { selAllMemo.home = toggleSelectAll(vm.sel, vm.liveF().map { it.id }, selAllMemo.home) }) { c -> Ic("all", c) }
             XBtn(on = allPinned, onClick = {
                 val l = vm.sel.toList()
                 if (l.isNotEmpty()) {
@@ -279,7 +311,8 @@ fun ListSelDock(vm: AppVM, sel: androidx.compose.runtime.snapshots.SnapshotState
             else XBtn(onClick = {
                 val l = sel.toList(); sel.clear(); vm.mark(l, "${cnt(l.size, "note")} unarchived") { it.copy(a = false) }
             }) { c -> Ic("unarc", c) }
-            XBtn(onClick = { all.forEach { if (it.id !in sel) sel.add(it.id) } }) { c -> Ic("all", c) }
+            val allSelNow = on && all.isNotEmpty() && all.all { it.id in sel }
+            XBtn(on = allSelNow, onClick = { selAllMemo.list = toggleSelectAll(sel, all.map { it.id }, selAllMemo.list) }) { c -> Ic("all", c) }
         }
         XBtn(tone = 1, onClick = {
             val l = sel.toList(); sel.clear()

@@ -455,19 +455,30 @@ class Ed(private val vm: AppVM, val noteId: String, private val scope: Coroutine
             if (u != null) { linkize(key, u); return }
         }
         if (df.ins > 0 && insStr.indexOf('\n') >= 0) {
-            val without = nt.removeRange(df.p, df.p + df.ins)
+            // Enter dari IME bisa datang BERSAMAAN dengan koreksi/penyelesaian kata yang sedang diketik (composing / autocorrect),
+            // mis. "teh" -> "the\n". Diff mentah lalu menganggap "he\n" sebagai sisipan: huruf terakhir ikut terbawa ke butir berikut.
+            // Jadi: kalau hanya SATU '\n' dan kursor tepat di belakangnya, itu Enter murni; cabut hanya '\n' itu, sisanya
+            // (kata yang sudah dikoreksi) tetap utuh di baris kiri. Posisi Enter = posisi '\n' itu, bukan awal diff.
+            val caret0 = v.selection.min - 1
+            val nlAt = if (v.selection.collapsed && df.del > 0 && df.ins <= 48 && insStr.count { it == '\n' } == 1) {
+                val k = caret0 - 1
+                if (k >= df.p && k < df.p + df.ins && k < nt.length && nt[k] == '\n') k else -1
+            } else -1
+            val pureEnter = nlAt >= 0
+            val without = if (pureEnter) nt.removeRange(nlAt, nlAt + 1) else nt.removeRange(df.p, df.p + df.ins)
+            val enterAt = if (pureEnter) nlAt else df.p
             if (cell) {
                 val rt2 = oldRt.edit(without, typing)
                 putRt(key, rt2)
-                tf[key] = TextFieldValue(Z + rt2.t, TextRange(df.p + 1))
+                tf[key] = TextFieldValue(Z + rt2.t, TextRange(enterAt + 1))
                 cellEnter(key)
                 return
             }
             if (!b.isMulti) {
                 val rt2 = oldRt.edit(without, typing)
                 putRt(key, rt2)
-                tf[key] = TextFieldValue(Z + rt2.t, TextRange(df.p + 1))
-                if (insStr == "\n") enter(key, df.p) else {
+                tf[key] = TextFieldValue(Z + rt2.t, TextRange(enterAt + 1))
+                if (insStr == "\n" || pureEnter) enter(key, enterAt) else {
                     holdFollow()
                     val bl0 = blocks
                     val ids0 = blocks.mapTo(HashSet()) { it.id }

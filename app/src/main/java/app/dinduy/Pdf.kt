@@ -241,7 +241,7 @@ fun isPdfUri(ctx: Context, u: Uri): Boolean {
     return n.endsWith(".pdf", true)
 }
 
-private fun pdfName(ctx: Context, u: Uri): String {
+fun pdfName(ctx: Context, u: Uri): String {
     var name = ""
     try {
         ctx.contentResolver.query(u, null, null, null, null)?.use { c ->

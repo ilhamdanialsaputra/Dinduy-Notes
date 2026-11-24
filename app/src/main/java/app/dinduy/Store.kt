@@ -252,6 +252,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     // kartu "Tambah catatan" (muncul dari bawah, bisa ditarik ke atas jadi catatan baru)
     var addOn by mutableStateOf(false)         // kartu diminta tampil
+    var pdfBusy by mutableStateOf<String?>(null)   // nama PDF yang sedang disalin/dibuka dari aplikasi lain (null = tidak ada); menyalakan layar muat
     val addF = Animatable(0f)                  // pecahan tinggi layar yang tertutup kartu (0 = tersembunyi, 1 = layar penuh)
     val addFade = Animatable(1f)               // 1 = normal, menuju 0 saat morph catatan sudah mengambil alih bentuk kartu
     var addHand by mutableStateOf(false)       // true selama kartu menyerahkan bentuknya ke morph catatan

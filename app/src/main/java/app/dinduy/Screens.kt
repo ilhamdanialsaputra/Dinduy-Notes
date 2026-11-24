@@ -417,8 +417,12 @@ private fun CardText(d: Note, kind: String, c2: Boolean, fg: Color, padH: Dp, pa
     val shownBody = body.ifEmpty { if (!hasTitle) (if (d.au.isNotEmpty()) "Voice note" else if (d.cv.isNotEmpty()) "" else "Empty") else "" }
     // kartu bersampul: sampul tetap utuh, yang dipendekkan hanya kotak tulisannya (padding, jarak, dan jumlah baris)
     val cvd = d.cv.isNotEmpty()
+    // kartu bersampul Frame yang isinya hanya lencana label: lencana kecil + frame bersudut bundar di atasnya terlihat dempet,
+    // jadi diberi napas ekstra di atas (dan sedikit di bawah supaya kartu tetap seimbang)
+    val chipsOnly = cvd && d.cm == "f" && !hasTitle && shownBody.isEmpty() && !remOn && d.lb.isNotEmpty()
+    val vPad = if (cvd) padV * .72f else padV
     Column(
-        Modifier.fillMaxWidth().padding(horizontal = padH, vertical = if (cvd) padV * .72f else padV),
+        Modifier.fillMaxWidth().padding(start = padH, end = padH, top = vPad + (if (chipsOnly) 6.dp else 0.dp), bottom = vPad + (if (chipsOnly) 2.dp else 0.dp)),
         verticalArrangement = Arrangement.spacedBy(if (cvd) 5.dp else 8.dp)
     ) {
         if (hasTitle) {
@@ -2080,6 +2084,9 @@ fun Fab(vm: AppVM, act: Actions, small: Boolean, hide: Boolean, lift: Dp) {
     // agar tidak memicu rekomposisi tiap frame saat bilah ditarik.
     // selama kapsul seleksi tampil, FAB tidak menerima sentuhan (kapsul menggambar bentuk yang sama di atasnya)
     val dockHide by remember { derivedStateOf { vm.sel.isNotEmpty() || SelDockFx.p.value > .001f } }
+    // lebar FAB hanya dicatat sebagai lebar "diam" setelah animasi kecil/besar selesai (kapsul memakainya sebagai titik awal / akhir morph)
+    val settled = remember { booleanArrayOf(false) }
+    LaunchedEffect(small) { settled[0] = false; kotlinx.coroutines.delay(450); settled[0] = true }
     val sc by animateFloatAsState(if (gone) .4f else if (pr) .93f else 1f, spring(.55f, 500f), label = "sc")
     val al by animateFloatAsState(if (gone) 0f else 1f, tween(if (FabFx.drag) 80 else 250), label = "al")
     val r by animateDpAsState(if (pr) 22.dp else 32.dp, spring(.6f, 500f), label = "r")
@@ -2097,7 +2104,10 @@ fun Fab(vm: AppVM, act: Actions, small: Boolean, hide: Boolean, lift: Dp) {
             Modifier.offset(y = -ly)
                 .onGloballyPositioned { c ->
                     val b = c.boundsInWindow()
-                    if (b.width > 0f) SelDockFx.fabW = b.width
+                    if (b.width > 0f) {
+                        SelDockFx.fabW = b.width
+                        if (settled[0]) { if (small) SelDockFx.wSmall = b.width else SelDockFx.wLarge = b.width }
+                    }
                     if (!hide && b.width > 0f) vm.fabMorph = Morph(b.left, b.top, b.right, b.bottom, 32f * dens, pal.pc, card = true, fabg = FabGhost(!small, pal.opc))
                 }
                 .graphicsLayer {

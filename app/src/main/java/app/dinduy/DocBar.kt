@@ -275,7 +275,8 @@ private fun PhotoBtn(open: Boolean, enabled: Boolean, onToggle: () -> Unit, onCa
         ) {
             Row { XBtn(onClick = onCamera) { Ic("cam", it) }; Spacer(Modifier.width(2.dp)) }
         }
-        XBtn(enabled = enabled || open, onClick = { if (open) onGallery() else onToggle() }) { Ic("img", it) }
+        // menguncup: ikon "tambah gambar" (galeri + tanda plus) supaya TIDAK sama dengan tombol galeri sungguhan yang muncul di tengah saat melebar
+        XBtn(enabled = enabled || open, onClick = { if (open) onGallery() else onToggle() }) { if (open) Ic("img", it) else AddImgIcon(it) }
         AnimatedVisibility(
             visible = open,
             enter = expandHorizontally(grow, expandFrom = Alignment.Start),

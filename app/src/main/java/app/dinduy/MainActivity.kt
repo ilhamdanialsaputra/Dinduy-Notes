@@ -5,6 +5,8 @@ package app.dinduy
 import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.height
 import android.Manifest
 import android.app.Activity
 import android.content.ClipData
@@ -694,6 +696,19 @@ fun AppRoot(vm: AppVM, act: Actions) {
             val scope = rememberCoroutineScope()
             val drawer = rememberDrawerState(DrawerValue.Closed)
             var fabSmall by remember { mutableStateOf(false) }
+            // FAB mengecil / melebar mengikuti gulir, TAPI tidak boleh bergerak selagi kapsul seleksi tampil atau sedang morph
+            // (keduanya menggambar bentuk yang sama di tempat yang sama = berebut frame, animasi tersendat). Niat gulir dicatat di fabWant,
+            // lalu diterapkan setelah kapsul benar-benar tertutup + jeda singkat supaya FAB muncul diam dulu.
+            var fabWant by remember { mutableStateOf(false) }
+            val dockBusy by remember { derivedStateOf { vm.sel.isNotEmpty() || SelDockFx.p.value > .001f } }
+            LaunchedEffect(dockBusy) { if (!dockBusy) SelDockFx.closedAt = System.currentTimeMillis() }
+            LaunchedEffect(fabWant, dockBusy) {
+                if (dockBusy) return@LaunchedEffect
+                val since = System.currentTimeMillis() - SelDockFx.closedAt
+                if (since < 450L) delay(450L - since)
+                if (fabSmall != fabWant) fabSmall = fabWant
+            }
+            SideEffect { SelDockFx.small = fabSmall }
             val top = nav.top
             val isHome = top is Scr.Home
             val isNote = top is Scr.Note
@@ -766,7 +781,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
                         on = true, base = true, keep = true,
                         under = nav.stack.any { it is Scr.Settings || it is Scr.Info || it is Scr.Archive || it is Scr.Trash }
                     ) {
-                        HomeScreen(vm, nav, act, openDrawer = { scope.launch { drawer.open() } }, onSmall = { fabSmall = it })
+                        HomeScreen(vm, nav, act, openDrawer = { scope.launch { drawer.open() } }, onSmall = { fabWant = it })
                     }
                     ViewLayer(on = top is Scr.Archive || (inNote && nav.stack.any { it is Scr.Archive }), under = false) {
                         ListScreen(
@@ -870,6 +885,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     LabelDialogHost(vm)
                     ModelDialogHost(vm)
                     PermissionHost(vm)
+                    PdfOpenOverlay(vm)
                     UpdateHost()
                     // layar muat awal: paling atas, hanya sekali per proses (beranda sudah dikomposisi di baliknya)
                     LaunchedEffect(Unit) { vm.boot() }
@@ -1208,7 +1224,15 @@ class MainActivity : ComponentActivity(), Actions {
                 val pdfs = us.filter { isPdfUri(this@MainActivity, it) }
                 val rest = us - pdfs.toSet()
                 vm.remDlg = null; vm.sheet = null; vm.addOn = false
-                val ns = if (pdfs.isNotEmpty()) vm.importPdfs(pdfs) else emptyList<Note>()
+                // layar muat: nyala segera supaya pengguna tahu PDF-nya sedang diproses; minimal tampil sebentar agar tidak berkedip
+                val t0 = System.currentTimeMillis()
+                if (pdfs.isNotEmpty()) vm.pdfBusy = if (pdfs.size == 1) pdfName(this@MainActivity, pdfs[0]) else "${pdfs.size} PDFs"
+                val ns = try { if (pdfs.isNotEmpty()) vm.importPdfs(pdfs) else emptyList<Note>() } finally {
+                    if (pdfs.isNotEmpty()) {
+                        val el = System.currentTimeMillis() - t0
+                        if (el < 650L) delay(650L - el)
+                    }
+                }
                 // selain PDF: coba sebagai berkas .dinduy (catatan yang dibagikan atau cadangan)
                 var added = 0
                 var sid: String? = null
@@ -1231,6 +1255,7 @@ class MainActivity : ComponentActivity(), Actions {
                     total == 1 -> (ns.firstOrNull()?.id ?: sid)?.let { vm.nav.openNote(it, null) }
                     else -> vm.show(if (total == 0) "Couldn't open this file" else "Imported ${cnt(total, "note")}")
                 }
+                vm.pdfBusy = null
             }
             return
         }
@@ -1446,4 +1471,111 @@ class MainActivity : ComponentActivity(), Actions {
     }
 
     override fun back() { vm.nav.pop() }
+}
+
+// ---------- layar muat saat PDF dibuka dari aplikasi lain ----------
+
+/**
+ * Umpan balik "Buka dengan Dinduy" / Bagikan: PDF disalin + dirender sampulnya dulu (bisa beberapa detik untuk berkas besar).
+ * Selama itu layar tertutup lapisan lembut berisi bentuk yang berubah-ubah (morphing) + berputar, gaya Material 3 Expressive.
+ * Lapisan menelan sentuhan supaya tidak ada ketukan nyasar ke beranda di baliknya.
+ */
+@Composable
+fun PdfOpenOverlay(vm: AppVM) {
+    val pal = LocalPal.current
+    val name = vm.pdfBusy
+    var last by remember { mutableStateOf("") }
+    if (name != null) last = name
+    AnimatedVisibility(
+        visible = name != null,
+        enter = fadeIn(tween(180)),
+        exit = fadeOut(tween(260))
+    ) {
+        var shown by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) { shown = true }
+        val sc by animateFloatAsState(if (shown) 1f else .55f, M3E.spatial<Float>(), label = "pdfLoadScale")
+        Box(
+            Modifier.fillMaxSize().background(pal.bg.copy(alpha = .93f))
+                .swallowTouches(),
+            Alignment.Center
+        ) {
+            Column(
+                Modifier.graphicsLayer { scaleX = sc; scaleY = sc; alpha = ((sc - .55f) / .45f).coerceIn(0f, 1f) }
+                    .padding(horizontal = 40.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                PdfMorphLoader(pal.p, 96.dp)
+                androidx.compose.foundation.layout.Spacer(Modifier.vGap(26.dp))
+                T("Opening PDF", 19f, 800, pal.os)
+                androidx.compose.foundation.layout.Spacer(Modifier.vGap(6.dp))
+                T(last, 13f, 500, pal.os.copy(alpha = .62f))
+            }
+        }
+    }
+}
+
+private fun Modifier.swallowTouches(): Modifier =
+    this.pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent().changes.forEach { it.consume() } } }
+
+private fun Modifier.vGap(d: androidx.compose.ui.unit.Dp): Modifier = this.height(d)
+
+/** Bentuk "kue" yang berganti jumlah tonjolan dengan pegas membal, sambil berputar pelan dan berdenyut. */
+@Composable
+private fun PdfMorphLoader(fill: Color, dim: androidx.compose.ui.unit.Dp) {
+    val ns = intArrayOf(6, 3, 5, 8)
+    val am = floatArrayOf(.11f, .21f, .15f, .075f)
+    var cur by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) { while (true) { delay(760); cur = (cur + 1) % ns.size } }
+    val w0 by animateFloatAsState(if (cur == 0) 1f else 0f, M3E.spatialFast<Float>(), label = "w0")
+    val w1 by animateFloatAsState(if (cur == 1) 1f else 0f, M3E.spatialFast<Float>(), label = "w1")
+    val w2 by animateFloatAsState(if (cur == 2) 1f else 0f, M3E.spatialFast<Float>(), label = "w2")
+    val w3 by animateFloatAsState(if (cur == 3) 1f else 0f, M3E.spatialFast<Float>(), label = "w3")
+    val inf = androidx.compose.animation.core.rememberInfiniteTransition(label = "pdfLoad")
+    val rot by inf.animateFloat(
+        0f, 360f,
+        androidx.compose.animation.core.infiniteRepeatable(tween(4200, easing = androidx.compose.animation.core.LinearEasing)),
+        label = "rot"
+    )
+    val pulse by inf.animateFloat(
+        .94f, 1.04f,
+        androidx.compose.animation.core.infiniteRepeatable(tween(900, easing = androidx.compose.animation.core.FastOutSlowInEasing), androidx.compose.animation.core.RepeatMode.Reverse),
+        label = "pulse"
+    )
+    androidx.compose.foundation.Canvas(Modifier.size(dim)) {
+        val ws = floatArrayOf(w0, w1, w2, w3)
+        val r0 = this.size.minDimension / 2f / 1.28f * pulse
+        val cx = this.size.width / 2f
+        val cy = this.size.height / 2f
+        val path = Path()
+        val steps = 96
+        for (k in 0..steps) {
+            val th = (k.toFloat() / steps) * 2f * Math.PI.toFloat()
+            var f = 1f
+            for (q in ns.indices) f += ws[q] * am[q] * kotlin.math.cos(ns[q] * th)
+            val rr = r0 * f
+            val x = cx + rr * kotlin.math.cos(th)
+            val y = cy + rr * kotlin.math.sin(th)
+            if (k == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        path.close()
+        androidx.compose.ui.graphics.drawscope.rotate(rot, Offset(cx, cy)) { drawPath(path, fill) }
+        // "halaman" kecil di tengah (tidak ikut berputar) = petunjuk bahwa ini soal dokumen
+        val pw = r0 * .62f
+        val ph = r0 * .8f
+        drawRoundRect(
+            color = Color.White.copy(alpha = .92f),
+            topLeft = Offset(cx - pw / 2f, cy - ph / 2f),
+            size = androidx.compose.ui.geometry.Size(pw, ph),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(pw * .16f)
+        )
+        for (l in 0..2) {
+            val ly = cy - ph / 2f + ph * (.26f + .22f * l)
+            drawRoundRect(
+                color = fill.copy(alpha = .75f),
+                topLeft = Offset(cx - pw * .32f, ly),
+                size = androidx.compose.ui.geometry.Size(if (l == 2) pw * .36f else pw * .64f, ph * .075f),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(ph * .04f)
+            )
+        }
+    }
 }

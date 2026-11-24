@@ -3142,9 +3142,18 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                         val headNote = vm.note(ed.noteId)
                         val noteLb = headNote?.lb ?: emptyList()
                         val remOn = headNote != null && headNote.rm > 0L
+                        val hasBadges = noteLb.isNotEmpty() || remOn
+                        // sampul frame: lencana diberi napas lebih (16dp) dari frame di atasnya, lalu judul didekatkan ke lencana
+                        // (20dp) supaya frame -> lencana -> judul terbaca sebagai satu kelompok, bukan lencana menempel ke frame
+                        val badgeTop by androidx.compose.animation.core.animateDpAsState(
+                            if (!hasBadges) 0.dp else if (frameOn) 16.dp else 6.dp, spring(.8f, 400f), label = "badgeTop"
+                        )
+                        val titleTop by androidx.compose.animation.core.animateDpAsState(
+                            if (frameOn) (if (hasBadges) 20.dp else 28.dp) else 48.dp + coverInset, spring(.8f, 400f), label = "titleTop"
+                        )
                         Row(
                             Modifier.fillMaxWidth().animateContentSize(spring(.8f, 400f)).horizontalScroll(rememberScrollState())
-                                .padding(top = if (noteLb.isEmpty() && !remOn) 0.dp else 6.dp),
+                                .padding(top = badgeTop),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             // lencana pengingat di depan lencana label; ketuk untuk mengubah atau menghapusnya
@@ -3167,7 +3176,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
                             Modifier.onGloballyPositioned { c ->
                                 val cc = ed.contentCoords
                                 ed.titleRect = if (cc != null && cc.isAttached && c.isAttached) cc.localBoundingBoxOf(c) else null
-                            }.padding(top = if (frameOn) 28.dp else 48.dp + coverInset, bottom = 20.dp)
+                            }.padding(top = titleTop, bottom = 20.dp)
                         ) {
                             // judul memakai efek seleksi yang sama dengan isi catatan (selGlow); sorotan bawaan field disembunyikan, pegangan tetap
                             TitleEditor(ed, vm, titleFr, tBold, tItal, tColor, tTa, tPh, titleVt) { firstText() }
@@ -3663,25 +3672,58 @@ private fun TitleEditor(
             }
         }
     }
-    val vt: VisualTransformation = if (!gsx) findVt else remember(words, findVt) {
-        VisualTransformation { t ->
-            val base = findVt.filter(t)
-            TransformedText(
-                buildAnnotatedString {
-                    append(base.text)
-                    for (w in words) {
-                        if (w.e > base.text.length) continue
-                        val f = GSX.curve(w.ix, w.sl) ?: continue
-                        addStyle(androidx.compose.ui.text.SpanStyle(fontFamily = f, fontWeight = FontWeight(GSX.curveW(w.ix)), letterSpacing = w.ls.em), w.s, w.e)
-                    }
-                },
-                base.offsetMapping
-            )
-        }
-    }
     // keluarga huruf dasar (spasi, kursor): TETAP gaya acuan, tidak ikut tebal / miring, supaya lebar spasi pun tidak berubah
     val baseFam = if (gsx) (GSX.curve(GSX.REF_IX, 0) ?: ffNow) else ffNow
     val baseW = if (gsx) GSX.curveW(GSX.REF_IX) else if (tBold) 1000 else 400
+
+    // ---- KUNCI PEMENGGALAN BARIS ----
+    // Penyamaan lebar per kata di atas hanya pendekatan: pembulatan lebar huruf / kerning membuat sisa selisih beberapa piksel.
+    // Bila satu huruf / satu spasi saja membuat judul pas di ambang 1 baris vs 2 baris, selisih sekecil itu membalik jumlah baris
+    // di tengah animasi tebal (buka-tutup catatan) -> tinggi judul loncat, isi catatan ikut kedip.
+    // Perbaikan: pemenggalan baris ditetapkan SEKALI dari gaya acuan (tidak beranimasi), lalu gaya beranimasi hanya diterima bila
+    // memenggal persis sama; kalau tidak, semua jarak huruf digeser sedikit (sama rata) sampai pemenggalannya sama.
+    // Judul tetap boleh berbaris banyak (tidak dibatasi 1 baris).
+    var lockW by remember { mutableStateOf(0) }   // lebar kendala judul; hanya berubah bila lebar benar-benar berubah (bukan tiap tata letak)
+    val lockStyle = remember(baseFam, baseW, tTa) {
+        TextStyle(
+            fontFamily = baseFam, fontSize = 46.sp, fontWeight = FontWeight(baseW),
+            lineHeight = (46 * 1.1f).sp, letterSpacing = (-.02f).em, textAlign = tTa
+        )
+    }
+    fun annOf(src: androidx.compose.ui.text.AnnotatedString, ws: List<TWord>): androidx.compose.ui.text.AnnotatedString = buildAnnotatedString {
+        append(src)
+        for (w in ws) {
+            if (w.e > src.length) continue
+            val f = GSX.curve(w.ix, w.sl) ?: continue
+            addStyle(androidx.compose.ui.text.SpanStyle(fontFamily = f, fontWeight = FontWeight(GSX.curveW(w.ix)), letterSpacing = w.ls.em), w.s, w.e)
+        }
+    }
+    fun startsOf(src: String, ws: List<TWord>): List<Int> {
+        val r = tm.measure(annOf(androidx.compose.ui.text.AnnotatedString(src), ws), lockStyle, constraints = androidx.compose.ui.unit.Constraints(maxWidth = lockW))
+        return List(r.lineCount) { r.getLineStart(it) }
+    }
+    val refStarts = remember(text, lockW, gsx, lockStyle) {
+        if (!gsx || lockW <= 0 || text.isEmpty()) null
+        else startsOf(text, wordRanges(text).map { r -> TWord(r.first, r.last + 1, GSX.REF_IX, 0, -.0015f) })
+    }
+    val lockedWords = remember(words, refStarts, text) {
+        if (refStarts == null || words.isEmpty() || startsOf(text, words) == refStarts) words
+        else {
+            var out = words
+            for (bias in floatArrayOf(-.004f, .004f, -.008f, .008f, -.016f, .016f)) {
+                val c = words.map { TWord(it.s, it.e, it.ix, it.sl, it.ls + bias) }
+                if (startsOf(text, c) == refStarts) { out = c; break }
+            }
+            out
+        }
+    }
+
+    val vt: VisualTransformation = if (!gsx) findVt else remember(lockedWords, findVt) {
+        VisualTransformation { t ->
+            val base = findVt.filter(t)
+            TransformedText(annOf(base.text, lockedWords), base.offsetMapping)
+        }
+    }
 
     val menu = remember { androidx.compose.runtime.mutableStateOf<TitleMenu?>(null) }
     val toolbar = remember { TitleToolbar(menu) }
@@ -3702,7 +3744,7 @@ private fun TitleEditor(
                 tfv = v
                 if (v.text != ed.title) { val nl = v.text.contains('\n'); ed.titleChanged(v.text); if (nl) firstText() }
             },
-            onTextLayout = { tLay = it },
+            onTextLayout = { tLay = it; val mw = it.layoutInput.constraints.maxWidth; if (mw != lockW) lockW = mw },
             readOnly = ed.reading,
             visualTransformation = vt,
             textStyle = TextStyle(
