@@ -370,7 +370,7 @@ fun NoteCard(
             )
     ) {
         CompositionLocalProvider(LocalPal provides pal) {
-            CardBody(d, "f", c2, fg, CARD_PAD_H, CARD_PAD_V, 0.dp, 0.dp, delTime)
+            CardBody(d, "f", c2, fg, CARD_PAD_H, CARD_PAD_V, 0.dp, 0.dp, delTime, orn = d.orn, ornP = ornP)
         }
         if (badge > .01f) Box(
             Modifier.align(Alignment.TopEnd).padding(8.dp).size(26.dp)
@@ -386,7 +386,10 @@ fun NoteCard(
  * lalu label / pengingat. Dipakai kartu asli dan bayangan teks saat morph buka/tutup.
  */
 @Composable
-fun CardBody(d: Note, kind: String, c2: Boolean, fg: Color, padH: Dp, padV: Dp, insTL: Dp, insBL: Dp, delTime: Long, drawCover: Boolean = true) {
+fun CardBody(
+    d: Note, kind: String, c2: Boolean, fg: Color, padH: Dp, padV: Dp, insTL: Dp, insBL: Dp, delTime: Long, drawCover: Boolean = true,
+    orn: String = "", ornP: OrnPaint? = null
+) {
     val vm = LocalVM.current
     if (d.cv.isEmpty() || vm == null) {
         CardText(d, kind, c2, fg, padH, padV, insTL, insBL, delTime)
@@ -404,7 +407,11 @@ fun CardBody(d: Note, kind: String, c2: Boolean, fg: Color, padH: Dp, padV: Dp, 
                 .aspectRatio(frameAspect(c2))
             if (drawCover) CoverImage(vm, d, fm.clip(RoundedCornerShape(FRAME_CARD_R.dp)))
             else Spacer(fm)
-        } else if (drawCover) CoverImage(vm, d, Modifier.fillMaxWidth().aspectRatio(coverAspect(c2)))
+        } else if (drawCover) CoverImage(
+            vm, d,
+            // sampul gradasi larut ke warna kertas di tepi bawahnya: ornamen digambar ulang DI ATAS sampul dengan topeng pudar, supaya tidak terpotong
+            Modifier.fillMaxWidth().aspectRatio(coverAspect(c2)).let { if (ornP != null && orn.isNotEmpty()) it.cardOrnOverCover(orn, ornP, d.id) else it }
+        )
         else Spacer(Modifier.fillMaxWidth().aspectRatio(coverAspect(c2)))
         if (hasText) CardText(d, kind, c2, fg, padH, padV, insTL, insBL, delTime)
     }

@@ -3093,12 +3093,21 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     // setengah-transparan yang identik itu bertumpuk menjadi ~75% sehingga sampul tampak pucat sesaat = "kedip".
     val ornKind = vm.note(ed.noteId)?.orn.orEmpty()
     val ofx = remember(ed.noteId) { OrnFx() }
-    OrnDriver(ofx, { scroll.value.toFloat() }, { ed.tl != null }, ornKind.isNotEmpty())
+    val oclk = remember(ed.noteId) { OrnClock(OrnPose.get(ed.noteId)).also { it.cur = ornKind } }
+    // mengetik / keyboard terbuka / judul fokus -> ornamen meredup dan melambat supaya tulisan tetap nyaman dibaca
+    OrnDriver(ofx, { scroll.value.toFloat() }, { ed.tl != null }, ornKind.isNotEmpty(), calm = { imeOpen || ed.titleFocus || ed.focus != null })
     Box(Modifier.fillMaxSize().ornTouch(ofx)) {
     // latar: alpha digambar langsung (tanpa layer offscreen layar penuh yang dibuat ulang tiap frame morph)
     Box(Modifier.fillMaxSize().drawBehind { drawRect(pal.s, alpha = noteFade(vm)) })
-    OrnamentLayer(vm, ornKind, pal, ofx, ed.noteId)
-    if (coverNote != null) { if (frameOn) EditorFrame(vm, coverNote) { scroll.value } else EditorCover(vm, coverNote) { scroll.value } }
+    OrnamentLayer(vm, ornKind, pal, ofx, ed.noteId, clock = oclk)
+    if (coverNote != null) {
+        if (frameOn) EditorFrame(vm, coverNote) { scroll.value }
+        else {
+            EditorCover(vm, coverNote) { scroll.value }
+            // sampul gradasi larut ke kertas di tepi bawahnya: ornamen muncul lagi di atas sampul dengan topeng pudar (tidak terpotong)
+            if (ornKind.isNotEmpty()) OrnamentCoverOverlay(vm, pal, ofx, oclk, with(density) { (screenWdp / EDIT_RATIO).toPx() }) { scroll.value.toFloat() }
+        }
+    }
     Box(Modifier.fillMaxSize().graphicsLayer { alpha = noteFade(vm) }) {
     Column(Modifier.fillMaxSize()) {
         TopBar()
