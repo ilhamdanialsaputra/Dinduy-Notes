@@ -2085,6 +2085,9 @@ fun Fab(vm: AppVM, act: Actions, small: Boolean, hide: Boolean, lift: Dp) {
     val ly by animateDpAsState(lift, spring(.7f, 400f), label = "ly")
     // dilepas dari komposisi selama catatan terbuka: tombol tak terlihat TIDAK boleh tetap menangkap sentuhan di pojok kanan bawah
     if (hide && (viaMorph || al <= .01f)) return
+    // kapsul seleksi sedang menutupi tombol: lepaskan sepenuhnya dari komposisi. Tombol (walau transparan) adalah saudara yang digambar
+    // di ATAS kapsul dan hitbox-nya menelan sentuhan di sisi kanan kapsul, sehingga kapsul tidak bisa digeser dari sana.
+    if (dockHide) return
     val sab = sabDp()
     val dens = LocalDensity.current.density
     val shape = RoundedCornerShape(r)
