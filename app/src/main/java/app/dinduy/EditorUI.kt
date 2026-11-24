@@ -3122,11 +3122,14 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     val ofx = remember(ed.noteId) { OrnFx() }
     val oclk = remember(ed.noteId) { OrnClock(OrnPose.get(ed.noteId)).also { it.cur = ornKind } }
     // mengetik / keyboard terbuka / judul fokus -> ornamen meredup dan melambat supaya tulisan tetap nyaman dibaca
-    OrnDriver(ofx, { scroll.value.toFloat() }, { ed.tl != null }, ornKind.isNotEmpty(), calm = { imeOpen || ed.titleFocus || ed.focus != null })
+    val ornInten = vm.note(ed.noteId)?.ti ?: 1f
+    // parallax per catatan: dibaca lewat State supaya OrnDriver (yang hidup lintas recomposition) selalu melihat nilai terbaru
+    val ornPar = androidx.compose.runtime.rememberUpdatedState(vm.note(ed.noteId)?.pl ?: true)
+    OrnDriver(ofx, { scroll.value.toFloat() }, { ed.tl != null }, ornKind.isNotEmpty(), calm = { imeOpen || ed.titleFocus || ed.focus != null }, par = { ornPar.value })
     Box(Modifier.fillMaxSize().ornTouch(ofx)) {
     // latar: alpha digambar langsung (tanpa layer offscreen layar penuh yang dibuat ulang tiap frame morph)
     Box(Modifier.fillMaxSize().drawBehind { drawRect(pal.s, alpha = noteFade(vm)) })
-    OrnamentLayer(vm, ornKind, pal, ofx, ed.noteId, clock = oclk)
+    OrnamentLayer(vm, ornKind, pal, ofx, ed.noteId, clock = oclk, inten = ornInten)
     if (coverNote != null) { if (frameOn) EditorFrame(vm, coverNote) { scroll.value } else EditorCover(vm, coverNote) { scroll.value } }
     Box(Modifier.fillMaxSize().graphicsLayer { alpha = noteFade(vm) }) {
     Column(Modifier.fillMaxSize()) {

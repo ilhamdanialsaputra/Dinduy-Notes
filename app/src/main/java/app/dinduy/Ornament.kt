@@ -16,6 +16,20 @@ package app.dinduy
  */
 
 import android.os.SystemClock
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.EnterExitState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.horizontalDrag
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -127,7 +141,8 @@ fun themeSummary(d: Note?): String {
     if (d == null) return ""
     val o = ORN_LIST.firstOrNull { it.id == d.orn }?.name?.takeIf { d.orn.isNotEmpty() }
     val c = if (d.th >= 0f) hueName(d.th) else null
-    return if (o == null && c == null) "Color and backdrop for this note" else listOfNotNull(c, o).joinToString(" · ")
+    val np = if (o != null && !d.pl) "No parallax" else null
+    return if (o == null && c == null) "Color and backdrop for this note" else listOfNotNull(c, o, np).joinToString(" · ")
 }
 
 // =====================================================================================================================
@@ -176,19 +191,28 @@ private fun ornCap(c: Color, paper: Color, maxD: Float): Color {
     return if (d <= maxD) c else lerpC(paper, c, maxD / d)
 }
 
-fun ornPaint(p: Pal): OrnPaint {
+/**
+ * [k] = intensitas ornamen pilihan pengguna (1 = bawaan). Pagar kontras ([ornCap]) dan kadar campuran warna ke kertas sama-sama
+ * dikalikan k, jadi k > 1 benar-benar menebalkan ornamen (berguna kalau kertas berwarna pekat membuat ornamen samar), dan k < 1 menenangkannya.
+ */
+fun ornPaint(p: Pal, k: Float = 1f): OrnPaint {
     val dk = p.dark
     val s = p.s
-    val cap = if (dk) .12f else .10f
+    val kk = k.coerceIn(ORN_INT_MIN, ORN_INT_MAX)
+    val cap = (if (dk) .12f else .10f) * kk
+    fun mix(f: Float) = (f * kk).coerceAtMost(1f)
     return OrnPaint(
-        ornCap(lerpC(s, p.p, .20f), s, cap),
-        ornCap(lerpC(s, p.tc, if (dk) .85f else .70f), s, cap),
-        ornCap(lerpC(s, p.sc, if (dk) .85f else .75f), s, cap),
-        ornCap(lerpC(s, p.ac, if (dk) .80f else .60f), s, cap * 1.15f),
-        ornCap(lerpC(s, p.p, if (dk) .34f else .30f), s, cap * 1.35f),
+        ornCap(lerpC(s, p.p, mix(.20f)), s, cap),
+        ornCap(lerpC(s, p.tc, mix(if (dk) .85f else .70f)), s, cap),
+        ornCap(lerpC(s, p.sc, mix(if (dk) .85f else .75f)), s, cap),
+        ornCap(lerpC(s, p.ac, mix(if (dk) .80f else .60f)), s, cap * 1.15f),
+        ornCap(lerpC(s, p.p, mix(if (dk) .34f else .30f)), s, cap * 1.35f),
         s, dark = dk
     )
 }
+
+const val ORN_INT_MIN = .4f
+const val ORN_INT_MAX = 3f
 
 // =====================================================================================================================
 // Sinyal sentuhan / gulir
@@ -236,22 +260,34 @@ fun Modifier.ornTouch(fx: OrnFx): Modifier = pointerInput(fx) {
  * [scroll] dibaca tiap frame; [lifted] true selama teks sedang diangkat; [calm] true selama pengguna mengetik / keyboard terbuka.
  */
 @Composable
-fun OrnDriver(fx: OrnFx, scroll: () -> Float, lifted: () -> Boolean, on: Boolean, calm: () -> Boolean = { false }) {
+fun OrnDriver(
+    fx: OrnFx, scroll: () -> Float, lifted: () -> Boolean, on: Boolean, calm: () -> Boolean = { false },
+    /** false = parallax mati: gulir tidak lagi menggeser / meregangkan ornamen. Sentuhan, tahan, angkat, redam, dan waktu tetap jalan. */
+    par: () -> Boolean = { true }
+) {
     if (!on) return
     LaunchedEffect(fx) {
-        var last = scroll(); fx.scroll = last
+        var last = scroll()
+        // pm = seberapa besar gulir dipakai (1 = parallax penuh, 0 = mati). Berpindah dengan halus, jadi menyalakan / mematikan
+        // parallax tidak membuat ornamen melompat. Saat parallax menyala (pm = 1) perilakunya persis seperti sebelumnya.
+        var pm = if (par()) 1f else 0f
+        fx.scroll = last * pm
         var lastT = 0L
         var sv = 0f
-        snapshotFlow { scroll() to fx.down }.collectLatest {
+        snapshotFlow { Triple(scroll(), fx.down, par()) }.collectLatest {
             var idle = 0
             while (idle < 24) {
                 val n = withFrameNanos { it }
                 val dt = if (lastT == 0L) .016f else ((n - lastT) / 1e9f).coerceIn(.004f, .05f)
                 lastT = n
-                val s = scroll(); fx.scroll = s
+                val pTarget = if (par()) 1f else 0f
+                pm += (pTarget - pm) * (1f - exp(-dt * 9f))
+                if (abs(pTarget - pm) < .002f) pm = pTarget
+                val raw = scroll()
+                val s = raw * pm; fx.scroll = s
                 // lompatan gulir sekali-frame (koreksi tinggi blok / gulir kursor, bukan jari) tidak boleh dianggap fling: kalau tidak, stretch
                 // menempel di batas dan ekornya (peluruhan vel) membuat ornamen terasa "macet" hampir 1 detik
-                val v = ((s - last) / dt).coerceIn(-9000f, 9000f); last = s
+                val v = (((raw - last) / dt).coerceIn(-9000f, 9000f)) * pm; last = raw
                 fx.vel += (v - fx.vel) * (1f - exp(-dt * 14f))
                 // pegas hampir kritis (zeta ~ .78): melar mengikuti gulir lalu kembali halus; target dilunakkan tanh supaya tidak pernah "mentok"
                 val tgt = tanh(fx.vel / 3600f) * .85f
@@ -267,7 +303,7 @@ fun OrnDriver(fx: OrnFx, scroll: () -> Float, lifted: () -> Boolean, on: Boolean
                 val still = fx.moved < 24f && abs(fx.vel) < 80f
                 val ht = if (fx.down && still && heldMs > 280L) 1f else 0f
                 fx.hold += (ht - fx.hold) * (1f - exp(-dt * 5f))
-                val quiet = abs(fx.vel) < 6f && abs(fx.stretch) < .004f && abs(sv) < .02f && !fx.down && fx.press < .005f && fx.hold < .005f
+                val quiet = abs(fx.vel) < 6f && abs(fx.stretch) < .004f && abs(sv) < .02f && !fx.down && fx.press < .005f && fx.hold < .005f && pm == pTarget
                 idle = if (quiet) idle + 1 else 0
             }
             fx.vel = 0f; fx.stretch = 0f; sv = 0f; fx.press = 0f; fx.hold = 0f; lastT = 0L
@@ -905,7 +941,8 @@ private fun ornViewH(vm: AppVM, size: Size): Float {
 @Composable
 fun OrnamentLayer(
     vm: AppVM?, kind: String, pal: Pal, fx: OrnFx, id: String, modifier: Modifier = Modifier.fillMaxSize(),
-    clock: OrnClock = remember(id) { OrnClock(OrnPose.get(id)).also { it.cur = kind } }
+    clock: OrnClock = remember(id) { OrnClock(OrnPose.get(id)).also { it.cur = kind } },
+    inten: Float = 1f
 ) {
     LaunchedEffect(kind, clock) {
         if (kind != clock.cur) {
@@ -918,7 +955,7 @@ fun OrnamentLayer(
     }
     DisposableEffect(id) { onDispose { OrnPose.ver++ } }
     if (clock.cur.isEmpty() && clock.prev.isEmpty()) return
-    val P = remember(pal) { ornPaint(pal) }
+    val P = remember(pal, inten) { ornPaint(pal, inten) }
     LaunchedEffect(id, clock) {
         OrnWarm.run()
         var last = 0L
@@ -950,52 +987,116 @@ fun OrnamentLayer(
     }
 }
 
+
 // =====================================================================================================================
 // Halaman Theme (dibuka dari menu titik tiga)
 // =====================================================================================================================
+
+private class ThemeSt(val hue: Float, val orn: String, val ti: Float, val par: Boolean)
+
+/** Kemajuan masuk/keluar (0..1, boleh sedikit melewati 1 karena pegas) untuk isi sebuah AnimatedVisibility. Dipakai slider untuk morphing. */
+@Composable
+private fun AnimatedVisibilityScope.rv(): Float =
+    transition.animateFloat(transitionSpec = { spring(.62f, 340f) }, label = "rv") { s ->
+        if (s == EnterExitState.Visible) 1f else 0f
+    }.value
+
+private val ExEnter = expandVertically(spring(.78f, 360f)) + fadeIn(tween(220)) + scaleIn(spring(.8f, 400f), initialScale = .92f)
+private val ExExit = shrinkVertically(spring(.9f, 520f)) + fadeOut(tween(140)) + scaleOut(tween(180), targetScale = .94f)
 
 @Composable
 fun ThemePage(vm: AppVM, nav: Nav, id: String) {
     val gp = LocalPal.current
     val d = vm.note(id)
     val autoH = if (gp.ex) gp.exH else hueSat(vm.pr.seed).first
-    var hue by remember(id) { mutableStateOf(d?.th ?: -1f) }
+    var hue by remember(id) { mutableStateOf(d?.th ?: -1f) }       // < 0 = Auto (warna Kustom mati)
     var orn by remember(id) { mutableStateOf(d?.orn ?: "") }
+    var ti by remember(id) { mutableFloatStateOf(d?.ti ?: 1f) }
+    var par by remember(id) { mutableStateOf(d?.pl ?: true) }
+    // rona terakhir yang dipilih: saat toggle Kustom dinyalakan lagi, slider kembali ke sana (awal: rona warna aplikasi)
+    var lastHue by remember(id) { mutableFloatStateOf(if ((d?.th ?: -1f) >= 0f) d!!.th else autoH) }
+    val custom = hue >= 0f
 
     // simpan dengan jeda (slider menghasilkan banyak nilai), dan pasti tersimpan saat halaman ditutup
-    LaunchedEffect(hue, orn) { delay(120); vm.setNoteTheme(id, hue, orn) }
-    val latest by rememberUpdatedState(hue to orn)
-    DisposableEffect(id) { onDispose { vm.setNoteTheme(id, latest.first, latest.second) } }
+    LaunchedEffect(hue, orn, ti, par) { delay(120); vm.setNoteTheme(id, hue, orn, ti, par) }
+    val latest by rememberUpdatedState(ThemeSt(hue, orn, ti, par))
+    DisposableEffect(id) { onDispose { vm.setNoteTheme(id, latest.hue, latest.orn, latest.ti, latest.par) } }
 
     val pv = remember(gp, hue, d?.cp, d?.cv) { if (d != null) notePalFor(gp, d.copy(th = hue)) else gp }
 
     PageScaffold("Note theme", d?.t?.ifEmpty { null } ?: "Untitled", { nav.pop() }) {
         SGroup("Preview", 0) {
-            ThemePreview(d?.t.orEmpty(), pv, orn, id)
+            ThemePreview(d?.t.orEmpty(), pv, orn, id, ti, par)
         }
         SGroup("Backdrop", 60) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 ORN_LIST.forEach { info ->
-                    OrnTile(info, pv, orn == info.id, Modifier.weight(1f)) {
-                        orn = info.id
-                        // pertama kali memilih backdrop bertema (daun / kota) saat warna masih Auto: mulai dari rona khasnya
-                        if (hue < 0f && info.hue >= 0f) hue = info.hue
+                    OrnTile(info, pv, ti, orn == info.id, Modifier.weight(1f)) { orn = info.id }
+                }
+            }
+            // intensitas + parallax hanya relevan kalau ada backdrop
+            AnimatedVisibility(orn.isNotEmpty(), enter = ExEnter, exit = ExExit) {
+                val r = rv()
+                Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    SCard(POS_TOP) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                T("Intensity", 16f, 500, gp.os)
+                                T("How bold the backdrop looks", 14f, 400, gp.osv)
+                            }
+                            T("${(ti * 100f).toInt()}%", 15f, 700, gp.p)
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        ExpSlider(
+                            frac = (ti - ORN_INT_MIN) / (ORN_INT_MAX - ORN_INT_MIN), reveal = r, rainbow = false,
+                            active = gp.p, inactive = gp.pc, handle = gp.p
+                        ) { f ->
+                            val raw = Math.round((ORN_INT_MIN + f * (ORN_INT_MAX - ORN_INT_MIN)) * 20f) / 20f
+                            ti = if (abs(raw - 1f) < .06f) 1f else raw      // detent di 100% (bawaan)
+                        }
+                    }
+                    SCard(POS_BOT, onClick = { par = !par }) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Column(Modifier.weight(1f)) {
+                                T("Parallax", 16f, 500, gp.os)
+                                T("The backdrop drifts as you scroll. Touch and motion stay on either way", 14f, 400, gp.osv, lh = 1.3f)
+                            }
+                            MorphSwitch(par)
+                        }
                     }
                 }
             }
         }
         SGroup("Color", 120) {
-            HueSlider(if (hue >= 0f) hue else autoH, hue >= 0f) { hue = it }
-            Spacer(Modifier.height(12.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val on = hue < 0f
-                Box(
-                    Modifier.clip(RoundedCornerShape(50)).background(if (on) gp.p else gp.dockIn())
-                        .clickable(remember { MutableInteractionSource() }, null) { hue = -1f }
-                        .padding(horizontal = 18.dp, vertical = 10.dp)
-                ) { T("Auto", 14f, 600, if (on) gp.op else gp.os) }
-                Spacer(Modifier.width(12.dp))
-                T(if (on) "Follows your app color" else hueName(hue), 14f, 500, gp.osv)
+            SCard(if (custom) POS_TOP else POS_ONE, onClick = {
+                if (custom) { lastHue = hue; hue = -1f } else hue = lastHue
+            }) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        T("Custom color", 16f, 500, gp.os)
+                        T(
+                            if (custom) "${hueName(hue)} paper" else "Auto: follows your app theme, or the cover photo",
+                            14f, 400, gp.osv, lh = 1.3f
+                        )
+                    }
+                    MorphSwitch(custom)
+                }
+            }
+            AnimatedVisibility(custom, enter = ExEnter, exit = ExExit) {
+                val r = rv()
+                SCard(POS_BOT) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        T("Hue", 16f, 500, gp.os, Modifier.weight(1f))
+                        val h = if (hue >= 0f) hue else lastHue
+                        T("${hueName(h)} · ${h.toInt()}°", 15f, 700, gp.p)
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    val h = if (hue >= 0f) hue else lastHue
+                    ExpSlider(
+                        frac = h / 360f, reveal = r, rainbow = true,
+                        active = gp.p, inactive = gp.pc, handle = hsl(h, 75f, 50f)
+                    ) { f -> val v = f * 360f; hue = v; lastHue = v }
+                }
             }
         }
     }
@@ -1003,28 +1104,33 @@ fun ThemePage(vm: AppVM, nav: Nav, id: String) {
 
 /** Pratinjau hidup: tahan, seret, atau geser vertikal untuk merasakan responsnya persis seperti di editor. */
 @Composable
-private fun ThemePreview(title: String, pal: Pal, kind: String, id: String) {
+private fun ThemePreview(title: String, pal: Pal, kind: String, id: String, inten: Float, par: Boolean) {
     val fx = remember { OrnFx() }
     var sim by remember { mutableFloatStateOf(0f) }
-    OrnDriver(fx, { sim }, { false }, kind.isNotEmpty())
+    val parS = rememberUpdatedState(par)
+    OrnDriver(fx, { sim }, { false }, kind.isNotEmpty(), par = { parS.value })
     Box(
         Modifier.fillMaxWidth().height(210.dp).clip(RoundedCornerShape(32.dp)).background(pal.s)
             .ornTouch(fx)
             .pointerInput(Unit) { detectVerticalDragGestures { _, dy -> sim -= dy } }
     ) {
-        OrnamentLayer(null, kind, pal, fx, "preview_$id")
+        OrnamentLayer(null, kind, pal, fx, "preview_$id", inten = inten)
         Column(Modifier.padding(24.dp)) {
             T(title.ifEmpty { "Untitled" }, 26f, 800, pal.os, maxLines = 1)
             Spacer(Modifier.height(8.dp))
-            T("Hold, drag, or swipe up and down. The backdrop always stays behind the words.", 15f, 400, pal.os, alpha = .8f, lh = 1.35f)
+            T(
+                if (par || kind.isEmpty()) "Hold, drag, or swipe up and down. The backdrop always stays behind the words."
+                else "Parallax is off. Hold or drag and the backdrop still responds.",
+                15f, 400, pal.os, alpha = .8f, lh = 1.35f
+            )
         }
     }
 }
 
 @Composable
-private fun OrnTile(info: OrnInfo, pal: Pal, sel: Boolean, modifier: Modifier, onClick: () -> Unit) {
+private fun OrnTile(info: OrnInfo, pal: Pal, inten: Float, sel: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val gp = LocalPal.current
-    val P = remember(pal) { ornPaint(pal) }
+    val P = remember(pal, inten) { ornPaint(pal, inten) }
     val r by animateDpAsState(if (sel) 30.dp else 16.dp, spring(.55f, 420f), label = "otr")
     val k by animateFloatAsState(if (sel) 1f else .94f, spring(.5f, 500f), label = "otk")
     val bw by animateDpAsState(if (sel) 3.dp else 1.dp, spring(.8f, 500f), label = "otb")
@@ -1049,38 +1155,71 @@ private fun OrnTile(info: OrnInfo, pal: Pal, sel: Boolean, modifier: Modifier, o
     }
 }
 
-/** Slider hue gaya Expressive: trek pelangi, pegangan menyempit dan membulat saat ditekan. */
+private const val SLIDER_PAD = 22f
+
+/**
+ * Slider Material 3 Expressive (dipakai slider warna dan intensitas): trek tebal terbelah dua di sekitar pegangan, sudut luar bulat
+ * penuh dan sudut dalam kecil; pegangan berupa kapsul tegak yang menyempit dan memanjang saat ditekan. [reveal] (0..1+) = morphing
+ * masuk: pegangan muncul lebih dulu, lalu trek menyebar ke kiri dan kanan dari pegangan sambil menebal dari garis tipis.
+ * [rainbow] = trek berupa spektrum hue (posisi pegangan = warna di bawahnya); selain itu kiri = [active], kanan = [inactive].
+ */
 @Composable
-private fun HueSlider(value: Float, active: Boolean, onChange: (Float) -> Unit) {
-    val gp = LocalPal.current
+private fun ExpSlider(
+    frac: Float, reveal: Float, rainbow: Boolean, active: Color, inactive: Color, handle: Color,
+    onFrac: (Float) -> Unit
+) {
     var pressed by remember { mutableStateOf(false) }
-    val tw by animateDpAsState(if (pressed) 4.dp else 10.dp, spring(.5f, 600f), label = "htw")
-    val th by animateDpAsState(if (pressed) 40.dp else 52.dp, spring(.5f, 600f), label = "hth")
-    val dim by animateFloatAsState(if (active) 1f else .55f, spring(.8f, 300f), label = "hd")
-    val stops = remember { (0..12).map { hsl(it * 30f, 70f, 55f) } }
-    Box(
-        Modifier.fillMaxWidth().height(56.dp).clip(RoundedCornerShape(28.dp))
-            .graphicsLayer { alpha = .55f + .45f * dim }
-            .background(Brush.horizontalGradient(stops))
-            .pointerInput(Unit) {
-                detectTapGestures(onPress = { o ->
-                    pressed = true
-                    onChange((o.x / size.width * 360f).coerceIn(0f, 360f))
-                    tryAwaitRelease(); pressed = false
-                })
+    val hw by animateDpAsState(if (pressed) 2.dp else 4.dp, spring(.55f, 700f), label = "xhw")
+    val hh by animateDpAsState(if (pressed) 56.dp else 48.dp, spring(.5f, 600f), label = "xhh")
+    val stops = remember { (0..12).map { hsl(it * 30f, 72f, 55f) } }
+    val pl = remember { Path() }
+    val pr = remember { Path() }
+    val onF by rememberUpdatedState(onFrac)
+    Canvas(
+        Modifier.fillMaxWidth().height(56.dp).pointerInput(Unit) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                pressed = true
+                val pad = SLIDER_PAD.dp.toPx()
+                fun f(x: Float) = ((x - pad) / (size.width - 2f * pad).coerceAtLeast(1f)).coerceIn(0f, 1f)
+                onF(f(down.position.x))
+                horizontalDrag(down.id) { ch -> ch.consume(); onF(f(ch.position.x)) }
+                pressed = false
             }
-            .pointerInput(Unit) {
-                detectHorizontalDragGestures(
-                    onDragStart = { pressed = true }, onDragEnd = { pressed = false }, onDragCancel = { pressed = false }
-                ) { c, _ -> onChange((c.position.x / size.width * 360f).coerceIn(0f, 360f)) }
-            }
+        }
     ) {
-        Canvas(Modifier.fillMaxSize()) {
-            val pad = 28.dp.toPx()
-            val cx = pad + (size.width - 2f * pad) * (value / 360f)
-            val tH = th.toPx(); val tW = tw.toPx()
-            drawRoundRect(gp.setCard(), Offset(cx - tW / 2f - 3.dp.toPx(), (size.height - tH) / 2f - 3.dp.toPx()), Size(tW + 6.dp.toPx(), tH + 6.dp.toPx()), CornerRadius((tW + 6.dp.toPx()) / 2f))
-            drawRoundRect(Color.White, Offset(cx - tW / 2f, (size.height - tH) / 2f), Size(tW, tH), CornerRadius(tW / 2f))
+        val r = reveal.coerceAtLeast(0f)
+        if (r < .003f) return@Canvas
+        val w = size.width; val h = size.height
+        val pad = SLIDER_PAD.dp.toPx()
+        val cx = pad + (w - 2f * pad) * frac.coerceIn(0f, 1f)
+        val rc = r.coerceAtMost(1f)
+        val trackH = 40.dp.toPx()
+        val ty = (h - trackH) / 2f
+        val gap = 6.dp.toPx()
+        val hwp = hw.toPx()
+        val hhp = hh.toPx() * min(r, 1.12f)
+        val outer = trackH / 2f
+        val inner = 4.dp.toPx()
+        val lx1 = cx - hwp / 2f - gap
+        val rx0 = cx + hwp / 2f + gap
+        val sy = lerp(.3f, 1f, ornSmooth(rc))
+        val brush: Brush? = if (rainbow) Brush.horizontalGradient(stops, startX = pad, endX = w - pad) else null
+
+        clipRect(cx - r * w, 0f, cx + r * w) {
+            withTransform({ scale(1f, sy, Offset(cx, h / 2f)) }) {
+                if (lx1 > 1f) {
+                    pl.reset()
+                    pl.addRoundRect(RoundRect(0f, ty, lx1, ty + trackH, CornerRadius(outer), CornerRadius(inner), CornerRadius(inner), CornerRadius(outer)))
+                    if (brush != null) drawPath(pl, brush) else drawPath(pl, active)
+                }
+                if (w - rx0 > 1f) {
+                    pr.reset()
+                    pr.addRoundRect(RoundRect(rx0, ty, w, ty + trackH, CornerRadius(inner), CornerRadius(outer), CornerRadius(outer), CornerRadius(inner)))
+                    if (brush != null) drawPath(pr, brush) else drawPath(pr, inactive)
+                }
+            }
+            drawRoundRect(handle, Offset(cx - hwp / 2f, (h - hhp) / 2f), Size(hwp, hhp), CornerRadius(hwp / 2f))
         }
     }
 }

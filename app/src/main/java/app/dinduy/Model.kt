@@ -287,7 +287,9 @@ data class Note(
     val pdk: Int = 0,                    // PDF: halaman gelap (AMOLED): 0 ikut tema aplikasi, 1 gelap, 2 terang
     val cm: String = "",                 // gaya sampul: "" gradasi (bawaan), "f" frame (kotak bersudut bundar seperti Keep)
     val th: Float = -1f,                 // tema catatan: hue 0..360, -1 = Auto (ikut palet aplikasi / sampul)
-    val orn: String = ""                 // tema catatan: backdrop "" Plain / "morph" / "canopy" / "skyline"
+    val orn: String = "",                // tema catatan: backdrop "" Plain / "morph" / "canopy" / "skyline"
+    val ti: Float = 1f,                  // tema catatan: intensitas ornamen (0.4..3, 1 = bawaan; makin besar makin tegas)
+    val pl: Boolean = true               // tema catatan: parallax ornamen saat digulir (false = mati; sentuhan dan animasi waktu tetap jalan)
 )
 
 @Serializable

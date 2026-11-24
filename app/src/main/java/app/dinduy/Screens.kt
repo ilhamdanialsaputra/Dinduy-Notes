@@ -311,7 +311,7 @@ fun NoteCard(
     // satu-satunya penentu warna catatan: sama persis dengan editor (lihat notePalFor di Ornament.kt)
     val pal = if (d.th < 0f && !gp.ex && (d.cp.isEmpty() || d.cv.isEmpty())) gp
         else remember(d.id, d.th, d.cp, d.cv, gp.dark, gp.mono, gp.ex, gp.exH, gp.exS) { notePalFor(gp, d) }
-    val ornP = remember(pal) { ornPaint(pal) }
+    val ornP = remember(pal, d.ti) { ornPaint(pal, d.ti) }
     val cvm = LocalVM.current
     LaunchedEffect(d.id, d.cv, d.cp) { if (d.cv.isNotEmpty() && d.cp.isEmpty()) cvm?.ensureCoverPal(d.id) }
     val c2 = cols == 2

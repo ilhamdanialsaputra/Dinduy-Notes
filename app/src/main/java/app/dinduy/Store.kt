@@ -551,10 +551,10 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     }
 
     /** Tema catatan (hue + backdrop). Tidak mengubah waktu ubah (u), jadi urutan kartu tidak bergeser. */
-    fun setNoteTheme(id: String, th: Float, orn: String) {
+    fun setNoteTheme(id: String, th: Float, orn: String, ti: Float = 1f, pl: Boolean = true) {
         val n = note(id) ?: return
-        if (n.th == th && n.orn == orn) return
-        upd(id) { it.copy(th = th, orn = orn) }
+        if (n.th == th && n.orn == orn && n.ti == ti && n.pl == pl) return
+        upd(id) { it.copy(th = th, orn = orn, ti = ti, pl = pl) }
     }
 
     fun removeCover(id: String) {
