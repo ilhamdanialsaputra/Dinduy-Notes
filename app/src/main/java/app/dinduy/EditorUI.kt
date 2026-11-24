@@ -631,6 +631,68 @@ private object NoTextToolbar : TextToolbar {
     ) {}
 }
 
+/** Menu seleksi judul: posisi + aksi yang diminta field (null = tidak berlaku, mis. Cut / Paste di mode baca). */
+private class TitleMenu(
+    val rect: androidx.compose.ui.geometry.Rect, val cut: (() -> Unit)?, val copy: (() -> Unit)?,
+    val paste: (() -> Unit)?, val all: (() -> Unit)?
+)
+
+/** Pengganti toolbar bawaan Android untuk kolom judul: hanya menyimpan permintaan, yang menggambar adalah TitleBubble (gaya Dinduy). */
+private class TitleToolbar(private val st: androidx.compose.runtime.MutableState<TitleMenu?>) : TextToolbar {
+    override val status: TextToolbarStatus get() = if (st.value != null) TextToolbarStatus.Shown else TextToolbarStatus.Hidden
+    override fun hide() { st.value = null }
+    override fun showMenu(
+        rect: androidx.compose.ui.geometry.Rect,
+        onCopyRequested: (() -> Unit)?, onPasteRequested: (() -> Unit)?,
+        onCutRequested: (() -> Unit)?, onSelectAllRequested: (() -> Unit)?
+    ) { st.value = TitleMenu(rect, onCutRequested, onCopyRequested, onPasteRequested, onSelectAllRequested) }
+}
+
+/** Gelembung seleksi judul: kapsul yang sama dengan SelBubble (SelBtn, wadah dock), melayang di atas seleksi atau di bawahnya bila tidak muat. */
+@Composable
+private fun TitleBubble(m: TitleMenu, onCopied: () -> Unit) {
+    val pal = LocalPal.current
+    val gap = with(LocalDensity.current) { 12.dp.roundToPx() }
+    val pos = remember(m) {
+        object : androidx.compose.ui.window.PopupPositionProvider {
+            override fun calculatePosition(
+                anchorBounds: androidx.compose.ui.unit.IntRect, windowSize: IntSize,
+                layoutDirection: androidx.compose.ui.unit.LayoutDirection, popupContentSize: IntSize
+            ): IntOffset {
+                val x = (m.rect.center.x - popupContentSize.width / 2f).roundToInt().coerceIn(8, (windowSize.width - popupContentSize.width - 8).coerceAtLeast(8))
+                var y = (m.rect.top - popupContentSize.height - gap).roundToInt()
+                if (y < 8) y = (m.rect.bottom + gap * 3).roundToInt()
+                return IntOffset(x, y)
+            }
+        }
+    }
+    androidx.compose.ui.window.Popup(
+        popupPositionProvider = pos,
+        properties = androidx.compose.ui.window.PopupProperties(focusable = false, dismissOnClickOutside = false)
+    ) {
+        val a = remember { Animatable(0f) }
+        LaunchedEffect(Unit) { a.animateTo(1f, spring(.62f, 520f)) }
+        val items = listOfNotNull(
+            m.cut?.let { Triple("Cut", 0, it) }, m.copy?.let { c -> Triple("Copy", 2, { c(); onCopied() }) },
+            m.paste?.let { Triple("Paste", 0, it) }, m.all?.let { Triple("All", 0, it) }
+        )
+        Row(
+            Modifier.graphicsLayer {
+                val v = a.value
+                alpha = (v * 4f).coerceIn(0f, 1f); val sc = .6f + .4f * v; scaleX = sc; scaleY = sc
+            }
+                .clip(RoundedCornerShape(28.dp)).background(pal.dock()).padding(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            items.forEachIndexed { i, (label, tone, fn) ->
+                Box(Modifier.padding(horizontal = 3.dp)) {
+                    SelBtn(true, i == 0, i == items.lastIndex, tone, fn) { T(label, 14f, 700, it, maxLines = 1) }
+                }
+            }
+        }
+    }
+}
+
 /** Satu kolom teks: BasicTextField saat mengedit, Text biasa saat mode baca. */
 @Composable
 fun TF(
@@ -3553,19 +3615,20 @@ private fun TitleEditor(
                 !(appCtx.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager).isPowerSaveMode
         } catch (e: Exception) { true }
     }
-    val typing = ed.titleFocus || ed.focus != null || !calm
+    var tfv by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(ed.title)) }
+    if (tfv.text != ed.title) tfv = androidx.compose.ui.text.input.TextFieldValue(ed.title, TextRange(minOf(tfv.selection.end, ed.title.length)))
+    var tLay by remember { mutableStateOf<TextLayoutResult?>(null) }
+    val tSel = tfv.selection.takeIf { !it.collapsed && ed.titleFocus }?.let { it.min to it.max }
+    val tCols = androidx.compose.foundation.text.selection.LocalTextSelectionColors.current
+    val text = tfv.text
+    // gelombang juga diam selama ada teks judul yang diseleksi (dulu terus menggambar ulang judul, itu yang membuat seleksi lag)
+    val typing = ed.titleFocus || ed.focus != null || !calm || !tfv.selection.collapsed
     LaunchedEffect(typing, anim.introOn, gsx) {
         if (!gsx) return@LaunchedEffect
         val target = if (typing || anim.introOn) 0f else 1f
         androidx.compose.animation.core.animate(anim.loop, target, animationSpec = tween(if (target > 0f) 900 else 350)) { v, _ -> anim.loop = v }
     }
 
-    var tfv by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(ed.title)) }
-    if (tfv.text != ed.title) tfv = androidx.compose.ui.text.input.TextFieldValue(ed.title, TextRange(minOf(tfv.selection.end, ed.title.length)))
-    var tLay by remember { mutableStateOf<TextLayoutResult?>(null) }
-    val tSel = tfv.selection.takeIf { !it.collapsed && ed.titleFocus && !ed.reading }?.let { it.min to it.max }
-    val tCols = androidx.compose.foundation.text.selection.LocalTextSelectionColors.current
-    val text = tfv.text
 
     // gaya tiap kata (ix * 8 + miring). derivedStateOf: membaca jam animasi, tapi hanya memicu recompose bila hasil berundaknya berubah.
     val specs by remember(text, gsx) {
@@ -3596,7 +3659,7 @@ private fun TitleEditor(
                 val ix = sp / 8
                 val sl = sp % 8
                 val dPx = wid(word, GSX.REF_IX, 0) - wid(word, ix, sl)
-                TWord(r.first, r.last + 1, ix, sl, (dPx / word.length / fontPx).coerceIn(-.14f, .14f))
+                TWord(r.first, r.last + 1, ix, sl, (dPx / word.length / fontPx - .0015f).coerceIn(-.3f, .3f))   // -.0015: tidak pernah lebih lebar dari gaya acuan, jadi pemecahan baris judul tidak ikut berubah saat tebalnya beranimasi
             }
         }
     }
@@ -3620,10 +3683,14 @@ private fun TitleEditor(
     val baseFam = if (gsx) (GSX.curve(GSX.REF_IX, 0) ?: ffNow) else ffNow
     val baseW = if (gsx) GSX.curveW(GSX.REF_IX) else if (tBold) 1000 else 400
 
+    val menu = remember { androidx.compose.runtime.mutableStateOf<TitleMenu?>(null) }
+    val toolbar = remember { TitleToolbar(menu) }
     CompositionLocalProvider(
         androidx.compose.foundation.text.selection.LocalTextSelectionColors provides
-            androidx.compose.foundation.text.selection.TextSelectionColors(tCols.handleColor, Color.Transparent)
+            androidx.compose.foundation.text.selection.TextSelectionColors(tCols.handleColor, Color.Transparent),
+        LocalTextToolbar provides toolbar
     ) {
+        menu.value?.let { m -> TitleBubble(m) { vm.show("Copied") } }
         if (ed.title.isEmpty()) {
             Box(Modifier.fillMaxWidth(), tPh) {
                 T("Title", 46f, if (tBold) 1000 else 400, pal.osv, alpha = .5f, ls = -.02f)
@@ -3649,7 +3716,11 @@ private fun TitleEditor(
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
             keyboardActions = KeyboardActions(onNext = { firstText() }),
             modifier = Modifier.fillMaxWidth().selGlow(tSel, pal.p, { it - 1 }, { tLay }, { tfv.selection }).focusProperties { canFocus = !ed.ink.on }.focusRequester(titleFr)
-                .onFocusChanged { ed.titleFocus = it.isFocused; if (it.isFocused) { ed.selImg = null; ed.selObj = null } }
+                .onFocusChanged {
+                    ed.titleFocus = it.isFocused
+                    if (it.isFocused) { ed.selImg = null; ed.selObj = null }
+                    else if (!tfv.selection.collapsed) tfv = tfv.copy(selection = TextRange(tfv.selection.max))
+                }
                 .then(
                     if (ed.reading) Modifier.wordTap(
                         onTap = { if (ed.selOn) ed.clearSel() else { ed.exitReading(); ed.titleReq++ } },
@@ -3686,7 +3757,7 @@ private fun headWords(
             val fam = v.fam ?: return@forEachIndexed
             val word = text.substring(r.first, r.last + 1)
             // -.02em = jarak huruf bawaan heading (headStyle)
-            val ls = ((wid(word, 0, 0) - wid(word, d, sl)) / word.length / fontPx - .02f).coerceIn(-.16f, .1f)
+            val ls = ((wid(word, 0, 0) - wid(word, d, sl)) / word.length / fontPx - .02f - .0015f).coerceIn(-.34f, .22f)
             // +1: teks mode tampil diawali satu huruf tak terlihat (Z)
             addStyle(androidx.compose.ui.text.SpanStyle(fontFamily = fam, fontWeight = FontWeight(v.w), letterSpacing = ls.em), r.first + 1, r.last + 2)
         }
