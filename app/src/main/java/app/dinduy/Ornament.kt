@@ -457,60 +457,48 @@ private val BLOBS = listOf(
 
 private fun DrawScope.drawMorphScene(P: OrnPaint, w: Float, h: Float, t: Float, fx: OrnFx?) {
     val u = w
-    val pr = fx?.press ?: 0f; val hd = fx?.hold ?: 0f; val lf = fx?.lift ?: 0f
+    val lf = fx?.lift ?: 0f
     val pop = fx?.pop ?: 0f
-    val tx = fx?.px ?: 0f; val ty = fx?.py ?: 0f
     val popX = fx?.popX ?: 0f; val popY = fx?.popY ?: 0f
 
     for (i in BLOBS.indices) {
         val b = BLOBS[i]
-        // napas: dua frekuensi tak sebanding, jadi ukuran tidak pernah berulang persis
-        val breathe = .02f * sin(t * b.spd * .8f + i) + .012f * sin(t * b.spd * .47f + i * 2.1f)
-        val r0 = b.s * u * .8f * (1f + .06f * lf + .03f * hd + breathe)
+        // napas: pelan dan tipis supaya tidak menarik mata dari tulisan
+        val breathe = .015f * sin(t * b.spd * .6f + i)
+        val r0 = b.s * u * .8f * (1f + .06f * lf + breathe)
         val per = h + 3f * r0
-        // orbit Lissajous: dua gelombang per sumbu dengan periode berbeda (gerak mengalir, tidak terasa mondar-mandir)
-        val cx0 = b.x * u + sin(t * b.spd * .6f + i) * u * .045f + sin(t * b.spd * .31f + i * 2.3f) * u * .025f
-        val cy0 = b.y * per - 1.5f * r0 + sin(t * b.spd * .45f + i * 1.7f) * u * .04f + sin(t * b.spd * .23f + i * .9f) * u * .02f
+        // melayang pelan: satu gelombang per sumbu, amplitudo kecil
+        val cx0 = b.x * u + sin(t * b.spd * .45f + i) * u * .028f
+        val cy0 = b.y * per - 1.5f * r0 + sin(t * b.spd * .33f + i * 1.7f) * u * .028f
         var cx = cx0; var cy = cy0
         if (cy + r0 * 1.7f < 0f || cy - r0 * 1.7f > h) continue
 
-        // jari: bentuk menyingkir; ditahan: pelan-pelan tertarik; diangkat: merenggang keluar. Semua lewat pegas, jadi membal halus.
-        var ox = 0f; var oy = 0f; var infl = 0f
-        if (pr > .01f) {
-            val dx = cx - tx; val dy = cy - ty
-            val d = hypot(dx, dy) + 1f
-            infl = exp(-(d * d) / (u * u * .22f)) * pr
-            val k = infl * u * .07f * (1f - hd * 1.4f)
-            ox = dx / d * k; oy = dy / d * k
-        }
+        // Tidak ada respons menghindar / tertarik ke jari: latar tetap tenang saat disentuh. Hanya saat teks diangkat bentuk merenggang pelan,
+        // dan ketukan memberi "mekar" lembut yang berayun kembali.
+        var ox = 0f; var oy = 0f
         if (lf > .001f) { ox += (cx - u / 2f) / u * lf * u * .04f; oy += (cy - h / 2f) / u * lf * u * .04f }
-
-        // ketukan: gelombang dari titik ketuk. Yang dekat terdorong keluar, membesar, lalu berayun kembali (pegas), dan "mekar" ke bentuk bunga.
         var pk = 0f
         if (abs(pop) > .003f) {
             val dx = cx - popX; val dy = cy - popY
             val d = hypot(dx, dy) + 1f
             pk = pop * exp(-(d * d) / (u * u * .30f))
-            ox += dx / d * pk * u * .07f; oy += dy / d * pk * u * .07f
+            ox += dx / d * pk * u * .03f; oy += dy / d * pk * u * .03f
         }
 
         // perubahan bentuk: berjalan terus pada kecepatan tetap; sentuhan dan ketukan hanya menambah "bunga" lewat nilai berpegas
-        val ph = t * b.spd * .30f + i * 1.7f
+        val ph = t * b.spd * .18f + i * 1.7f
         val seg = ornMod(ph, 3f)
         val k0 = seg.toInt().coerceIn(0, 2)
         val f = ornSmooth(seg - k0)
         val sa = when (k0) { 0 -> b.a; 1 -> b.b; else -> b.c }
         val sb = when (k0) { 0 -> b.b; 1 -> b.c; else -> b.a }
-        val mc = (hd * .5f + infl * .2f + lf * .25f + abs(pk) * .55f).coerceIn(0f, .7f)
+        val mc = (lf * .25f + abs(pk) * .22f).coerceIn(0f, .5f)
 
-        // squash & stretch: volume terjaga (lebar mengecil sebanyak tinggi bertambah), mengikuti ayunan ketukan
-        val sy = 1f + pk * .14f * (.7f + b.depth * 2f)
-        val sx = 1f / sy
-        val rot = b.rot + t * b.spd * .22f + pk * .10f
+        val rot = b.rot + t * b.spd * .12f
 
         val col = P.pick(b.col)
         val fill = col.copy(alpha = col.alpha * (.72f + .28f * (b.depth / .38f)))
-        blobPath(SP, cx + ox, cy + oy, r0 * (1f + .16f * pk), rot, sx, sy, SH.all[sa], SH.all[sb], f, SH.all[6], mc, .022f, t * b.spd * 1.1f + i)
+        blobPath(SP, cx + ox, cy + oy, r0 * (1f + .06f * pk), rot, 1f, 1f, SH.all[sa], SH.all[sb], f, SH.all[6], mc, .022f, t * b.spd * .7f + i)
         drawPath(SP, fill)
     }
 }
