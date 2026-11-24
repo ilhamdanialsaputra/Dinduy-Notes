@@ -242,7 +242,7 @@ fun OrnDriver(fx: OrnFx, scroll: () -> Float, lifted: () -> Boolean, on: Boolean
         var last = scroll(); fx.scroll = last
         var lastT = 0L
         var sv = 0f
-        snapshotFlow { Triple(scroll(), fx.down, fx.tx) }.collectLatest {
+        snapshotFlow { scroll() to fx.down }.collectLatest {
             var idle = 0
             while (idle < 24) {
                 val n = withFrameNanos { it }
