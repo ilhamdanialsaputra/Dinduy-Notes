@@ -308,10 +308,10 @@ fun NoteCard(
 ) {
     // catatan bersampul: kartu memakai palet dari warna foto sampulnya (terpisah dari palet aplikasi)
     val gp = LocalPal.current
-    val pal = if (d.cp.isEmpty() || d.cv.isEmpty()) {
-        // Expressive: tiap kartu punya rona sendiri (sama persis dengan catatannya saat dibuka, lihat MainActivity)
-        if (gp.ex) remember(d.id, gp.dark, gp.exH, gp.exS) { expressivePal(gp.dark, gp.exH + exOff(d.id), gp.exS) } else gp
-    } else remember(d.cp, gp.dark, gp.mono, gp.ex) { coverPal(gp.dark, d.cp, gp.mono, gp.ex) }
+    // satu-satunya penentu warna catatan: sama persis dengan editor (lihat notePalFor di Ornament.kt)
+    val pal = if (d.th < 0f && !gp.ex && (d.cp.isEmpty() || d.cv.isEmpty())) gp
+        else remember(d.id, d.th, d.cp, d.cv, gp.dark, gp.mono, gp.ex, gp.exH, gp.exS) { notePalFor(gp, d) }
+    val ornP = remember(pal) { ornPaint(pal) }
     val cvm = LocalVM.current
     LaunchedEffect(d.id, d.cv, d.cp) { if (d.cv.isNotEmpty() && d.cp.isEmpty()) cvm?.ensureCoverPal(d.id) }
     val c2 = cols == 2
@@ -360,6 +360,7 @@ fun NoteCard(
                 ambientShadowColor = pal.p.copy(alpha = .30f); spotShadowColor = pal.p.copy(alpha = .40f)
             }
             .fillMaxWidth().clip(shape).background(cardC)
+            .cardOrnament(d.orn, ornP, d.id)
             .background(pal.p.copy(alpha = .10f * selA))
             .border((1f + selA).dp, androidx.compose.ui.graphics.lerp(edge, pal.p, selA), shape)
             .combinedClickable(

@@ -3091,9 +3091,13 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     // Latar dan isi memudar sendiri-sendiri (noteFade), sedangkan sampul TIDAK ikut memudar: ia buram penuh sejak awal morph,
     // persis menimpa sampul kartu. Dulu seluruh isi (termasuk sampul) memudar sambil bayangan kartu juga memudar, dan dua lapisan
     // setengah-transparan yang identik itu bertumpuk menjadi ~75% sehingga sampul tampak pucat sesaat = "kedip".
-    Box(Modifier.fillMaxSize()) {
+    val ornKind = vm.note(ed.noteId)?.orn.orEmpty()
+    val ofx = remember(ed.noteId) { OrnFx() }
+    OrnDriver(ofx, { scroll.value.toFloat() }, { ed.tl != null }, ornKind.isNotEmpty())
+    Box(Modifier.fillMaxSize().ornTouch(ofx)) {
     // latar: alpha digambar langsung (tanpa layer offscreen layar penuh yang dibuat ulang tiap frame morph)
     Box(Modifier.fillMaxSize().drawBehind { drawRect(pal.s, alpha = noteFade(vm)) })
+    OrnamentLayer(vm, ornKind, pal, ofx, ed.noteId)
     if (coverNote != null) { if (frameOn) EditorFrame(vm, coverNote) { scroll.value } else EditorCover(vm, coverNote) { scroll.value } }
     Box(Modifier.fillMaxSize().graphicsLayer { alpha = noteFade(vm) }) {
     Column(Modifier.fillMaxSize()) {

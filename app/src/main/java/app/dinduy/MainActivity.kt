@@ -130,6 +130,7 @@ sealed class Scr {
     class NoteLabels(val id: String) : Scr()   // halaman label untuk satu catatan
     class PdfExport(val id: String) : Scr()    // halaman Ekspor PDF dari menu titik tiga
     class Cover(val id: String) : Scr()        // halaman sampul catatan (pilih & pangkas)
+    class Theme(val id: String) : Scr()        // halaman tema catatan (warna + backdrop)
     object Models : Scr()                      // unduh model transkripsi
 }
 
@@ -674,8 +675,10 @@ fun AppRoot(vm: AppVM, act: Actions) {
     val curNote = (nav.noteId ?: vm.openId)?.let { vm.note(it) }
     val curCp = curNote?.takeIf { it.cv.isNotEmpty() && it.pdf.isEmpty() }?.cp.orEmpty()
     val curId = curNote?.id
-    val noteTarget = remember(curCp, curId, pal.dark, pal.mono, pal.ex, pal.exH, pal.exS, to) {
-        if (curCp.isEmpty()) { if (pal.ex && curId != null) expressivePal(pal.dark, pal.exH + exOff(curId), pal.exS) else to }
+    val curTh = curNote?.th ?: -1f
+    val noteTarget = remember(curCp, curId, curTh, pal.dark, pal.mono, pal.ex, pal.exH, pal.exS, to) {
+        if (curTh >= 0f && curNote?.pdf.isNullOrEmpty()) themedPal(pal, curTh)
+        else if (curCp.isEmpty()) { if (pal.ex && curId != null) expressivePal(pal.dark, pal.exH + exOff(curId), pal.exS) else to }
         else coverPal(pal.dark, curCp, pal.mono, pal.ex)
     }
     val notePal = animPal(noteTarget, curNote?.id)
@@ -717,17 +720,18 @@ fun AppRoot(vm: AppVM, act: Actions) {
             // catatan tetap "terbuka" selama halaman titik tiga / label ada di atasnya
             val modelsOnNote = top is Scr.Models && nav.stack.any { it is Scr.Note }
             val modelsOnSettings = top is Scr.Models && !modelsOnNote
-            val inNote = isNote || top is Scr.NoteMenu || top is Scr.NoteLabels || top is Scr.PdfExport || top is Scr.Cover || modelsOnNote
+            val inNote = isNote || top is Scr.NoteMenu || top is Scr.NoteLabels || top is Scr.PdfExport || top is Scr.Cover || top is Scr.Theme || modelsOnNote
             val reading = vm.ed?.reading == true && isNote
             val imgSel = vm.ed?.selImg != null && isNote
             val selE = vm.ed?.selEdit == true && isNote
             val finding = vm.ed?.findOn == true && isNote
             val menuKept = nav.stack.any { it is Scr.NoteMenu }   // halaman titik tiga tetap 'hidup' selama halaman anak (label/PDF/sampul) menumpuk di atasnya
-            val pageIds = remember { arrayOfNulls<String>(4) }
+            val pageIds = remember { arrayOfNulls<String>(5) }
             (top as? Scr.NoteMenu)?.let { pageIds[0] = it.id }
             (top as? Scr.NoteLabels)?.let { pageIds[1] = it.id }
             (top as? Scr.PdfExport)?.let { pageIds[2] = it.id }
             (top as? Scr.Cover)?.let { pageIds[3] = it.id }
+            (top as? Scr.Theme)?.let { pageIds[4] = it.id }
 
             BackHandler(enabled = nav.stack.size > 1 || drawer.isOpen || vm.addOn || (QuickFx.shown && !QuickFx.noteBound && isHome) || vm.sel.isNotEmpty() || vm.searchOn || (isHome && (vm.filter != null || vm.remFilter)) || reading || imgSel || selE || finding) {
                 when {
@@ -810,7 +814,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
                         LocalContentColor provides notePal.os,
                         LocalTextSelectionColors provides TextSelectionColors(handleColor = notePal.p, backgroundColor = notePal.pc)
                     ) {
-                    NoteLayer(vm, on = inNote, morph = vm.morph, under = top is Scr.NoteMenu || top is Scr.NoteLabels || top is Scr.PdfExport || top is Scr.Cover || modelsOnNote) {
+                    NoteLayer(vm, on = inNote, morph = vm.morph, under = top is Scr.NoteMenu || top is Scr.NoteLabels || top is Scr.PdfExport || top is Scr.Cover || top is Scr.Theme || modelsOnNote) {
                         val id = nav.noteId
                         androidx.compose.runtime.remember { PdfConv.restore(vm) }
                         // selama animasi geser masuk catatan hasil konversi, PDF asalnya masih terlihat di bawahnya
@@ -854,7 +858,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     }
 
                     // halaman titik tiga & label: satu halaman penuh bergaya Pengaturan, di atas editor
-                    ViewLayer(on = menuKept, under = menuKept && (top is Scr.NoteLabels || top is Scr.PdfExport || top is Scr.Cover || top is Scr.Models)) {
+                    ViewLayer(on = menuKept, under = menuKept && (top is Scr.NoteLabels || top is Scr.PdfExport || top is Scr.Cover || top is Scr.Theme || top is Scr.Models)) {
                         pageIds[0]?.let { if (vm.note(it)?.pdf?.isNotEmpty() == true) PdfMenuPage(vm, nav, act, it) else NoteMenuPage(vm, nav, act, it) }
                     }
                     ViewLayer(on = top is Scr.NoteLabels, under = false) {
@@ -865,6 +869,9 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     }
                     ViewLayer(on = top is Scr.Cover, under = false) {
                         pageIds[3]?.let { CoverPage(vm, nav, act, it) }
+                    }
+                    ViewLayer(on = top is Scr.Theme, under = false) {
+                        pageIds[4]?.let { ThemePage(vm, nav, it) }
                     }
                     // halaman transkripsi: digambar PALING ATAS (di atas editor), kalau tidak tersembunyi di balik lapisan catatan
                     ViewLayer(on = top is Scr.Models, under = false) {

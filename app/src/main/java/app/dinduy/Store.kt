@@ -547,6 +547,13 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         upd(id) { it.copy(cm = m) }
     }
 
+    /** Tema catatan (hue + backdrop). Tidak mengubah waktu ubah (u), jadi urutan kartu tidak bergeser. */
+    fun setNoteTheme(id: String, th: Float, orn: String) {
+        val n = note(id) ?: return
+        if (n.th == th && n.orn == orn) return
+        upd(id) { it.copy(th = th, orn = orn) }
+    }
+
     fun removeCover(id: String) {
         val n = note(id) ?: return
         if (n.cv.isEmpty()) return

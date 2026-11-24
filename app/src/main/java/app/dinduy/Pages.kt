@@ -404,6 +404,7 @@ fun NoteMenuPage(vm: AppVM, nav: Nav, act: Actions, id: String) {
             MRow(POS_MID, "img", "Cover", if (d?.cv.isNullOrEmpty()) "Add an image at the top of the note" else "Change or crop the cover image", chevron = true) {
                 if (d?.cv.isNullOrEmpty()) act.pickCover(id) else nav.push(Scr.Cover(id))
             }
+            MRow(POS_MID, "pal", "Theme", themeSummary(d), chevron = true) { nav.push(Scr.Theme(id)) }
             MRow(POS_MID, "label", "Labels", d?.lb?.joinToString(", ")?.ifEmpty { null } ?: "Set labels for this note", chevron = true) {
                 nav.push(Scr.NoteLabels(id))
             }
