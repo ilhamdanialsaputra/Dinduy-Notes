@@ -29,6 +29,7 @@ import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -81,6 +82,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -1558,7 +1560,7 @@ private fun PdfMorphLoader(fill: Color, dim: androidx.compose.ui.unit.Dp) {
             if (k == 0) path.moveTo(x, y) else path.lineTo(x, y)
         }
         path.close()
-        androidx.compose.ui.graphics.drawscope.rotate(rot, Offset(cx, cy)) { drawPath(path, fill) }
+        rotate(rot, Offset(cx, cy)) { drawPath(path, fill) }
         // "halaman" kecil di tengah (tidak ikut berputar) = petunjuk bahwa ini soal dokumen
         val pw = r0 * .62f
         val ph = r0 * .8f
@@ -1568,13 +1570,14 @@ private fun PdfMorphLoader(fill: Color, dim: androidx.compose.ui.unit.Dp) {
             size = androidx.compose.ui.geometry.Size(pw, ph),
             cornerRadius = androidx.compose.ui.geometry.CornerRadius(pw * .16f)
         )
-        for (l in 0..2) {
-            val ly = cy - ph / 2f + ph * (.26f + .22f * l)
+        for (row in 0..2) {
+            val lineY: Float = cy - ph / 2f + ph * (0.26f + 0.22f * row.toFloat())
+            val lineW: Float = if (row == 2) pw * 0.36f else pw * 0.64f
             drawRoundRect(
                 color = fill.copy(alpha = .75f),
-                topLeft = Offset(cx - pw * .32f, ly),
-                size = androidx.compose.ui.geometry.Size(if (l == 2) pw * .36f else pw * .64f, ph * .075f),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(ph * .04f)
+                topLeft = androidx.compose.ui.geometry.Offset(cx - pw * 0.32f, lineY),
+                size = androidx.compose.ui.geometry.Size(lineW, ph * 0.075f),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(ph * 0.04f)
             )
         }
     }
