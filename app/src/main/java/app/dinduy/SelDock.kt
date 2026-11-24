@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.PathParser
@@ -77,7 +78,7 @@ private fun ShareIc(tint: Color, sz: Dp = 24.dp) {
     val path = remember { PathParser().parsePathString(ShareD).toPath() }
     androidx.compose.foundation.Canvas(Modifier.size(sz)) {
         val s = size.width / 24f
-        androidx.compose.ui.graphics.drawscope.scale(s, s, pivot = androidx.compose.ui.geometry.Offset.Zero) { drawPath(path, tint) }
+        scale(s, s, pivot = androidx.compose.ui.geometry.Offset.Zero) { drawPath(path, tint) }
     }
 }
 
