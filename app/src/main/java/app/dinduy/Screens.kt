@@ -1994,12 +1994,13 @@ fun HomeCard(
         // animasi masuk hanya untuk kartu di layar pertama (urutan < 8); sisanya langsung tampil, supaya tidak puluhan animasi
         // berjalan serentak saat app baru dibuka (2 kolom merender semua kartu sekaligus)
         // vm.bootDone: selama layar muat awal tampil, kartu langsung jadi (tidak ada animasi masuk satu-satu). Animasi hanya untuk catatan baru sesudahnya.
-        val first = remember(d.id) { val f = !vm.seen.contains(d.id); vm.seen.add(d.id); f && i < 8 && vm.bootDone }
+        val first = remember(d.id) { val f = !vm.seen.contains(d.id); vm.seen.add(d.id); f && (i < 8 || d.id in vm.fastIn) && vm.bootDone }
         val prog = remember(d.id) { Animatable(if (first) 0f else 1f) }
         LaunchedEffect(d.id) {
             if (first) {
-                delay(i * 35L)
-                prog.animateTo(1f, spring(.8f, 500f))
+                val fast = vm.fastIn.remove(d.id)
+                if (!fast) delay(i * 35L)
+                prog.animateTo(1f, if (fast) spring(.7f, 520f) else spring(.8f, 500f))
             }
         }
         SwipeCard(
