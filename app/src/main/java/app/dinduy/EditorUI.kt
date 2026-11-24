@@ -3121,11 +3121,9 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     val ornKind = vm.note(ed.noteId)?.orn.orEmpty()
     val ofx = remember(ed.noteId) { OrnFx() }
     val oclk = remember(ed.noteId) { OrnClock(OrnPose.get(ed.noteId)).also { it.cur = ornKind } }
-    // mengetik / keyboard terbuka / judul fokus -> ornamen meredup dan melambat supaya tulisan tetap nyaman dibaca
     val ornInten = vm.note(ed.noteId)?.ti ?: 1f
-    // parallax per catatan: dibaca lewat State supaya OrnDriver (yang hidup lintas recomposition) selalu melihat nilai terbaru
-    val ornPar = androidx.compose.runtime.rememberUpdatedState(vm.note(ed.noteId)?.pl ?: true)
-    OrnDriver(ofx, { scroll.value.toFloat() }, { ed.tl != null }, ornKind.isNotEmpty(), calm = { imeOpen || ed.titleFocus || ed.focus != null }, par = { ornPar.value })
+    // mengetik / keyboard terbuka / judul fokus -> ornamen meredup dan melambat supaya tulisan tetap nyaman dibaca
+    OrnDriver(ofx, { ed.tl != null }, ornKind.isNotEmpty(), calm = { imeOpen || ed.titleFocus || ed.focus != null })
     Box(Modifier.fillMaxSize().ornTouch(ofx)) {
     // latar: alpha digambar langsung (tanpa layer offscreen layar penuh yang dibuat ulang tiap frame morph)
     Box(Modifier.fillMaxSize().drawBehind { drawRect(pal.s, alpha = noteFade(vm)) })

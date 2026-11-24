@@ -10,8 +10,8 @@ package app.dinduy
  *    adalah gambar yang sama persis, hanya skalanya berbeda -> buka/tutup kartu mulus tanpa lompatan.
  *  - Legibilitas: kontras ornamen dipagari (ornCap), ornamen meredup + melambat saat mengetik (OrnFx.calm), tepi bentuk berbulu,
  *    dan tepi bentuk berbulu.
- *  - Editor: parallax (tiap lapisan punya kedalaman), meregang dan memantul mengikuti kecepatan gulir, menghindari
- *    jari saat disentuh, berkumpul ke jari saat ditahan, dan "mekar" saat teks diangkat (ed.tl).
+ *  - Editor: tanpa parallax. Gerak murni waktu (orbit, napas, angin) + respons pegas: menghindari jari saat disentuh, berkumpul ke jari
+ *    saat ditahan, bergelombang dari titik ketuk, dan "mekar" saat teks diangkat (ed.tl).
  *  - Kartu: pose diam (tanpa animasi), dengan pose terakhir dari editor supaya kartu tidak "loncat" setelah ditutup.
  */
 
@@ -112,7 +112,6 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.sin
-import kotlin.math.tanh
 
 // =====================================================================================================================
 // Katalog backdrop
@@ -141,8 +140,7 @@ fun themeSummary(d: Note?): String {
     if (d == null) return ""
     val o = ORN_LIST.firstOrNull { it.id == d.orn }?.name?.takeIf { d.orn.isNotEmpty() }
     val c = if (d.th >= 0f) hueName(d.th) else null
-    val np = if (o != null && !d.pl) "No parallax" else null
-    return if (o == null && c == null) "Color and backdrop for this note" else listOfNotNull(c, o, np).joinToString(" · ")
+    return if (o == null && c == null) "Color and backdrop for this note" else listOfNotNull(c, o).joinToString(" · ")
 }
 
 // =====================================================================================================================
@@ -220,17 +218,18 @@ const val ORN_INT_MAX = 3f
 
 @Stable
 class OrnFx {
-    var scroll by mutableFloatStateOf(0f)      // px gulir
-    var vel by mutableFloatStateOf(0f)         // px/detik (dihaluskan)
-    var stretch by mutableFloatStateOf(0f)     // -.85..85, pegas hampir kritis: melar saat gulir cepat, kembali tenang nyaris tanpa memantul
     var tx by mutableFloatStateOf(0f)          // posisi jari mentah
     var ty by mutableFloatStateOf(0f)
-    var px by mutableFloatStateOf(0f)          // posisi jari yang dihaluskan: inilah yang dipakai gambar (tidak ada lompatan saat menyentuh)
+    var px by mutableFloatStateOf(0f)          // posisi jari yang mengikuti dengan pegas (sedikit melampaui lalu mengendap)
     var py by mutableFloatStateOf(0f)
-    var press by mutableFloatStateOf(0f)       // 0..1 jari menempel
+    var press by mutableFloatStateOf(0f)       // 0..~1.15 jari menempel: pegas kurang teredam, jadi membal sedikit saat menyentuh / melepas
     var hold by mutableFloatStateOf(0f)        // 0..1 jari ditahan diam
     var lift by mutableFloatStateOf(0f)        // 0..1 teks diangkat
     var calm by mutableFloatStateOf(0f)        // 0..1 sedang mengetik / membaca fokus: ornamen meredup dan melambat
+    var pop by mutableFloatStateOf(0f)         // ketukan: mulai 1 lalu berayun mengendap ke 0 (pegas kurang teredam); asal di (popX, popY)
+    var popX = 0f
+    var popY = 0f
+    var tapN by mutableIntStateOf(0)           // bertambah tiap ketukan
     var down by mutableStateOf(false)
     var downAt = 0L
     var x0 = 0f
@@ -238,14 +237,18 @@ class OrnFx {
     var moved = 0f
 }
 
-/** Membaca sentuhan di fase Initial tanpa mengonsumsi apa pun, jadi gestur editor tidak terganggu. */
+/** Membaca sentuhan di fase Initial tanpa mengonsumsi apa pun, jadi gestur editor tidak terganggu. Ketukan singkat (tanpa geser) memicu [OrnFx.pop]. */
 fun Modifier.ornTouch(fx: OrnFx): Modifier = pointerInput(fx) {
     awaitPointerEventScope {
         while (true) {
             val e = awaitPointerEvent(PointerEventPass.Initial)
             val c = e.changes.firstOrNull { it.pressed }
             if (c == null) {
-                if (fx.down) fx.down = false
+                if (fx.down) {
+                    fx.down = false
+                    val up = e.changes.firstOrNull()?.uptimeMillis ?: fx.downAt
+                    if (up - fx.downAt < 300L && fx.moved < 24f) { fx.popX = fx.tx; fx.popY = fx.ty; fx.tapN++ }
+                }
             } else {
                 if (!fx.down) { fx.downAt = c.uptimeMillis; fx.x0 = c.position.x; fx.y0 = c.position.y; fx.moved = 0f; fx.down = true }
                 fx.tx = c.position.x; fx.ty = c.position.y
@@ -256,57 +259,48 @@ fun Modifier.ornTouch(fx: OrnFx): Modifier = pointerInput(fx) {
 }
 
 /**
- * Penggerak sinyal. Hanya berputar saat ada yang bergerak (gulir / jari / pegas belum tenang), lalu tidur lagi.
- * [scroll] dibaca tiap frame; [lifted] true selama teks sedang diangkat; [calm] true selama pengguna mengetik / keyboard terbuka.
+ * Penggerak sinyal. Semuanya pegas fisik (bukan interpolasi eksponensial): jari, tekan, dan tahan sedikit melampaui target lalu
+ * mengendap, seperti gerak spasial Material 3 Expressive. Hanya berputar saat ada yang bergerak, lalu tidur lagi.
+ * [lifted] true selama teks sedang diangkat; [calm] true selama pengguna mengetik / keyboard terbuka.
  */
 @Composable
-fun OrnDriver(
-    fx: OrnFx, scroll: () -> Float, lifted: () -> Boolean, on: Boolean, calm: () -> Boolean = { false },
-    /** false = parallax mati: gulir tidak lagi menggeser / meregangkan ornamen. Sentuhan, tahan, angkat, redam, dan waktu tetap jalan. */
-    par: () -> Boolean = { true }
-) {
+fun OrnDriver(fx: OrnFx, lifted: () -> Boolean, on: Boolean, calm: () -> Boolean = { false }) {
     if (!on) return
     LaunchedEffect(fx) {
-        var last = scroll()
-        // pm = seberapa besar gulir dipakai (1 = parallax penuh, 0 = mati). Berpindah dengan halus, jadi menyalakan / mematikan
-        // parallax tidak membuat ornamen melompat. Saat parallax menyala (pm = 1) perilakunya persis seperti sebelumnya.
-        var pm = if (par()) 1f else 0f
-        fx.scroll = last * pm
         var lastT = 0L
-        var sv = 0f
-        snapshotFlow { Triple(scroll(), fx.down, par()) }.collectLatest {
+        var pv = 0f; var hv = 0f; var fvx = 0f; var fvy = 0f
+        snapshotFlow { fx.down }.collectLatest {
             var idle = 0
             while (idle < 24) {
                 val n = withFrameNanos { it }
                 val dt = if (lastT == 0L) .016f else ((n - lastT) / 1e9f).coerceIn(.004f, .05f)
                 lastT = n
-                val pTarget = if (par()) 1f else 0f
-                pm += (pTarget - pm) * (1f - exp(-dt * 9f))
-                if (abs(pTarget - pm) < .002f) pm = pTarget
-                val raw = scroll()
-                val s = raw * pm; fx.scroll = s
-                // lompatan gulir sekali-frame (koreksi tinggi blok / gulir kursor, bukan jari) tidak boleh dianggap fling: kalau tidak, stretch
-                // menempel di batas dan ekornya (peluruhan vel) membuat ornamen terasa "macet" hampir 1 detik
-                val v = (((raw - last) / dt).coerceIn(-9000f, 9000f)) * pm; last = raw
-                fx.vel += (v - fx.vel) * (1f - exp(-dt * 14f))
-                // pegas hampir kritis (zeta ~ .78): melar mengikuti gulir lalu kembali halus; target dilunakkan tanh supaya tidak pernah "mentok"
-                val tgt = tanh(fx.vel / 3600f) * .85f
-                sv += (120f * (tgt - fx.stretch) - 17f * sv) * dt
-                fx.stretch += sv * dt
-                // jari: posisi dihaluskan, dan saat baru menyentuh langsung mulai dari titik sentuh (pengaruhnya sendiri naik lewat press)
-                if (fx.down && fx.press < .02f) { fx.px = fx.tx; fx.py = fx.ty }
-                val kf = 1f - exp(-dt * 12f)
-                fx.px += (fx.tx - fx.px) * kf
-                fx.py += (fx.ty - fx.py) * kf
-                fx.press += ((if (fx.down) 1f else 0f) - fx.press) * (1f - exp(-dt * 9f))
+                // jari baru menyentuh: mulai dari titik sentuh (pengaruhnya sendiri naik lewat press), sesudah itu mengikuti dengan pegas (zeta ~ .62)
+                if (fx.down && fx.press < .02f && abs(pv) < .05f) { fx.px = fx.tx; fx.py = fx.ty; fvx = 0f; fvy = 0f }
+                fvx += (230f * (fx.tx - fx.px) - 19f * fvx) * dt; fx.px += fvx * dt
+                fvy += (230f * (fx.ty - fx.py) - 19f * fvy) * dt; fx.py += fvy * dt
+                // tekan: pegas zeta ~ .51 (membal ~15%): menyentuh terasa "mengisi", melepas terasa "melenting"
+                pv += (280f * ((if (fx.down) 1f else 0f) - fx.press) - 17f * pv) * dt
+                fx.press += pv * dt
                 val heldMs = if (fx.down) SystemClock.uptimeMillis() - fx.downAt else 0L
-                val still = fx.moved < 24f && abs(fx.vel) < 80f
-                val ht = if (fx.down && still && heldMs > 280L) 1f else 0f
-                fx.hold += (ht - fx.hold) * (1f - exp(-dt * 5f))
-                val quiet = abs(fx.vel) < 6f && abs(fx.stretch) < .004f && abs(sv) < .02f && !fx.down && fx.press < .005f && fx.hold < .005f && pm == pTarget
+                val ht = if (fx.down && fx.moved < 24f && heldMs > 280L) 1f else 0f
+                hv += (95f * (ht - fx.hold) - 12.5f * hv) * dt
+                fx.hold += hv * dt
+                val quiet = !fx.down && abs(fx.press) < .004f && abs(pv) < .02f && abs(fx.hold) < .004f && abs(hv) < .02f &&
+                    abs(fvx) < 1f && abs(fvy) < 1f
                 idle = if (quiet) idle + 1 else 0
             }
-            fx.vel = 0f; fx.stretch = 0f; sv = 0f; fx.press = 0f; fx.hold = 0f; lastT = 0L
+            fx.press = 0f; fx.hold = 0f; pv = 0f; hv = 0f; fvx = 0f; fvy = 0f; lastT = 0L
+        }
+    }
+    // ketukan: pegas kurang teredam (zeta ~ .32, ~3 ayunan) dari 1 menuju 0; makin tenang saat mengetik supaya tidak mengganggu
+    LaunchedEffect(fx) {
+        val a = Animatable(0f)
+        snapshotFlow { fx.tapN }.collectLatest { n ->
+            if (n == 0) return@collectLatest
+            a.snapTo(0f)
+            a.animateTo(1f, spring(.32f, 260f)) { fx.pop = (1f - value) * (1f - .6f * fx.calm) }
+            fx.pop = 0f
         }
     }
     LaunchedEffect(fx) {
@@ -350,7 +344,6 @@ object OrnPose {
 // =====================================================================================================================
 
 private fun ornMod(x: Float, m: Float): Float = ((x % m) + m) % m
-private fun ornSoft(x: Float, m: Float): Float = m * tanh(x / m)
 private fun ornHash(i: Int, s: Int): Float {
     var x = i * 374761393 + s * 668265263
     x = (x xor (x ushr 13)) * 1274126177.toInt()
@@ -462,22 +455,26 @@ private val BLOBS = listOf(
     Blob(.95f, .95f, .22f, 5, 2, 1, 1, .34f, .34f, .2f),
 ).sortedBy { it.depth }      // yang jauh digambar lebih dulu
 
-private fun DrawScope.drawMorphScene(P: OrnPaint, w: Float, h: Float, t: Float, sc: Float, fx: OrnFx?) {
+private fun DrawScope.drawMorphScene(P: OrnPaint, w: Float, h: Float, t: Float, fx: OrnFx?) {
     val u = w
-    val st = fx?.stretch ?: 0f; val pr = fx?.press ?: 0f; val hd = fx?.hold ?: 0f; val lf = fx?.lift ?: 0f
+    val pr = fx?.press ?: 0f; val hd = fx?.hold ?: 0f; val lf = fx?.lift ?: 0f
+    val pop = fx?.pop ?: 0f
     val tx = fx?.px ?: 0f; val ty = fx?.py ?: 0f
+    val popX = fx?.popX ?: 0f; val popY = fx?.popY ?: 0f
 
     for (i in BLOBS.indices) {
         val b = BLOBS[i]
-        val r0 = b.s * u * .8f * (1f + .06f * lf + .03f * hd + .02f * sin(t * b.spd * .8f + i))
-        // keliling lebih panjang dari layar: saat membungkus, bentuk sudah sepenuhnya di luar layar (tidak ada yang "muncul tiba-tiba")
+        // napas: dua frekuensi tak sebanding, jadi ukuran tidak pernah berulang persis
+        val breathe = .02f * sin(t * b.spd * .8f + i) + .012f * sin(t * b.spd * .47f + i * 2.1f)
+        val r0 = b.s * u * .8f * (1f + .06f * lf + .03f * hd + breathe)
         val per = h + 3f * r0
-        val cy0 = ornMod(b.y * per - sc * b.depth, per) - 1.5f * r0
-        val cx = b.x * u + sin(t * b.spd * .6f + i) * u * .03f
-        val cy = cy0 + sin(t * b.spd * .45f + i * 1.7f) * u * .03f + st * u * .06f * b.depth
+        // orbit Lissajous: dua gelombang per sumbu dengan periode berbeda (gerak mengalir, tidak terasa mondar-mandir)
+        val cx0 = b.x * u + sin(t * b.spd * .6f + i) * u * .045f + sin(t * b.spd * .31f + i * 2.3f) * u * .025f
+        val cy0 = b.y * per - 1.5f * r0 + sin(t * b.spd * .45f + i * 1.7f) * u * .04f + sin(t * b.spd * .23f + i * .9f) * u * .02f
+        var cx = cx0; var cy = cy0
         if (cy + r0 * 1.7f < 0f || cy - r0 * 1.7f > h) continue
 
-        // jari: bentuk menyingkir sedikit; ditahan: pelan-pelan tertarik; diangkat: merenggang keluar. Semua amplitudo kecil dan sudah dihaluskan.
+        // jari: bentuk menyingkir; ditahan: pelan-pelan tertarik; diangkat: merenggang keluar. Semua lewat pegas, jadi membal halus.
         var ox = 0f; var oy = 0f; var infl = 0f
         if (pr > .01f) {
             val dx = cx - tx; val dy = cy - ty
@@ -488,26 +485,32 @@ private fun DrawScope.drawMorphScene(P: OrnPaint, w: Float, h: Float, t: Float, 
         }
         if (lf > .001f) { ox += (cx - u / 2f) / u * lf * u * .04f; oy += (cy - h / 2f) / u * lf * u * .04f }
 
-        // perubahan bentuk: berjalan terus pada kecepatan tetap (tanpa dipengaruhi sentuhan, jadi tidak pernah melonjak);
-        // sentuhan hanya menambahkan sedikit "bunga" lewat nilai yang sudah dihaluskan
+        // ketukan: gelombang dari titik ketuk. Yang dekat terdorong keluar, membesar, lalu berayun kembali (pegas), dan "mekar" ke bentuk bunga.
+        var pk = 0f
+        if (abs(pop) > .003f) {
+            val dx = cx - popX; val dy = cy - popY
+            val d = hypot(dx, dy) + 1f
+            pk = pop * exp(-(d * d) / (u * u * .30f))
+            ox += dx / d * pk * u * .07f; oy += dy / d * pk * u * .07f
+        }
+
+        // perubahan bentuk: berjalan terus pada kecepatan tetap; sentuhan dan ketukan hanya menambah "bunga" lewat nilai berpegas
         val ph = t * b.spd * .30f + i * 1.7f
         val seg = ornMod(ph, 3f)
         val k0 = seg.toInt().coerceIn(0, 2)
         val f = ornSmooth(seg - k0)
         val sa = when (k0) { 0 -> b.a; 1 -> b.b; else -> b.c }
         val sb = when (k0) { 0 -> b.b; 1 -> b.c; else -> b.a }
-        val mc = (hd * .5f + infl * .2f + lf * .25f).coerceIn(0f, .6f)
+        val mc = (hd * .5f + infl * .2f + lf * .25f + abs(pk) * .55f).coerceIn(0f, .7f)
 
-        // melar: volume terjaga (lebar mengecil sebanyak tinggi bertambah)
-        val k2 = .5f + b.depth * 2f
-        val sy = 1f + abs(st) * .10f * k2
+        // squash & stretch: volume terjaga (lebar mengecil sebanyak tinggi bertambah), mengikuti ayunan ketukan
+        val sy = 1f + pk * .14f * (.7f + b.depth * 2f)
         val sx = 1f / sy
-        val rot = b.rot + t * b.spd * .22f + sc * .0004f * (1f + b.depth * 4f) + st * .08f
+        val rot = b.rot + t * b.spd * .22f + pk * .10f
 
         val col = P.pick(b.col)
         val fill = col.copy(alpha = col.alpha * (.72f + .28f * (b.depth / .38f)))
-        blobPath(SP, cx + ox, cy + oy, r0, rot, sx, sy, SH.all[sa], SH.all[sb], f, SH.all[6], mc, .022f, t * b.spd * 1.1f + i)
-        // polos: satu fill saja, tanpa halo, tanpa cahaya, tanpa inti terang
+        blobPath(SP, cx + ox, cy + oy, r0 * (1f + .16f * pk), rot, sx, sy, SH.all[sa], SH.all[sb], f, SH.all[6], mc, .022f, t * b.spd * 1.1f + i)
         drawPath(SP, fill)
     }
 }
@@ -572,12 +575,17 @@ private fun DrawScope.branch(
     drawPath(SP, P.pick(n + seed).let { it.copy(alpha = it.alpha * fade) })
 }
 
-private fun DrawScope.drawCanopyScene(P: OrnPaint, w: Float, h: Float, t: Float, sc: Float, fx: OrnFx?) {
+private fun DrawScope.drawCanopyScene(P: OrnPaint, w: Float, h: Float, t: Float, fx: OrnFx?) {
     val u = w
-    val st = fx?.stretch ?: 0f; val pr = fx?.press ?: 0f; val hd = fx?.hold ?: 0f; val lf = fx?.lift ?: 0f
+    val pr = fx?.press ?: 0f; val hd = fx?.hold ?: 0f; val lf = fx?.lift ?: 0f
+    val pop = fx?.pop ?: 0f; val popX = fx?.popX ?: 0f; val popY = fx?.popY ?: 0f
     val tx = fx?.px ?: 0f
     val calm = fx?.calm ?: 0f
-    val wind = st * .14f
+    // angin bersama: dua gelombang lambat yang tak sebanding, jadi embusan tidak pernah berulang persis dan semua ranting bergerak serempak
+    val wind = (.040f * sin(t * .21f) + .026f * sin(t * .53f + 1.3f)) * (1f - .5f * calm)
+    // ketukan: ranting didorong menjauhi titik ketuk lalu berayun kembali, daun ikut berkibar
+    fun kick(ox: Float): Float = if (abs(pop) > .003f) ((ox - popX) / u).coerceIn(-1.2f, 1.2f) * pop * .34f else 0f
+    val flAdd = abs(pop) * 1.6f
     fun gust(ox: Float): Float = if (pr > .01f) ((ox - tx) / u).coerceIn(-1.2f, 1.2f) * pr * .18f else 0f
     val leafK = 1f + .05f * hd
 
@@ -594,44 +602,42 @@ private fun DrawScope.drawCanopyScene(P: OrnPaint, w: Float, h: Float, t: Float,
         )
     }
 
-    // daun jatuh: di belakang ranting; jatuh pada kecepatan tetap (gulir hanya menggeser lewat parallax), berputar 3D (lebar daun berdenyut)
+    // daun jatuh: di belakang ranting; jatuh pada kecepatan tetap, berputar 3D (lebar daun berdenyut)
     for (i in 0 until 6) {
         val sz = u * (.035f + .02f * ornHash(i, 1)) * leafK
-        val dep = .15f + .3f * ornHash(i, 2)
         val per = h + sz * 6f
-        val y0 = ornHash(i, 3) * per + t * u * (.010f + .008f * ornHash(i, 4)) - sc * dep
+        val y0 = ornHash(i, 3) * per + t * u * (.010f + .008f * ornHash(i, 4))
         val y = ornMod(y0, per) - sz * 3f
-        val x = ornHash(i, 5) * u + sin(t * .5f + i * 2f) * u * .06f + st * u * .03f + lf * u * .02f * (ornHash(i, 7) - .5f)
+        val x = ornHash(i, 5) * u + sin(t * .5f + i * 2f) * u * .06f + wind * u * .6f + lf * u * .02f * (ornHash(i, 7) - .5f)
         val flip = abs(cos(t * (.45f + ornHash(i, 6) * .5f) + i))
-        leafPath(SP, x, y, t * (.35f + ornHash(i, 6) * .4f) + i + st * .2f, sz * 2f, sz * .9f * (.28f + .72f * flip))
+        leafPath(SP, x, y, t * (.35f + ornHash(i, 6) * .4f) + i + wind * 3f, sz * 2f, sz * .9f * (.28f + .72f * flip))
         drawPath(SP, P.pick(i + 1))
     }
 
     val sw = { ph: Float, amp: Float -> sin(t * .45f + ph) * amp + wind + lf * .12f }
     // lapis jauh: lebih kecil dan pudar, memberi kedalaman
     val f1 = u * .46f
-    branch(P, f1, -u * .02f - ornSoft(sc * .03f, u * .10f), 1.95f, u * .34f, 6, .05f, sw(2.4f, .08f) + gust(f1), t, 2.4f, u * .07f * leafK, lf * 1.5f, 4, .55f, calm)
+    branch(P, f1, -u * .02f, 1.95f, u * .34f, 6, .05f, sw(2.4f, .08f) + gust(f1) + kick(f1), t, 2.4f, u * .07f * leafK, lf * 1.5f + flAdd, 4, .55f, calm)
     val f2 = u * .64f
-    branch(P, f2, h + u * .02f + ornSoft(sc * .03f, u * .06f), -1.35f, u * .30f, 5, -.05f, sw(5.2f, .09f) + gust(f2), t, 5.2f, u * .065f * leafK, lf * 1.5f, 5, .5f, calm)
+    branch(P, f2, h + u * .02f, -1.35f, u * .30f, 5, -.05f, sw(5.2f, .09f) + gust(f2) + kick(f2), t, 5.2f, u * .065f * leafK, lf * 1.5f + flAdd, 5, .5f, calm)
     // kanan-atas (besar)
     val o1 = u * 1.03f
-    branch(P, o1, -u * .03f - ornSoft(sc * .06f, u * .18f), 2.30f, u * .85f, 9, -.07f, sw(0f, .10f) + gust(o1), t, 0f, u * .17f * leafK, lf * 2f, 0, 1f, calm)
+    branch(P, o1, -u * .03f, 2.30f, u * .85f, 9, -.07f, sw(0f, .10f) + gust(o1) + kick(o1), t, 0f, u * .17f * leafK, lf * 2f + flAdd, 0, 1f, calm)
     // kiri-atas
     val o2 = -u * .03f
-    branch(P, o2, -u * .02f - ornSoft(sc * .10f, u * .14f), .85f, u * .5f, 7, .07f, sw(1.7f, .12f) + gust(o2), t, 1.7f, u * .12f * leafK, lf * 2f, 1, 1f, calm)
+    branch(P, o2, -u * .02f, .85f, u * .5f, 7, .07f, sw(1.7f, .12f) + gust(o2) + kick(o2), t, 1.7f, u * .12f * leafK, lf * 2f + flAdd, 1, 1f, calm)
     // kiri-bawah (tumbuh ke atas)
     val o3 = -u * .04f
-    branch(P, o3, h + u * .03f + ornSoft(sc * .05f, u * .10f), -1.15f, u * .65f, 8, -.05f, sw(3.1f, .09f) + gust(o3), t, 3.1f, u * .14f * leafK, lf * 2f, 2, 1f, calm)
+    branch(P, o3, h + u * .03f, -1.15f, u * .65f, 8, -.05f, sw(3.1f, .09f) + gust(o3) + kick(o3), t, 3.1f, u * .14f * leafK, lf * 2f + flAdd, 2, 1f, calm)
     // kanan-bawah
     val o4 = u * 1.04f
-    branch(P, o4, h + u * .02f + ornSoft(sc * .08f, u * .08f), -2.15f, u * .42f, 6, .06f, sw(4.6f, .11f) + gust(o4), t, 4.6f, u * .10f * leafK, lf * 2f, 3, 1f, calm)
+    branch(P, o4, h + u * .02f, -2.15f, u * .42f, 6, .06f, sw(4.6f, .11f) + gust(o4) + kick(o4), t, 4.6f, u * .10f * leafK, lf * 2f + flAdd, 3, 1f, calm)
 
     // kunang-kunang: titik cahaya kecil yang naik pelan dan berkedip lembut
     for (i in 0 until 7) {
-        val dep = .1f + .25f * ornHash(i, 7)
         val rr = u * (.006f + .006f * ornHash(i, 8))
         val per = h + u * .2f
-        val y = ornMod(ornHash(i, 9) * per - t * u * (.008f + .006f * ornHash(i, 10)) - sc * dep, per) - u * .1f
+        val y = ornMod(ornHash(i, 9) * per - t * u * (.008f + .006f * ornHash(i, 10)), per) - u * .1f
         val x = ornHash(i, 12) * u + sin(t * .3f + i * 1.9f) * u * .05f
         val tw = .5f + .5f * sin(t * (.4f + ornHash(i, 13) * .6f) + i * 3f)
         val col = P.pick(i + 2)
@@ -641,22 +647,21 @@ private fun DrawScope.drawCanopyScene(P: OrnPaint, w: Float, h: Float, t: Float,
 }
 
 // =====================================================================================================================
-// Skyline: matahari berhalo, awan, burung, tiga lapis gedung berkabut dengan parallax
+// Skyline: matahari berhalo, awan, burung, tiga lapis gedung berkabut 
 // =====================================================================================================================
 
-private val DEP = floatArrayOf(.10f, .20f, .34f)
-
-private fun DrawScope.drawSkylineScene(P: OrnPaint, w: Float, h: Float, t: Float, sc: Float, fx: OrnFx?) {
+private fun DrawScope.drawSkylineScene(P: OrnPaint, w: Float, h: Float, t: Float, fx: OrnFx?) {
     val u = w
-    val st = fx?.stretch ?: 0f; val pr = fx?.press ?: 0f; val hd = fx?.hold ?: 0f; val lf = fx?.lift ?: 0f
+    val pr = fx?.press ?: 0f; val hd = fx?.hold ?: 0f; val lf = fx?.lift ?: 0f
+    val pop = fx?.pop ?: 0f; val popX = fx?.popX ?: 0f; val popY = fx?.popY ?: 0f
     val tx = fx?.px ?: 0f
     val calm = fx?.calm ?: 0f
 
     val dk = P.dark
     val litT = if (dk) .42f else .6f
-    val sunR = u * .11f * (1f + .05f * hd + .08f * lf)
+    val sunR = u * .11f * (1f + .05f * hd + .08f * lf + .10f * pop)
     val sx = u * (.76f + .025f * sin(t * .05f))
-    val sy = u * .19f - ornSoft(sc * .07f, u * .2f) + sin(t * .35f) * u * .006f
+    val sy = u * .19f + sin(t * .35f) * u * .006f
     if (dk) {
         // malam: bulan sabit berhalo tipis (menggantikan matahari)
         val mr = sunR * 1.2f
@@ -664,7 +669,7 @@ private fun DrawScope.drawSkylineScene(P: OrnPaint, w: Float, h: Float, t: Float
         SP2.reset(); SP2.addOval(Rect(Offset(sx + mr * .45f, sy - mr * .2f), mr * .86f))
         clipPath(SP2, ClipOp.Difference) { drawCircle(P.ink, mr, Offset(sx, sy)) }
     } else {
-        val rot = t * .12f + sc * .0008f + lf * .6f + st * .15f
+        val rot = t * .12f + lf * .6f + pop * .5f
         for (k in 0 until 12) {
             val a = rot + k * (2f * PI.toFloat() / 12f)
             val lng = if (k % 2 == 0) 1f else .62f
@@ -680,8 +685,8 @@ private fun DrawScope.drawSkylineScene(P: OrnPaint, w: Float, h: Float, t: Float
         val cw = u * (.28f + .06f * i); val ch = cw * .24f
         val dep = .10f + .06f * i
         val span = u * 1.8f
-        val x = ornMod(ornHash(i, 11) * span + t * u * (.005f + .0025f * i) - sc * dep * .25f + st * u * .03f * dep, span) - cw
-        val y = u * (.10f + .17f * i) - ornSoft(sc * dep * .3f, u * .1f) + sin(t * .2f + i * 2f) * u * .004f
+        val x = ornMod(ornHash(i, 11) * span + t * u * (.005f + .0025f * i) + pop * u * .12f * dep, span) - cw
+        val y = u * (.10f + .17f * i) + sin(t * .2f + i * 2f) * u * .004f
         drawRoundRect(P.b, Offset(x, y), Size(cw, ch), CornerRadius(ch / 2f))
         drawCircle(P.b, ch * .62f, Offset(x + cw * .30f, y + ch * .1f))
         drawCircle(P.b, ch * .85f, Offset(x + cw * .55f, y))
@@ -691,8 +696,8 @@ private fun DrawScope.drawSkylineScene(P: OrnPaint, w: Float, h: Float, t: Float
     // burung: satu kawanan berbentuk V, kepakan bergantian, melintas pelan
     if (!dk) run {
         val span = u * 1.8f
-        val hx = ornMod(ornHash(0, 61) * span + t * u * .022f - sc * .02f, span) - u * .3f
-        val hy = u * .17f - ornSoft(sc * .05f, u * .1f) + sin(t * .4f) * u * .012f
+        val hx = ornMod(ornHash(0, 61) * span + t * u * .022f, span) - u * .3f
+        val hy = u * .17f + sin(t * .4f) * u * .012f
         for (i in 0 until 5) {
             val row = (i + 1) / 2; val sd = if (i % 2 == 0) -1f else 1f
             val bx = hx - row * u * .035f
@@ -711,7 +716,7 @@ private fun DrawScope.drawSkylineScene(P: OrnPaint, w: Float, h: Float, t: Float
     val sn = if (dk) 24 else 5
     val starC = if (dk) P.ink else P.d
     for (i in 0 until sn) {
-        val kx = u * (.05f + .90f * ornHash(i, 71)); val ky = u * (.03f + .34f * ornHash(i, 72)) - ornSoft(sc * .03f, u * .08f)
+        val kx = u * (.05f + .90f * ornHash(i, 71)); val ky = u * (.03f + .34f * ornHash(i, 72))
         if (dk && hypot(kx - sx, ky - sy) < sunR * 2.4f) continue
         val tw = sin(t * (.55f + ornHash(i, 73) * .5f) + i * 2.1f)
         var a = (tw * .5f + .5f).let { it * it }
@@ -726,8 +731,8 @@ private fun DrawScope.drawSkylineScene(P: OrnPaint, w: Float, h: Float, t: Float
     // balon udara: melintas sangat pelan, bergoyang, dan ikut parallax gulir
     run {
         val span = u * 2.6f
-        val bx = ornMod(u * .5f + t * u * .0085f - sc * .035f + st * u * .02f, span) - u * .8f
-        val by = u * .36f + sin(t * .27f) * u * .018f - ornSoft(sc * .06f, u * .12f) - lf * u * .02f
+        val bx = ornMod(u * .5f + t * u * .0085f, span) - u * .8f
+        val by = u * .36f + sin(t * .27f) * u * .018f - lf * u * .02f - pop * u * .012f
         val br = u * .052f
         val sway = sin(t * .5f) * .06f
         withTransform({ rotate(sway * 57.3f, Offset(bx, by + br * 2f)) }) {
@@ -747,7 +752,7 @@ private fun DrawScope.drawSkylineScene(P: OrnPaint, w: Float, h: Float, t: Float
         if (k < .55f) {
             val f = k / .55f
             val px = -u * .15f + f * u * 1.3f
-            val py = u * .30f - f * u * .06f - ornSoft(sc * .04f, u * .1f)
+            val py = u * .30f - f * u * .06f
             val tl = u * .30f
             val ang = -.05f
             val dx = cos(ang); val dy = sin(ang)
@@ -776,24 +781,24 @@ private fun DrawScope.drawSkylineScene(P: OrnPaint, w: Float, h: Float, t: Float
     // gedung: jauh -> dekat; setiap lapis jauh diselimuti kabut tipis (perspektif udara)
     val tile = u * 1.5f
     for (L in 0..2) {
-        val dep = DEP[L]
-        val col = if (L == 0) P.b else if (L == 1) P.a else P.ink
-        val yb = h + u * .015f + ornSoft(sc * dep * .25f, u * .07f * (L + 1)) - lf * u * .025f * (.6f + .3f * L)
-        val shift = -sc * dep * .30f + st * u * .05f * dep
+            val col = if (L == 0) P.b else if (L == 1) P.a else P.ink
+        val yb = h + u * .015f - lf * u * .025f * (.6f + .3f * L)
         var x = -u * .05f
         var i = 0
         while (x < tile) {
             val bw = u * (.075f + .075f * ornHash(i, 21 + L))
             val hb = when (L) { 0 -> .20f + .26f * ornHash(i, 31 + L); 1 -> .13f + .22f * ornHash(i, 31 + L); else -> .08f + .20f * ornHash(i, 31 + L) }
-            val bh = min(u * hb * (1f + abs(st) * .04f), h * .62f)
+            val bh = min(u * hb, h * .62f)
             val roof = (ornHash(i, 41 + L) * 3f).toInt()
             for (rep in 0..1) {
-                val bx = ornMod(x + shift, tile) - (if (rep == 1) tile else 0f)
+                val bx = ornMod(x, tile) - (if (rep == 1) tile else 0f)
                 if (bx > u || bx + bw < 0f) continue
                 // jari mengangkat gedung di dekatnya dan menyalakan jendelanya
                 val cxm = bx + bw / 2f
                 val near = if (pr > .01f) exp(-((cxm - tx) * (cxm - tx)) / (u * u * .03f)) * pr else 0f
-                val bump = near * u * .028f
+                // ketukan: gedung di dekat titik ketuk melonjak lalu berayun kembali (pegas), makin dekat makin tinggi
+                val hop = if (abs(pop) > .003f) exp(-((cxm - popX) * (cxm - popX)) / (u * u * .05f)) * pop else 0f
+                val bump = near * u * .028f + hop * u * (.022f + .012f * L)
                 val top = yb - bh - bump
                 val rad = when (roof) { 1 -> bw * .5f; else -> min(bw * .18f, u * .015f) }
                 drawRoundRect(col, Offset(bx, top), Size(bw, bh + bump + u), CornerRadius(rad))
@@ -846,18 +851,18 @@ private fun DrawScope.drawSkylineScene(P: OrnPaint, w: Float, h: Float, t: Float
 // =====================================================================================================================
 
 /**
- * [w] x [h] = ukuran wadah (kartu, atau layar editor menurut tinggi yang tampak). [t] detik, [sc] gulir px, [fx] null = pose diam.
+ * [w] x [h] = ukuran wadah (kartu, atau layar editor menurut tinggi yang tampak). [t] detik, [fx] null = pose diam.
  * [alpha] dan [enter] dipakai untuk pergantian backdrop: yang lama mengecil sedikit + pudar, yang baru membesar sedikit dengan pegas lembut.
  */
-fun DrawScope.drawOrnament(kind: String, P0: OrnPaint, w: Float, h: Float, t: Float, sc: Float, fx: OrnFx?, alpha: Float = 1f, enter: Float = 1f) {
+fun DrawScope.drawOrnament(kind: String, P0: OrnPaint, w: Float, h: Float, t: Float, fx: OrnFx?, alpha: Float = 1f, enter: Float = 1f) {
     if (kind.isEmpty() || w <= 1f || h <= 1f || alpha <= .002f) return
     val P = P0.alpha(alpha)
     val s = .90f + .10f * enter.coerceIn(0f, 1.1f)
     withTransform({ scale(s, s, Offset(w / 2f, h / 2f)) }) {
         when (kind) {
-            "morph" -> drawMorphScene(P, w, h, t, sc, fx)
-            "canopy" -> drawCanopyScene(P, w, h, t, sc, fx)
-            "skyline" -> drawSkylineScene(P, w, h, t, sc, fx)
+            "morph" -> drawMorphScene(P, w, h, t, fx)
+            "canopy" -> drawCanopyScene(P, w, h, t, fx)
+            "skyline" -> drawSkylineScene(P, w, h, t, fx)
         }
     }
 }
@@ -881,14 +886,14 @@ object OrnWarm {
         gpuDone = true
         try {
             val c = Color(0xFFEEEEEE)
-            val fx = OrnFx().also { it.press = 1f; it.hold = 1f; it.lift = 1f; it.stretch = .6f; it.calm = .5f; it.px = 50f; it.py = 80f }
+            val fx = OrnFx().also { it.press = 1f; it.hold = 1f; it.lift = 1f; it.pop = .6f; it.popX = 40f; it.popY = 60f; it.calm = .5f; it.px = 50f; it.py = 80f }
             with(ds) {
                 clipRect(0f, 0f, 120f, 200f) {
                     for (dk in listOf(false, true)) {
                         val op = OrnPaint(c, c, c, c, c, c, 1f, dk)
                         for (k in listOf("morph", "canopy", "skyline")) {
-                            drawOrnament(k, op, 120f, 200f, 3f, 900f, fx, alpha = .02f)
-                            drawOrnament(k, op, 120f, 200f, 31f, 0f, fx, alpha = .02f)
+                            drawOrnament(k, op, 120f, 200f, 3f, fx, alpha = .02f)
+                            drawOrnament(k, op, 120f, 200f, 31f, fx, alpha = .02f)
                         }
                     }
                 }
@@ -905,9 +910,9 @@ object OrnWarm {
             val ds = androidx.compose.ui.graphics.drawscope.CanvasDrawScope()
             val pal = Color(0xFFEEEEEE)
             val op = OrnPaint(pal, pal, pal, pal, pal, pal)
-            val fx = OrnFx().also { it.press = .5f; it.stretch = .2f; it.px = 40f; it.py = 60f }
+            val fx = OrnFx().also { it.press = .5f; it.pop = .3f; it.px = 40f; it.py = 60f }
             ds.draw(androidx.compose.ui.unit.Density(1f), androidx.compose.ui.unit.LayoutDirection.Ltr, cv, Size(96f, 160f)) {
-                for (k in listOf("morph", "canopy", "skyline")) drawOrnament(k, op, 96f, 160f, 3f, 20f, fx)
+                for (k in listOf("morph", "canopy", "skyline")) drawOrnament(k, op, 96f, 160f, 3f, fx)
             }
         } catch (e: Throwable) { }
     }
@@ -919,7 +924,7 @@ fun Modifier.cardOrnament(kind: String, P: OrnPaint, id: String): Modifier =
         OrnWarm.run()
         OrnWarm.gpu(this)
         OrnPose.ver
-        drawOrnament(kind, P, size.width, size.height, OrnPose.get(id), 0f, null)
+        drawOrnament(kind, P, size.width, size.height, OrnPose.get(id), null)
     }
 
 /** Tinggi wadah yang tampak dalam koordinat isi editor. Saat morph dari kartu, isi editor diskalakan; hasilnya = tinggi kartu / skala. */
@@ -982,8 +987,8 @@ fun OrnamentLayer(
         val tn = clock.now
         val s = clock.sw
         val ca = 1f - .36f * fx.calm
-        if (clock.prev.isNotEmpty()) drawOrnament(clock.prev, P, size.width, ph, tn, fx.scroll, fx, alpha = (1f - s).coerceIn(0f, 1f) * ca, enter = (1f - s).coerceIn(0f, 1f))
-        drawOrnament(clock.cur, P, size.width, ph, tn, fx.scroll, fx, alpha = s.coerceIn(0f, 1f) * ca, enter = s)
+        if (clock.prev.isNotEmpty()) drawOrnament(clock.prev, P, size.width, ph, tn, fx, alpha = (1f - s).coerceIn(0f, 1f) * ca, enter = (1f - s).coerceIn(0f, 1f))
+        drawOrnament(clock.cur, P, size.width, ph, tn, fx, alpha = s.coerceIn(0f, 1f) * ca, enter = s)
     }
 }
 
@@ -992,7 +997,7 @@ fun OrnamentLayer(
 // Halaman Theme (dibuka dari menu titik tiga)
 // =====================================================================================================================
 
-private class ThemeSt(val hue: Float, val orn: String, val ti: Float, val par: Boolean)
+private class ThemeSt(val hue: Float, val orn: String, val ti: Float)
 
 /** Kemajuan masuk/keluar (0..1, boleh sedikit melewati 1 karena pegas) untuk isi sebuah AnimatedVisibility. Dipakai slider untuk morphing. */
 @Composable
@@ -1012,21 +1017,20 @@ fun ThemePage(vm: AppVM, nav: Nav, id: String) {
     var hue by remember(id) { mutableStateOf(d?.th ?: -1f) }       // < 0 = Auto (warna Kustom mati)
     var orn by remember(id) { mutableStateOf(d?.orn ?: "") }
     var ti by remember(id) { mutableFloatStateOf(d?.ti ?: 1f) }
-    var par by remember(id) { mutableStateOf(d?.pl ?: true) }
     // rona terakhir yang dipilih: saat toggle Kustom dinyalakan lagi, slider kembali ke sana (awal: rona warna aplikasi)
     var lastHue by remember(id) { mutableFloatStateOf(if ((d?.th ?: -1f) >= 0f) d!!.th else autoH) }
     val custom = hue >= 0f
 
     // simpan dengan jeda (slider menghasilkan banyak nilai), dan pasti tersimpan saat halaman ditutup
-    LaunchedEffect(hue, orn, ti, par) { delay(120); vm.setNoteTheme(id, hue, orn, ti, par) }
-    val latest by rememberUpdatedState(ThemeSt(hue, orn, ti, par))
-    DisposableEffect(id) { onDispose { vm.setNoteTheme(id, latest.hue, latest.orn, latest.ti, latest.par) } }
+    LaunchedEffect(hue, orn, ti) { delay(120); vm.setNoteTheme(id, hue, orn, ti) }
+    val latest by rememberUpdatedState(ThemeSt(hue, orn, ti))
+    DisposableEffect(id) { onDispose { vm.setNoteTheme(id, latest.hue, latest.orn, latest.ti) } }
 
     val pv = remember(gp, hue, d?.cp, d?.cv) { if (d != null) notePalFor(gp, d.copy(th = hue)) else gp }
 
     PageScaffold("Note theme", d?.t?.ifEmpty { null } ?: "Untitled", { nav.pop() }) {
         SGroup("Preview", 0) {
-            ThemePreview(d?.t.orEmpty(), pv, orn, id, ti, par)
+            ThemePreview(d?.t.orEmpty(), pv, orn, id, ti)
         }
         SGroup("Backdrop", 60) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1034,11 +1038,11 @@ fun ThemePage(vm: AppVM, nav: Nav, id: String) {
                     OrnTile(info, pv, ti, orn == info.id, Modifier.weight(1f)) { orn = info.id }
                 }
             }
-            // intensitas + parallax hanya relevan kalau ada backdrop
+            // intensitas hanya relevan kalau ada backdrop
             AnimatedVisibility(orn.isNotEmpty(), enter = ExEnter, exit = ExExit) {
                 val r = rv()
                 Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    SCard(POS_TOP) {
+                    SCard(POS_ONE) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 T("Intensity", 16f, 500, gp.os)
@@ -1053,15 +1057,6 @@ fun ThemePage(vm: AppVM, nav: Nav, id: String) {
                         ) { f ->
                             val raw = Math.round((ORN_INT_MIN + f * (ORN_INT_MAX - ORN_INT_MIN)) * 20f) / 20f
                             ti = if (abs(raw - 1f) < .06f) 1f else raw      // detent di 100% (bawaan)
-                        }
-                    }
-                    SCard(POS_BOT, onClick = { par = !par }) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Column(Modifier.weight(1f)) {
-                                T("Parallax", 16f, 500, gp.os)
-                                T("The backdrop drifts as you scroll. Touch and motion stay on either way", 14f, 400, gp.osv, lh = 1.3f)
-                            }
-                            MorphSwitch(par)
                         }
                     }
                 }
@@ -1104,25 +1099,18 @@ fun ThemePage(vm: AppVM, nav: Nav, id: String) {
 
 /** Pratinjau hidup: tahan, seret, atau geser vertikal untuk merasakan responsnya persis seperti di editor. */
 @Composable
-private fun ThemePreview(title: String, pal: Pal, kind: String, id: String, inten: Float, par: Boolean) {
+private fun ThemePreview(title: String, pal: Pal, kind: String, id: String, inten: Float) {
     val fx = remember { OrnFx() }
-    var sim by remember { mutableFloatStateOf(0f) }
-    val parS = rememberUpdatedState(par)
-    OrnDriver(fx, { sim }, { false }, kind.isNotEmpty(), par = { parS.value })
+    OrnDriver(fx, { false }, kind.isNotEmpty())
     Box(
         Modifier.fillMaxWidth().height(210.dp).clip(RoundedCornerShape(32.dp)).background(pal.s)
             .ornTouch(fx)
-            .pointerInput(Unit) { detectVerticalDragGestures { _, dy -> sim -= dy } }
     ) {
         OrnamentLayer(null, kind, pal, fx, "preview_$id", inten = inten)
         Column(Modifier.padding(24.dp)) {
             T(title.ifEmpty { "Untitled" }, 26f, 800, pal.os, maxLines = 1)
             Spacer(Modifier.height(8.dp))
-            T(
-                if (par || kind.isEmpty()) "Hold, drag, or swipe up and down. The backdrop always stays behind the words."
-                else "Parallax is off. Hold or drag and the backdrop still responds.",
-                15f, 400, pal.os, alpha = .8f, lh = 1.35f
-            )
+            T("Tap, hold, or drag across it. The backdrop always stays behind the words.", 15f, 400, pal.os, alpha = .8f, lh = 1.35f)
         }
     }
 }
