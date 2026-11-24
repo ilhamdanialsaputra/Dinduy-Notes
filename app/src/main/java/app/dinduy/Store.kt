@@ -672,22 +672,36 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         show("Reminder removed") { upd(id) { it.copy(rm = prev.rm, rr = prev.rr, rd = prev.rd) } }
     }
 
-    fun duplicate(id: String) {
-        val d = note(id) ?: return
-        val t = now
-        docs.add(0, d.copy(id = uid(), t = (d.t.ifEmpty { "Untitled" }) + " (copy)", u = t, c = t, p = false, a = false, rm = 0L, rr = "", rd = 0L))
-        save(); show("Note duplicated")
+    /** Id salinan yang baru dibuat: kartunya langsung masuk (tanpa jeda berurutan) walau berada di bawah layar pertama. */
+    val fastIn = HashSet<String>()
+
+    /**
+     * Salinan diletakkan TEPAT di bawah aslinya (kunci urut sedikit lebih kecil, kelompok sematan dan kolom yang sama), bukan di puncak daftar
+     * atau dengan kunci urut kembar yang membuat letaknya acak. Beranda lalu menggulir ke salinan pertama bila belum terlihat.
+     */
+    private fun cloneAfter(d: Note, t: Long): Note {
+        val c = d.copy(id = uid(), t = (d.t.ifEmpty { "Untitled" }) + " (copy)", u = t, c = t, o = sortKey(d) - 1L, a = false, rm = 0L, rr = "", rd = 0L)
+        lanes[d.id]?.let { lanes[c.id] = it }
+        fastIn.add(c.id)
+        return c
     }
 
-    /** Gandakan beberapa catatan sekaligus: satu kali simpan, satu pesan (urutan asli dipertahankan di puncak daftar). */
+    fun duplicate(id: String) = duplicateAll(listOf(id))
+
+    /** Gandakan beberapa catatan sekaligus: satu kali simpan, satu pesan. */
     fun duplicateAll(ids: List<String>) {
         val src = ids.mapNotNull { note(it) }
         if (src.isEmpty()) return
         val t = now
-        src.asReversed().forEach { d ->
-            docs.add(0, d.copy(id = uid(), t = (d.t.ifEmpty { "Untitled" }) + " (copy)", u = t, c = t, p = false, a = false, rm = 0L, rr = "", rd = 0L))
+        var first: String? = null
+        for (d in src) {
+            val c = cloneAfter(d, t)
+            docs.add(0, c)
+            if (first == null) first = c.id
         }
-        save(); show(if (src.size == 1) "Note duplicated" else "${src.size} notes duplicated")
+        save(); saveLanes()
+        show(if (src.size == 1) "Note duplicated" else "${src.size} notes duplicated")
+        revealId = first; revealTick++
     }
 
     fun purge(id: String) {
