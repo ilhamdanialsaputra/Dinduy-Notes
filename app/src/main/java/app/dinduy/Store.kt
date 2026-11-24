@@ -293,8 +293,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                     }
                 }
             } catch (e: CancellationException) { throw e } catch (e: Throwable) { }
-            val left = 700L - (System.currentTimeMillis() - t0)
-            if (left > 0L) delay(left)
+            // tanpa layar muat: tidak ada jeda minimum, pemanasan berjalan di latar dan selesai secepat mungkin
             bootDone = true
         }
     }
@@ -678,6 +677,17 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         val t = now
         docs.add(0, d.copy(id = uid(), t = (d.t.ifEmpty { "Untitled" }) + " (copy)", u = t, c = t, p = false, a = false, rm = 0L, rr = "", rd = 0L))
         save(); show("Note duplicated")
+    }
+
+    /** Gandakan beberapa catatan sekaligus: satu kali simpan, satu pesan (urutan asli dipertahankan di puncak daftar). */
+    fun duplicateAll(ids: List<String>) {
+        val src = ids.mapNotNull { note(it) }
+        if (src.isEmpty()) return
+        val t = now
+        src.asReversed().forEach { d ->
+            docs.add(0, d.copy(id = uid(), t = (d.t.ifEmpty { "Untitled" }) + " (copy)", u = t, c = t, p = false, a = false, rm = 0L, rr = "", rd = 0L))
+        }
+        save(); show(if (src.size == 1) "Note duplicated" else "${src.size} notes duplicated")
     }
 
     fun purge(id: String) {

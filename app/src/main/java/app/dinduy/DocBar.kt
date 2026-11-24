@@ -198,10 +198,10 @@ fun DocTopActions(ed: Ed) {
     val plusOn = ed.sheet == 1
     val rot by animateFloatAsState(if (plusOn) 1f else 0f, M3E.spatial(), label = "plusrot")
     Row {
-        Pop(2) { XBtn(rest = pal.c3, enabled = ed.canUndo && !ed.selOn, onClick = { ed.undo() }) { Ic("undo", it) } }
-        Pop(1) { XBtn(rest = pal.c3, enabled = ed.canRedo && !ed.selOn, onClick = { ed.redo() }) { Ic("redo", it) } }
+        Pop(2) { XBtn(rest = pal.dock(), enabled = ed.canUndo && !ed.selOn, onClick = { ed.undo() }) { Ic("undo", it) } }
+        Pop(1) { XBtn(rest = pal.dock(), enabled = ed.canRedo && !ed.selOn, onClick = { ed.redo() }) { Ic("redo", it) } }
         Pop(0) {
-            XBtn(on = plusOn, rest = pal.c3, onClick = {
+            XBtn(on = plusOn, rest = pal.dock(), onClick = {
                 ed.sub = 0; ed.pickQuote = false; ed.sheetPage = 0
                 if (ed.sheet == 1) ed.closeSheet() else { kb?.hide(); ed.sheet = 1 }
             }) { Ic("plus", it, modifier = Modifier.graphicsLayer { rotationZ = 135f * rot }) }
@@ -233,7 +233,7 @@ private fun AddImgIcon(c: Color) {
     Box(Modifier.size(26.dp)) {
         Ic("img", c, 22.dp, Modifier.align(Alignment.BottomStart))
         Canvas(Modifier.size(13.dp).align(Alignment.TopEnd)) {
-            drawCircle(pal.c3)
+            drawCircle(pal.dock())
             val u = size.width
             drawLine(c, Offset(u * .25f, u * .5f), Offset(u * .75f, u * .5f), 1.8f * density, StrokeCap.Round)
             drawLine(c, Offset(u * .5f, u * .25f), Offset(u * .5f, u * .75f), 1.8f * density, StrokeCap.Round)
@@ -329,7 +329,7 @@ private fun MorphDock(kind: Int, content: @Composable (Int) -> Unit) {
                 shadowElevation = elev.toPx()
                 shape = RoundedCornerShape((34.dp.toPx() - 9.dp.toPx() * abs(k).coerceAtMost(1.5f)).coerceAtLeast(16.dp.toPx()))
                 clip = true
-            }.background(pal.c3)
+            }.background(pal.dock())
         ) {
             CompositionLocalProvider(LocalDockMotion provides true) {
                 MorphSwap(
@@ -481,10 +481,10 @@ fun ToolDock(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     listOf("ar" to "+ Row", "ac" to "+ Column", "dr" to "− Row", "dc" to "− Column").forEachIndexed { n, (op, l) ->
-                        CapChip(n, l, pal.c4, pal.os, RoundedCornerShape(24.dp)) { ed.tOp(op) }
+                        CapChip(n, l, pal.dockIn(), pal.os, RoundedCornerShape(24.dp)) { ed.tOp(op) }
                     }
                     var n2 = 4
-                    if (blk != null && blk.cw.isNotEmpty()) CapChip(n2++, "Reset widths", pal.c4, pal.os, RoundedCornerShape(24.dp)) { ed.tblResetCols(blk.id) }
+                    if (blk != null && blk.cw.isNotEmpty()) CapChip(n2++, "Reset widths", pal.dockIn(), pal.os, RoundedCornerShape(24.dp)) { ed.tblResetCols(blk.id) }
                     CapChip(n2, "Delete table", pal.ec, pal.oec, RoundedCornerShape(24.dp)) { ed.tOp("dt") }
                 }
                 K_QUOTE -> Row(
@@ -494,9 +494,9 @@ fun ToolDock(ed: Ed, vm: AppVM, act: Actions, showBar: Boolean) {
                 ) {
                     VARS.forEachIndexed { n, (v, l) ->
                         val q = qs(v, pal)
-                        CapChip(n, l, if (v == "def") pal.c4 else q.bg, q.fg, q.shape, 52.dp, 104.dp) { ed.pickQuote = false; ed.setQuote(v) }
+                        CapChip(n, l, if (v == "def") pal.dockIn() else q.bg, q.fg, q.shape, 52.dp, 104.dp) { ed.pickQuote = false; ed.setQuote(v) }
                     }
-                    if (ty == "q") CapChip(VARS.size, "Plain text", pal.c4, pal.os, RoundedCornerShape(24.dp)) { ed.pickQuote = false; ed.setPlain() }
+                    if (ty == "q") CapChip(VARS.size, "Plain text", pal.dockIn(), pal.os, RoundedCornerShape(24.dp)) { ed.pickQuote = false; ed.setPlain() }
                 }
                 K_INK -> InkDockContent(ed, vm)
                 K_TITLE -> TitleBarContent(ed, vm)
@@ -616,7 +616,7 @@ private fun SheetTileView(t: SheetTile, i: Int, modifier: Modifier) {
     Column(
         modifier.popIn(i, 40L)
             .graphicsLayer { scaleX = sc; scaleY = sc; alpha = if (t.enabled) 1f else .32f }
-            .height(92.dp).clip(RoundedCornerShape(r.nn())).background(pal.c4)
+            .height(92.dp).clip(RoundedCornerShape(r.nn())).background(pal.dockIn())
             .clickable(interactionSource = src, indication = LocalIndication.current, enabled = t.enabled) {
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 t.onClick()
@@ -638,7 +638,7 @@ private fun SRow(on: Boolean = false, enabled: Boolean = true, icon: @Composable
     val r by animateDpAsState(if (pr) 14.dp else 22.dp, M3E.spatialFast(), label = "srr")
     val ir by animateDpAsState(if (on) 15.dp else 21.dp, M3E.spatialFast(), label = "sri")
     val bg by animateColorAsState(if (on) pal.pc.copy(alpha = .6f) else pal.pc.copy(alpha = 0f), M3E.effects(), label = "srb")
-    val ibg by animateColorAsState(if (on) pal.p.copy(alpha = .16f) else pal.c4, M3E.effects(), label = "sribg")
+    val ibg by animateColorAsState(if (on) pal.p.copy(alpha = .16f) else pal.dockIn(), M3E.effects(), label = "sribg")
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 1.dp).height(58.dp)
             .clip(RoundedCornerShape(r.nn())).background(bg).alpha(if (enabled) 1f else .35f)
@@ -662,7 +662,7 @@ private fun LinkBtn(label: String, filled: Boolean, enabled: Boolean, modifier: 
     val pr by src.collectIsPressedAsState()
     val r by animateDpAsState(if (pr) 14.dp else 28.dp, M3E.spatialFast(), label = "lbr")
     val sc by animateFloatAsState(if (pr) .95f else 1f, spring(.45f, 700f), label = "lbs")
-    val bg by animateColorAsState(if (filled) pal.p else pal.c4, M3E.effects(), label = "lbb")
+    val bg by animateColorAsState(if (filled) pal.p else pal.dockIn(), M3E.effects(), label = "lbb")
     val fg = if (filled) pal.op else pal.os
     Row(
         modifier.height(56.dp)
@@ -709,7 +709,7 @@ private fun SheetLinkPage(ed: Ed) {
     ) {
         // bar alamat (hanya tampilan, tidak memicu keyboard)
         Row(
-            Modifier.fillMaxWidth().height(68.dp).clip(RoundedCornerShape(34.dp)).background(pal.c4).padding(start = 12.dp, end = 10.dp),
+            Modifier.fillMaxWidth().height(68.dp).clip(RoundedCornerShape(34.dp)).background(pal.dockIn()).padding(start = 12.dp, end = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             val badge by animateColorAsState(if (url != null) pal.p else pal.pc, M3E.effects(), label = "lkbadge")
@@ -893,7 +893,7 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM, sheetPxOf: () -> Int, kbNow: () ->
         Column(
             Modifier.fillMaxWidth().height(holdDp).graphicsLayer { translationY = drag.value }
                 .shadow(if (pal.dark) 12.dp else 8.dp, RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp))
-                .clip(RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp)).background(pal.c3)
+                .clip(RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp)).background(pal.dock())
                 .windowInsetsPadding(WindowInsets.navigationBars)
         ) {
             Box(
@@ -942,11 +942,11 @@ fun DocSheet(ed: Ed, act: Actions, vm: AppVM, sheetPxOf: () -> Int, kbNow: () ->
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         if (pg == 1 || pg == 3) {
-                            XBtn(rest = pal.c4, onClick = { if (pg == 3) ed.linkAt = null; nav(0) }) { Ic("chl", it) }
+                            XBtn(rest = pal.dockIn(), onClick = { if (pg == 3) ed.linkAt = null; nav(0) }) { Ic("chl", it) }
                             Spacer(Modifier.width(10.dp))
                         } else Spacer(Modifier.width(12.dp))
                         T(if (pg == 2) "Format" else if (pg == 1) "Table" else if (pg == 3) "Link" else "Insert", 22f, 800, pal.os, Modifier.weight(1f))
-                        XBtn(rest = pal.c4, onClick = { ed.closeSheet() }) { Ic("x", it) }
+                        XBtn(rest = pal.dockIn(), onClick = { ed.closeSheet() }) { Ic("x", it) }
                     }
                     // sheet setinggi keyboard: isi yang lebih panjang digulir di dalam sheet, tinggi sheet tidak pernah berubah
                     Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {

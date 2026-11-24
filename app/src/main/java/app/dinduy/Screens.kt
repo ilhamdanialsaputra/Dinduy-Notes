@@ -304,7 +304,7 @@ fun Modifier.makeRoom(vm: AppVM, id: String, idx: Int, openIdx: () -> Int, h: Fl
 fun NoteCard(
     d: Note, i: Int, kind: String, selected: Boolean, modifier: Modifier = Modifier,
     delTime: Long = 0L, onLong: (() -> Unit)? = null, track: ((Morph) -> Unit)? = null, tick: Int = 0, cols: Int = 1,
-    paper: Boolean = false, onClick: (Morph) -> Unit
+    paper: Boolean = false, selMode: Boolean = false, onClick: (Morph) -> Unit
 ) {
     // catatan bersampul: kartu memakai palet dari warna foto sampulnya (terpisah dari palet aplikasi)
     val gp = LocalPal.current
@@ -319,11 +319,16 @@ fun NoteCard(
     val cardC = pal.s
     val fg = pal.os
     val edge = androidx.compose.ui.graphics.lerp(pal.bg, pal.os, .13f)
-    val shape = RoundedCornerShape(CARD_R.dp)
     val src = remember { MutableInteractionSource() }
     val pressed by src.collectIsPressedAsState()
     val selA by animateFloatAsState(if (selected) 1f else 0f, spring(.6f, 400f), label = "sel")
-    val sc by animateFloatAsState(if (selected || pressed) .97f else 1f, spring(.55f, 500f), label = "sc")
+    // terpilih: kartu "mengangkat" (sedikit mengecil dengan pegas memantul), sudut membulat, bayangan naik, lencana centang melompat masuk;
+    // kartu yang tidak terpilih meredup lembut selama mode seleksi
+    val cr by animateDpAsState(if (selected) 18.dp else CARD_R.dp, M3E.spatialFast(), label = "ncr")
+    val shape = RoundedCornerShape(cr.nn())
+    val sc by animateFloatAsState(if (selected) .955f else if (pressed) .97f else 1f, spring(.4f, 480f), label = "sc")
+    val badge by animateFloatAsState(if (selected) 1f else 0f, spring(.42f, 520f), label = "nbd")
+    val dimA by animateFloatAsState(if (selMode && !selected) .72f else 1f, tween(220), label = "ndim")
     var rect by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
     val dens = LocalDensity.current.density
     val haptic = LocalHapticFeedback.current
@@ -345,8 +350,17 @@ fun NoteCard(
             rect = it.boundsInWindow()
             track?.invoke(morphNow(false))
         }
-            .graphicsLayer { scaleX = sc; scaleY = sc }
+            .graphicsLayer {
+                scaleX = sc; scaleY = sc
+                alpha = dimA
+                compositingStrategy = if (dimA < 1f) androidx.compose.ui.graphics.CompositingStrategy.ModulateAlpha else androidx.compose.ui.graphics.CompositingStrategy.Auto
+                shadowElevation = 6.dp.toPx() * selA
+                this.shape = shape
+                clip = false
+                ambientShadowColor = pal.p.copy(alpha = .30f); spotShadowColor = pal.p.copy(alpha = .40f)
+            }
             .fillMaxWidth().clip(shape).background(cardC)
+            .background(pal.p.copy(alpha = .10f * selA))
             .border((1f + selA).dp, androidx.compose.ui.graphics.lerp(edge, pal.p, selA), shape)
             .combinedClickable(
                 interactionSource = src, indication = LocalIndication.current,
@@ -357,6 +371,12 @@ fun NoteCard(
         CompositionLocalProvider(LocalPal provides pal) {
             CardBody(d, "f", c2, fg, CARD_PAD_H, CARD_PAD_V, 0.dp, 0.dp, delTime)
         }
+        if (badge > .01f) Box(
+            Modifier.align(Alignment.TopEnd).padding(8.dp).size(26.dp)
+                .graphicsLayer { scaleX = badge; scaleY = badge; alpha = badge.coerceIn(0f, 1f) }
+                .clip(CircleShape).background(pal.p),
+            Alignment.Center
+        ) { Ic("ok", pal.op, 16.dp) }
     }
 }
 
@@ -1182,6 +1202,8 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
     val fr = remember { FocusRequester() }
     val sel = vm.sel
     val selMode = sel.isNotEmpty()
+    // seluruh layar ikut bereaksi pada mode seleksi: tombol menu / kolom dan bilah cari meredup dan tidak bisa disentuh
+    val selDimS = animateFloatAsState(if (selMode) 1f else 0f, spring(.9f, 420f), label = "seldim")
     val cols = vm.pr.cols.coerceIn(1, 2)
     // derivedStateOf: hanya dihitung ulang saat catatan / filter / urutan / layar berubah, bukan tiap frame animasi pencarian atau keyboard
     val live by remember(vm) {
@@ -1201,6 +1223,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         androidx.compose.runtime.snapshotFlow { if (cols == 2) scroll.value > 0 else state.canScrollBackward }.collect { back -> if (!back) onSmall(false) }
     }
     LaunchedEffect(vm.filter, vm.remFilter) {
+        vm.sel.clear()
         try { state.scrollToItem(0) } catch (e: Exception) { }
         try { scroll.scrollTo(0) } catch (e: Exception) { }
     }
@@ -1268,6 +1291,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
     }
     LaunchedEffect(vm.searchOn) {
         if (vm.searchOn) {
+            vm.sel.clear()
             try { resState.scrollToItem(0) } catch (e: Exception) { }
             delay(60); try { fr.requestFocus() } catch (e: Exception) { }
         } else {
@@ -1788,7 +1812,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                         shadowElevation = if (ghostNote.pdf.isNotEmpty()) 0f else 16.dp.toPx() * k
                         ambientShadowColor = Color.Black.copy(alpha = if (pal.dark) .50f else .22f)
                         spotShadowColor = Color.Black.copy(alpha = if (pal.dark) .65f else .32f)
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(18.dp)
                         clip = false
                     }
             ) {
@@ -1801,13 +1825,13 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
         Box(Modifier.fillMaxWidth().height(sat + 72.dp).background(pal.bg))
         Box(
             Modifier.padding(start = 10.dp, top = sat + 10.dp)
-                .graphicsLayer { val sa = saF(); translationX = -84.dp.toPx() * sa; scaleX = 1f - .4f * sa; scaleY = 1f - .4f * sa; alpha = 1f - sa }
-        ) { IconBtn("menu", pal.osv, { if (saF() < .5f) openDrawer() }) }
+                .graphicsLayer { val sa = saF(); translationX = -84.dp.toPx() * sa; scaleX = 1f - .4f * sa; scaleY = 1f - .4f * sa; alpha = (1f - sa) * (1f - .55f * selDimS.value) }
+        ) { IconBtn("menu", pal.osv, { if (saF() < .5f && !selMode) openDrawer() }, enabled = !selMode) }
 
         Box(
             Modifier.align(Alignment.TopEnd).padding(end = 10.dp, top = sat + 10.dp)
-                .graphicsLayer { val sa = saF(); translationX = 84.dp.toPx() * sa; scaleX = 1f - .4f * sa; scaleY = 1f - .4f * sa; alpha = 1f - sa }
-        ) { IconBtn(if (cols == 1) "cols" else "rows", pal.osv, { if (saF() < .5f) vm.setPr(vm.pr.copy(cols = if (cols == 1) 2 else 1)) }) }
+                .graphicsLayer { val sa = saF(); translationX = 84.dp.toPx() * sa; scaleX = 1f - .4f * sa; scaleY = 1f - .4f * sa; alpha = (1f - sa) * (1f - .55f * selDimS.value) }
+        ) { IconBtn(if (cols == 1) "cols" else "rows", pal.osv, { if (saF() < .5f && !selMode) vm.setPr(vm.pr.copy(cols = if (cols == 1) 2 else 1)) }, enabled = !selMode) }
 
         val q = vm.query.trim().lowercase()
         val res by remember(vm) {
@@ -1884,7 +1908,7 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                     val r = androidx.compose.ui.util.lerp(size.width - padEndIdle, size.width, k)
                     val rad = androidx.compose.ui.util.lerp(radIdle, 0f, k)
                     drawRoundRect(
-                        androidx.compose.ui.graphics.lerp(pal.sb, pal.bg, (k * 1.6f).coerceAtMost(1f)),
+                        androidx.compose.ui.graphics.lerp(androidx.compose.ui.graphics.lerp(pal.sb, pal.bg, .55f * selDimS.value), pal.bg, (k * 1.6f).coerceAtMost(1f)),
                         topLeft = Offset(l, topBar), size = Size(r - l, botBar - topBar), cornerRadius = CornerRadius(rad)
                     )
                 }
@@ -1902,7 +1926,8 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                         layout(c.maxWidth, pl.height) { pl.place(st, 0) }
                     }
                     .fillMaxWidth().height(56.dp)
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !vm.searchOn) { vm.searchOn = true },
+                    .graphicsLayer { alpha = 1f - .5f * selDimS.value }
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !vm.searchOn && !selMode) { vm.searchOn = true },
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // ikon kiri: kaca pembesar berputar jadi panah kembali (seperti Keep)
@@ -1913,9 +1938,9 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
                 Spacer(Modifier.width(6.dp))
                 BasicTextField(
                     value = vm.query, onValueChange = { vm.query = it },
-                    modifier = Modifier.weight(1f).focusRequester(fr).onFocusChanged { if (it.isFocused && !vm.searchOn) vm.searchOn = true },
+                    modifier = Modifier.weight(1f).focusRequester(fr).onFocusChanged { if (it.isFocused && !vm.searchOn && !selMode) vm.searchOn = true },
                     textStyle = TextStyle(color = pal.os, fontFamily = LocalFF.current, fontSize = 17.sp, fontWeight = FontWeight(400)),
-                    singleLine = true, cursorBrush = SolidColor(pal.p),
+                    singleLine = true, cursorBrush = SolidColor(pal.p), enabled = !selMode,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { focusMgr.clearFocus() }),
                     decorationBox = { inner ->
@@ -1931,6 +1956,8 @@ fun HomeScreen(vm: AppVM, nav: Nav, act: Actions, openDrawer: () -> Unit, onSmal
             }
         }
         }
+        // kapsul seleksi: melar dari FAB (tidak ada saat pencarian terbuka: seleksi dibersihkan saat pencarian dibuka)
+        HomeSelDock(vm, act)
     }
 }
 
@@ -2006,6 +2033,7 @@ fun HomeCard(
                 onLong = { if (d.id !in sel) sel.add(d.id) },
                 track = trackFn,
                 cols = cols,
+                selMode = selMode,
                 onClick = clickFn
             )
         }
@@ -2019,8 +2047,10 @@ fun openNewFromFab(vm: AppVM) {
 }
 
 /** Bilah voice note cepat sedang menggantikan tombol Baru (ditarik, merekam, atau sedang menguncup kembali). */
+private fun dockCoversFab(vm: AppVM): Boolean = vm.sel.isNotEmpty() || SelDockFx.p.value > .001f
+
 private fun quickCoversFab(vm: AppVM): Boolean =
-    (QuickFx.drag || QuickFx.shown || QuickFx.noteBound || QuickFx.p.value > .001f) &&
+    dockCoversFab(vm) || (QuickFx.drag || QuickFx.shown || QuickFx.noteBound || QuickFx.p.value > .001f) &&
         (vm.nav.top is Scr.Home || QuickFx.noteBound)
 
 private const val FAB_HOLD_MS = 550L   // tahan sedikit lama untuk memunculkan sheet (suara dll.)
@@ -2047,6 +2077,8 @@ fun Fab(vm: AppVM, act: Actions, small: Boolean, hide: Boolean, lift: Dp) {
     // bilah voice note cepat (QuickVoice) menggambar bentuk yang sama persis di atas tombol ini; selama ia aktif tombol asli
     // harus benar-benar hilang (tanpa animasi, tanpa skala) supaya tidak ada dua tombol bertumpuk. Dibaca di lambda gambar
     // agar tidak memicu rekomposisi tiap frame saat bilah ditarik.
+    // selama kapsul seleksi tampil, FAB tidak menerima sentuhan (kapsul menggambar bentuk yang sama di atasnya)
+    val dockHide by remember { derivedStateOf { vm.sel.isNotEmpty() || SelDockFx.p.value > .001f } }
     val sc by animateFloatAsState(if (gone) .4f else if (pr) .93f else 1f, spring(.55f, 500f), label = "sc")
     val al by animateFloatAsState(if (gone) 0f else 1f, tween(if (FabFx.drag) 80 else 250), label = "al")
     val r by animateDpAsState(if (pr) 22.dp else 32.dp, spring(.6f, 500f), label = "r")
@@ -2061,6 +2093,7 @@ fun Fab(vm: AppVM, act: Actions, small: Boolean, hide: Boolean, lift: Dp) {
             Modifier.offset(y = -ly)
                 .onGloballyPositioned { c ->
                     val b = c.boundsInWindow()
+                    if (b.width > 0f) SelDockFx.fabW = b.width
                     if (!hide && b.width > 0f) vm.fabMorph = Morph(b.left, b.top, b.right, b.bottom, 32f * dens, pal.pc, card = true, fabg = FabGhost(!small, pal.opc))
                 }
                 .graphicsLayer {
@@ -2083,8 +2116,8 @@ fun Fab(vm: AppVM, act: Actions, small: Boolean, hide: Boolean, lift: Dp) {
                     onClick("New note") { if (!hide) openNewFromFab(vm); true }
                     onLongClick("Add voice note") { if (!hide) vm.addOn = true; true }
                 }
-                .pointerInput(hide) {
-                    if (hide) return@pointerInput
+                .pointerInput(hide, dockHide) {
+                    if (hide || dockHide) return@pointerInput
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
                         val press = PressInteraction.Press(down.position)
@@ -2232,42 +2265,9 @@ fun Fab(vm: AppVM, act: Actions, small: Boolean, hide: Boolean, lift: Dp) {
     }
 }
 
+/** Bilah seleksi lama di atas layar sudah diganti kapsul di bawah (lihat SelDock.kt). Dibiarkan kosong agar pemanggil lama tetap valid. */
 @Composable
-fun SelBar(vm: AppVM) {
-    val pal = LocalPal.current
-    val sat = satDp()
-    var count by remember { mutableStateOf(0) }
-    if (vm.sel.isNotEmpty()) count = vm.sel.size
-    AnimatedVisibility(
-        visible = vm.sel.isNotEmpty(),
-        enter = slideInVertically(tween(450, easing = Emph)) { -it }, exit = slideOutVertically(tween(450, easing = Emph)) { -it }
-    ) {
-        Row(
-            Modifier.fillMaxWidth().height(sat + 72.dp).background(pal.bg).padding(top = sat + 12.dp, start = 10.dp, end = 10.dp),
-            verticalAlignment = Alignment.Top
-        ) {
-            IconBtn("x", pal.os, { vm.sel.clear() }, size = 48.dp)
-            Box(Modifier.weight(1f).height(48.dp).padding(start = 6.dp), Alignment.CenterStart) { T("$count selected", 18f, 900, pal.os) }
-            IconBtn("all", pal.os, { vm.liveF().forEach { if (it.id !in vm.sel) vm.sel.add(it.id) } }, size = 48.dp)
-            IconBtn("pin", pal.os, {
-                val ids = vm.sel.toList()
-                if (ids.isNotEmpty()) {
-                    val all = ids.all { vm.note(it)?.p == true }
-                    vm.sel.clear()
-                    vm.mark(ids, if (all) "Note unpinned" else "${cnt(ids.size, "note")} pinned") { it.copy(p = !all) }
-                }
-            }, size = 48.dp)
-            IconBtn("arc", pal.os, {
-                val ids = vm.sel.toList()
-                if (ids.isNotEmpty()) { vm.sel.clear(); vm.mark(ids, "${cnt(ids.size, "note")} archived") { it.copy(a = true, p = false) } }
-            }, size = 48.dp)
-            IconBtn("del", pal.os, {
-                val ids = vm.sel.toList()
-                if (ids.isNotEmpty()) { vm.sel.clear(); vm.mark(ids, "${cnt(ids.size, "note")} moved to Trash") { it.copy(dt = System.currentTimeMillis()) } }
-            }, size = 48.dp)
-        }
-    }
-}
+fun SelBar(vm: AppVM) { }
 
 // ---------- arsip & sampah ----------
 @Composable
@@ -2282,20 +2282,26 @@ fun ListScreen(
     val dens = LocalDensity.current.density
     var tick by remember { mutableIntStateOf(0) }
     val seen = remember { HashSet<String>() }
+    val sel = remember { androidx.compose.runtime.mutableStateListOf<String>() }
+    val selMode = sel.isNotEmpty()
     LaunchedEffect(Unit) { delay(560); tick++ }
+    LaunchedEffect(notes) { val ids = notes.map { it.id }.toHashSet(); sel.removeAll { it !in ids } }
+    androidx.activity.compose.BackHandler(selMode) { sel.clear() }
+    val padB by androidx.compose.animation.core.animateDpAsState(if (selMode) 120.dp else 40.dp, M3E.spatial(), label = "lpad")
+    Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().background(pal.bg).onSizeChanged { hPx = it.height.toFloat() }) {
         Row(
             Modifier.fillMaxWidth().padding(top = sat + 8.dp, bottom = 8.dp, start = 12.dp, end = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconBtn("back", pal.os, onBack)
-            T(title, 22f, 900, pal.os, Modifier.weight(1f).padding(start = 8.dp), ls = -.01f, maxLines = 1)
-            if (onClear != null && notes.isNotEmpty()) IconBtn("del", pal.os, onClear)
+            if (selMode) IconBtn("x", pal.os, { sel.clear() }) else IconBtn("back", pal.os, onBack)
+            T(if (selMode) "${sel.size} selected" else title, 22f, 900, pal.os, Modifier.weight(1f).padding(start = 8.dp), ls = -.01f, maxLines = 1)
+            if (onClear != null && notes.isNotEmpty() && !selMode) IconBtn("del", pal.os, onClear)
         }
         if (hint != null) T(hint, 14f, 600, pal.osv, Modifier.padding(start = 24.dp, end = 24.dp, bottom = 8.dp))
         LazyColumn(
             Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 40.dp + sab),
+            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = padB + sab),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             if (notes.isEmpty()) item(key = "empty-list") {
@@ -2312,7 +2318,7 @@ fun ListScreen(
                     }
                 }
                 NoteCard(
-                    d, ix, "f", false,
+                    d, ix, "f", d.id in sel,
                     flowItem()
                         .makeRoom(vm, d.id, ix, { notes.indexOfFirst { it.id == vm.openId } }, hPx, dens)
                         .graphicsLayer {
@@ -2321,10 +2327,14 @@ fun ListScreen(
                             val s = .94f + .06f * pv.coerceIn(0f, 1f); scaleX = s; scaleY = s
                         },
                     delTime = if (trash) d.dt else 0L,
-                    track = { m -> vm.cardMorph[d.id] = m }, tick = tick
-                ) { onClick(d) }
+                    track = { m -> vm.cardMorph[d.id] = m }, tick = tick,
+                    onLong = { if (d.id !in sel) sel.add(d.id) },
+                    selMode = selMode
+                ) { if (selMode) { if (d.id in sel) sel.remove(d.id) else sel.add(d.id) } else onClick(d) }
             }
         }
+    }
+    ListSelDock(vm, sel, notes, trash)
     }
 }
 
@@ -2396,7 +2406,7 @@ fun BigSlider(value: Float, min: Float, max: Float, onChange: (Float) -> Unit) {
 fun SegPill(n: Int, sel: Int, onSel: (Int) -> Unit, h: Dp = 52.dp, item: @Composable (Int, Color) -> Unit) {
     val pal = LocalPal.current
     val x = animateFloatAsState(sel.toFloat(), spring(.62f, 380f), label = "seg")
-    Box(Modifier.fillMaxWidth().height(h).clip(CircleShape).background(pal.c4).padding(4.dp)) {
+    Box(Modifier.fillMaxWidth().height(h).clip(CircleShape).background(pal.dockIn()).padding(4.dp)) {
         Box(
             Modifier.fillMaxHeight().fillMaxWidth(1f / n)
                 .graphicsLayer {
@@ -2424,9 +2434,10 @@ fun SegPill(n: Int, sel: Int, onSel: (Int) -> Unit, h: Dp = 52.dp, item: @Compos
 fun MorphSwitch(on: Boolean) {
     val pal = LocalPal.current
     val k by animateFloatAsState(if (on) 1f else 0f, spring(.7f, 420f), label = "sw")
-    val track = androidx.compose.ui.graphics.lerp(pal.neutral(if (pal.dark) .16f else .10f), pal.p, k)
-    val edge = androidx.compose.ui.graphics.lerp(pal.neutral(.45f), pal.p, k)
-    val thumb = androidx.compose.ui.graphics.lerp(pal.neutral(.45f), pal.op, k)
+    // Expressive: trek mati berwarna tonal (tb2) dengan tepi / gagang abu-hangat; trek hidup memakai warna utama dan gagang tonal terang
+    val track = androidx.compose.ui.graphics.lerp(if (pal.ex) pal.tb2 else pal.neutral(if (pal.dark) .16f else .10f), pal.p, k)
+    val edge = androidx.compose.ui.graphics.lerp(if (pal.ex) pal.osv else pal.neutral(.45f), pal.p, k)
+    val thumb = androidx.compose.ui.graphics.lerp(if (pal.ex) pal.osv else pal.neutral(.45f), if (pal.ex) pal.tb else pal.op, k)
     Box(Modifier.size(width = 52.dp, height = 32.dp).clip(CircleShape).background(track).border(2.dp, edge, CircleShape)) {
         val d = 16f + 8f * k
         val cx = 16f + 20f * k
@@ -2475,7 +2486,7 @@ fun SCard(
     val shape = RoundedCornerShape(tr.coerceAtLeast(0f).dp, tr.coerceAtLeast(0f).dp, br.coerceAtLeast(0f).dp, br.coerceAtLeast(0f).dp)
     val tone = LocalToneCards.current
     Column(
-        Modifier.fillMaxWidth().clip(shape).background(bg ?: if (tone) pal.tb else pal.c2)
+        Modifier.fillMaxWidth().clip(shape).background(bg ?: if (tone || pal.ex) pal.tb else pal.c2)
             .then(if (tone) Modifier.border(1.dp, pal.ol, shape) else Modifier)
             .then(if (onClick != null) Modifier.clickable(interactionSource = src, indication = LocalIndication.current, onClick = onClick) else Modifier)
             .animateContentSize(SizeSpring).padding(pad),
@@ -2713,7 +2724,7 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
             Modifier.fillMaxWidth().height(sat + 64.dp)
                 .drawBehind {
                     val k = (scroll.value / 80.dp.toPx()).coerceIn(0f, 1f)
-                    drawRect(androidx.compose.ui.graphics.lerp(pal.bg, pal.c2, k))
+                    drawRect(androidx.compose.ui.graphics.lerp(pal.bg, pal.setCard(), k))
                 }
                 .padding(top = sat, start = 8.dp, end = 12.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -2737,7 +2748,7 @@ fun SettingsScreen(vm: AppVM, act: Actions, onBack: () -> Unit) {
         val col = hsl(h, s, 40f)
         AlertDialog(
             onDismissRequest = { custom = false },
-            containerColor = pal.c3,
+            containerColor = pal.dock(),
             shape = RoundedCornerShape(28.dp),
             title = { T("Custom color", 24f, 400, pal.os) },
             text = {
@@ -2769,7 +2780,7 @@ fun SheetHost(vm: AppVM, nav: Nav, act: Actions) {
     val close = { vm.sheet = null }
     ModalBottomSheet(
         onDismissRequest = { vm.sheet = null }, sheetState = st,
-        shape = RoundedCornerShape(topStart = 40.dp, topEnd = 40.dp), containerColor = pal.c3,
+        shape = RoundedCornerShape(topStart = 40.dp, topEnd = 40.dp), containerColor = pal.dock(),
         scrimColor = Color.Black.copy(alpha = .5f),
         dragHandle = {
             Box(Modifier.padding(top = 14.dp, bottom = 18.dp).width(40.dp).height(5.dp).clip(RoundedCornerShape(3.dp)).background(pal.ol))

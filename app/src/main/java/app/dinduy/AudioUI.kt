@@ -236,7 +236,7 @@ fun RecordCard(vm: AppVM) {
     val shape = RoundedCornerShape(32.dp)
     Row(
         Modifier.widthIn(max = 560.dp).fillMaxWidth().padding(horizontal = 10.dp).padding(bottom = 8.dp)
-            .shadow(if (pal.dark) 6.dp else 1.dp, shape).clip(shape).background(pal.c3)
+            .shadow(if (pal.dark) 6.dp else 1.dp, shape).clip(shape).background(pal.dock())
             .padding(start = 18.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -313,7 +313,7 @@ fun AudioCard(vm: AppVM, noteId: String, a: Aud, idx: Int, total: Int, title: St
     val pr by src.collectIsPressedAsState()
     val ps by animateFloatAsState(if (pr) .92f else 1f, spring(.5f, 600f), label = "ps")
     // kartu suara bercorak warna utama: beda dari gambar (netral) dan dari kertas, jadi tidak menyatu
-    val cardBg = if (pal.dark)   // gelap: sedikit lebih terang dari kertas, saturasi sangat rendah (condong ke warna teks, hint tipis warna utama)
+    val cardBg = if (pal.ex) pal.tb else if (pal.dark)   // gelap: sedikit lebih terang dari kertas, saturasi sangat rendah (condong ke warna teks, hint tipis warna utama)
         androidx.compose.ui.graphics.lerp(androidx.compose.ui.graphics.lerp(pal.s, pal.os, .25f), pal.p, .03f)
     else androidx.compose.ui.graphics.lerp(pal.s, pal.p, .14f)
     val btnBg = androidx.compose.ui.graphics.lerp(cardBg, pal.os, .10f)

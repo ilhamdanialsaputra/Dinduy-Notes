@@ -1093,7 +1093,7 @@ fun TableView(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier = Modifier) {
         // tanpa pegangan: tekan-tahan di mana pun pada tabel = angkat dan pindahkan seluruh tabel (seperti foto), juga di mode baca.
         // Saat sebuah sel sedang diedit, tekan-tahan tepat di atas huruf tetap untuk seleksi teks; pegangan lebar kolom tidak ikut terangkat.
         HBox(
-            Modifier.clip(RoundedCornerShape(4.dp)).background(pal.c2)
+            Modifier.clip(RoundedCornerShape(4.dp)).background(pal.tblBg())
                 .border(1.5.dp, if (active) pal.p.copy(alpha = .75f) else pal.osv.copy(alpha = .75f), RoundedCornerShape(4.dp))   // garis luar jelas di tema terang maupun gelap
                 .onGloballyPositioned { viewW = it.size.width; dw[8] = it.positionInRoot().x + it.size.width }
                 .objLift(
@@ -1241,7 +1241,7 @@ private fun TRow(ws: List<Dp>, head: Boolean, topLine: Boolean, fc: Int, dc: Int
             ws.forEachIndexed { c, wd ->
                 val w = wd.toPx()
                 if (c == fc) drawRect(pal.pc, Offset(x, 0f), Size(w, size.height))
-                else if (head) drawRect(pal.sc, Offset(x, 0f), Size(w, size.height))
+                else if (head) drawRect(pal.tblHead(), Offset(x, 0f), Size(w, size.height))
                 if (c == dc) drawRect(pal.p.copy(alpha = .16f), Offset(x, 0f), Size(w, size.height))
                 x += w
             }
@@ -1899,33 +1899,58 @@ private fun planFloat(ed: Ed, i: Int, dm: Dm, pal: Pal, tm: TextMeasurer, dn: De
     return FloatPlan(out)
 }
 
+/** Entri cache rencana aliran teks: sah selama blok kepala, semua blok peserta, dan blok penutup tetap instance yang sama. */
+private class PlanEntry(
+    val head: Blk, val tail: Blk?, val w: Float, val dm: Dm, val pal: Pal, val rd: Boolean, val oh: Float, val dn: Density, val plan: FloatPlan
+)
+
+/**
+ * planFloat mengukur teks di sekitar objek (tabel: mengukur SEMUA sel). Dulu dijalankan ulang untuk setiap objek di setiap ketikan,
+ * walau yang diketik jauh dari objek itu. Sekarang hasilnya dipakai ulang selama blok yang terlibat tidak berubah.
+ */
+private fun cachedPlan(cache: HashMap<String, PlanEntry>, ed: Ed, i: Int, dm: Dm, pal: Pal, tm: TextMeasurer, dn: Density): FloatPlan {
+    val bl = ed.blocks
+    val b = bl[i]
+    val oh = ed.objH[b.id] ?: -1f
+    val e = cache[b.id]
+    if (e != null && e.head === b && e.w == ed.widthDp && e.dm === dm && e.pal === pal && e.rd == ed.reading && e.oh == oh && e.dn == dn) {
+        val ps = e.plan.parts
+        var ok = true
+        for (k in ps.indices) if (bl.getOrNull(i + 1 + k) !== ps[k].first) { ok = false; break }
+        if (ok && bl.getOrNull(i + 1 + ps.size) === e.tail) return e.plan
+    }
+    val plan = planFloat(ed, i, dm, pal, tm, dn)
+    cache[b.id] = PlanEntry(b, bl.getOrNull(i + 1 + plan.parts.size), ed.widthDp, dm, pal, ed.reading, oh, dn, plan)
+    return plan
+}
+
 /** Rencana untuk semua gambar mengambang (kiri/kanan dan cukup ruang) di catatan ini. */
 @Composable
 fun floatPlans(ed: Ed, dm: Dm): Map<String, FloatPlan> {
     val pal = LocalPal.current
     val tm = rememberTextMeasurer()
     val dn = LocalDensity.current
+    val cache = remember(ed) { HashMap<String, PlanEntry>() }
     var out: HashMap<String, FloatPlan>? = null
     val bl = ed.blocks
+    if (cache.size > bl.size + 24) { val live = HashSet<String>(); for (x in bl) live.add(x.id); cache.keys.retainAll(live) }
     for ((i, b) in bl.withIndex()) {
-        // semua gambar tunggal rata kiri/kanan selalu lewat FloatGroup, walau tak ada teks di sampingnya,
-        // supaya komponen gambar tidak berganti (dan gestur ubah ukuran tidak putus) saat teks samping habis
+        // semua tabel lewat TblFloatGroup (komposisi tidak berganti saat lebar kolom diseret melewati batas);
+        // teks hanya mengalir di sampingnya bila tabel cukup sempit
         if (b.ty == "tbl") {
-            // semua tabel lewat TblFloatGroup (komposisi tidak berganti saat lebar kolom diseret melewati batas);
-            // teks hanya mengalir di sampingnya bila tabel cukup sempit
             if (out == null) out = HashMap()
-            out[b.id] = if (ed.tblSideOk(b)) planFloat(ed, i, dm, pal, tm, dn) else FloatPlan(emptyList())
+            out[b.id] = if (ed.tblSideOk(b)) cachedPlan(cache, ed, i, dm, pal, tm, dn) else FloatPlan(emptyList())
             continue
         }
         if (b.isBox) {
             // semua kutipan / kode / garis (kiri, tengah, kanan) selalu lewat BoxFloatGroup: komposisi tidak berganti saat letak / lebar
             // berubah (juga saat diseret), jadi gestur sentuh tidak putus. Tengah = rencana kosong (tidak ada teks yang mengalir).
             if (out == null) out = HashMap()
-            out[b.id] = if (ed.boxSideOk(b)) planFloat(ed, i, dm, pal, tm, dn) else FloatPlan(emptyList())
+            out[b.id] = if (ed.boxSideOk(b)) cachedPlan(cache, ed, i, dm, pal, tm, dn) else FloatPlan(emptyList())
             continue
         }
         if (b.ty != "img" || b.im.size != 1) continue   // tengah juga lewat FloatGroup (rencana kosong): komposisi tidak berganti saat letak berubah
-        val p = if (ed.sideOk(b)) planFloat(ed, i, dm, pal, tm, dn) else FloatPlan(emptyList())
+        val p = if (ed.sideOk(b)) cachedPlan(cache, ed, i, dm, pal, tm, dn) else FloatPlan(emptyList())
         if (out == null) out = HashMap()
         out[b.id] = p
     }
@@ -2287,7 +2312,7 @@ private fun BoxBody(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier, sel: B
             }
         }
         "code" -> {
-            Box(modifier.selRing(sel, RoundedCornerShape(28.dp), ring).clip(RoundedCornerShape(28.dp)).background(pal.c3).padding(20.dp)) {
+            Box(modifier.selRing(sel, RoundedCornerShape(28.dp), ring).clip(RoundedCornerShape(28.dp)).background(pal.codeBg()).padding(20.dp)) {
                 Column {
                     if (b.l.isNotEmpty()) {
                         T(
@@ -3312,7 +3337,7 @@ fun SelBubble(ed: Ed, vm: AppVM, act: Actions, scrollY: () -> Int) {
             }
             .onSizeChanged { bs = it }
             .shadow(if (pal.dark) 8.dp else 6.dp, RoundedCornerShape(28.dp)).clip(RoundedCornerShape(28.dp))
-            .background(pal.c3).padding(6.dp),
+            .background(pal.dock()).padding(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         val enter = expandHorizontally(spring(.72f, 520f)) + scaleIn(spring(.6f, 520f), .5f)
@@ -3498,18 +3523,24 @@ private fun TitleEditor(
         while (true) {
             val n = withFrameNanos { it }
             anim.t = (n - t0) / 1_000_000_000f
-            if (anim.t > 2.4f) break
+            if (anim.t > 1.8f) break
         }
         anim.introOn = false
     }
-    // jam gelombang: berjalan terus selama catatan terbuka (~30 fps cukup, tebal-tipisnya berundak halus)
+    // jam gelombang: hanya berdetak selama gelombang benar-benar menyala. Saat judul diketik / catatan diedit / keyboard aktif
+    // coroutine ini TIDUR (tanpa callback frame sama sekali), jadi tidak ada beban per frame yang berebut dengan keyboard dan seleksi.
     LaunchedEffect(gsx) {
         if (!gsx) return@LaunchedEffect
-        val t0 = withFrameNanos { it }
+        var t0 = 0L
         var last = 0L
         while (true) {
-            val n = withFrameNanos { it }
-            if (n - last >= 40_000_000L) { last = n; anim.lt = (n - t0) / 1_000_000_000f }
+            androidx.compose.runtime.snapshotFlow { anim.loop > 0f && ed.title.isNotBlank() }.first { it }
+            val s0 = withFrameNanos { it }
+            if (t0 == 0L) t0 = s0
+            while (anim.loop > 0f) {
+                val n = withFrameNanos { it }
+                if (n - last >= 33_000_000L) { last = n; anim.lt = (n - t0) / 1_000_000_000f }
+            }
         }
     }
     // kekuatan gelombang: menyala pelan setelah intro, meredup saat judul sedang diketik (kursor diam, huruf tenang)
@@ -3526,7 +3557,7 @@ private fun TitleEditor(
     LaunchedEffect(typing, anim.introOn, gsx) {
         if (!gsx) return@LaunchedEffect
         val target = if (typing || anim.introOn) 0f else 1f
-        androidx.compose.animation.core.animate(anim.loop, target, animationSpec = tween(if (target > 0f) 1200 else 450)) { v, _ -> anim.loop = v }
+        androidx.compose.animation.core.animate(anim.loop, target, animationSpec = tween(if (target > 0f) 900 else 350)) { v, _ -> anim.loop = v }
     }
 
     var tfv by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(ed.title)) }
@@ -3617,7 +3648,7 @@ private fun TitleEditor(
             cursorBrush = SolidColor(pal.p),
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
             keyboardActions = KeyboardActions(onNext = { firstText() }),
-            modifier = Modifier.fillMaxWidth().selGlow(tSel, pal.p, { it }, { tLay }, { tfv.selection }).focusProperties { canFocus = !ed.ink.on }.focusRequester(titleFr)
+            modifier = Modifier.fillMaxWidth().selGlow(tSel, pal.p, { it - 1 }, { tLay }, { tfv.selection }).focusProperties { canFocus = !ed.ink.on }.focusRequester(titleFr)
                 .onFocusChanged { ed.titleFocus = it.isFocused; if (it.isFocused) { ed.selImg = null; ed.selObj = null } }
                 .then(
                     if (ed.reading) Modifier.wordTap(
@@ -3674,19 +3705,27 @@ private fun HeadFxDriver(ed: Ed) {
                 !(ctx.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager).isPowerSaveMode
         } catch (e: Exception) { true }
     }
+    // jam hanya berdetak selama gelombang menyala (h.loop > 0); selain itu tidur tanpa callback frame
     LaunchedEffect(gsx) {
         if (!gsx) return@LaunchedEffect
-        val t0 = withFrameNanos { it }
+        var t0 = 0L
         var last = 0L
         while (true) {
-            val n = withFrameNanos { it }
-            if (n - last >= 40_000_000L) { last = n; h.lt = (n - t0) / 1_000_000_000f }
+            androidx.compose.runtime.snapshotFlow { h.loop > 0f }.first { it }
+            val s0 = withFrameNanos { it }
+            if (t0 == 0L) t0 = s0
+            while (h.loop > 0f) {
+                val n = withFrameNanos { it }
+                if (n - last >= 33_000_000L) { last = n; h.lt = (n - t0) / 1_000_000_000f }
+            }
         }
     }
-    val busy = ed.titleFocus || ed.focus != null || !calm
+    // tidak ada heading H1-H3 di catatan: tidak perlu animasi sama sekali
+    val hasHead by remember(ed) { androidx.compose.runtime.derivedStateOf { ed.blocks.any { it.ty == "h" && it.lv in 1..3 } } }
+    val busy = ed.titleFocus || ed.focus != null || !calm || !hasHead
     LaunchedEffect(busy, gsx) {
         if (!gsx) return@LaunchedEffect
-        if (!busy) kotlinx.coroutines.delay(900)
-        androidx.compose.animation.core.animate(h.loop, if (busy) 0f else 1f, animationSpec = tween(if (busy) 450 else 1200)) { v, _ -> h.loop = v }
+        if (!busy) kotlinx.coroutines.delay(700)
+        androidx.compose.animation.core.animate(h.loop, if (busy) 0f else 1f, animationSpec = tween(if (busy) 350 else 900)) { v, _ -> h.loop = v }
     }
 }

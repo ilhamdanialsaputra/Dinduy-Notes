@@ -281,7 +281,7 @@ fun PageScaffold(title: String, sub: String?, onBack: () -> Unit, content: @Comp
             Modifier.fillMaxWidth().height(sat + 64.dp)
                 .drawBehind {
                     val k = (scroll.value / 80.dp.toPx()).coerceIn(0f, 1f)
-                    drawRect(androidx.compose.ui.graphics.lerp(pal.bg, pal.c2, k))
+                    drawRect(androidx.compose.ui.graphics.lerp(pal.bg, pal.setCard(), k))
                 }
                 .padding(top = sat, start = 8.dp, end = 12.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -364,9 +364,9 @@ private fun MdRow(pos: Int, onSave: () -> Unit, onCopy: () -> Unit) {
                 T("Text only", 16f, 500, pal.os)
                 T("Save or copy the words", 14f, 400, pal.osv, lh = 1.3f)
             }
-            IconBtn("dl", pal.os, onSave, size = 44.dp, bg = pal.c4)
+            IconBtn("dl", pal.os, onSave, size = 44.dp, bg = pal.dockIn())
             Spacer(Modifier.width(6.dp))
-            IconBtn("dup", pal.os, onCopy, size = 44.dp, bg = pal.c4)
+            IconBtn("dup", pal.os, onCopy, size = 44.dp, bg = pal.dockIn())
         }
     }
 }
@@ -381,7 +381,7 @@ private fun DinduyRow(pos: Int, onShare: () -> Unit) {
                 T("Share note", 16f, 500, pal.os)
                 T("Opens in Dinduy, with everything in it", 14f, 400, pal.osv, lh = 1.3f)
             }
-            ShareNodesBtn(pal.os, pal.c4, onShare)
+            ShareNodesBtn(pal.os, pal.dockIn(), onShare)
         }
     }
 }
@@ -544,7 +544,7 @@ fun FindBar(ed: Ed, fa: Float) {
                         layout(w, c.maxHeight) { p.place(0, 0) }
                     }
                     .graphicsLayer { shape = RoundedCornerShape(26.dp); clip = true; alpha = smooth(fa / .45f) }
-                    .background(pal.c3),
+                    .background(pal.dock()),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(

@@ -150,6 +150,20 @@ fun Pal.bar2(): Color = lerp(s, os, if (dark) .13f else .07f)
 /** Abu-abu netral mutlak (tanpa corak warna) turunan dari kertas dan teks; dipakai untuk trek toggle. */
 fun Pal.neutral(k: Float): Color = lerp(s.gray(), os.gray(), k)
 
+// ---- Expressive: wadah toolbar / sheet / objek sisipan / kartu pengaturan memakai wadah tonal berwarna (tb, tb2)
+// yang berbeda tegas dari mode biasa. Mode biasa tetap memakai c2 / c3 / c4 seperti sebelumnya.
+/** Wadah toolbar, sheet, bilah rekam, gelembung seleksi. */
+fun Pal.dock(): Color = if (ex) tb else c3
+/** Elemen di dalam wadah di atas (grup tombol, ubin, chip). */
+fun Pal.dockIn(): Color = if (ex) tb2 else c4
+/** Kartu halaman Pengaturan / opsi. */
+fun Pal.setCard(): Color = if (ex) tb else c2
+/** Tabel: latar sel dan baris kepala. */
+fun Pal.tblBg(): Color = if (ex) tb2 else c2
+fun Pal.tblHead(): Color = if (ex) tb else sc
+/** Blok kode. */
+fun Pal.codeBg(): Color = if (ex) tb else c3
+
 /** Abu-abu dengan kecerahan yang sama (bobot persepsi mata), alpha tetap. */
 fun Color.gray(): Color {
     val l = 0.299f * red + 0.587f * green + 0.114f * blue

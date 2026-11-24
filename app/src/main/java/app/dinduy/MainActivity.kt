@@ -857,10 +857,9 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     PhotoLayer(vm)
                     androidx.compose.runtime.LaunchedEffect(vm.importTick) { if (vm.importTick > 0) act.importMd() }
 
-                    SelBar(vm)
                     Fab(
                         vm, act, small = fabSmall,
-                        hide = (!isHome && !FabFx.drag) || vm.sel.isNotEmpty() || vm.searchOn || vm.addOn || vm.remFilter,
+                        hide = (!isHome && !FabFx.drag) || vm.searchOn || vm.addOn || vm.remFilter,
                         lift = 0.dp   // snackbar/notifikasi tidak menaikkan tombol; snackbar digambar di atasnya
                     )
                     QuickVoice(vm, lift = 0.dp)
@@ -874,7 +873,7 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     UpdateHost()
                     // layar muat awal: paling atas, hanya sekali per proses (beranda sudah dikomposisi di baliknya)
                     LaunchedEffect(Unit) { vm.boot() }
-                    BootSplash(vm)
+                    // layar muat awal DIHAPUS: persiapan sampul / tekstur buku tetap jalan di latar lewat vm.boot(), tanpa layar penutup
                 }
             }
         }

@@ -147,7 +147,7 @@ class TitleAnim(intro: Boolean) {
 
     private fun spring(tau: Float, rest: Float): Float {
         val z = .36f
-        val w = 10.5f
+        val w = 13f
         val s = sqrt(1f - z * z)
         val e = exp(-z * w * tau)
         return rest * (1f - e * (cos(w * s * tau) + (z / s) * sin(w * s * tau)))
@@ -156,17 +156,17 @@ class TitleAnim(intro: Boolean) {
     fun u(k: Int, rest: Float): Float {
         var u = rest
         if (introOn) {
-            val tau = t - k * .07f
+            val tau = t - k * .055f
             u = if (tau <= 0f) .02f else spring(tau, rest)
         }
-        if (loop > 0f) u += loop * (.30f * sin(lt * .9f - k * 1.1f) + .10f * sin(lt * 1.7f + k * 2.3f))
+        if (loop > 0f) u += loop * (.30f * sin(lt * 1.25f - k * 1.1f) + .10f * sin(lt * 2.3f + k * 2.3f))
         return u
     }
 
     /** Tingkat miring kata (0 tegak .. SL-1 paling miring). */
     fun slant(k: Int): Int {
         if (loop < .02f) return 0
-        val v = (sin(lt * .5f + k * 1.7f) + 1f) / 2f
+        val v = (sin(lt * .7f + k * 1.7f) + 1f) / 2f
         return (v * v * (GSX.SL - 1) * loop).roundToInt()   // naik-turun bertahap lewat tingkat antara: miringnya mengalir, tidak patah
     }
 }
@@ -209,9 +209,9 @@ class HeadAnim {
 
     /** Gaya tiap kata: (d + 16) * 4 + miring. Dibaca lewat derivedStateOf supaya hanya berubah saat tingkatnya berundak. */
     fun specs(lv: Int, n: Int): List<Int> = List(n) { k ->
-        val s = if (loop <= 0f) 0f else (loop * (.8f * sin(lt * .8f - k * 1.3f) + .2f * sin(lt * 1.5f + k * 2.1f))).coerceIn(-1f, 1f)
+        val s = if (loop <= 0f) 0f else (loop * (.8f * sin(lt * 1.1f - k * 1.3f) + .2f * sin(lt * 2.0f + k * 2.1f))).coerceIn(-1f, 1f)
         val d = if (s < 0f) (s * below(lv)).roundToInt() else (s * above(lv)).roundToInt()
-        val v = (sin(lt * .45f + k * 1.9f) + 1f) / 2f
+        val v = (sin(lt * .62f + k * 1.9f) + 1f) / 2f
         val sl = (v * v * (HEAD_SL - 1) * loop).roundToInt()
         (d + 16) * 4 + sl
     }

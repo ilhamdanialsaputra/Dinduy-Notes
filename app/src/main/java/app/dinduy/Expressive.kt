@@ -204,7 +204,7 @@ fun XBtn(
 fun XGroup(
     modifier: Modifier = Modifier,
     i: Int = -1,
-    color: Color = LocalPal.current.c4,
+    color: Color = LocalPal.current.dockIn(),
     content: @Composable RowScope.() -> Unit
 ) {
     Row(
@@ -224,7 +224,7 @@ fun SlideSeg(
     count: Int,
     sel: Int,
     i: Int = -1,
-    color: Color = LocalPal.current.c4,
+    color: Color = LocalPal.current.dockIn(),
     onPick: (Int) -> Unit,
     item: @Composable (Int, Color) -> Unit
 ) {

@@ -413,7 +413,7 @@ fun LinkBody(ed: Ed, b: Blk, dm: Dm, pal: Pal, modifier: Modifier) {
     val showImg = b.pi.isNotEmpty() && (bmp != null || !imgSt.first)
     val domain = LinkPreviews.domain(url)
 
-    BoxWithConstraints(modifier.clip(LinkShape).background(pal.sc)) {
+    BoxWithConstraints(modifier.clip(LinkShape).background(if (pal.ex) pal.tb else pal.sc)) {
         val showBadge = maxWidth >= 170.dp
         val showArrow = maxWidth >= 230.dp
         Column(Modifier.fillMaxWidth().padding(8.dp)) {
