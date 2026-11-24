@@ -3100,14 +3100,7 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     // latar: alpha digambar langsung (tanpa layer offscreen layar penuh yang dibuat ulang tiap frame morph)
     Box(Modifier.fillMaxSize().drawBehind { drawRect(pal.s, alpha = noteFade(vm)) })
     OrnamentLayer(vm, ornKind, pal, ofx, ed.noteId, clock = oclk)
-    if (coverNote != null) {
-        if (frameOn) EditorFrame(vm, coverNote) { scroll.value }
-        else {
-            EditorCover(vm, coverNote) { scroll.value }
-            // sampul gradasi larut ke kertas di tepi bawahnya: ornamen muncul lagi di atas sampul dengan topeng pudar (tidak terpotong)
-            if (ornKind.isNotEmpty()) OrnamentCoverOverlay(vm, pal, ofx, oclk, with(density) { (screenWdp / EDIT_RATIO).toPx() }) { scroll.value.toFloat() }
-        }
-    }
+    if (coverNote != null) { if (frameOn) EditorFrame(vm, coverNote) { scroll.value } else EditorCover(vm, coverNote) { scroll.value } }
     Box(Modifier.fillMaxSize().graphicsLayer { alpha = noteFade(vm) }) {
     Column(Modifier.fillMaxSize()) {
         TopBar()

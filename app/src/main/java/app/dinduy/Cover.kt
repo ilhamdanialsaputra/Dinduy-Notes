@@ -43,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.ColorFilter
@@ -182,6 +183,10 @@ fun EditorCover(vm: AppVM, d: Note, scroll: () -> Int) {
     val pal = LocalPal.current
     val bmp = rememberImg(vm, d.cv)
     val clear = pal.s.copy(alpha = 0f)
+    // Catatan berornamen: banner TIDAK lagi menimpa dirinya dengan kerudung warna kertas (yang menutupi ornamen di dalam banner,
+    // sehingga ornamen "terpotong" di tepi bawah). Pudarnya dibuat lewat topeng alfa pada banner itu sendiri, jadi yang tersingkap
+    // di bawahnya adalah kertas + ornamen asli. Kurva dan semua pewaktuannya (e, scroll) sama persis dengan kerudung lama.
+    val orn = d.orn.isNotEmpty()
     Box(
         Modifier.fillMaxWidth()
             .layout { m, c ->
@@ -201,8 +206,32 @@ fun EditorCover(vm: AppVM, d: Note, scroll: () -> Int) {
                 val k = cSmooth((vm.openP.value - .5f) / .5f)
                 translationY = -scroll().toFloat() * k
                 clip = true
+                if (orn) compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen
             }
-            .background(pal.c3)
+            .let { if (orn) it else it.background(pal.c3) }
+            .let {
+                if (!orn) it else it.drawWithContent {
+                    drawContent()
+                    val e = cSmooth(vm.openP.value)
+                    val k = Color.Black
+                    drawRect(
+                        Brush.verticalGradient(
+                            colorStops = if (pal.dark) arrayOf(
+                                0f to k.copy(alpha = 1f - .5f * e),
+                                .28f to k,
+                                .42f to k,
+                                1f to k.copy(alpha = 1f - e)
+                            ) else Array(LIGHT_N) { i ->
+                                (i / (LIGHT_N - 1).toFloat()) to k.copy(alpha = 1f - LIGHT_FADE[i] * e)
+                            }
+                        ),
+                        blendMode = androidx.compose.ui.graphics.BlendMode.DstIn
+                    )
+                    // larut saat digulir: sama dengan lapisan kertas lama (alpha .94), tapi sebagai topeng alfa
+                    val dis = .94f * cSmooth((coverQ(vm.openP.value, scroll(), size.height) - .18f) / .82f)
+                    if (dis > .001f) drawRect(k.copy(alpha = 1f - dis), blendMode = androidx.compose.ui.graphics.BlendMode.DstIn)
+                }
+            }
     ) {
         // lapisan gambar: tertinggal dari isi (parallax), membesar dari tepi bawah, miring ke belakang seperti halaman yang dilipat, dan memburam
         Canvas(
@@ -223,7 +252,7 @@ fun EditorCover(vm: AppVM, d: Note, scroll: () -> Int) {
                 }
             }
         ) { if (bmp != null) drawCover(bmp, d.cz, d.cx, d.cy, soft = !pal.dark) }
-        Box(
+        if (!orn) Box(
             Modifier.fillMaxSize().drawBehind {
                 val e = cSmooth(vm.openP.value)
                 drawRect(
@@ -242,7 +271,7 @@ fun EditorCover(vm: AppVM, d: Note, scroll: () -> Int) {
             }
         )
         // sampul larut ke warna kertas saat digulir (satu lapisan polos, murah digambar)
-        Box(
+        if (!orn) Box(
             Modifier.fillMaxSize().graphicsLayer {
                 val q = coverQ(vm.openP.value, scroll(), size.height)
                 alpha = .94f * cSmooth((q - .18f) / .82f)

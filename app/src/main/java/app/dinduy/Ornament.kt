@@ -9,7 +9,7 @@ package app.dinduy
  *  - Ukuran semua elemen dihitung dari LEBAR wadah (u = w). Karena itu ornamen di kartu, di wadah morph, dan di editor
  *    adalah gambar yang sama persis, hanya skalanya berbeda -> buka/tutup kartu mulus tanpa lompatan.
  *  - Legibilitas: kontras ornamen dipagari (ornCap), ornamen meredup + melambat saat mengetik (OrnFx.calm), tepi bentuk berbulu,
- *    dan di atas sampul gradasi ornamen digambar ulang dengan topeng pudar (OrnamentCoverOverlay / cardOrnOverCover) supaya tidak terpotong.
+ *    dan tepi bentuk berbulu.
  *  - Editor: parallax (tiap lapisan punya kedalaman), meregang dan memantul mengikuti kecepatan gulir, menghindari
  *    jari saat disentuh, berkumpul ke jari saat ditahan, dan "mekar" saat teks diangkat (ed.tl).
  *  - Kartu: pose diam (tanpa animasi), dengan pose terakhir dari editor supaya kartu tidak "loncat" setelah ditutup.
@@ -297,7 +297,6 @@ class OrnClock(val base: Float) {
 
 object OrnPose {
     private val m = HashMap<String, Float>()
-    val cardH = HashMap<String, Float>()          // tinggi kartu terakhir yang digambar (dipakai ornamen di atas sampul kartu)
     var ver by mutableIntStateOf(0)
     fun get(id: String): Float = m[id] ?: ((id.hashCode() and 0xFFFF) / 700f)
     fun put(id: String, t: Float) { m[id] = t }
@@ -335,7 +334,7 @@ private fun DrawScope.glow(c: Color, cx: Float, cy: Float, r: Float, k: Float) {
 // Bentuk Morph: fungsi radial r(theta) dinormalisasi, diinterpolasi antar bentuk lalu dihaluskan jadi kurva Bezier
 // =====================================================================================================================
 
-private const val ON = 64
+private const val ON = 48
 
 private object SH {
     private fun norm(f: (Float) -> Float): FloatArray {
@@ -457,13 +456,14 @@ private fun DrawScope.drawMorphScene(P: OrnPaint, w: Float, h: Float, t: Float, 
         val col = P.pick(b.col)
         val fill = col.copy(alpha = col.alpha * (.72f + .28f * (b.depth / .38f)))
         blobPath(SP, cx + ox, cy + oy, r0, rot, sx, sy, SH.all[sa], SH.all[sb], f, SH.all[6], mc, .022f, t * b.spd * 1.1f + i)
-        // tepi berbulu (dua lingkar lebar berintensitas rendah): bentuk "menyatu" dengan kertas, bukan tertempel
-        drawPath(SP, fill.copy(alpha = fill.alpha * .10f), style = Stroke(u * .075f, join = StrokeJoin.Round))
-        drawPath(SP, fill.copy(alpha = fill.alpha * .16f), style = Stroke(u * .035f, join = StrokeJoin.Round))
+        // tepi berbulu: satu lingkar lebar berintensitas rendah (murah) supaya bentuk menyatu dengan kertas
+        drawPath(SP, fill.copy(alpha = fill.alpha * .14f), style = Stroke(u * .04f, join = StrokeJoin.Round))
         drawPath(SP, fill)
-        // inti yang lebih terang, sedikit bergeser ke arah cahaya: memberi volume sekaligus meringankan bagian tengah tempat teks biasanya lewat
-        blobPath(SP, cx + ox - r0 * .10f, cy + oy - r0 * .12f, r0 * .60f, rot, sx, sy, SH.all[sa], SH.all[sb], f, SH.all[6], mc, .03f, t * b.spd * 1.1f + i + 1.3f)
-        drawPath(SP, lerpC(fill, P.paper, .5f).copy(alpha = fill.alpha * .75f))
+        // inti lebih terang: path yang sama dipakai ulang (diskalakan 60% terhadap titik pivot), tanpa membangun ulang kurva
+        val cxx = cx + ox; val cyy = cy + oy
+        withTransform({ scale(.6f, .6f, Offset(cxx - r0 * .25f, cyy - r0 * .30f)) }) {
+            drawPath(SP, lerpC(fill, P.paper, .5f).copy(alpha = fill.alpha * .75f))
+        }
     }
 }
 
@@ -513,9 +513,11 @@ private fun DrawScope.branch(
         val col = P.pick(k + seed).let { it.copy(alpha = it.alpha * fade) }
         leafPath(SP, NX[k], NY[k], la, ls, ls * .9f)
         drawPath(SP, col)
-        // sisi daun yang terkena cahaya
-        leafPath(SP, NX[k], NY[k], la - side * .10f, ls * .92f, ls * .36f)
-        drawPath(SP, lerpC(col, P.paper, .40f).copy(alpha = col.alpha * .55f))
+        // sisi daun yang terkena cahaya (hanya ranting depan: hemat gambar)
+        if (fade >= .99f && ls > u * .05f) {
+            leafPath(SP, NX[k], NY[k], la - side * .10f, ls * .92f, ls * .36f)
+            drawPath(SP, lerpC(col, P.paper, .40f).copy(alpha = col.alpha * .55f))
+        }
         if (ls > u * .05f) drawLine(
             P.paper.copy(alpha = .4f * fade * (1f - .6f * calm)), Offset(NX[k], NY[k]),
             Offset(NX[k] + cos(la) * ls * .8f, NY[k] + sin(la) * ls * .8f), strokeWidth = u * .0035f, cap = StrokeCap.Round
@@ -730,49 +732,11 @@ fun DrawScope.drawOrnament(kind: String, P0: OrnPaint, w: Float, h: Float, t: Fl
     }
 }
 
-/**
- * Ornamen yang MUNCUL DI ATAS sampul gradasi, dengan topeng alfa vertikal: nol di dalam foto, penuh tepat di tepi bawah sampul
- * (di situ foto sudah larut jadi warna kertas). Hasilnya ornamen "keluar" dari kabut sampul dan menyambung mulus dengan ornamen
- * di bawahnya, bukan terpotong garis sampul. Digambar dalam layer kecil (hanya area sampul) supaya topengnya tidak menyentuh pixel lain.
- * [y1] = tepi bawah sampul, [rampLen] = panjang zona transisi ke atas dari tepi itu.
- */
-fun DrawScope.drawOrnOverCover(
-    kind: String, P0: OrnPaint, w: Float, h: Float, t: Float, sc: Float, fx: OrnFx?,
-    y1: Float, rampLen: Float, alpha: Float = 1f, enter: Float = 1f
-) {
-    if (kind.isEmpty() || y1 <= 2f || alpha <= .002f) return
-    val yb = min(y1, size.height)
-    val y0 = (y1 - rampLen).coerceIn(0f, yb - 1f)
-    if (yb - y0 < 2f) return
-    drawIntoCanvas { c ->
-        c.saveLayer(Rect(0f, y0, w, yb), Paint())
-        drawOrnament(kind, P0, w, h, t, sc, fx, alpha, enter)
-        drawRect(
-            Brush.verticalGradient(0f to Color.Transparent, .55f to Color.Black.copy(alpha = .30f), 1f to Color.Black, startY = y0, endY = yb),
-            topLeft = Offset(0f, y0), size = Size(w, yb - y0), blendMode = BlendMode.DstIn
-        )
-        c.restore()
-    }
-}
-
 /** Ornamen kartu: digambar di belakang isi kartu (dan di belakang sampul), pose diam. Pasang tepat setelah .background(...). */
 fun Modifier.cardOrnament(kind: String, P: OrnPaint, id: String): Modifier =
     if (kind.isEmpty()) this else drawBehind {
         OrnPose.ver
-        OrnPose.cardH[id] = size.height
         drawOrnament(kind, P, size.width, size.height, OrnPose.get(id), 0f, null)
-    }
-
-/**
- * Pasangan [cardOrnament] untuk kartu bersampul GRADASI: pasang pada Modifier sampul (setelah ukuran), supaya ornamen digambar di atas
- * foto dengan topeng pudar ke bawah (lihat [drawOrnOverCover]). Adegannya sama persis dengan yang di belakang sampul.
- */
-fun Modifier.cardOrnOverCover(kind: String, P: OrnPaint, id: String): Modifier =
-    if (kind.isEmpty()) this else drawWithContent {
-        drawContent()
-        OrnPose.ver
-        val h = OrnPose.cardH[id] ?: (size.height * 2.2f)
-        drawOrnOverCover(kind, P, size.width, h, OrnPose.get(id), 0f, null, size.height, size.height * .55f)
     }
 
 /** Tinggi wadah yang tampak dalam koordinat isi editor. Saat morph dari kartu, isi editor diskalakan; hasilnya = tinggi kartu / skala. */
@@ -824,29 +788,6 @@ fun OrnamentLayer(
         val ca = 1f - .36f * fx.calm
         if (clock.prev.isNotEmpty()) drawOrnament(clock.prev, P, size.width, ph, tn, fx.scroll, fx, alpha = (1f - s).coerceIn(0f, 1f) * ca, enter = (1f - s).coerceIn(0f, 1f))
         drawOrnament(clock.cur, P, size.width, ph, tn, fx.scroll, fx, alpha = s.coerceIn(0f, 1f) * ca, enter = s)
-    }
-}
-
-/**
- * Pasangan [OrnamentLayer] untuk catatan bersampul GRADASI di editor. Letakkan TEPAT SETELAH sampul (dan sebelum isi / teks).
- * [coverH] = tinggi banner sampul (px, dalam koordinat isi), [scroll] = gulir saat ini (px): banner ikut tergulir, jadi tepi bawahnya = coverH - scroll.
- */
-@Composable
-fun OrnamentCoverOverlay(
-    vm: AppVM?, pal: Pal, fx: OrnFx, clock: OrnClock, coverH: Float, modifier: Modifier = Modifier.fillMaxSize(), scroll: () -> Float
-) {
-    if (clock.cur.isEmpty() && clock.prev.isEmpty()) return
-    val P = remember(pal) { ornPaint(pal) }
-    Canvas(modifier) {
-        val y1 = coverH - scroll()
-        if (y1 <= 2f) return@Canvas
-        val ph = if (vm != null) ornViewH(vm, size) else size.height
-        val tn = clock.now
-        val s = clock.sw
-        val ca = 1f - .36f * fx.calm
-        val ramp = coverH * .55f
-        if (clock.prev.isNotEmpty()) drawOrnOverCover(clock.prev, P, size.width, ph, tn, fx.scroll, fx, y1, ramp, (1f - s).coerceIn(0f, 1f) * ca, (1f - s).coerceIn(0f, 1f))
-        drawOrnOverCover(clock.cur, P, size.width, ph, tn, fx.scroll, fx, y1, ramp, s.coerceIn(0f, 1f) * ca, s)
     }
 }
 
