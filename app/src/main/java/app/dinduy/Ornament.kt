@@ -67,6 +67,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.ClipOp
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Paint
@@ -154,11 +157,11 @@ fun notePalFor(gp: Pal, d: Note): Pal {
 // =====================================================================================================================
 
 @Immutable
-class OrnPaint(val a: Color, val b: Color, val c: Color, val d: Color, val ink: Color, val paper: Color, val amt: Float = 1f) {
+class OrnPaint(val a: Color, val b: Color, val c: Color, val d: Color, val ink: Color, val paper: Color, val amt: Float = 1f, val dark: Boolean = false) {
     fun pick(i: Int): Color = when (((i % 4) + 4) % 4) { 0 -> a; 1 -> b; 2 -> c; else -> d }
     fun alpha(k: Float): OrnPaint = if (k >= 1f) this else OrnPaint(
         a.copy(alpha = a.alpha * k), b.copy(alpha = b.alpha * k), c.copy(alpha = c.alpha * k),
-        d.copy(alpha = d.alpha * k), ink.copy(alpha = ink.alpha * k), paper, amt * k
+        d.copy(alpha = d.alpha * k), ink.copy(alpha = ink.alpha * k), paper, amt * k, dark
     )
 }
 
@@ -183,7 +186,7 @@ fun ornPaint(p: Pal): OrnPaint {
         ornCap(lerpC(s, p.sc, if (dk) .85f else .75f), s, cap),
         ornCap(lerpC(s, p.ac, if (dk) .80f else .60f), s, cap * 1.15f),
         ornCap(lerpC(s, p.p, if (dk) .34f else .30f), s, cap * 1.35f),
-        s
+        s, dark = dk
     )
 }
 
@@ -426,10 +429,6 @@ private fun DrawScope.drawMorphScene(P: OrnPaint, w: Float, h: Float, t: Float, 
     val st = fx?.stretch ?: 0f; val pr = fx?.press ?: 0f; val hd = fx?.hold ?: 0f; val lf = fx?.lift ?: 0f
     val tx = fx?.px ?: 0f; val ty = fx?.py ?: 0f
 
-    // dua cahaya aurora yang melayang pelan di belakang semua bentuk
-    glow(P.c, u * (.80f + .05f * sin(t * .13f)), u * (.22f + .04f * cos(t * .11f)) - ornSoft(sc * .05f, u * .2f), u * .95f, .55f)
-    glow(P.b, u * (.14f + .05f * cos(t * .10f)), h * (.80f + .04f * sin(t * .09f)) - ornSoft(sc * .04f, u * .2f), u * .80f, .50f)
-
     for (i in BLOBS.indices) {
         val b = BLOBS[i]
         val r0 = b.s * u * .8f * (1f + .06f * lf + .03f * hd + .02f * sin(t * b.spd * .8f + i))
@@ -470,18 +469,8 @@ private fun DrawScope.drawMorphScene(P: OrnPaint, w: Float, h: Float, t: Float, 
         val col = P.pick(b.col)
         val fill = col.copy(alpha = col.alpha * (.72f + .28f * (b.depth / .38f)))
         blobPath(SP, cx + ox, cy + oy, r0, rot, sx, sy, SH.all[sa], SH.all[sb], f, SH.all[6], mc, .022f, t * b.spd * 1.1f + i)
-        val cxx = cx + ox; val cyy = cy + oy
-        // Dulu: stroke lebar (SkStroker di CPU tiap frame, sangat mahal) + fill + fill inti = 3 gambar path per bentuk.
-        // Sekarang 2: halo = path yang SAMA diskalakan sedikit (tanpa stroking), lalu fill dengan gradien radial yang sudah memuat inti terang.
-        withTransform({ scale(1.07f, 1.07f, Offset(cxx, cyy)) }) { drawPath(SP, fill.copy(alpha = fill.alpha * .12f)) }
-        val hi = lerpC(fill, P.paper, .5f).copy(alpha = fill.alpha * .75f)
-        drawPath(
-            SP,
-            Brush.radialGradient(
-                0f to hi, .38f to hi, .62f to fill, 1f to fill,
-                center = Offset(cxx - r0 * .15f, cyy - r0 * .18f), radius = r0 * 1.15f
-            )
-        )
+        // polos: satu fill saja, tanpa halo, tanpa cahaya, tanpa inti terang
+        drawPath(SP, fill)
     }
 }
 
@@ -625,22 +614,28 @@ private fun DrawScope.drawSkylineScene(P: OrnPaint, w: Float, h: Float, t: Float
     val tx = fx?.px ?: 0f
     val calm = fx?.calm ?: 0f
 
-    // matahari + halo
+    val dk = P.dark
+    val litT = if (dk) .42f else .6f
     val sunR = u * .11f * (1f + .05f * hd + .08f * lf)
     val sx = u * (.76f + .025f * sin(t * .05f))
     val sy = u * .19f - ornSoft(sc * .07f, u * .2f) + sin(t * .35f) * u * .006f
-    glow(P.d, sx, sy, sunR * 4.4f, .45f * (1f + .15f * sin(t * .4f)))
-    glow(P.b, sx, sy, sunR * 2.7f, .55f)
-    val rot = t * .12f + sc * .0008f + lf * .6f + st * .15f
-    for (k in 0 until 12) {
-        val a = rot + k * (2f * PI.toFloat() / 12f)
-        val lng = if (k % 2 == 0) 1f else .62f
-        val r1 = sunR * 1.38f
-        val r2 = sunR * (1.38f + (.26f + .07f * sin(t * .9f + k * 1.3f)) * lng)
-        drawLine(P.b, Offset(sx + cos(a) * r1, sy + sin(a) * r1), Offset(sx + cos(a) * r2, sy + sin(a) * r2), strokeWidth = sunR * .17f, cap = StrokeCap.Round)
+    if (dk) {
+        // malam: bulan sabit berhalo tipis (menggantikan matahari)
+        val mr = sunR * 1.2f
+        glow(P.ink, sx, sy, mr * 2.4f, .22f)
+        SP2.reset(); SP2.addOval(Rect(Offset(sx + mr * .45f, sy - mr * .2f), mr * .86f))
+        clipPath(SP2, ClipOp.Difference) { drawCircle(P.ink, mr, Offset(sx, sy)) }
+    } else {
+        val rot = t * .12f + sc * .0008f + lf * .6f + st * .15f
+        for (k in 0 until 12) {
+            val a = rot + k * (2f * PI.toFloat() / 12f)
+            val lng = if (k % 2 == 0) 1f else .62f
+            val r1 = sunR * 1.38f
+            val r2 = sunR * (1.38f + (.26f + .07f * sin(t * .9f + k * 1.3f)) * lng)
+            drawLine(P.b, Offset(sx + cos(a) * r1, sy + sin(a) * r1), Offset(sx + cos(a) * r2, sy + sin(a) * r2), strokeWidth = sunR * .17f, cap = StrokeCap.Round)
+        }
+        drawCircle(P.d, sunR, Offset(sx, sy))
     }
-    drawCircle(P.d, sunR, Offset(sx, sy))
-    drawCircle(lerpC(P.d, P.paper, .45f).copy(alpha = P.d.alpha * .8f), sunR * .66f, Offset(sx - sunR * .06f, sy - sunR * .08f))
 
     // awan: gulir menggeser mereka ke samping; tiga gumpalan + dasar rata
     for (i in 0 until 3) {
@@ -656,7 +651,7 @@ private fun DrawScope.drawSkylineScene(P: OrnPaint, w: Float, h: Float, t: Float
     }
 
     // burung: satu kawanan berbentuk V, kepakan bergantian, melintas pelan
-    run {
+    if (!dk) run {
         val span = u * 1.8f
         val hx = ornMod(ornHash(0, 61) * span + t * u * .022f - sc * .02f, span) - u * .3f
         val hy = u * .17f - ornSoft(sc * .05f, u * .1f) + sin(t * .4f) * u * .012f
@@ -674,14 +669,18 @@ private fun DrawScope.drawSkylineScene(P: OrnPaint, w: Float, h: Float, t: Float
         }
     }
 
-    // kilau bintang kecil di langit: empat ujung, berkedip bergantian (murah: 2 garis per kilau)
-    for (i in 0 until 5) {
-        val kx = u * (.08f + .84f * ornHash(i, 71)); val ky = u * (.05f + .30f * ornHash(i, 72)) - ornSoft(sc * .03f, u * .08f)
+    // bintang: siang hanya 5 kilau samar; malam 24 bintang (sebagian kilau empat ujung, sisanya titik) yang berkedip bergantian
+    val sn = if (dk) 24 else 5
+    val starC = if (dk) P.ink else P.d
+    for (i in 0 until sn) {
+        val kx = u * (.05f + .90f * ornHash(i, 71)); val ky = u * (.03f + .34f * ornHash(i, 72)) - ornSoft(sc * .03f, u * .08f)
+        if (dk && hypot(kx - sx, ky - sy) < sunR * 2.4f) continue
         val tw = sin(t * (.55f + ornHash(i, 73) * .5f) + i * 2.1f)
-        val a = (tw * .5f + .5f).let { it * it }
-        if (a < .04f) continue
+        var a = (tw * .5f + .5f).let { it * it }
+        if (dk) a = .3f + .7f * a else if (a < .04f) continue
         val r = u * (.006f + .006f * ornHash(i, 74)) * (.6f + .6f * a)
-        val c = P.d.copy(alpha = P.d.alpha * a * .8f * (1f - .6f * calm))
+        val c = starC.copy(alpha = starC.alpha * a * (if (dk) 1f else .8f) * (1f - .6f * calm))
+        if (dk && i >= 9) { drawCircle(c, r * .45f, Offset(kx, ky)); continue }
         drawLine(c, Offset(kx - r, ky), Offset(kx + r, ky), strokeWidth = u * .0028f, cap = StrokeCap.Round)
         drawLine(c, Offset(kx, ky - r), Offset(kx, ky + r), strokeWidth = u * .0028f, cap = StrokeCap.Round)
     }
@@ -771,7 +770,7 @@ private fun DrawScope.drawSkylineScene(P: OrnPaint, w: Float, h: Float, t: Float
                     val cell = bw / cols
                     for (r in 0 until rows) for (c in 0 until cols) {
                         val hh = ornHash(i * 131 + r * 17 + c * 3, 51 + L)
-                        if (!(hh > .6f || (near > .3f && hh > .25f))) continue
+                        if (!(hh > litT || (near > .3f && hh > .25f))) continue
                         val tw = .5f + .5f * sin(t * (.18f + hh * .3f) + hh * 20f)
                         val al = (.30f + .35f * tw) * (if (L == 1) .6f else 1f) * (1f - .35f * calm) + near * .2f
                         drawRoundRect(
@@ -831,6 +830,34 @@ fun DrawScope.drawOrnament(kind: String, P0: OrnPaint, w: Float, h: Float, t: Fl
  */
 object OrnWarm {
     private var done = false
+    private var gpuDone = false
+
+    /**
+     * Pemanasan GPU: bitmap di atas memanaskan JIT, tetapi shader gradien dan jalur path Skia baru dikompilasi saat pertama kali
+     * digambar di kanvas layar sungguhan. Itu yang membuat ornamen "berhenti sekedip" sekali setelah catatan dibuka (saat pertama kali
+     * ada gulir cepat / awan / pesawat / mode gelap muncul). Di sini semua adegan (terang + gelap, semua gestur aktif) digambar sekali
+     * dengan alpha nyaris nol di pojok kecil kanvas pertama yang tampil (kartu di daftar), jadi biayanya terbayar sebelum editor dibuka.
+     */
+    fun gpu(ds: DrawScope) {
+        if (gpuDone) return
+        gpuDone = true
+        try {
+            val c = Color(0xFFEEEEEE)
+            val fx = OrnFx().also { it.press = 1f; it.hold = 1f; it.lift = 1f; it.stretch = .6f; it.calm = .5f; it.px = 50f; it.py = 80f }
+            with(ds) {
+                clipRect(0f, 0f, 120f, 200f) {
+                    for (dk in listOf(false, true)) {
+                        val op = OrnPaint(c, c, c, c, c, c, 1f, dk)
+                        for (k in listOf("morph", "canopy", "skyline")) {
+                            drawOrnament(k, op, 120f, 200f, 3f, 900f, fx, alpha = .02f)
+                            drawOrnament(k, op, 120f, 200f, 31f, 0f, fx, alpha = .02f)
+                        }
+                    }
+                }
+            }
+        } catch (e: Throwable) { }
+    }
+
     fun run() {
         if (done) return
         done = true
@@ -852,6 +879,7 @@ object OrnWarm {
 fun Modifier.cardOrnament(kind: String, P: OrnPaint, id: String): Modifier =
     if (kind.isEmpty()) this else drawBehind {
         OrnWarm.run()
+        OrnWarm.gpu(this)
         OrnPose.ver
         drawOrnament(kind, P, size.width, size.height, OrnPose.get(id), 0f, null)
     }
@@ -909,6 +937,7 @@ fun OrnamentLayer(
     }
     // layer sendiri: invalidasi per frame ornamen tidak ikut merekam ulang node tetangga
     Canvas(modifier.graphicsLayer { }) {
+        OrnWarm.gpu(this)
         val ph = if (vm != null) ornViewH(vm, size) else size.height
         val tn = clock.now
         val s = clock.sw
