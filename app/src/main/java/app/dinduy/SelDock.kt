@@ -1,6 +1,10 @@
 package app.dinduy
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
@@ -90,6 +94,7 @@ private fun ShareIc(tint: Color, sz: Dp = 24.dp) {
 fun SelDockShell(
     on: Boolean, p: Animatable<Float, androidx.compose.animation.core.AnimationVector1D>,
     fromW: Dp, fromH: Dp, endPad: Dp?, lift: Dp,
+    plus: Boolean = true,
     content: @Composable RowScope.() -> Unit
 ) {
     LaunchedEffect(on) { p.animateTo(if (on) 1f else 0f, M3E.spatial()) }
@@ -117,21 +122,39 @@ fun SelDockShell(
                     layout(c.maxWidth, h) { pl.place(x, 0) }
                 }
         ) {
+            // Tanpa bayangan: kapsul dibingkai garis tebal berwarna utama supaya jelas terpisah dari kartu / latar (mode biasa maupun Expressive).
+            // Garis dan warna tumbuh bersama progres morph. Kapsul arsip / sampah (plus = false) tidak berasal dari FAB, jadi tumbuh dari
+            // titik kecil sambil memudar masuk dan TIDAK menampilkan tombol "+" sama sekali.
             Box(
                 Modifier.fillMaxSize()
                     .graphicsLayer {
                         val pp = p.value.coerceIn(0f, 1f)
-                        shadowElevation = (3f + 5f * pp).dp.toPx()
-                        val r = (32f + 4f * pp).dp.toPx()
-                        shape = RoundedCornerShape(r.coerceAtLeast(0f).let { with(dn) { it.toDp() } })
+                        val rr = min(size.height / 2f, (32f + 4f * pp).dp.toPx()).coerceAtLeast(0f)
+                        shape = RoundedCornerShape(androidx.compose.foundation.shape.CornerSize(rr))
                         clip = true
-                        ambientShadowColor = pal.p.copy(alpha = .25f)
-                        spotShadowColor = pal.p.copy(alpha = .35f)
+                        if (!plus) {
+                            val g = sm(pp / .45f)
+                            alpha = g; val sc = .55f + .45f * g; scaleX = sc; scaleY = sc
+                        }
                     }
-                    .drawBehind { drawRect(lerp(pal.pc, pal.dock(), sm(p.value / .6f))) }
+                    .drawWithContent {
+                        val pp = p.value.coerceIn(0f, 1f)
+                        drawRect(if (plus) lerp(pal.pc, pal.dock(), sm(pp / .6f)) else pal.dock())
+                        drawContent()
+                        val sw = (if (plus) 3.dp.toPx() * sm((pp - .1f) / .5f) else 3.dp.toPx())
+                        if (sw > .1f) {
+                            val rr = min(size.height / 2f, (32f + 4f * pp).dp.toPx()).coerceAtLeast(0f)
+                            drawRoundRect(
+                                pal.p, androidx.compose.ui.geometry.Offset(sw / 2f, sw / 2f),
+                                androidx.compose.ui.geometry.Size((size.width - sw).coerceAtLeast(0f), (size.height - sw).coerceAtLeast(0f)),
+                                androidx.compose.ui.geometry.CornerRadius((rr - sw / 2f).coerceAtLeast(0f)),
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(sw)
+                            )
+                        }
+                    }
             ) {
-                // "+" memudar dan berputar keluar saat kapsul melebar
-                Box(
+                // "+" memudar dan berputar keluar saat kapsul melebar (hanya untuk kapsul beranda yang berasal dari FAB)
+                if (plus) Box(
                     Modifier.fillMaxSize().graphicsLayer {
                         val a = 1f - sm(p.value / .35f)
                         alpha = a; rotationZ = 90f * (1f - a)
@@ -139,7 +162,8 @@ fun SelDockShell(
                     Alignment.Center
                 ) { Ic("plus", pal.opc, 36.dp) }
                 Box(
-                    Modifier.fillMaxSize().graphicsLayer { alpha = sm((p.value - .22f) / .45f) }
+                    Modifier.fillMaxSize()
+                        .graphicsLayer { val a = sm((p.value - .22f) / .45f); if (a < .999f) { alpha = a; compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.ModulateAlpha } }
                         .horizontalScroll(rememberScrollState())
                 ) {
                     Row(
@@ -167,16 +191,19 @@ fun CountChip(n: Int) {
         Modifier.height(48.dp).clip(CircleShape).background(pal.p).padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        AnimatedContent(
-            targetState = n,
-            transitionSpec = {
-                val up = targetState > initialState
-                (slideInVertically(M3E.spatialFast()) { if (up) it else -it } togetherWith
-                    slideOutVertically(M3E.spatialFast()) { if (up) -it else it })
-                    .using(SizeTransform(clip = false))
-            },
-            label = "cnt"
-        ) { v -> T(v.toString(), 17f, 900, pal.op) }
+        // angka lama / baru digeser DI DALAM kotak berpotong (clipToBounds) lalu memudar, jadi tidak ada angka yang tertinggal di atas / bawah lalu hilang mendadak
+        Box(Modifier.height(30.dp).clipToBounds(), Alignment.Center) {
+            AnimatedContent(
+                targetState = n,
+                transitionSpec = {
+                    val up = targetState > initialState
+                    (slideInVertically(M3E.spatialFast()) { if (up) it else -it } + fadeIn(tween(110)) togetherWith
+                        slideOutVertically(M3E.spatialFast()) { if (up) -it else it } + fadeOut(tween(90)))
+                        .using(SizeTransform(clip = true))
+                },
+                label = "cnt"
+            ) { v -> T(v.toString(), 17f, 900, pal.op) }
+        }
         T(" selected", 15f, 700, pal.op, maxLines = 1)
     }
 }
@@ -242,7 +269,7 @@ fun ListSelDock(vm: AppVM, sel: androidx.compose.runtime.snapshots.SnapshotState
     val last = remember { arrayOf<List<String>>(emptyList()) }
     if (on) last[0] = sel.toList()
     val ids = if (on) sel.toList() else last[0]
-    SelDockShell(on, listP.p, 64.dp, 64.dp, null, 0.dp) {
+    SelDockShell(on, listP.p, 64.dp, 64.dp, null, 0.dp, plus = false) {
         XBtn(onClick = { sel.clear() }) { c -> Ic("x", c) }
         CountChip(ids.size)
         XGroup {
