@@ -249,7 +249,9 @@ fun OrnDriver(fx: OrnFx, scroll: () -> Float, lifted: () -> Boolean, on: Boolean
                 val dt = if (lastT == 0L) .016f else ((n - lastT) / 1e9f).coerceIn(.004f, .05f)
                 lastT = n
                 val s = scroll(); fx.scroll = s
-                val v = (s - last) / dt; last = s
+                // lompatan gulir sekali-frame (koreksi tinggi blok / gulir kursor, bukan jari) tidak boleh dianggap fling: kalau tidak, stretch
+                // menempel di batas dan ekornya (peluruhan vel) membuat ornamen terasa "macet" hampir 1 detik
+                val v = ((s - last) / dt).coerceIn(-9000f, 9000f); last = s
                 fx.vel += (v - fx.vel) * (1f - exp(-dt * 14f))
                 // pegas hampir kritis (zeta ~ .78): melar mengikuti gulir lalu kembali halus; target dilunakkan tanh supaya tidak pernah "mentok"
                 val tgt = tanh(fx.vel / 3600f) * .85f
@@ -927,7 +929,8 @@ fun OrnamentLayer(
                 // tidak "berhenti lalu melompat". Frame normal tetap mengikuti dt asli.
                 val raw = ((n - last) / 1e9f).coerceIn(.001f, .25f)
                 sm += (raw.coerceAtMost(.034f) - sm) * .35f
-                val dt = if (raw > .034f) sm + (raw - .034f) * .5f else raw
+                // frame yang tersendat hanya memajukan waktu sedikit (maks ~40 ms): setelah hitch gerak lanjut mulus, bukan melompat
+                val dt = if (raw > .034f) (sm + (raw - .034f) * .12f).coerceAtMost(.04f) else raw
                 // saat mengetik, waktu ornamen berjalan lebih lambat (gerak latar yang tenang = mata tidak "tertarik" dari teks)
                 clock.time += dt * (1f - .70f * fx.calm)
             }

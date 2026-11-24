@@ -2890,7 +2890,34 @@ fun NoteScreen(vm: AppVM, ed: Ed, act: Actions) {
     }
     LaunchedEffect(winOn, dm) {
         if (!winOn) { liveSet = emptySet(); return@LaunchedEffect }
-        androidx.compose.runtime.snapshotFlow { ed.computeLive(scroll.value, plansNow, dm.fs, dm.lh) }.collect { liveSet = it }
+        // Blok yang BARU masuk jendela disusun bertahap (3 per frame, yang terdekat dengan layar dulu), bukan sekaligus: menyusun
+        // belasan blok dalam satu frame = main thread tersendat = ornamen (waktu + parallax) membeku sekejap. Blok yang sudah
+        // tampak di layar tetap langsung disusun; yang keluar jendela dibuang seketika.
+        androidx.compose.runtime.snapshotFlow { ed.computeLive(scroll.value, plansNow, dm.fs, dm.lh) }.collectLatest { target ->
+            val cur = liveSet
+            val add = target.filter { it !in cur }
+            val keep = target.filter { it in cur }.toHashSet()
+            if (add.size <= 3) { liveSet = target; return@collectLatest }
+            val sv = scroll.value.toFloat()
+            val vh = if (ed.viewH > 0f) ed.viewH else 1600f
+            fun dist(id: String): Float {
+                val pos = ed.bpos[id] ?: return Float.MAX_VALUE
+                val t = pos[0]; val b = t + pos[1]
+                return if (b < sv) sv - b else if (t > sv + vh) t - (sv + vh) else 0f
+            }
+            val order = add.sortedBy { dist(it) }
+            val now = order.filter { dist(it) == 0f }
+            keep.addAll(now)
+            liveSet = keep.toHashSet()
+            val rest = order.filter { dist(it) != 0f }
+            var i = 0
+            while (i < rest.size) {
+                androidx.compose.runtime.withFrameNanos { }
+                for (k in i until minOf(i + 3, rest.size)) keep.add(rest[k])
+                liveSet = keep.toHashSet()
+                i += 3
+            }
+        }
     }
     val titleFr = remember { FocusRequester() }
     val titleNote = vm.note(ed.noteId)

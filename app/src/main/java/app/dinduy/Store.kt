@@ -140,6 +140,9 @@ object Imgs {
             var s = 1
             while (o.outWidth / (s * 2) >= 1200) s *= 2
             val bm = BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inSampleSize = s }) ?: return null
+            // unggah tekstur GPU sekarang (di thread IO), bukan saat pertama kali tergambar: upload ~7 MB di RenderThread itulah
+            // yang membuat ornamen membeku sekejap saat foto pertama kali masuk layar
+            try { bm.prepareToDraw() } catch (e: Throwable) { }
             val ib = bm.asImageBitmap()
             cache.put(id, ib)
             return ib
