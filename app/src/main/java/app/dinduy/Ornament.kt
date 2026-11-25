@@ -502,23 +502,42 @@ private fun DrawScope.drawMorphScene(P: OrnPaint, w: Float, h: Float, t: Float, 
             ox += dx / d * pk * u * .03f; oy += dy / d * pk * u * .03f
         }
 
-        // perubahan bentuk: berjalan terus pada kecepatan tetap; sentuhan dan ketukan hanya menambah "bunga" lewat nilai berpegas
-        val ph = t * b.spd * .18f + i * 1.7f
+        // perubahan bentuk: berputar terus a -> b -> c -> a. Tiap bentuk ditahan sebentar, melesat lembut ke bentuk berikutnya, lalu
+        // mengendap seperti pegas (sedikit melampaui lalu kembali). Saat melesat badan meregang-memipih (squash & stretch).
+        val ph = t * (.07f + b.spd * .20f) + i * 1.7f
         val seg = ornMod(ph, 3f)
         val k0 = seg.toInt().coerceIn(0, 2)
-        val f = ornSmooth(seg - k0)
-        val sa = when (k0) { 0 -> b.a; 1 -> b.b; else -> b.c }
-        val sb = when (k0) { 0 -> b.b; 1 -> b.c; else -> b.a }
+        val sf = seg - k0
+        val g1 = ((sf - .18f) / .42f).coerceIn(0f, 1f)
+        val st = ((sf - .60f) / .40f).coerceIn(0f, 1f)
+        val ring = if (sf > .60f) .16f * exp(-5f * st) * sin(st * 13f) else 0f
+        val f = ornSmooth(g1) + ring
+        val stretch = sin(g1 * PI.toFloat()) * (1f - st) + ring * 2.2f
+        val sa = chainOf(b, k0); val sb = chainOf(b, (k0 + 1) % 3)
         val mc = (lf * .25f + abs(pk) * .22f).coerceIn(0f, .5f)
-
-        val rot = b.rot + t * b.spd * .12f
+        val rot = b.rot + t * b.spd * .12f + .10f * sin(t * b.spd * .55f + i * 2.1f)
+        val br = t * b.spd * 1.1f + i * 1.3f
+        val dirS = if (i % 2 == 0) 1f else -1f
+        val sx = 1f + .035f * sin(br) + .10f * stretch * dirS
+        val sy = 1f - .035f * sin(br) - .10f * stretch * dirS
 
         val col = P.pick(b.col)
         val fill = col.copy(alpha = col.alpha * (.72f + .28f * (b.depth / .38f)))
-        blobPath(SP, cx + ox, cy + oy, r0 * (1f + .06f * pk), rot, 1f, 1f, SH.all[sa], SH.all[sb], f, SH.all[6], mc, .022f, t * b.spd * .7f + i)
+        blobPath(SP, cx + ox, cy + oy, r0 * (1f + .06f * pk), rot, sx, sy, SH.all[sa], SH.all[sb], f, SH.all[6], mc, .034f, t * (.5f + b.spd * 1.4f) + i)
         drawPath(SP, fill)
+        // bentuk dalam: lebih terang, berotasi berlawanan dan berganti bentuk satu langkah di depan, memberi kedalaman berlapis
+        if (b.s >= .3f) {
+            val sa2 = chainOf(b, (k0 + 1) % 3); val sb2 = chainOf(b, (k0 + 2) % 3)
+            blobPath(
+                SP, cx + ox - r0 * .10f, cy + oy - r0 * .08f, r0 * .54f * (1f + .05f * sin(br * 1.3f)), -rot * 1.4f, 1f, 1f,
+                SH.all[sa2], SH.all[sb2], f, SH.all[6], 0f, .05f, -t * b.spd * 1.1f + i
+            )
+            drawPath(SP, mixc(col, P.paper, .30f).copy(alpha = col.alpha * .50f))
+        }
     }
 }
+
+private fun chainOf(b: Blob, k: Int): Int = when (k) { 0 -> b.a; 1 -> b.b; else -> b.c }
 
 // =====================================================================================================================
 // Perkakas gambar bersama (dipakai semua adegan berdetail)
@@ -574,11 +593,11 @@ private fun ribbon(p: Path, n: Int, w0: Float, w1: Float, useRW: Boolean = false
 }
 
 /** Separuh daun (side = +1 / -1) dengan tulang daun yang melengkung (bend). Dua separuh = satu daun dua nada. */
-private fun leaf2(p: Path, x: Float, y: Float, ang: Float, len: Float, wid: Float, side: Float, bend: Float) {
+private fun leaf2(p: Path, x: Float, y: Float, ang: Float, len: Float, wid: Float, side: Float, bend: Float, reset: Boolean = true) {
     val ca = cos(ang); val sa = sin(ang)
     val mx = x + ca * len * .5f - sa * bend * len
     val my = y + sa * len * .5f + ca * bend * len
-    p.reset()
+    if (reset) p.reset()
     p.moveTo(x, y)
     p.quadraticBezierTo(mx - sa * wid * side, my + ca * wid * side, x + ca * len, y + sa * len)
     p.quadraticBezierTo(mx, my, x, y)
@@ -612,6 +631,35 @@ private fun DrawScope.birdWing(col: Color, bx: Float, by: Float, bs: Float, fl: 
 // Canopy: ranting berkulit, daun dua nada, sulur, berkas cahaya berdebu, kupu-kupu, daun jatuh, dan kunang-kunang
 // =====================================================================================================================
 
+// Daun dikumpulkan per warna (4 warna x 2 nada) + satu jalur tulang daun + satu jalur ranting kecil, lalu digambar sekali per cabang.
+// Dulu tiap daun = 3 pemanggilan gambar; sekarang satu cabang penuh daun = sekitar 10.
+private val LP = Array(8) { Path() }
+private val LV = Path()
+private val TW = Path()
+
+private fun leafAdd(idx: Int, x: Float, y: Float, ang: Float, len: Float, wid: Float, side: Float, vein: Boolean) {
+    val bend = .07f * side
+    leaf2(LP[idx], x, y, ang, len, wid, 1f, bend, false)
+    leaf2(LP[4 + idx], x, y, ang, len, wid, -1f, bend, false)
+    if (vein) {
+        val ca = cos(ang); val sa = sin(ang)
+        LV.moveTo(x, y)
+        LV.quadraticBezierTo(x + ca * len * .5f - sa * bend * len, y + sa * len * .5f + ca * bend * len, x + ca * len * .92f, y + sa * len * .92f)
+    }
+}
+
+private fun leafBatchReset() { for (p in LP) p.reset(); LV.reset(); TW.reset() }
+
+private fun DrawScope.leafBatchDraw(P: OrnPaint, fade: Float, veinW: Float, twigW: Float) {
+    for (i in 0 until 4) {
+        val col = P.pick(i).al(fade)
+        drawPath(LP[i], col)
+        drawPath(LP[4 + i], mixc(col, P.paper, .42f).al(.92f))
+    }
+    drawPath(LV, P.pp(.42f * fade), style = Stroke(veinW, cap = StrokeCap.Round))
+    drawPath(TW, P.ink.al(.8f * fade), style = Stroke(twigW, cap = StrokeCap.Round))
+}
+
 private fun DrawScope.branch(
     P: OrnPaint, ox: Float, oy: Float, base: Float, len: Float, n: Int, curve: Float, sway: Float,
     t: Float, ph: Float, leaf: Float, flutter: Float, seed: Int, fade: Float = 1f, calm: Float = 0f
@@ -627,7 +675,7 @@ private fun DrawScope.branch(
         x += cos(a) * seg; y += sin(a) * seg
         RX[k] = x; RY[k] = y; RA[k] = a
     }
-    // kulit kayu: pita meruncing + garis terang di tengahnya + ruas gelap
+    // kulit kayu: pita meruncing + garis terang di tengahnya
     val bw = u * .017f * (.55f + .45f * fade)
     ribbon(SP2, n, bw, bw * .16f)
     drawPath(SP2, P.ink.al(fade))
@@ -635,25 +683,25 @@ private fun DrawScope.branch(
     for (k in 1..n) SP3.lineTo(RX[k], RY[k])
     drawPath(SP3, mixc(P.ink, P.paper, .55f).al(.5f * fade), style = Stroke(bw * .2f, cap = StrokeCap.Round, join = StrokeJoin.Round))
     val flK = 1f - .5f * calm
+    leafBatchReset()
     for (k in 2..n) {
         val f = k.toFloat() / n
         val side = if (k % 2 == 0) 1f else -1f
         val ls = leaf * (1.05f - .6f * f)
         val fl = sin(t * 1.5f + ph + k * .9f) * .14f * (1f + flutter) * flK
         val la = RA[k] + side * (.95f - .25f * f) + fl
-        // ranting kecil
         if (fade > .9f && k < n && k % 2 == 1) {
             val ta = RA[k] + side * 1.05f
-            drawLine(P.ink.al(.8f), Offset(RX[k], RY[k]), Offset(RX[k] + cos(ta) * ls * .55f, RY[k] + sin(ta) * ls * .55f), strokeWidth = bw * .32f, cap = StrokeCap.Round)
+            TW.moveTo(RX[k], RY[k]); TW.lineTo(RX[k] + cos(ta) * ls * .55f, RY[k] + sin(ta) * ls * .55f)
         }
         val round = (k + seed) % 3 == 0
-        leafArt(P, P.pick(k + seed).al(fade), RX[k], RY[k], la, ls, if (round) ls * 1.2f else ls * .9f, side)
-        // daun kedua di sisi seberang tiap simpul ketiga
+        leafAdd((k + seed) % 4, RX[k], RY[k], la, ls, if (round) ls * 1.2f else ls * .9f, side, ls > u * .045f)
         if (fade > .9f && k % 3 == 0 && k < n) {
-            leafArt(P, P.pick(k + seed + 2).al(fade), RX[k], RY[k], RA[k] - side * (1.05f - .3f * f) - fl, ls * .8f, ls * .7f, -side)
+            leafAdd((k + seed + 2) % 4, RX[k], RY[k], RA[k] - side * (1.05f - .3f * f) - fl, ls * .8f, ls * .7f, -side, ls * .8f > u * .045f)
         }
     }
-    leafArt(P, P.pick(n + seed).al(fade), RX[n], RY[n], RA[n] + sin(t * 1.6f + ph) * .10f * flK, leaf * .6f, leaf * .5f, 1f)
+    leafAdd((n + seed) % 4, RX[n], RY[n], RA[n] + sin(t * 1.6f + ph) * .10f * flK, leaf * .6f, leaf * .5f, 1f, leaf * .6f > u * .045f)
+    leafBatchDraw(P, fade, u * .003f, bw * .32f)
     // buah kecil di ujung (hanya ranting depan)
     if (fade > .9f && seed % 2 == 0) {
         val bx = RX[n - 1]; val by = RY[n - 1]
@@ -674,19 +722,21 @@ private fun DrawScope.vine(P: OrnPaint, x0: Float, len: Float, t: Float, ph: Flo
     SP3.reset(); SP3.moveTo(RX[0], RY[0])
     for (k in 1..n) SP3.lineTo(RX[k], RY[k])
     drawPath(SP3, P.ink.al(.7f), style = Stroke(u * .0042f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    leafBatchReset()
     for (k in 2..n) {
         val side = if (k % 2 == 0) 1f else -1f
         val a = PI.toFloat() / 2f + side * (1.0f - .3f * k / n) + sin(t * 1.3f + ph + k) * .12f
         val ls = u * (.05f - .022f * k / n)
-        leafArt(P, P.pick(k + seed), RX[k], RY[k], a, ls, ls, side, false)
+        leafAdd((k + seed) % 4, RX[k], RY[k], a, ls, ls, side, false)
     }
+    leafBatchDraw(P, 1f, u * .003f, u * .003f)
 }
 
 private fun DrawScope.butterfly(P: OrnPaint, bx: Float, by: Float, ws: Float, t: Float, ang: Float) {
     val f = .22f + .78f * abs(sin(t * 7.5f))
     withTransform({ rotate(ang * 57.3f, Offset(bx, by)) }) {
-        for (sd in intArrayOf(-1, 1)) {
-            val s = sd.toFloat()
+        for (sd in 0..1) {
+            val s = if (sd == 0) -1f else 1f
             SP2.reset(); SP2.moveTo(bx, by)
             SP2.cubicTo(bx + s * ws * f, by - ws * 2.4f, bx + s * ws * 2.8f * f, by - ws * 1.5f, bx + s * ws * 2.2f * f, by - ws * .1f)
             SP2.quadraticBezierTo(bx + s * ws * .8f * f, by + ws * .5f, bx, by)
@@ -735,7 +785,7 @@ private fun DrawScope.drawCanopyScene(P: OrnPaint, w: Float, h: Float, t: Float,
         }
     }
     // debu cahaya
-    for (i in 0 until 10) {
+    for (i in 0 until 6) {
         val x = ornHash(i, 91) * u + sin(t * .25f + i * 1.7f) * u * .03f
         val y = ornMod(ornHash(i, 92) * h + t * u * .006f * (.5f + ornHash(i, 93)), h)
         val tw = .5f + .5f * sin(t * .8f + i * 2f)
@@ -884,8 +934,10 @@ private fun DrawScope.drawSkylineScene(P: OrnPaint, w: Float, h: Float, t: Float
             drawCircle(P.pp(.2f), mr * .08f, Offset(sx - mr * .3f, sy + mr * .45f))
         }
     } else {
-        // matahari siang: piringan polos saja (tanpa halo / sinar, supaya latar tidak jadi gelap)
-        drawCircle(P.d, sunR, Offset(sx, sy))
+        // matahari siang: piringan bergradasi, tanpa halo / sinar (supaya latar tidak jadi gelap)
+        drawCircle(Brush.radialGradient(listOf(mixc(P.d, P.paper, .50f), P.d), center = Offset(sx - sunR * .25f, sy - sunR * .25f), radius = sunR * 1.35f), sunR, Offset(sx, sy))
+        drawCircle(mixc(P.d, P.ink, .12f).al(.55f), sunR * .985f, Offset(sx, sy), style = Stroke(sunR * .07f))
+        drawCircle(P.pp(.30f), sunR * .30f, Offset(sx - sunR * .34f, sy - sunR * .34f))
     }
 
     // burung: kawanan V, kepakan bergantian
@@ -979,8 +1031,8 @@ private fun DrawScope.drawSkylineScene(P: OrnPaint, w: Float, h: Float, t: Float
             if (L == 2) eachBldg(2, u, h) { _, bx, bw, bh, _ ->
                 val cxm = bx + bw / 2f
                 val dxv = cxm - vpX
-                if (abs(dxv) > u * .06f) {
-                    val dep = bw * .30f * (abs(dxv) / (u * .5f)).coerceIn(.2f, 1f)
+                if (abs(dxv) > u * .20f) {
+                    val dep = bw * .30f * ((abs(dxv) - u * .20f) / (u * .30f)).coerceIn(.15f, 1f)
                     val ex = if (dxv < 0f) bx + bw else bx
                     val sdir = if (dxv < 0f) 1f else -1f
                     val top = yb - bh - bumpOf(cxm, L)
@@ -998,7 +1050,7 @@ private fun DrawScope.drawSkylineScene(P: OrnPaint, w: Float, h: Float, t: Float
                 val bump = bumpOf(cxm, L)
                 val top = yb - bh - bump
                 val rad = if (roof == 1) bw * .5f else min(bw * .18f, u * .015f)
-                drawRoundRect(col, Offset(bx, top), Size(bw, bh + bump + u), CornerRadius(rad))
+                drawRoundRect(col, Offset(bx, top), Size(bw + u * .009f, bh + bump + u), CornerRadius(rad))
                 // sisi gelap + tepi terang memberi volume
                 drawRect(shade.al(.55f), Offset(bx + bw * .80f, top + rad), Size(bw * .20f, bh + bump + u))
                 drawRect(edge.al(.55f), Offset(bx, top + rad), Size(bw * .045f, bh + bump))
@@ -1123,18 +1175,23 @@ private fun DrawScope.drawSkylineScene(P: OrnPaint, w: Float, h: Float, t: Float
 // dan di dasar: karang tanduk, karang otak, karang meja, kipas laut, spons tabung, anemon + ikan badut, rumput laut, bintang laut
 // =====================================================================================================================
 
+/** Tambahkan badan ikan (menghadap [dir]) ke path [p] tanpa menggambar: dipakai untuk membatch satu gerombolan jadi satu gambar. */
+private fun fishBody(p: Path, x: Float, y: Float, s: Float, dir: Float, tp: Float) {
+    val ts = sin(tp) * s * .22f
+    p.moveTo(x + dir * s, y)
+    p.quadraticBezierTo(x + dir * s * .2f, y - s * .62f, x - dir * s * .62f, y - s * .10f)
+    p.lineTo(x - dir * s * 1.05f, y - s * .42f + ts)
+    p.lineTo(x - dir * s * .90f, y + ts * .6f)
+    p.lineTo(x - dir * s * 1.05f, y + s * .42f + ts)
+    p.lineTo(x - dir * s * .62f, y + s * .10f)
+    p.quadraticBezierTo(x + dir * s * .2f, y + s * .58f, x + dir * s, y)
+    p.close()
+}
+
 /** Ikan menghadap [dir] (+1 kanan / -1 kiri). [detail] menambah garis tubuh, sirip, mata. */
 private fun DrawScope.fish(P: OrnPaint, col: Color, x: Float, y: Float, s: Float, dir: Float, tp: Float, stripe: Boolean, detail: Boolean) {
-    val ts = sin(tp) * s * .22f
     SP.reset()
-    SP.moveTo(x + dir * s, y)
-    SP.quadraticBezierTo(x + dir * s * .2f, y - s * .62f, x - dir * s * .62f, y - s * .10f)
-    SP.lineTo(x - dir * s * 1.05f, y - s * .42f + ts)
-    SP.lineTo(x - dir * s * .90f, y + ts * .6f)
-    SP.lineTo(x - dir * s * 1.05f, y + s * .42f + ts)
-    SP.lineTo(x - dir * s * .62f, y + s * .10f)
-    SP.quadraticBezierTo(x + dir * s * .2f, y + s * .58f, x + dir * s, y)
-    SP.close()
+    fishBody(SP, x, y, s, dir, tp)
     drawPath(SP, col)
     if (detail) {
         drawOval(P.pp(.22f), Offset(x - s * .4f, y + s * .05f), Size(s * 1.2f, s * .34f))
@@ -1277,19 +1334,26 @@ private fun DrawScope.manta(P: OrnPaint, x: Float, y: Float, s: Float, dir: Floa
     }
 }
 
-private fun DrawScope.staghorn(P: OrnPaint, x: Float, y: Float, len: Float, ang: Float, depth: Int, t: Float, sw: Float, col: Color, tip: Color, wd: Float, seed: Int) {
+private val SB = Array(5) { Path() }    // 0..3 = cabang per kedalaman, 4 = ujung polip
+
+private fun staghornAdd(x: Float, y: Float, len: Float, ang: Float, depth: Int, t: Float, sw: Float, seed: Int, tipR: Float) {
     val a = ang + sin(t * .8f + seed * 1.7f + depth * .9f) * .028f * (4 - depth) + sw * (4 - depth) * .25f
     val ex = x + sin(a) * len; val ey = y - cos(a) * len
-    drawLine(col, Offset(x, y), Offset(ex, ey), strokeWidth = wd, cap = StrokeCap.Round)
-    if (depth <= 0) {
-        drawCircle(tip, wd * .85f, Offset(ex, ey))
-        return
-    }
+    SB[depth].moveTo(x, y); SB[depth].lineTo(ex, ey)
+    if (depth <= 0) { SB[4].addOval(Rect(ex - tipR, ey - tipR, ex + tipR, ey + tipR)); return }
     val n = if (depth == 3) 3 else 2
     for (k in 0 until n) {
         val da = (k - (n - 1) / 2f) * .66f + (ornHash(seed * 7 + k + depth * 3, 91) - .5f) * .32f
-        staghorn(P, ex, ey, len * .74f, a + da, depth - 1, t, sw, col, tip, wd * .72f, seed * 3 + k + 1)
+        staghornAdd(ex, ey, len * .74f, a + da, depth - 1, t, sw, seed * 3 + k + 1, tipR)
     }
+}
+
+/** Karang tanduk bercabang rekursif; seluruh cabang digambar per tingkat ketebalan (4 gambar + ujung), bukan per cabang. */
+private fun DrawScope.staghorn(P: OrnPaint, x: Float, y: Float, len: Float, ang: Float, depth: Int, t: Float, sw: Float, col: Color, tip: Color, wd: Float, seed: Int) {
+    for (p in SB) p.reset()
+    staghornAdd(x, y, len, ang, depth, t, sw, seed, wd * (.72f).pow(depth) * .85f)
+    for (d in depth downTo 0) drawPath(SB[d], col, style = Stroke(wd * (.72f).pow(depth - d), cap = StrokeCap.Round, join = StrokeJoin.Round))
+    drawPath(SB[4], tip)
 }
 
 private fun DrawScope.brainCoral(P: OrnPaint, x: Float, y: Float, r: Float) {
@@ -1329,28 +1393,31 @@ private fun DrawScope.seaFan(P: OrnPaint, x: Float, y: Float, s: Float, t: Float
     val hubX = x; val hubY = y - s * .16f
     drawLine(col, Offset(x, y), Offset(hubX, hubY), strokeWidth = s * .05f, cap = StrokeCap.Round)
     val rays = 9
+    SP2.reset()
     for (i in 0 until rays) {
         val f = i.toFloat() / (rays - 1)
         val a0 = (f - .5f) * 2.5f + sin(t * .7f + i * .5f) * .03f + sw * .8f
         val L = s * (.80f + .18f * sin(f * PI.toFloat()))
-        SP3.reset(); SP3.moveTo(hubX, hubY)
+        SP2.moveTo(hubX, hubY)
         for (m in 1..3) {
             val q = m / 3f
             val aa = a0 + (f - .5f) * .35f * q
             val px = hubX + sin(aa) * L * q + sin(t * 1.1f + i + q * 3f) * s * .012f * q
             val py = hubY - cos(aa) * L * q
             RX[i * 3 + m - 1] = px; RY[i * 3 + m - 1] = py
-            SP3.lineTo(px, py)
+            SP2.lineTo(px, py)
         }
-        drawPath(SP3, col, style = Stroke(s * .028f, cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
+    drawPath(SP2, col, style = Stroke(s * .028f, cap = StrokeCap.Round, join = StrokeJoin.Round))
     // jaring melintang antar cabang
     for (ring in 0 until 3) {
         SP3.reset()
         for (i in 0 until rays) { val k = i * 3 + ring; if (i == 0) SP3.moveTo(RX[k], RY[k]) else SP3.lineTo(RX[k], RY[k]) }
         drawPath(SP3, col.al(.55f), style = Stroke(s * .012f, cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
-    for (i in 0 until rays) drawCircle(P.pp(.6f), s * .016f, Offset(RX[i * 3 + 2], RY[i * 3 + 2]))
+    SP2.reset()
+    for (i in 0 until rays) SP2.addOval(Rect(RX[i * 3 + 2] - s * .016f, RY[i * 3 + 2] - s * .016f, RX[i * 3 + 2] + s * .016f, RY[i * 3 + 2] + s * .016f))
+    drawPath(SP2, P.pp(.6f))
 }
 
 private fun DrawScope.anemone(P: OrnPaint, x: Float, y: Float, r: Float, t: Float, sw: Float, front: Boolean) {
@@ -1359,18 +1426,20 @@ private fun DrawScope.anemone(P: OrnPaint, x: Float, y: Float, r: Float, t: Floa
         drawOval(mixc(P.c, P.ink, .18f), Offset(x - r * .56f, y - r * .20f), Size(r * 1.12f, r * .22f))
     }
     val n = 12
+    SP2.reset(); SP3.reset()
     for (i in 0 until n) {
         val f = i.toFloat() / (n - 1)
-        val isFront = i % 2 == 0
-        if (isFront != front) continue
+        if ((i % 2 == 0) != front) continue
         val bx = x + (f - .5f) * r * 1.0f
         val a = (f - .5f) * 1.3f + sin(t * .9f + i * .8f) * .22f + sw
         val L = r * (.85f + .2f * ornHash(i, 181))
-        SP3.reset(); SP3.moveTo(bx, y - r * .62f)
-        SP3.quadraticBezierTo(bx + sin(a) * L * .5f + sin(t * 1.2f + i) * r * .15f, y - r * .62f - cos(a) * L * .55f, bx + sin(a) * L, y - r * .62f - cos(a) * L)
-        drawPath(SP3, P.pick(i).al(.9f), style = Stroke(r * .085f, cap = StrokeCap.Round))
-        drawCircle(P.pp(.75f), r * .045f, Offset(bx + sin(a) * L, y - r * .62f - cos(a) * L))
+        val ex = bx + sin(a) * L; val ey = y - r * .62f - cos(a) * L
+        SP2.moveTo(bx, y - r * .62f)
+        SP2.quadraticBezierTo(bx + sin(a) * L * .5f + sin(t * 1.2f + i) * r * .15f, y - r * .62f - cos(a) * L * .55f, ex, ey)
+        SP3.addOval(Rect(ex - r * .045f, ey - r * .045f, ex + r * .045f, ey + r * .045f))
     }
+    drawPath(SP2, (if (front) P.d else mixc(P.d, P.ink, .15f)).al(.9f), style = Stroke(r * .085f, cap = StrokeCap.Round))
+    drawPath(SP3, P.pp(.75f))
 }
 
 private fun DrawScope.seagrass(P: OrnPaint, x0: Float, yb: Float, hgt: Float, ph: Float, t: Float, gust: Float, col: Color) {
@@ -1405,11 +1474,13 @@ private fun DrawScope.starfish(P: OrnPaint, x: Float, y: Float, r: Float, rot: F
 }
 
 private fun DrawScope.urchin(P: OrnPaint, x: Float, y: Float, r: Float, t: Float) {
+    SP2.reset()
     for (k in 0 until 26) {
         val a = k * (2f * PI.toFloat() / 26f)
         val L = r * (1.6f + .5f * ornHash(k, 191)) * (1f + .05f * sin(t * 1.5f + k))
-        drawLine(P.ink.al(.85f), Offset(x + cos(a) * r * .8f, y + sin(a) * r * .8f), Offset(x + cos(a) * L, y + sin(a) * L), strokeWidth = r * .09f, cap = StrokeCap.Round)
+        SP2.moveTo(x + cos(a) * r * .8f, y + sin(a) * r * .8f); SP2.lineTo(x + cos(a) * L, y + sin(a) * L)
     }
+    drawPath(SP2, P.ink.al(.85f), style = Stroke(r * .09f, cap = StrokeCap.Round))
     drawCircle(mixc(P.ink, P.d, .25f), r, Offset(x, y))
     drawCircle(P.pp(.25f), r * .3f, Offset(x - r * .3f, y - r * .35f))
 }
@@ -1446,8 +1517,8 @@ private fun DrawScope.drawReefScene(P: OrnPaint, w: Float, h: Float, t: Float, f
     }
 
     // ---- berkas cahaya dari permukaan ----------------------------------------------------------------------------------------------------
-    for (i in 0 until 5) {
-        val x0 = u * (.10f + .20f * i) + sin(t * .12f + i * 1.7f) * u * .04f - par * u * .01f
+    for (i in 0 until 4) {
+        val x0 = u * (.10f + .26f * i) + sin(t * .12f + i * 1.7f) * u * .04f - par * u * .01f
         val wd = u * (.05f + .03f * ornHash(i, 211))
         val sk = u * .38f
         val br = .5f + .5f * sin(t * .21f + i * 1.9f)
@@ -1465,16 +1536,17 @@ private fun DrawScope.drawReefScene(P: OrnPaint, w: Float, h: Float, t: Float, f
             SP.lineTo(u * 1.05f, h + 2f); SP.close()
             drawPath(SP, (if (layer == 0) mixc(P.b, P.ink, .12f) else mixc(P.a, P.ink, .16f)).al(if (layer == 0) .45f else .60f))
             // karang kecil di punggung bukit
+            SP2.reset()
             for (i in 0 until 9) {
                 val cx = u * (.06f + .11f * i + .02f * ornHash(i + layer * 9, 215))
                 val cyy = base - (sin(cx / u * (5f + 3f * layer) + layer * 2f) * .5f + .5f) * u * (.09f - .02f * layer) + u * .004f
                 val hh = u * (.035f + .03f * ornHash(i + layer * 9, 216))
-                val col = (if (layer == 0) P.b else P.a).al(.55f)
                 for (k in 0 until 3) {
                     val a = (k - 1) * .5f + sin(t * .7f + i + k) * .04f
-                    drawLine(col, Offset(cx, cyy), Offset(cx + sin(a) * hh, cyy - cos(a) * hh), strokeWidth = u * .006f, cap = StrokeCap.Round)
+                    SP2.moveTo(cx, cyy); SP2.lineTo(cx + sin(a) * hh, cyy - cos(a) * hh)
                 }
             }
+            drawPath(SP2, (if (layer == 0) P.b else P.a).al(.55f), style = Stroke(u * .006f, cap = StrokeCap.Round))
         }
         // pari manta melintas sangat jauh
         run {
@@ -1508,13 +1580,20 @@ private fun DrawScope.drawReefScene(P: OrnPaint, w: Float, h: Float, t: Float, f
         val span = u * 1.6f
         val cxs = ornMod(u * .15f + t * u * .030f, span) - u * .3f
         val cys = h * .28f + sin(t * .12f) * u * .05f
+        SP.reset(); SP3.reset(); SP2.reset()
         for (j in 0 until 14) {
             val ox = (ornHash(j, 221) - .5f) * u * .15f + sin(t * .7f + j) * u * .012f
             val oy = (ornHash(j, 222) - .5f) * u * .09f + sin(t * .9f + j * 1.7f) * u * .010f
             val x = cxs + ox; val y = cys + oy
             if (x < -u * .1f || x > u * 1.1f) continue
-            fish(P, if (j % 3 == 0) P.d else mixc(P.c, P.paper, .15f), x + flee(x, y), y, u * (.016f + .004f * ornHash(j, 223)), 1f, t * 9f + j, false, false)
+            val sz = u * (.016f + .004f * ornHash(j, 223))
+            val fxp = x + flee(x, y)
+            fishBody(if (j % 3 == 0) SP else SP3, fxp, y, sz, 1f, t * 9f + j)
+            SP2.addOval(Rect(fxp + sz * .50f, y - sz * .16f, fxp + sz * .70f, y + sz * .04f))
         }
+        drawPath(SP, P.d)
+        drawPath(SP3, mixc(P.c, P.paper, .15f))
+        drawPath(SP2, P.ink.al(.85f))
     }
     run {
         val span = u * 1.6f
@@ -1616,7 +1695,6 @@ private fun DrawScope.drawReefScene(P: OrnPaint, w: Float, h: Float, t: Float, f
         val a = (y / (h * .9f)).coerceIn(0f, 1f) * .9f + .1f
         drawCircle(P.b.al(.30f * a), br, Offset(x, y))
         drawCircle(P.pp(.55f * a), br, Offset(x, y), style = Stroke(br * .28f))
-        drawCircle(P.pp(.8f * a), br * .24f, Offset(x - br * .3f, y - br * .3f))
     }
     if (ta < 4f) {
         for (k in 0 until 12) {
