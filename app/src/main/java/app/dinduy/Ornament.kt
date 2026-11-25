@@ -110,6 +110,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.sqrt
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.exp
@@ -607,25 +608,49 @@ private fun DrawScope.birdWing(col: Color, bx: Float, by: Float, bs: Float, fl: 
     drawPath(SP2, col, style = Stroke(wd, cap = StrokeCap.Round, join = StrokeJoin.Round))
 }
 
-private val CLOUD = floatArrayOf(
-    -.36f, -.01f, .17f, -.17f, -.07f, .23f, .06f, -.12f, .27f, .28f, -.04f, .21f, .42f, .02f, .14f
-)
+private const val CN = 48
 
-/** Awan kumulus: gumpalan, bayangan bawah, dasar rata, dan sorotan atas-kiri. [k] = kekuatan bayangan. */
-private fun DrawScope.cloud(P: OrnPaint, cx: Float, cy: Float, cw: Float, base: Color, k: Float) {
-    val sh = mixc(base, P.ink, .18f * k)
+/**
+ * Selubung atas awan: tinggi puncak tiap x (-.5 .. .5, relatif lebar awan) dari gabungan beberapa gumpalan. Dihitung sekali,
+ * lalu dihaluskan sedikit supaya lekukan antar gumpalan terasa menyatu, bukan lingkaran yang ditumpuk.
+ */
+private val CLOUD_ENV = FloatArray(CN + 1).also { env ->
+    val cs = floatArrayOf(-.36f, -.01f, .17f, -.19f, -.08f, .22f, .04f, -.14f, .28f, .27f, -.06f, .21f, .43f, .02f, .13f)
+    for (j in 0..CN) {
+        val x = -.5f + j.toFloat() / CN
+        var y = .16f
+        var i = 0
+        while (i < cs.size) {
+            val dx = x - cs[i]; val r = cs[i + 2]
+            if (abs(dx) < r) y = min(y, cs[i + 1] - sqrt(r * r - dx * dx))
+            i += 3
+        }
+        env[j] = y
+    }
+    val c = env.copyOf()
+    for (j in 1 until CN) env[j] = c[j - 1] * .25f + c[j] * .5f + c[j + 1] * .25f
+}
+
+/**
+ * Awan kumulus satu siluet. Kedalaman datang dari gradasi di dalam bentuk (atas terkena cahaya, perut agak gelap) dan perut yang
+ * melengkung, bukan dari gumpalan tambahan. [k] = kekuatan bayangan, [flip] = -1 mencerminkan bentuk supaya awan tidak kembar.
+ */
+private fun DrawScope.cloud(P: OrnPaint, cx: Float, cy: Float, cw: Float, base: Color, k: Float, flip: Float = 1f) {
+    val bot = .16f
+    SP3.reset()
+    SP3.moveTo(cx - cw * .5f * flip, cy + bot * cw)
+    for (j in 0..CN) SP3.lineTo(cx + (-.5f + j.toFloat() / CN) * cw * flip, cy + CLOUD_ENV[j] * cw)
+    SP3.lineTo(cx + cw * .5f * flip, cy + bot * cw)
+    SP3.quadraticBezierTo(cx, cy + (bot + .07f) * cw, cx - cw * .5f * flip, cy + bot * cw)
+    SP3.close()
+    drawPath(SP3, base)
     val hi = mixc(base, P.paper, .55f)
-    var i = 0
-    while (i < CLOUD.size) { drawCircle(sh, CLOUD[i + 2] * cw, Offset(cx + CLOUD[i] * cw, cy + CLOUD[i + 1] * cw + cw * .03f)); i += 3 }
-    i = 0
-    while (i < CLOUD.size) { drawCircle(base, CLOUD[i + 2] * cw, Offset(cx + CLOUD[i] * cw, cy + CLOUD[i + 1] * cw)); i += 3 }
-    drawRoundRect(base, Offset(cx - cw * .5f, cy + cw * .03f), Size(cw, cw * .14f), CornerRadius(cw * .07f))
-    drawRoundRect(sh.al(.7f), Offset(cx - cw * .44f, cy + cw * .12f), Size(cw * .88f, cw * .05f), CornerRadius(cw * .025f))
-    i = 3
-    while (i < CLOUD.size - 3) {
-        val r = CLOUD[i + 2] * cw
-        drawCircle(hi.al(.5f), r * .6f, Offset(cx + CLOUD[i] * cw - r * .2f, cy + CLOUD[i + 1] * cw - r * .24f))
-        i += 3
+    val sh = mixc(base, P.ink, .20f * k)
+    clipPath(SP3) {
+        drawRect(
+            Brush.verticalGradient(0f to hi.al(.55f), .42f to Color.Transparent, 1f to sh.al(.9f), startY = cy - cw * .40f, endY = cy + cw * .22f),
+            Offset(cx - cw * .5f, cy - cw * .40f), Size(cw, cw * .62f)
+        )
     }
 }
 
@@ -928,7 +953,7 @@ private fun DrawScope.drawSkylineScene(P: OrnPaint, w: Float, h: Float, t: Float
         val span = u * 1.9f
         val x = ornMod(ornHash(i, 11) * span + t * u * (.004f + .0035f * (i % 3)) + pop * u * .12f * dep, span) - cw * .6f - par * u * dep * .06f
         val y = u * (.08f + .105f * i) + sin(t * .2f + i * 2f) * u * .004f
-        cloud(P, x, y, cw, if (far) P.b.al(.7f) else P.b, if (far) .5f else 1f)
+        cloud(P, x, y, cw, if (far) P.b.al(.7f) else P.b, if (far) .5f else 1f, if (i % 2 == 0) 1f else -1f)
     }
 
     // burung: kawanan V, kepakan bergantian
@@ -1069,23 +1094,22 @@ private fun DrawScope.drawSkylineScene(P: OrnPaint, w: Float, h: Float, t: Float
                         for (g in 0 until 3) drawCircle(P.a, u * (.010f + .004f * ornHash(i * 3 + g, 17)), Offset(bx + bw * (.22f + .28f * g), top - u * .004f))
                     }
                 }
-                // jendela: lapis tengah + depan
+                // jendela: lapis tengah + depan. Dibatch jadi dua path per gedung; kedipnya per gedung, bukan per jendela (jauh lebih ringan)
                 if (L >= 1 && bw > u * .06f) {
                     val cols = max(1, (bw / (u * .03f)).toInt())
                     val rows = min(8, (bh / (u * .04f)).toInt())
                     val cell = bw / cols
+                    SP.reset(); SP3.reset()
                     for (r in 0 until rows) for (c in 0 until cols) {
                         val hh = ornHash(i * 131 + r * 17 + c * 3, 51 + L)
                         if (!(hh > litT || (near > .3f && hh > .25f))) continue
-                        val tw2 = .5f + .5f * sin(t * (.18f + hh * .3f) + hh * 20f)
-                        val wa = (.30f + .35f * tw2) * (if (L == 1) .6f else 1f) * (1f - .35f * calm) + near * .2f
-                        val warm = L == 2 && hh > .86f
-                        drawRoundRect(
-                            (if (warm) P.d.al(.9f) else P.pp(wa.coerceIn(0f, 1f))),
-                            Offset(bx + c * cell + cell * .25f, top + u * .025f + r * u * .04f),
-                            Size(cell * .5f, u * .02f), CornerRadius(u * .004f)
-                        )
+                        val wx = bx + c * cell + cell * .25f; val wy = top + u * .025f + r * u * .04f
+                        if (L == 2 && hh > .86f) SP3.addRect(Rect(wx, wy, wx + cell * .5f, wy + u * .02f))
+                        else SP.addRect(Rect(wx, wy, wx + cell * .5f, wy + u * .02f))
                     }
+                    val wa = ((.30f + .35f * (.5f + .5f * sin(t * .25f + i * 1.7f))) * (if (L == 1) .6f else 1f) * (1f - .35f * calm) + near * .2f).coerceIn(0f, 1f)
+                    drawPath(SP, P.pp(wa))
+                    if (L == 2) drawPath(SP3, P.d.al(.9f))
                     // lantai: garis tipis antar baris pada lapis depan
                     if (L == 2) for (r in 1 until rows) drawLine(P.pp(.10f), Offset(bx + bw * .06f, top + u * .018f + r * u * .04f), Offset(bx + bw * .78f, top + u * .018f + r * u * .04f), strokeWidth = u * .0016f)
                 }
@@ -1193,31 +1217,75 @@ private fun DrawScope.fish(P: OrnPaint, col: Color, x: Float, y: Float, s: Float
     drawCircle(P.ink, s * .06f, Offset(x + dir * s * .60f, y - s * .10f))
 }
 
+/** Sirip berbentuk dayung (tetesan memanjang) dari pangkal (x0, y0) ke arah +x sepanjang L; dipakai dengan rotate. */
+private fun flipperPath(p: Path, x0: Float, y0: Float, L: Float, wd: Float) {
+    p.reset()
+    p.moveTo(x0, y0 - wd * .35f)
+    p.cubicTo(x0 + L * .40f, y0 - wd * .95f, x0 + L * .92f, y0 - wd * .35f, x0 + L, y0 + wd * .10f)
+    p.cubicTo(x0 + L * .72f, y0 + wd * .62f, x0 + L * .30f, y0 + wd * .55f, x0, y0 + wd * .38f)
+    p.close()
+}
+
+/** Penyu dari samping: empat sirip (dua depan besar yang mengayuh, dua belakang kecil), kepala berparuh, cangkang bersisik. */
 private fun DrawScope.turtle(P: OrnPaint, x: Float, y: Float, s: Float, dir: Float, t: Float) {
+    val skin = mixc(P.c, P.paper, .22f)
+    val skinD = mixc(P.c, P.ink, .22f)
+    val shell = mixc(P.a, P.ink, .12f)
+    val ph = t * 1.25f
+    val stroke = sin(ph)                       // -1..1: ayunan sirip depan
     withTransform({ scale(dir, 1f, Offset(x, y)) }) {
-        val fl = sin(t * 1.2f)
-        // sirip belakang
-        withTransform({ rotate(18f + fl * 10f, Offset(x - s * .38f, y + s * .12f)) }) { drawOval(mixc(P.a, P.ink, .12f), Offset(x - s * .38f, y + s * .02f), Size(s * .36f, s * .15f)) }
-        // sirip depan (belakang cangkang)
-        withTransform({ rotate(-25f - fl * 22f, Offset(x + s * .22f, y - s * .06f)) }) { drawOval(mixc(P.a, P.ink, .12f), Offset(x + s * .22f, y - s * .15f), Size(s * .58f, s * .17f)) }
-        // ekor
-        drawLine(P.a, Offset(x - s * .50f, y + s * .02f), Offset(x - s * .66f, y + s * .10f), strokeWidth = s * .06f, cap = StrokeCap.Round)
-        // cangkang
-        drawOval(mixc(P.a, P.ink, .18f), Offset(x - s * .52f, y - s * .27f), Size(s * 1.04f, s * .62f))
-        drawOval(P.a, Offset(x - s * .50f, y - s * .34f), Size(s * 1.0f, s * .60f))
-        drawOval(mixc(P.a, P.paper, .32f).al(.8f), Offset(x - s * .32f, y - s * .30f), Size(s * .56f, s * .22f))
-        // sisik cangkang
-        drawOval(P.ink.al(.22f), Offset(x - s * .16f, y - s * .22f), Size(s * .32f, s * .24f), style = Stroke(s * .018f))
-        for (k in 0 until 4) {
-            val a = k * 1.57f + .78f
-            drawLine(P.ink.al(.22f), Offset(x + cos(a) * s * .15f, y - s * .10f + sin(a) * s * .10f), Offset(x + cos(a) * s * .44f, y - s * .10f + sin(a) * s * .24f), strokeWidth = s * .018f)
+        // sirip sisi jauh (lebih gelap, di belakang badan)
+        withTransform({ rotate(-20f - stroke * 24f, Offset(x + s * .20f, y + s * .02f)) }) {
+            flipperPath(SP2, x + s * .20f, y + s * .02f, s * .44f, s * .15f); drawPath(SP2, skinD)
         }
-        // kepala + mata
-        drawLine(P.a, Offset(x + s * .42f, y - s * .06f), Offset(x + s * .60f, y - s * .10f), strokeWidth = s * .12f, cap = StrokeCap.Round)
-        drawCircle(P.a, s * .095f, Offset(x + s * .66f, y - s * .11f))
-        drawCircle(P.ink, s * .02f, Offset(x + s * .69f, y - s * .13f))
-        // sirip depan (depan cangkang)
-        withTransform({ rotate(35f + fl * 28f, Offset(x + s * .18f, y + s * .10f)) }) { drawOval(P.a, Offset(x + s * .18f, y + s * .02f), Size(s * .62f, s * .17f)) }
+        withTransform({ rotate(22f + stroke * 12f, Offset(x - s * .36f, y + s * .06f)) }) {
+            flipperPath(SP2, x - s * .36f, y + s * .06f, s * .26f, s * .10f); drawPath(SP2, skinD)
+        }
+        // ekor
+        SP2.reset(); SP2.moveTo(x - s * .46f, y); SP2.lineTo(x - s * .66f, y + s * .10f); SP2.lineTo(x - s * .44f, y + s * .09f); SP2.close()
+        drawPath(SP2, skinD)
+        // perut (plastron) dan leher
+        drawOval(skinD, Offset(x - s * .46f, y - s * .06f), Size(s * .92f, s * .34f))
+        SP2.reset(); SP2.moveTo(x + s * .30f, y - s * .10f)
+        SP2.cubicTo(x + s * .46f, y - s * .20f, x + s * .58f, y - s * .22f, x + s * .64f, y - s * .16f)
+        SP2.lineTo(x + s * .60f, y + s * .02f)
+        SP2.cubicTo(x + s * .50f, y + s * .08f, x + s * .38f, y + s * .12f, x + s * .28f, y + s * .12f)
+        SP2.close()
+        drawPath(SP2, skin)
+        // kepala: oval + paruh + mata + garis mulut
+        val hx = x + s * .68f; val hy = y - s * .13f
+        drawOval(skin, Offset(hx - s * .10f, hy - s * .075f), Size(s * .22f, s * .15f))
+        SP2.reset(); SP2.moveTo(hx + s * .09f, hy - s * .035f); SP2.quadraticBezierTo(hx + s * .17f, hy, hx + s * .09f, hy + s * .04f); SP2.close()
+        drawPath(SP2, skinD)
+        drawCircle(P.pp(.9f), s * .022f, Offset(hx + s * .04f, hy - s * .025f))
+        drawCircle(P.ink, s * .012f, Offset(hx + s * .045f, hy - s * .025f))
+        drawLine(P.ink.al(.45f), Offset(hx + s * .02f, hy + s * .025f), Offset(hx + s * .13f, hy + s * .018f), strokeWidth = s * .008f, cap = StrokeCap.Round)
+        // cangkang: kubah dengan tepi terang, sisik heksagonal, bayangan bawah
+        drawOval(shell, Offset(x - s * .52f, y - s * .36f), Size(s * 1.04f, s * .66f))
+        drawOval(mixc(shell, P.ink, .25f).al(.8f), Offset(x - s * .50f, y - s * .06f), Size(s * 1.0f, s * .34f))
+        drawOval(mixc(shell, P.paper, .22f), Offset(x - s * .47f, y - s * .38f), Size(s * .94f, s * .56f))
+        drawOval(mixc(shell, P.paper, .40f).al(.55f), Offset(x - s * .30f, y - s * .34f), Size(s * .52f, s * .20f))
+        SP2.reset()
+        for (r in 0 until 3) {
+            val cx = x - s * .27f + r * s * .27f
+            val cyy = y - s * .17f
+            val hw = s * .115f; val hh = s * .085f
+            SP2.moveTo(cx - hw, cyy); SP2.lineTo(cx - hw * .5f, cyy - hh); SP2.lineTo(cx + hw * .5f, cyy - hh)
+            SP2.lineTo(cx + hw, cyy); SP2.lineTo(cx + hw * .5f, cyy + hh); SP2.lineTo(cx - hw * .5f, cyy + hh); SP2.close()
+        }
+        drawPath(SP2, P.ink.al(.28f), style = Stroke(s * .014f, join = StrokeJoin.Round))
+        drawOval(mixc(shell, P.paper, .55f).al(.7f), Offset(x - s * .47f, y - s * .38f), Size(s * .94f, s * .56f), style = Stroke(s * .012f))
+        // sirip depan sisi dekat: besar, mengayuh naik-turun, di depan cangkang
+        withTransform({ rotate(34f + stroke * 30f, Offset(x + s * .22f, y + s * .10f)) }) {
+            flipperPath(SP2, x + s * .22f, y + s * .10f, s * .56f, s * .19f); drawPath(SP2, skin)
+            drawPath(SP2, P.ink.al(.20f), style = Stroke(s * .010f, join = StrokeJoin.Round))
+            drawLine(P.pp(.30f), Offset(x + s * .30f, y + s * .10f), Offset(x + s * .62f, y + s * .12f), strokeWidth = s * .014f, cap = StrokeCap.Round)
+        }
+        // sirip belakang sisi dekat
+        withTransform({ rotate(30f - stroke * 14f, Offset(x - s * .34f, y + s * .12f)) }) {
+            flipperPath(SP2, x - s * .34f, y + s * .12f, s * .30f, s * .11f); drawPath(SP2, skin)
+            drawPath(SP2, P.ink.al(.20f), style = Stroke(s * .008f, join = StrokeJoin.Round))
+        }
     }
 }
 
@@ -1225,8 +1293,8 @@ private fun DrawScope.jellyfish(P: OrnPaint, x: Float, y: Float, r: Float, ph: F
     val pulse = sin(t * 1.3f + ph)
     val bw = r * (1f + .09f * pulse); val bh = r * (.85f - .14f * pulse)
     // tentakel
-    for (k in 0 until 7) {
-        val sx = x + (k - 3f) * bw * .24f
+    for (k in 0 until 5) {
+        val sx = x + (k - 2f) * bw * .30f
         SP3.reset(); SP3.moveTo(sx, y)
         for (m in 1..8) {
             val f = m / 8f
@@ -1296,9 +1364,9 @@ private fun DrawScope.brainCoral(P: OrnPaint, x: Float, y: Float, r: Float) {
     SP.reset(); SP.moveTo(x - r, y); SP.cubicTo(x - r, y - r * 1.25f, x + r, y - r * 1.25f, x + r, y); SP.close()
     drawPath(SP, Brush.verticalGradient(listOf(mixc(P.c, P.paper, .30f), P.c, mixc(P.c, P.ink, .25f)), startY = y - r * .95f, endY = y))
     clipPath(SP) {
+        SP2.reset()
         for (g in 0 until 7) {
             val yy = y - r * (.12f + g * .135f)
-            SP2.reset()
             var k = 0
             val seg = r * .20f
             var xx = x - r
@@ -1307,9 +1375,9 @@ private fun DrawScope.brainCoral(P: OrnPaint, x: Float, y: Float, r: Float) {
                 if (k == 0) SP2.moveTo(xx, yo) else SP2.lineTo(xx, yo)
                 xx += seg; k++
             }
-            drawPath(SP2, P.ink.al(.28f), style = Stroke(r * .05f, cap = StrokeCap.Round, join = StrokeJoin.Round))
-            drawPath(SP2, P.pp(.22f), style = Stroke(r * .02f, cap = StrokeCap.Round, join = StrokeJoin.Round))
         }
+        drawPath(SP2, P.ink.al(.28f), style = Stroke(r * .05f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawPath(SP2, P.pp(.22f), style = Stroke(r * .02f, cap = StrokeCap.Round, join = StrokeJoin.Round))
         drawOval(P.pp(.18f), Offset(x - r * .62f, y - r * 1.02f), Size(r * .8f, r * .34f))
     }
 }
@@ -1358,7 +1426,7 @@ private fun DrawScope.anemone(P: OrnPaint, x: Float, y: Float, r: Float, t: Floa
         drawOval(mixc(P.c, P.ink, .25f), Offset(x - r * .5f, y - r * .7f), Size(r, r * .9f))
         drawOval(mixc(P.c, P.ink, .18f), Offset(x - r * .56f, y - r * .20f), Size(r * 1.12f, r * .22f))
     }
-    val n = 16
+    val n = 12
     for (i in 0 until n) {
         val f = i.toFloat() / (n - 1)
         val isFront = i % 2 == 0
@@ -1512,6 +1580,7 @@ private fun DrawScope.drawReefScene(P: OrnPaint, w: Float, h: Float, t: Float, f
             val ox = (ornHash(j, 221) - .5f) * u * .15f + sin(t * .7f + j) * u * .012f
             val oy = (ornHash(j, 222) - .5f) * u * .09f + sin(t * .9f + j * 1.7f) * u * .010f
             val x = cxs + ox; val y = cys + oy
+            if (x < -u * .1f || x > u * 1.1f) continue
             fish(P, if (j % 3 == 0) P.d else mixc(P.c, P.paper, .15f), x + flee(x, y), y, u * (.016f + .004f * ornHash(j, 223)), 1f, t * 9f + j, false, false)
         }
     }
@@ -1523,6 +1592,7 @@ private fun DrawScope.drawReefScene(P: OrnPaint, w: Float, h: Float, t: Float, f
             val ox = (ornHash(j, 231) - .5f) * u * .12f + sin(t * .6f + j) * u * .010f
             val oy = (ornHash(j, 232) - .5f) * u * .10f + sin(t * .8f + j * 1.7f) * u * .012f
             val x = cxs + ox; val y = cys + oy
+            if (x < -u * .1f || x > u * 1.1f) continue
             fish(P, P.d, x + flee(x, y), y, u * (.026f + .006f * ornHash(j, 233)), -1f, t * 7f + j, true, true)
         }
     }
@@ -1533,7 +1603,7 @@ private fun DrawScope.drawReefScene(P: OrnPaint, w: Float, h: Float, t: Float, f
         val y = per - ornMod(ornHash(i, 241) * per + t * u * (.016f + .006f * i), per) + u * .1f - u * .3f
         val x = u * (.22f + .50f * i) + sin(t * .25f + i * 2.4f) * u * .07f - par * u * (.02f + .01f * i)
         val edge = (min(y, h - y) / (u * .25f)).coerceIn(0f, 1f)
-        jellyfish(P, x, y, u * (.060f + .016f * i), i * 2.3f, t, if (i == 0) P.d else P.c, edge * (1f - .3f * calm))
+        if (edge > .02f) jellyfish(P, x, y, u * (.060f + .016f * i), i * 2.3f, t, if (i == 0) P.d else P.c, edge * (1f - .3f * calm))
     }
 
     // ---- dasar laut: pasir + riak + bayangan kaustik --------------------------------------------------------------------------------------------------------------------
@@ -1604,7 +1674,7 @@ private fun DrawScope.drawReefScene(P: OrnPaint, w: Float, h: Float, t: Float, f
     }
 
     // ---- gelembung: dari ventilasi tetap + semburan saat diketuk -------------------------------------------------------------------------------------------------------------
-    for (i in 0 until 14) {
+    for (i in 0 until 10) {
         val srcX = u * (.12f + .74f * ornHash(i / 3, 271)) + par * u * .02f
         val rise = u * (.14f + .05f * ornHash(i, 272)) * .1f
         val per = yb - u * .05f
@@ -1635,7 +1705,7 @@ private fun DrawScope.drawReefScene(P: OrnPaint, w: Float, h: Float, t: Float, f
     }
 
     // ---- plankton: dua lapis kedalaman, berkelip -------------------------------------------------------------------------------------------------------------------------------------
-    for (i in 0 until 26) {
+    for (i in 0 until 18) {
         val deep = i % 2 == 0
         val x = ornMod(ornHash(i, 291) * u + t * u * (if (deep) .004f else .008f) * (1f + ornHash(i, 292)) + (if (deep) -par else par) * u * .03f, u)
         val y = ornMod(ornHash(i, 293) * h - t * u * .004f * (.5f + ornHash(i, 294)), h)
@@ -1658,13 +1728,16 @@ fun DrawScope.drawOrnament(kind: String, P0: OrnPaint, w: Float, h: Float, t: Fl
     if (kind.isEmpty() || w <= 1f || h <= 1f || alpha <= .002f) return
     val P = P0.alpha(alpha)
     val s = .90f + .10f * enter.coerceIn(0f, 1.1f)
-    withTransform({ scale(s, s, Offset(w / 2f, h / 2f)) }) {
-        when (kind) {
-            "morph" -> drawMorphScene(P, w, h, t, fx)
-            "canopy" -> drawCanopyScene(P, w, h, t, fx)
-            "skyline" -> drawSkylineScene(P, w, h, t, fx)
-            "reef" -> drawReefScene(P, w, h, t, fx)
-        }
+    if (s > .9995f && s < 1.0005f) drawScene(kind, P, w, h, t, fx)
+    else withTransform({ scale(s, s, Offset(w / 2f, h / 2f)) }) { drawScene(kind, P, w, h, t, fx) }
+}
+
+private fun DrawScope.drawScene(kind: String, P: OrnPaint, w: Float, h: Float, t: Float, fx: OrnFx?) {
+    when (kind) {
+        "morph" -> drawMorphScene(P, w, h, t, fx)
+        "canopy" -> drawCanopyScene(P, w, h, t, fx)
+        "skyline" -> drawSkylineScene(P, w, h, t, fx)
+        "reef" -> drawReefScene(P, w, h, t, fx)
     }
 }
 
@@ -1766,7 +1839,10 @@ fun OrnamentLayer(
         OrnWarm.run()
         var last = 0L
         var sm = .016f
+        var odd = false
         while (true) withFrameNanos { n ->
+            // saat mengetik ornamen sudah redup dan lambat: gambar ulang tiap dua frame (separuh beban, nyaris tak terlihat)
+            if (fx.calm > .6f) { odd = !odd; if (odd) return@withFrameNanos }
             if (last != 0L) {
                 // dt dihaluskan: frame yang tersendat (membuka editor yang berat, GC) hanya menggeser waktu sedikit, jadi gerak latar
                 // tidak "berhenti lalu melompat". Frame normal tetap mengikuti dt asli.
