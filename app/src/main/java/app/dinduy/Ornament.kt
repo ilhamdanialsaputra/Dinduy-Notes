@@ -765,11 +765,6 @@ private fun DrawScope.drawCanopyScene(P: OrnPaint, w: Float, h: Float, t: Float,
     fun gust(ox: Float): Float = if (pr > .01f) ((ox - tx) / u).coerceIn(-1.2f, 1.2f) * pr * .18f else 0f
     val leafK = 1f + .05f * hd
 
-    // kabut rimbun jauh: gumpalan daun yang kabur memberi kedalaman
-    glow(P.a, u * .98f, h * .08f, u * .85f, .60f)
-    glow(P.b, -u * .05f, h * .80f, u * .75f, .55f)
-    glow(P.c, u * .55f, h * .55f, u * .55f, .22f)
-
     // berkas cahaya: lebar lembut + inti sempit, bernapas pelan, memudar ke bawah
     for (i in 0 until 3) {
         val x0 = u * (.52f + .22f * i) + sin(t * .12f + i * 2f) * u * .04f
@@ -934,10 +929,16 @@ private fun DrawScope.drawSkylineScene(P: OrnPaint, w: Float, h: Float, t: Float
             drawCircle(P.pp(.2f), mr * .08f, Offset(sx - mr * .3f, sy + mr * .45f))
         }
     } else {
-        // matahari siang: piringan bergradasi, tanpa halo / sinar (supaya latar tidak jadi gelap)
-        drawCircle(Brush.radialGradient(listOf(mixc(P.d, P.paper, .50f), P.d), center = Offset(sx - sunR * .25f, sy - sunR * .25f), radius = sunR * 1.35f), sunR, Offset(sx, sy))
-        drawCircle(mixc(P.d, P.ink, .12f).al(.55f), sunR * .985f, Offset(sx, sy), style = Stroke(sunR * .07f))
-        drawCircle(P.pp(.30f), sunR * .30f, Offset(sx - sunR * .34f, sy - sunR * .34f))
+        // matahari siang: sinar garis bergantian panjang-pendek yang berputar pelan + piringan bergradasi. Tanpa halo / cahaya menyebar.
+        val rot = t * .12f + lf * .6f + pop * .5f
+        for (k in 0 until 14) {
+            val a = rot + k * (2f * PI.toFloat() / 14f)
+            val lng = if (k % 2 == 0) 1f else .62f
+            val r1 = sunR * 1.40f
+            val r2 = sunR * (1.40f + (.26f + .07f * sin(t * .9f + k * 1.3f)) * lng)
+            drawLine(P.b, Offset(sx + cos(a) * r1, sy + sin(a) * r1), Offset(sx + cos(a) * r2, sy + sin(a) * r2), strokeWidth = sunR * .15f, cap = StrokeCap.Round)
+        }
+        drawCircle(Brush.radialGradient(listOf(mixc(P.d, P.paper, .45f), P.d), center = Offset(sx - sunR * .2f, sy - sunR * .2f), radius = sunR * 1.3f), sunR, Offset(sx, sy))
     }
 
     // burung: kawanan V, kepakan bergantian
