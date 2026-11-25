@@ -5,7 +5,8 @@ package app.dinduy
  *
  *  - Backdrop: "Morph" (bentuk expressive: amuba, capsule, cookie, squircle, clover, pebble yang saling berubah bentuk),
  *    "Canopy" (daun, ranting berkulit, sulur, kupu-kupu), "Skyline" (kota tiga lapis berperspektif, awan, matahari / bulan),
- *    "Reef" (terumbu karang, ikan, kura-kura, ubur-ubur). Plain = tanpa ornamen.
+ *    "Reef" (terumbu karang, ikan, kura-kura, ubur-ubur), "Indonesia" (hutan tropis, candi runtuh, orang utan, cendrawasih,
+ *    badak Jawa, komodo). Plain = tanpa ornamen.
  *  - Parallax: lapisan dekat dan jauh bergeser berlawanan arah mengikuti jari (parX); tanpa jari, kedalaman tetap hidup lewat
  *    gerak waktu per lapis. Ketukan memicu respons khas tiap adegan (riak + percikan, gelembung, dentuman lahar, dst.).
  *  - Selalu DI BELAKANG teks: digambar tepat setelah kertas dan sebelum sampul / isi catatan.
@@ -144,6 +145,7 @@ val ORN_LIST = listOf(
     OrnInfo("canopy", "Canopy", "Leaves swaying in the wind", 138f),
     OrnInfo("skyline", "Skyline", "A city under a slow sun", 214f),
     OrnInfo("reef", "Reef", "Coral, fish and drifting jellyfish", 172f),
+    OrnInfo("indonesia", "Indonesia", "Rainforest, temple ruins and wildlife", 120f),
 )
 
 fun hueName(h: Float): String {
@@ -1763,6 +1765,448 @@ private fun DrawScope.drawReefScene(P: OrnPaint, w: Float, h: Float, t: Float, f
     }
 }
 
+// =====================================================================================================================
+// Indonesia: hutan tropis berkabut, candi berundak yang separuh runtuh dirambati lumut dan akar, orang utan berayun di sulur,
+// cendrawasih terbang berekor panjang, badak Jawa bercula satu merumput, dan komodo yang menjulurkan lidah di tanah.
+// Ketukan: orang utan terayun, cendrawasih mengepak lebih kuat, telinga badak berkedut, komodo menjulur lidah.
+// =====================================================================================================================
+
+private fun DrawScope.indStupa(P: OrnPaint, x: Float, y: Float, r: Float, stone: Color, broken: Boolean) {
+    drawRect(stone, Offset(x - r * 1.18f, y - r * .24f), Size(r * 2.36f, r * .24f))
+    val b = y - r * .24f
+    SP.reset()
+    if (broken) {
+        SP.moveTo(x - r, b)
+        SP.cubicTo(x - r, b - r * 1.0f, x - r * .6f, b - r * 1.3f, x - r * .12f, b - r * 1.1f)
+        SP.lineTo(x + r * .10f, b - r * .66f); SP.lineTo(x + r * .36f, b - r * .84f); SP.lineTo(x + r * .64f, b - r * .34f); SP.lineTo(x + r, b)
+    } else {
+        SP.moveTo(x - r, b)
+        SP.cubicTo(x - r, b - r * 1.55f, x + r, b - r * 1.55f, x + r, b)
+    }
+    SP.close()
+    drawPath(SP, stone)
+    val slit = P.ink.al(.30f)
+    drawRect(slit, Offset(x - r * .46f, b - r * .56f), Size(r * .16f, r * .34f))
+    drawRect(slit, Offset(x + r * .30f, b - r * .56f), Size(r * .16f, r * .34f))
+    if (!broken) {
+        drawLine(stone, Offset(x, b - r * 1.08f), Offset(x, b - r * 1.5f), strokeWidth = r * .13f, cap = StrokeCap.Round)
+        drawCircle(stone, r * .15f, Offset(x, b - r * 1.5f))
+    }
+}
+
+/** Candi berundak empat tingkat: relung ber-arca, tangga tengah, tingkat teratas runtuh, stupa (satu patah), lumut, akar menjuntai, balok jatuh. */
+private fun DrawScope.indTemple(P: OrnPaint, cx: Float, base: Float, s: Float, t: Float) {
+    val stone = mixc(P.c, P.ink, .34f).al(.66f)
+    val dark = mixc(P.ink, P.c, .25f).al(.42f)
+    val lit = mixc(P.b, P.paper, .35f).al(.60f)
+    val moss = P.a.al(.66f)
+    val th = s * .058f
+    // tangga tengah
+    SP.reset(); SP.moveTo(cx - s * .052f, base); SP.lineTo(cx + s * .052f, base); SP.lineTo(cx + s * .024f, base - th * 3f); SP.lineTo(cx - s * .024f, base - th * 3f); SP.close()
+    for (k in 0 until 4) {
+        val wd = s * (.56f - .095f * k)
+        val y1 = base - th * (k + 1)
+        val x0 = cx - wd / 2f
+        if (k == 3) {
+            SP2.reset(); SP2.moveTo(x0, y1 + th); SP2.lineTo(x0, y1 + th * .15f)
+            SP2.lineTo(x0 + wd * .18f, y1); SP2.lineTo(x0 + wd * .30f, y1 + th * .30f); SP2.lineTo(x0 + wd * .46f, y1 + th * .05f)
+            SP2.lineTo(x0 + wd * .60f, y1 + th * .42f); SP2.lineTo(x0 + wd * .78f, y1 + th * .12f); SP2.lineTo(x0 + wd, y1 + th * .38f); SP2.lineTo(x0 + wd, y1 + th); SP2.close()
+            drawPath(SP2, stone)
+        } else {
+            drawRect(stone, Offset(x0, y1), Size(wd, th))
+            drawRect(lit, Offset(x0 - s * .006f, y1), Size(wd + s * .012f, th * .2f))
+        }
+        val cnt = 6 - k
+        val gap = wd / (cnt + 1)
+        for (i in 1..cnt) {
+            val nx = x0 + gap * i
+            if (k < 3 && abs(nx - cx) < s * .055f) continue
+            val nw = th * .34f
+            drawRoundRect(dark, Offset(nx - nw / 2f, y1 + th * .34f), Size(nw, th * .56f), CornerRadius(nw / 2f, nw / 2f))
+            drawCircle(stone, nw * .17f, Offset(nx, y1 + th * .56f))
+        }
+        drawRect(moss, Offset(x0 + wd * (.05f + .45f * ornHash(k, 501)), y1), Size(wd * (.22f + .2f * ornHash(k, 502)), th * .14f))
+        drawRect(moss, Offset(x0 + wd * (.55f + .3f * ornHash(k, 503)), y1), Size(wd * .12f, th * .10f))
+        drawRect(moss, Offset(x0 + wd * ornHash(k, 504), y1), Size(s * .008f, th * (.3f + .5f * ornHash(k, 505))))
+    }
+    // tangga digambar di atas tingkat bawah
+    drawPath(SP, lit.al(.55f))
+    for (i in 1..5) {
+        val yy = base - th * 3f * i / 6f
+        val hw = s * (.052f - .028f * i / 6f)
+        drawLine(dark, Offset(cx - hw, yy), Offset(cx + hw, yy), strokeWidth = s * .0025f)
+    }
+    // stupa: dua di selasar tingkat tiga, satu patah di puncak
+    val ys = base - th * 3f
+    indStupa(P, cx - s * .165f, ys, s * .028f, stone, false)
+    indStupa(P, cx + s * .165f, ys, s * .028f, stone, true)
+    indStupa(P, cx, base - th * 4f + th * .18f, s * .048f, stone, true)
+    // akar menjuntai
+    for (i in 0 until 3) {
+        val x = cx + s * (-.20f + .20f * i)
+        val y0 = base - th * (2f + i % 2)
+        val len = s * (.08f + .03f * i)
+        SP3.reset(); SP3.moveTo(x, y0)
+        SP3.quadraticBezierTo(x + s * .015f + sin(t * .5f + i) * s * .008f, y0 + len * .5f, x + sin(t * .5f + i + 1f) * s * .014f, y0 + len)
+        drawPath(SP3, P.a.al(.75f), style = Stroke(s * .006f, cap = StrokeCap.Round))
+    }
+    // balok jatuh
+    for (i in 0 until 4) {
+        val bs = s * (.03f + .02f * ornHash(i, 511))
+        val bx = cx + s * (-.40f + .27f * i + .03f * ornHash(i, 512))
+        val by = base - s * .004f
+        withTransform({ rotate(ornHash(i, 513) * 40f - 20f, Offset(bx, by)) }) {
+            drawRect(stone, Offset(bx, by - bs * .7f), Size(bs * 1.3f, bs * .7f))
+            drawRect(lit, Offset(bx, by - bs * .7f), Size(bs * 1.3f, bs * .16f))
+        }
+    }
+}
+
+/** Badak Jawa menghadap kanan: satu cula pendek, tiga lipatan kulit (leher, bahu, pinggul), kepala merunduk merumput, telinga berkedut. */
+private fun DrawScope.indRhino(P: OrnPaint, cx: Float, gy: Float, r: Float, t: Float, ear: Float, calm: Float) {
+    val sk = mixc(P.c, P.ink, .50f).al(.78f)
+    val far = mixc(P.c, P.ink, .68f).al(.70f)
+    val dk = P.deep.al(.42f)
+    val lt = mixc(P.b, P.paper, .35f).al(.42f)
+    val sw = 1f - .5f * calm
+    val br = 1f + .012f * sin(t * .9f)
+    val dip = (.5f + .5f * sin(t * .33f)) * .12f * sw
+    withTransform({ translate(cx, gy); scale(r, r * br, Offset.Zero) }) {
+        val cr = CornerRadius(.04f, .04f)
+        drawRoundRect(far, Offset(-.285f, -.34f), Size(.13f, .34f), cr)
+        drawRoundRect(far, Offset(.095f, -.34f), Size(.13f, .34f), cr)
+        drawRoundRect(sk, Offset(-.405f, -.34f), Size(.13f, .34f), cr)
+        drawRoundRect(sk, Offset(.215f, -.34f), Size(.13f, .34f), cr)
+        drawRoundRect(sk, Offset(-.42f, -.045f), Size(.16f, .045f), CornerRadius(.02f, .02f))
+        drawRoundRect(sk, Offset(.20f, -.045f), Size(.16f, .045f), CornerRadius(.02f, .02f))
+        // ekor
+        SP2.reset(); SP2.moveTo(-.52f, -.36f); SP2.quadraticBezierTo(-.61f, -.28f + sin(t * .7f) * .02f * sw, -.58f, -.14f)
+        drawPath(SP2, far, style = Stroke(.03f, cap = StrokeCap.Round))
+        // badan
+        SP.reset(); SP.moveTo(-.52f, -.24f)
+        SP.cubicTo(-.56f, -.46f, -.36f, -.56f, -.12f, -.52f)
+        SP.cubicTo(.08f, -.50f, .22f, -.56f, .40f, -.48f)
+        SP.lineTo(.46f, -.30f)
+        SP.cubicTo(.40f, -.20f, .30f, -.14f, .10f, -.14f)
+        SP.cubicTo(-.12f, -.12f, -.36f, -.12f, -.46f, -.15f)
+        SP.close()
+        drawPath(SP, sk)
+        // lipatan kulit + tekstur mozaik
+        SP2.reset()
+        SP2.moveTo(.37f, -.50f); SP2.quadraticBezierTo(.31f, -.33f, .36f, -.15f)
+        SP2.moveTo(.10f, -.52f); SP2.quadraticBezierTo(.05f, -.34f, .10f, -.14f)
+        SP2.moveTo(-.34f, -.52f); SP2.quadraticBezierTo(-.40f, -.34f, -.36f, -.13f)
+        drawPath(SP2, dk, style = Stroke(.016f, cap = StrokeCap.Round))
+        for (i in 0 until 16) drawCircle(dk.al(1.2f), .010f + .008f * ornHash(i, 603), Offset(-.44f + .72f * ornHash(i, 601), -.46f + .26f * ornHash(i, 602)))
+        SP2.reset(); SP2.moveTo(-.46f, -.44f); SP2.cubicTo(-.40f, -.54f, -.18f, -.57f, -.02f, -.53f)
+        drawPath(SP2, lt, style = Stroke(.018f, cap = StrokeCap.Round))
+        // leher + kepala (berputar di bahu)
+        drawOval(sk, Offset(.28f, -.52f), Size(.30f, .34f))
+        withTransform({ rotate(dip * 57.3f, Offset(.40f, -.38f)) }) {
+            SP.reset(); SP.moveTo(.46f, -.46f)
+            SP.cubicTo(.62f, -.46f, .80f, -.34f, .90f, -.22f)
+            SP.lineTo(.90f, -.12f)
+            SP.cubicTo(.84f, -.08f, .70f, -.08f, .58f, -.14f)
+            SP.cubicTo(.48f, -.16f, .40f, -.22f, .40f, -.32f)
+            SP.close()
+            drawPath(SP, sk)
+            drawCircle(sk, .04f, Offset(.88f, -.14f))
+            SP2.reset(); SP2.moveTo(.76f, -.29f); SP2.quadraticBezierTo(.80f, -.40f, .83f, -.50f); SP2.quadraticBezierTo(.86f, -.40f, .89f, -.27f); SP2.close()
+            drawPath(SP2, mixc(P.deep, P.paper, .30f).al(.78f))
+            drawCircle(P.paper.al(.55f * P.amt), .016f, Offset(.68f, -.31f))
+            drawCircle(P.ink.al(.9f), .009f, Offset(.68f, -.31f))
+            withTransform({ rotate(-ear * 18f, Offset(.50f, -.46f)) }) {
+                SP2.reset(); SP2.moveTo(.46f, -.46f); SP2.lineTo(.45f, -.63f); SP2.lineTo(.56f, -.47f); SP2.close()
+                drawPath(SP2, sk)
+            }
+        }
+    }
+}
+
+/** Komodo menghadap kiri: badan pita meruncing, ekor melambai, sisik punggung, empat kaki bersendi, lidah bercabang yang menjulur berkala. */
+private fun DrawScope.indKomodo(P: OrnPaint, hx: Float, gy: Float, L: Float, t: Float, tongue: Float, calm: Float) {
+    val sw = 1f - .5f * calm
+    val col = mixc(P.c, P.ink, .46f).al(.80f)
+    val farc = mixc(P.c, P.ink, .62f).al(.70f)
+    val n = 22
+    for (k in 0..n) {
+        val f = k.toFloat() / n
+        val lift = if (f < .42f) .075f else .075f * (1f - ornSmooth((f - .42f) / .58f)) + .012f
+        RX[k] = hx + L * f
+        RY[k] = gy - L * lift + sin(t * .8f - f * 4.5f) * L * .03f * f * sw
+        RW[k] = if (f < .42f) L * (.058f + .047f * ornSmooth(f / .3f)) else L * (.105f * (1f - ornSmooth((f - .42f) / .58f)) + .008f)
+    }
+    val fs = sin(t * .5f) * L * .004f
+    // kaki jauh
+    SP3.reset()
+    SP3.moveTo(RX[5] + L * .03f, RY[5] + RW[5] * .35f); SP3.lineTo(RX[5], RY[5] + RW[5] * .35f + L * .03f); SP3.lineTo(RX[5] - L * .02f, gy)
+    SP3.moveTo(RX[14] + L * .03f, RY[14] + RW[14] * .35f); SP3.lineTo(RX[14] + L * .065f, RY[14] + RW[14] * .35f + L * .03f); SP3.lineTo(RX[14] + L * .05f, gy)
+    drawPath(SP3, farc, style = Stroke(L * .022f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    ribbon(SP4, n, 0f, 0f, true)
+    drawPath(SP4, col)
+    // sisik punggung + pita
+    val dk = P.deep.al(.40f)
+    for (k in 2..n - 3 step 2) drawCircle(dk, L * .006f, Offset(RX[k], RY[k] - RW[k] * .30f))
+    for (k in 3..n - 2 step 3) drawLine(dk.al(.7f), Offset(RX[k], RY[k] - RW[k] * .5f), Offset(RX[k], RY[k] + RW[k] * .5f), strokeWidth = L * .011f)
+    // kaki dekat
+    SP3.reset()
+    SP3.moveTo(RX[5], RY[5] + RW[5] * .35f); SP3.lineTo(RX[5] - L * .03f, RY[5] + RW[5] * .35f + L * .03f); SP3.lineTo(RX[5] - L * .045f + fs, gy); SP3.lineTo(RX[5] - L * .065f + fs, gy)
+    SP3.moveTo(RX[14], RY[14] + RW[14] * .35f); SP3.lineTo(RX[14] + L * .035f, RY[14] + RW[14] * .35f + L * .03f); SP3.lineTo(RX[14] + L * .02f - fs, gy); SP3.lineTo(RX[14] + L * .0f - fs, gy)
+    drawPath(SP3, col, style = Stroke(L * .024f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    // kepala
+    val hy = RY[0]
+    drawOval(col, Offset(hx - L * .10f, hy - L * .030f), Size(L * .13f, L * .058f))
+    drawLine(dk, Offset(hx - L * .095f, hy + L * .008f), Offset(hx - L * .01f, hy + L * .012f), strokeWidth = L * .004f, cap = StrokeCap.Round)
+    drawCircle(P.paper.al(.65f * P.amt), L * .008f, Offset(hx - L * .03f, hy - L * .012f))
+    drawCircle(P.ink.al(.9f), L * .0045f, Offset(hx - L * .03f, hy - L * .012f))
+    // lidah
+    val e = max(tongue, max(0f, sin(t * 1.4f)).pow(12f))
+    if (e > .02f) {
+        val mx = hx - L * .10f; val my = hy + L * .004f
+        val tipX = mx - L * .12f * e; val tipY = my + sin(t * 9f) * L * .004f * e
+        val tc = P.hot.al(.9f)
+        drawLine(tc, Offset(mx, my), Offset(tipX, tipY), strokeWidth = L * .0055f, cap = StrokeCap.Round)
+        drawLine(tc, Offset(tipX, tipY), Offset(tipX - L * .02f * e, tipY - L * .009f), strokeWidth = L * .004f, cap = StrokeCap.Round)
+        drawLine(tc, Offset(tipX, tipY), Offset(tipX - L * .02f * e, tipY + L * .009f), strokeWidth = L * .004f, cap = StrokeCap.Round)
+    }
+}
+
+/** Orang utan bergelantung di sulur: lengan atas memegang tali, lengan lain menjuntai panjang, bulu jingga berumbai, pipi lebar. [ang] = sudut ayun (rad). */
+private fun DrawScope.indOrangutan(P: OrnPaint, px: Float, py: Float, L: Float, s: Float, ang: Float, t: Float) {
+    val fur = mixc(P.hot, P.deep, .15f).al(.84f)
+    val face = mixc(P.deep, P.paper, .25f).al(.92f)
+    val cheek = mixc(face, P.hot, .35f)
+    withTransform({ rotate(ang * 57.3f, Offset(px, py)) }) {
+        drawLine(P.ink.al(.75f), Offset(px, py), Offset(px, py + L), strokeWidth = s * .05f, cap = StrokeCap.Round)
+        leafArt(P, P.a, px, py + L * .42f, PI.toFloat() / 2f + .9f, s * .55f, s * .24f, 1f, false)
+        leafArt(P, P.b, px, py + L * .62f, PI.toFloat() / 2f - .9f, s * .45f, s * .20f, -1f, false)
+        withTransform({ translate(px, py + L); scale(s, s, Offset.Zero) }) {
+            val sy = sin(t * .9f) * .06f
+            // lengan atas (memegang) + tangan
+            drawLine(fur, Offset(0f, 0f), Offset(.05f, .40f), strokeWidth = .15f, cap = StrokeCap.Round)
+            drawCircle(fur, .08f, Offset(0f, 0f))
+            // lengan menjuntai
+            SP2.reset(); SP2.moveTo(-.22f, .48f); SP2.quadraticBezierTo(-.66f, .62f, -.58f + sy, 1.22f)
+            drawPath(SP2, fur, style = Stroke(.13f, cap = StrokeCap.Round))
+            drawCircle(fur, .07f, Offset(-.58f + sy, 1.22f))
+            // kaki
+            SP2.reset(); SP2.moveTo(-.10f, 1.05f); SP2.quadraticBezierTo(-.30f, 1.12f, -.28f, 1.42f)
+            SP2.moveTo(.18f, 1.05f); SP2.quadraticBezierTo(.36f, 1.10f, .32f, 1.38f)
+            drawPath(SP2, fur, style = Stroke(.13f, cap = StrokeCap.Round))
+            // badan + rumbai bulu
+            drawOval(fur, Offset(-.30f, .30f), Size(.68f, .84f))
+            drawOval(P.deep.al(.16f), Offset(-.02f, .46f), Size(.40f, .64f))
+            SP3.reset()
+            for (i in 0 until 12) {
+                val a = i * (2f * PI.toFloat() / 12f)
+                val ex = .04f + cos(a) * .34f; val ey = .72f + sin(a) * .42f
+                val sw2 = sin(t * 1.1f + i) * .03f
+                SP3.moveTo(ex, ey); SP3.lineTo(ex + cos(a) * .13f + sw2, ey + sin(a) * .13f)
+            }
+            drawPath(SP3, fur, style = Stroke(.05f, cap = StrokeCap.Round))
+            // kepala: pipi lebar, wajah, mata, jenggot, jambul
+            drawCircle(fur, .21f, Offset(.02f, .26f))
+            drawCircle(cheek, .085f, Offset(-.19f, .31f))
+            drawCircle(cheek, .085f, Offset(.23f, .31f))
+            drawOval(face, Offset(-.12f, .19f), Size(.24f, .27f))
+            drawCircle(P.paper.al(.85f * P.amt), .022f, Offset(-.05f, .28f))
+            drawCircle(P.paper.al(.85f * P.amt), .022f, Offset(.09f, .28f))
+            drawCircle(P.ink.al(.9f), .011f, Offset(-.05f, .28f))
+            drawCircle(P.ink.al(.9f), .011f, Offset(.09f, .28f))
+            drawLine(P.ink.al(.5f), Offset(-.09f, .23f), Offset(.13f, .23f), strokeWidth = .02f, cap = StrokeCap.Round)
+            SP3.reset()
+            for (i in 0 until 5) { val bx = -.08f + .05f * i; SP3.moveTo(bx, .43f); SP3.lineTo(bx + sin(t * 1.2f + i) * .02f, .57f) }
+            for (i in 0 until 5) { val a = -PI.toFloat() * (.15f + .7f * i / 4f); SP3.moveTo(.02f + cos(a) * .19f, .26f + sin(a) * .19f); SP3.lineTo(.02f + cos(a) * .30f, .26f + sin(a) * .30f) }
+            drawPath(SP3, fur, style = Stroke(.045f, cap = StrokeCap.Round))
+        }
+    }
+}
+
+private fun DrawScope.indWing(col: Color, s: Float, a: Float) {
+    val ty = -s * .08f - s * 1.0f * a
+    SP2.reset(); SP2.moveTo(s * .18f, -s * .08f)
+    SP2.quadraticBezierTo(-s * .05f, ty * 1.05f, -s * .62f, ty * .85f + s * .12f)
+    SP2.quadraticBezierTo(-s * .28f, -s * .02f, s * .18f, s * .02f)
+    SP2.close()
+    drawPath(SP2, col)
+}
+
+/** Cendrawasih terbang ke kanan (dir = -1..1: berbalik halus saat berputar): tubuh cokelat, kepala kuning, dua kawat ekor panjang, kipas bulu sayap keemasan. */
+private fun DrawScope.indParadise(P: OrnPaint, bx: Float, by: Float, s: Float, dir: Float, t: Float, amp: Float, tilt: Float) {
+    val body = mixc(P.deep, P.c, .30f).al(.88f)
+    val gold = mixc(P.hot2, P.paper, .10f).al(.90f)
+    val plume = P.hot2.al(.60f)
+    val plume2 = P.hot.al(.55f)
+    val ph = t * 6f
+    withTransform({ translate(bx, by); scale(dir, 1f, Offset.Zero); rotate(tilt * 57.3f, Offset.Zero) }) {
+        indWing(body.al(.55f), s, sin(ph + 1.2f) * .8f * amp + .1f)
+        // kawat ekor
+        for (j in 0..1) {
+            val dy = if (j == 0) .30f else .55f
+            SP2.reset(); SP2.moveTo(-s * .45f, s * .02f)
+            SP2.cubicTo(-s * 1.4f, s * dy + sin(t * 2.2f + j) * s * .12f, -s * 2.2f, s * (dy + .5f) + sin(t * 1.7f + j * 2f) * s * .18f, -s * 3.0f, s * (dy + .35f) + sin(t * 1.4f + j) * s * .22f)
+            drawPath(SP2, if (j == 0) plume else plume2, style = Stroke(s * .05f, cap = StrokeCap.Round))
+            drawCircle(if (j == 0) plume else plume2, s * .075f, Offset(-s * 3.0f, s * (dy + .35f) + sin(t * 1.4f + j) * s * .22f))
+        }
+        // kipas bulu sayap
+        for (k in 0 until 5) {
+            val sp = sin(t * 2f + k * .8f) * s * .10f
+            drawLine(plume.al(.7f - .08f * k), Offset(-s * .25f, s * .04f), Offset(-s * (1.2f + .22f * k), s * (.02f + .13f * k) + sp), strokeWidth = s * .035f, cap = StrokeCap.Round)
+        }
+        drawOval(body, Offset(-s * .50f, -s * .18f), Size(s * 1.0f, s * .36f))
+        drawOval(gold, Offset(-s * .30f, -s * .18f), Size(s * .55f, s * .20f))
+        drawCircle(gold, s * .17f, Offset(s * .55f, -s * .06f))
+        drawLine(P.ink.al(.85f), Offset(s * .68f, -s * .05f), Offset(s * .96f, -s * .01f), strokeWidth = s * .06f, cap = StrokeCap.Round)
+        drawCircle(P.ink.al(.9f), s * .028f, Offset(s * .58f, -s * .09f))
+        indWing(body, s, sin(ph) * .8f * amp + .1f)
+    }
+}
+
+private fun DrawScope.drawIndonesiaScene(P: OrnPaint, w: Float, h: Float, t: Float, fx: OrnFx?) {
+    val u = w
+    val pr = fx?.press ?: 0f; val hd = fx?.hold ?: 0f; val lf = fx?.lift ?: 0f
+    val pop = fx?.pop ?: 0f; val popX = fx?.popX ?: 0f; val popY = fx?.popY ?: 0f
+    val tx = fx?.px ?: 0f
+    val calm = fx?.calm ?: 0f
+    val par = parX(fx, u)
+    val ta = tapAge(fx)
+    val sw = 1f - .5f * calm
+    val wind = (.040f * sin(t * .21f) + .026f * sin(t * .53f + 1.3f)) * sw
+    fun kick(ox: Float): Float = if (abs(pop) > .003f) ((ox - popX) / u).coerceIn(-1.2f, 1.2f) * pop * .34f else 0f
+    val flAdd = abs(pop) * 1.6f
+    fun gust(ox: Float): Float = if (pr > .01f) ((ox - tx) / u).coerceIn(-1.2f, 1.2f) * pr * .18f else 0f
+    val leafK = 1f + .05f * hd
+    val yb = h - u * .035f
+    val tb = yb - u * .17f
+
+    // ---- langit hutan: terang di atas, hijau tua di dasar + matahari berkabut --------------------------------------------------------------
+    drawRect(Brush.verticalGradient(listOf(P.d.al(.20f), P.b.al(.14f), P.a.al(.22f), P.c.al(.30f)), startY = 0f, endY = h), Offset.Zero, Size(w, h))
+    glow(mixc(P.d, P.hot2, .6f), u * .80f, u * .06f, u * .60f, .55f * (1f - .5f * calm))
+    for (i in 0 until 3) {
+        val x0 = u * (.40f + .20f * i) + sin(t * .12f + i * 2f) * u * .04f
+        val wd = u * (.06f + .03f * i)
+        val sk = u * .45f
+        val br = .5f + .5f * sin(t * .21f + i * 1.9f)
+        SP.reset(); SP.moveTo(x0, 0f); SP.lineTo(x0 + wd, 0f); SP.lineTo(x0 + wd - sk, h); SP.lineTo(x0 - sk, h); SP.close()
+        drawPath(SP, Brush.verticalGradient(listOf(P.d.al((.12f + .12f * br) * sw), Color.Transparent), startY = 0f, endY = h))
+    }
+
+    // ---- bukit jauh berkabut --------------------------------------------------------------------------------------------------------------
+    withTransform({ translate(-par * u * .015f, 0f) }) {
+        for (layer in 0..1) {
+            val bs = tb - u * (.16f - .07f * layer)
+            SP.reset(); SP.moveTo(-u * .05f, tb + 2f); SP.lineTo(-u * .05f, bs)
+            var x = -u * .05f
+            while (x <= u * 1.05f) { SP.lineTo(x, bs - (sin(x / u * (4.5f + 2.5f * layer) + layer * 2.2f) * .5f + .5f) * u * (.11f - .03f * layer)); x += u * .04f }
+            SP.lineTo(u * 1.05f, tb + 2f); SP.close()
+            drawPath(SP, (if (layer == 0) mixc(P.b, P.ink, .14f) else mixc(P.a, P.ink, .20f)).al(if (layer == 0) .34f else .50f))
+        }
+        // batang pohon jauh
+        for (i in 0 until 5) {
+            val x = u * (.06f + .21f * i + .04f * ornHash(i, 701))
+            drawLine(P.ink.al(.14f), Offset(x, tb), Offset(x + sin(t * .2f + i) * u * .004f + u * .01f * (ornHash(i, 702) - .5f), -u * .02f), strokeWidth = u * (.012f + .012f * ornHash(i, 703)), cap = StrokeCap.Round)
+        }
+    }
+
+    // ---- candi + tanah tengah + kabut -----------------------------------------------------------------------------------------------------
+    withTransform({ translate(-par * u * .008f, 0f) }) {
+        indTemple(P, u * .60f, tb, u * .95f, t)
+        SP.reset(); SP.moveTo(-u * .05f, h + 2f); SP.lineTo(-u * .05f, tb + u * .01f)
+        var x = -u * .05f
+        while (x <= u * 1.05f) { SP.lineTo(x, tb + u * .01f + sin(x / u * 6f) * u * .008f); x += u * .05f }
+        SP.lineTo(u * 1.05f, h + 2f); SP.close()
+        drawPath(SP, mixc(P.a, P.ink, .22f).al(.42f))
+    }
+    run {
+        val my = tb - u * .06f + sin(t * .2f) * u * .01f
+        drawRect(Brush.verticalGradient(listOf(Color.Transparent, P.pp(.30f * (1f - .3f * calm)), Color.Transparent), startY = my, endY = my + u * .22f), Offset(0f, my), Size(w, u * .22f))
+    }
+
+    // ---- tanah depan ----------------------------------------------------------------------------------------------------------------------
+    drawRect(Brush.verticalGradient(listOf(Color.Transparent, P.ink.al(.20f), P.ink.al(.34f)), startY = yb - u * .10f, endY = h), Offset(0f, yb - u * .10f), Size(w, h - (yb - u * .10f)))
+
+    // ---- satwa darat ----------------------------------------------------------------------------------------------------------------------
+    withTransform({ translate(par * u * .012f, 0f) }) {
+        val ear = abs(pop) + max(0f, sin(t * .7f)).pow(12f) * .6f
+        indRhino(P, u * .27f, yb - u * .006f, u * .30f, t, ear, calm)
+        val tg = if (ta < .9f) 1f - ta / .9f else 0f
+        indKomodo(P, u * .70f, yb - u * .004f, u * .30f, t, tg, calm)
+    }
+
+    // ---- rumput + pakis di depan satwa --------------------------------------------------------------------------------------------------
+    withTransform({ translate(par * u * .03f, 0f) }) {
+        SP3.reset()
+        for (i in 0 until 22) {
+            val gx = u * (.01f + .047f * i) + u * .01f * ornHash(i, 711)
+            val ln = u * (.025f + .03f * ornHash(i, 712))
+            val sx = (sin(t * .8f + i * .7f) * .012f + wind * .5f) * u + gust(gx) * u * .3f
+            SP3.moveTo(gx, yb + u * .02f); SP3.quadraticBezierTo(gx + sx * .4f, yb - ln * .5f, gx + sx, yb - ln)
+        }
+        drawPath(SP3, P.b.al(.80f), style = Stroke(u * .004f, cap = StrokeCap.Round))
+        for (i in 0 until 3) {
+            val fx0 = u * (.06f + .44f * i)
+            for (k in 0 until 4) {
+                val a = -PI.toFloat() / 2f + (k - 1.5f) * .55f + wind * 2f + sin(t * .7f + k + i) * .04f
+                leafArt(P, P.pick(i + k), fx0, yb + u * .02f, a, u * .13f, u * .05f, if (k % 2 == 0) 1f else -1f, false)
+            }
+        }
+    }
+
+    // ---- ranting + sulur --------------------------------------------------------------------------------------------------------------------
+    val sg = { ph: Float, amp: Float -> sin(t * .45f + ph) * amp + wind + lf * .12f }
+    withTransform({ translate(-par * u * .02f, 0f) }) {
+        val f1 = u * .46f
+        branch(P, f1, -u * .02f, 1.95f, u * .30f, 6, .05f, sg(2.4f, .08f) + gust(f1) + kick(f1), t, 2.4f, u * .065f * leafK, lf * 1.5f + flAdd, 14, .55f, calm)
+    }
+    vine(P, u * .58f, u * .30f, t, 2.2f, wind, 7)
+    vine(P, u * .86f, u * .22f, t, 4.0f, wind, 9)
+    withTransform({ translate(par * u * .03f, 0f) }) {
+        val o1 = u * 1.03f
+        branch(P, o1, -u * .03f, 2.25f, u * .78f, 9, -.07f, sg(0f, .10f) + gust(o1) + kick(o1), t, 0f, u * .15f * leafK, lf * 2f + flAdd, 12, 1f, calm)
+        val o2 = -u * .03f
+        branch(P, o2, -u * .02f, .95f, u * .42f, 7, .06f, sg(1.7f, .11f) + gust(o2) + kick(o2), t, 1.7f, u * .11f * leafK, lf * 2f + flAdd, 11, 1f, calm)
+    }
+
+    // ---- orang utan berayun di sulur ----------------------------------------------------------------------------------------------------
+    run {
+        val opx = u * .30f
+        val kA = pop * .32f * (if (popX < opx) 1f else -1f)
+        indOrangutan(P, opx, -u * .02f, u * .38f, u * .11f, sin(t * .55f) * .15f * sw + wind * 1.2f + kA, t)
+    }
+
+    // ---- cendrawasih terbang melintas ----------------------------------------------------------------------------------------------------
+    run {
+        val bx = u * (.52f + .36f * sin(t * .10f + .6f))
+        val by = u * (.27f + .09f * sin(t * .17f + 1f)) + sin(t * 1.9f) * u * .008f
+        val dir = (cos(t * .10f + .6f) * 3.3f).coerceIn(-1f, 1f)
+        indParadise(P, bx, by, u * .05f, dir, t, 1f + .4f * abs(pop), -.08f + .10f * sin(t * 1.9f))
+    }
+
+    // ---- ketukan: cincin cahaya ---------------------------------------------------------------------------------------------------------------
+    if (ta < 1.6f) {
+        val rad = u * .06f + ta * u * .22f
+        drawCircle(P.pp(.45f * (1f - ta / 1.6f)), rad, Offset(popX, popY), style = Stroke(u * .004f))
+    }
+
+    // ---- debu cahaya + kunang-kunang -----------------------------------------------------------------------------------------------------
+    for (i in 0 until 6) {
+        val x = ornHash(i, 91) * u + sin(t * .25f + i * 1.7f) * u * .03f
+        val y = ornMod(ornHash(i, 92) * h + t * u * .006f * (.5f + ornHash(i, 93)), h)
+        val tw = .5f + .5f * sin(t * .8f + i * 2f)
+        drawCircle(P.d.al(.20f + .30f * tw), u * .0035f * (.6f + ornHash(i, 94)), Offset(x, y))
+    }
+    for (i in 0 until 7) {
+        val rr = u * (.006f + .006f * ornHash(i, 8))
+        val per = h + u * .2f
+        val y = ornMod(ornHash(i, 9) * per - t * u * (.008f + .006f * ornHash(i, 10)), per) - u * .1f
+        val x = ornHash(i, 12) * u + sin(t * .3f + i * 1.9f) * u * .05f + par * u * .04f
+        val tw = .5f + .5f * sin(t * (.4f + ornHash(i, 13) * .6f) + i * 3f)
+        val col = P.hot2
+        drawCircle(col.al(.10f + .10f * tw), rr * 3.2f, Offset(x, y))
+        drawCircle(col.al(.45f + .35f * tw), rr, Offset(x, y))
+    }
+}
+
 private fun sign01(x: Float): Float = if (x >= 0f) 1f else -1f
 
 // =====================================================================================================================
@@ -1787,6 +2231,7 @@ private fun DrawScope.drawScene(kind: String, P: OrnPaint, w: Float, h: Float, t
         "canopy" -> drawCanopyScene(P, w, h, t, fx)
         "skyline" -> drawSkylineScene(P, w, h, t, fx)
         "reef" -> drawReefScene(P, w, h, t, fx)
+        "indonesia" -> drawIndonesiaScene(P, w, h, t, fx)
     }
 }
 
@@ -1814,7 +2259,7 @@ object OrnWarm {
                 clipRect(0f, 0f, 120f, 200f) {
                     for (dk in listOf(false, true)) {
                         val op = OrnPaint(c, c, c, c, c, c, 1f, dk)
-                        for (k in listOf("morph", "canopy", "skyline", "reef")) {
+                        for (k in listOf("morph", "canopy", "skyline", "reef", "indonesia")) {
                             drawOrnament(k, op, 120f, 200f, 3f, fx, alpha = .02f)
                             drawOrnament(k, op, 120f, 200f, 31f, fx, alpha = .02f)
                         }
@@ -1835,7 +2280,7 @@ object OrnWarm {
             val op = OrnPaint(pal, pal, pal, pal, pal, pal)
             val fx = OrnFx().also { it.press = .5f; it.pop = .3f; it.px = 40f; it.py = 60f }
             ds.draw(androidx.compose.ui.unit.Density(1f), androidx.compose.ui.unit.LayoutDirection.Ltr, cv, Size(96f, 160f)) {
-                for (k in listOf("morph", "canopy", "skyline", "reef")) drawOrnament(k, op, 96f, 160f, 3f, fx)
+                for (k in listOf("morph", "canopy", "skyline", "reef", "indonesia")) drawOrnament(k, op, 96f, 160f, 3f, fx)
             }
         } catch (e: Throwable) { }
     }
