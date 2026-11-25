@@ -608,52 +608,6 @@ private fun DrawScope.birdWing(col: Color, bx: Float, by: Float, bs: Float, fl: 
     drawPath(SP2, col, style = Stroke(wd, cap = StrokeCap.Round, join = StrokeJoin.Round))
 }
 
-private const val CN = 48
-
-/**
- * Selubung atas awan: tinggi puncak tiap x (-.5 .. .5, relatif lebar awan) dari gabungan beberapa gumpalan. Dihitung sekali,
- * lalu dihaluskan sedikit supaya lekukan antar gumpalan terasa menyatu, bukan lingkaran yang ditumpuk.
- */
-private val CLOUD_ENV = FloatArray(CN + 1).also { env ->
-    val cs = floatArrayOf(-.36f, -.01f, .17f, -.19f, -.08f, .22f, .04f, -.14f, .28f, .27f, -.06f, .21f, .43f, .02f, .13f)
-    for (j in 0..CN) {
-        val x = -.5f + j.toFloat() / CN
-        var y = .16f
-        var i = 0
-        while (i < cs.size) {
-            val dx = x - cs[i]; val r = cs[i + 2]
-            if (abs(dx) < r) y = min(y, cs[i + 1] - sqrt(r * r - dx * dx))
-            i += 3
-        }
-        env[j] = y
-    }
-    val c = env.copyOf()
-    for (j in 1 until CN) env[j] = c[j - 1] * .25f + c[j] * .5f + c[j + 1] * .25f
-}
-
-/**
- * Awan kumulus satu siluet. Kedalaman datang dari gradasi di dalam bentuk (atas terkena cahaya, perut agak gelap) dan perut yang
- * melengkung, bukan dari gumpalan tambahan. [k] = kekuatan bayangan, [flip] = -1 mencerminkan bentuk supaya awan tidak kembar.
- */
-private fun DrawScope.cloud(P: OrnPaint, cx: Float, cy: Float, cw: Float, base: Color, k: Float, flip: Float = 1f) {
-    val bot = .16f
-    SP3.reset()
-    SP3.moveTo(cx - cw * .5f * flip, cy + bot * cw)
-    for (j in 0..CN) SP3.lineTo(cx + (-.5f + j.toFloat() / CN) * cw * flip, cy + CLOUD_ENV[j] * cw)
-    SP3.lineTo(cx + cw * .5f * flip, cy + bot * cw)
-    SP3.quadraticBezierTo(cx, cy + (bot + .07f) * cw, cx - cw * .5f * flip, cy + bot * cw)
-    SP3.close()
-    drawPath(SP3, base)
-    val hi = mixc(base, P.paper, .55f)
-    val sh = mixc(base, P.ink, .20f * k)
-    clipPath(SP3) {
-        drawRect(
-            Brush.verticalGradient(0f to hi.al(.55f), .42f to Color.Transparent, 1f to sh.al(.9f), startY = cy - cw * .40f, endY = cy + cw * .22f),
-            Offset(cx - cw * .5f, cy - cw * .40f), Size(cw, cw * .62f)
-        )
-    }
-}
-
 // =====================================================================================================================
 // Canopy: ranting berkulit, daun dua nada, sulur, berkas cahaya berdebu, kupu-kupu, daun jatuh, dan kunang-kunang
 // =====================================================================================================================
@@ -930,30 +884,8 @@ private fun DrawScope.drawSkylineScene(P: OrnPaint, w: Float, h: Float, t: Float
             drawCircle(P.pp(.2f), mr * .08f, Offset(sx - mr * .3f, sy + mr * .45f))
         }
     } else {
-        // matahari: halo bertingkat, sinar bergantian panjang-pendek berputar pelan, piringan bergradasi
-        glow(P.d, sx, sy, sunR * 5.2f, .38f)
-        drawCircle(P.d.al(.10f), sunR * 2.5f, Offset(sx, sy))
-        drawCircle(P.d.al(.14f), sunR * 1.8f, Offset(sx, sy))
-        val rot = t * .12f + lf * .6f + pop * .5f
-        for (k in 0 until 14) {
-            val a = rot + k * (2f * PI.toFloat() / 14f)
-            val lng = if (k % 2 == 0) 1f else .62f
-            val r1 = sunR * 1.40f
-            val r2 = sunR * (1.40f + (.26f + .07f * sin(t * .9f + k * 1.3f)) * lng)
-            drawLine(P.b, Offset(sx + cos(a) * r1, sy + sin(a) * r1), Offset(sx + cos(a) * r2, sy + sin(a) * r2), strokeWidth = sunR * .15f, cap = StrokeCap.Round)
-        }
-        drawCircle(Brush.radialGradient(listOf(mixc(P.d, P.paper, .45f), P.d), center = Offset(sx - sunR * .2f, sy - sunR * .2f), radius = sunR * 1.3f), sunR, Offset(sx, sy))
-    }
-
-    // awan berlapis: yang jauh kecil, pucat, lambat; yang dekat besar dan bersayap bayangan. Ketukan mendorongnya ke samping.
-    for (i in 0 until 4) {
-        val far = i % 2 == 0
-        val cw = u * (if (far) .22f + .03f * i else .34f + .04f * i)
-        val dep = if (far) .10f else .22f
-        val span = u * 1.9f
-        val x = ornMod(ornHash(i, 11) * span + t * u * (.004f + .0035f * (i % 3)) + pop * u * .12f * dep, span) - cw * .6f - par * u * dep * .06f
-        val y = u * (.08f + .105f * i) + sin(t * .2f + i * 2f) * u * .004f
-        cloud(P, x, y, cw, if (far) P.b.al(.7f) else P.b, if (far) .5f else 1f, if (i % 2 == 0) 1f else -1f)
+        // matahari siang: piringan polos saja (tanpa halo / sinar, supaya latar tidak jadi gelap)
+        drawCircle(P.d, sunR, Offset(sx, sy))
     }
 
     // burung: kawanan V, kepakan bergantian
