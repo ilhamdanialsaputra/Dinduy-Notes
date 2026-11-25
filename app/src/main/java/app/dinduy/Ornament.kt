@@ -16,9 +16,13 @@ package app.dinduy
  *  - Editor: tanpa parallax. Gerak murni waktu (orbit, napas, angin) + respons pegas: menghindari jari saat disentuh, berkumpul ke jari
  *    saat ditahan, bergelombang dari titik ketuk, dan "mekar" saat teks diangkat (ed.tl).
  *  - Kartu: pose diam (tanpa animasi), dengan pose terakhir dari editor supaya kartu tidak "loncat" setelah ditutup.
+ *  - Performa: kartu merekam adegannya sekali ke GraphicsLayer luring lalu hanya menempel (cardOrnament); editor memakai OrnPacer
+ *    (laju diam ~60 fps + penjaga beban, penuh saat interaksi); glow memakai gradien satuan yang di-cache; tak ada clipPath per frame
+ *    di Skyline / Reef. Setel ORN_DEBUG = true untuk mencatat biaya gambar per frame ke logcat (tag OrnPerf).
  */
 
 import android.os.SystemClock
+import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterExitState
@@ -93,6 +97,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathOperation
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.graphics.layer.CompositingStrategy
+import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -104,6 +112,9 @@ import androidx.compose.ui.graphics.lerp as lerpC
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.composed
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import kotlinx.coroutines.delay
@@ -348,12 +359,19 @@ class OrnClock(val base: Float) {
 }
 
 object OrnPose {
-    private class Box(@JvmField var t: Float)
+    /** [v] = versi pose per catatan: hanya kartu milik catatan itu yang digambar ulang saat editornya ditutup (dulu SEMUA kartu terlihat sekaligus). */
+    private class Box(@JvmField var t: Float) { val v = mutableIntStateOf(0) }
     private val m = HashMap<String, Box>()
+    /** Versi global (tetap ada untuk kompatibilitas pemanggil lain). */
     var ver by mutableIntStateOf(0)
-    fun get(id: String): Float = m[id]?.t ?: ((id.hashCode() and 0xFFFF) / 700f)
+    private fun dflt(id: String): Float = (id.hashCode() and 0xFFFF) / 700f
+    private fun box(id: String): Box = m[id] ?: Box(dflt(id)).also { m[id] = it }
+    fun get(id: String): Float = m[id]?.t ?: dflt(id)
     /** Dipanggil tiap frame: kotak waktu dipakai ulang, jadi tidak ada alokasi (boxing Float) yang memicu GC saat catatan baru dibuka. */
     fun put(id: String, t: Float) { val b = m[id]; if (b == null) m[id] = Box(t) else b.t = t }
+    /** Dibaca di dalam gambar kartu: berubah hanya saat [bump] untuk [id] yang sama. */
+    fun verOf(id: String): Int = box(id).v.intValue
+    fun bump(id: String) { box(id).v.intValue++; ver++ }
 }
 
 // =====================================================================================================================
@@ -374,13 +392,23 @@ private fun ornSmooth(x: Float): Float {
     return c * c * c * (c * (c * 6f - 15f) + 10f)
 }
 
-/** Cahaya lembut (gradien radial): memberi kedalaman tanpa tepi keras yang mengganggu bacaan. */
+/**
+ * Cahaya lembut (gradien radial): memberi kedalaman tanpa tepi keras yang mengganggu bacaan.
+ *
+ * Dulu tiap pemanggilan membuat Brush + shader gradien baru (sampai ~25 per frame di Skyline malam). Sekarang satu gradien satuan
+ * (radius 1 di titik 0,0) disimpan per warna lalu diskalakan / digeser lewat transform, dan [k] menjadi alpha kuas.
+ * Hasil pikselnya sama persis: rona dan bentuk gradien tidak berubah, alpha hanya dikalikan skalar.
+ */
+private val GLOW_CACHE = HashMap<Long, Brush>()
+
 private fun DrawScope.glow(c: Color, cx: Float, cy: Float, r: Float, k: Float) {
     if (k <= .002f || c.alpha <= .002f || r <= 1f) return
-    drawCircle(
-        Brush.radialGradient(listOf(c.copy(alpha = c.alpha * k), Color.Transparent), center = Offset(cx, cy), radius = r),
-        r, Offset(cx, cy)
-    )
+    val key = c.value.toLong()
+    val br: Brush = GLOW_CACHE[key] ?: run {
+        if (GLOW_CACHE.size > 64) GLOW_CACHE.clear()
+        Brush.radialGradient(listOf(c, Color.Transparent), center = Offset.Zero, radius = 1f).also { GLOW_CACHE[key] = it }
+    }
+    withTransform({ translate(cx, cy); scale(r, r, Offset.Zero) }) { drawCircle(br, 1f, Offset.Zero, alpha = k.coerceIn(0f, 1f)) }
 }
 
 // =====================================================================================================================
@@ -867,6 +895,13 @@ private inline fun eachBldg(L: Int, u: Float, h: Float, block: (i: Int, bx: Floa
     }
 }
 
+/** Bulan sabit dalam koordinat satuan (radius 1 di 0,0): piringan dikurangi lingkaran (.45, -.2) berjari-jari .86. */
+private val MOON_CRESCENT: Path by lazy {
+    val disc = Path().apply { addOval(Rect(Offset.Zero, 1f)) }
+    val cut = Path().apply { addOval(Rect(Offset(.45f, -.2f), .86f)) }
+    Path().apply { op(disc, cut, PathOperation.Difference) }
+}
+
 private fun DrawScope.drawSkylineScene(P: OrnPaint, w: Float, h: Float, t: Float, fx: OrnFx?) {
     val u = w
     val pr = fx?.press ?: 0f; val hd = fx?.hold ?: 0f; val lf = fx?.lift ?: 0f
@@ -922,12 +957,11 @@ private fun DrawScope.drawSkylineScene(P: OrnPaint, w: Float, h: Float, t: Float
         glow(P.ink, sx, sy, mr * 3.2f, .20f)
         drawCircle(P.ink.al(.10f), mr * 1.9f, Offset(sx, sy))
         drawCircle(P.ink.al(.12f), mr * 1.4f, Offset(sx, sy))
-        SP2.reset(); SP2.addOval(Rect(Offset(sx + mr * .45f, sy - mr * .2f), mr * .86f))
-        clipPath(SP2, ClipOp.Difference) {
-            drawCircle(P.ink, mr, Offset(sx, sy))
-            drawCircle(P.pp(.25f), mr * .12f, Offset(sx - mr * .55f, sy + mr * .1f))
-            drawCircle(P.pp(.2f), mr * .08f, Offset(sx - mr * .3f, sy + mr * .45f))
-        }
+        // sabit: bentuk satuan dihitung sekali (piringan dikurangi lingkaran pemotong), lalu diskalakan. Dulu clipPath per frame.
+        // Kedua kawah letaknya sepenuhnya di luar lingkaran pemotong, jadi digambar langsung tanpa klip dengan hasil yang sama.
+        withTransform({ translate(sx, sy); scale(mr, mr, Offset.Zero) }) { drawPath(MOON_CRESCENT, P.ink) }
+        drawCircle(P.pp(.25f), mr * .12f, Offset(sx - mr * .55f, sy + mr * .1f))
+        drawCircle(P.pp(.2f), mr * .08f, Offset(sx - mr * .3f, sy + mr * .45f))
     } else {
         // matahari siang: sinar garis bergantian panjang-pendek yang berputar pelan + piringan bergradasi. Tanpa halo / cahaya menyebar.
         val rot = t * .12f + lf * .6f + pop * .5f
@@ -1282,16 +1316,17 @@ private fun DrawScope.turtle(P: OrnPaint, x: Float, y: Float, s: Float, dir: Flo
 private fun DrawScope.jellyfish(P: OrnPaint, x: Float, y: Float, r: Float, ph: Float, t: Float, col: Color, a: Float) {
     val pulse = sin(t * 1.3f + ph)
     val bw = r * (1f + .09f * pulse); val bh = r * (.85f - .14f * pulse)
-    // tentakel
+    // tentakel: lima helai tipis yang tak bersinggungan -> satu path, satu gambar
+    SP3.reset()
     for (k in 0 until 5) {
         val sx = x + (k - 2f) * bw * .30f
-        SP3.reset(); SP3.moveTo(sx, y)
+        SP3.moveTo(sx, y)
         for (m in 1..8) {
             val f = m / 8f
             SP3.lineTo(sx + sin(t * 1.1f + ph - m * .55f + k) * r * .11f * f * (1f + k % 2), y + f * r * (1.45f + .2f * (k % 3)) * (1f + .06f * pulse))
         }
-        drawPath(SP3, col.al(.55f * a), style = Stroke(r * .035f, cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
+    drawPath(SP3, col.al(.55f * a), style = Stroke(r * .035f, cap = StrokeCap.Round, join = StrokeJoin.Round))
     // lengan mulut yang lebih tebal
     for (k in 0 until 2) {
         SP3.reset(); SP3.moveTo(x + (k - .5f) * bw * .3f, y)
@@ -1556,7 +1591,7 @@ private fun DrawScope.drawReefScene(P: OrnPaint, w: Float, h: Float, t: Float, f
             val f = k
             val x = -u * .3f + f * u * 1.6f
             val y = h * .30f + sin(f * 5f) * u * .03f
-            manta(P, x, y, u * .30f, 1f, t, sin(f * PI.toFloat()).coerceIn(0f, 1f))
+            if (x + u * .35f > 0f && x - u * .35f < u) manta(P, x, y, u * .30f, 1f, t, sin(f * PI.toFloat()).coerceIn(0f, 1f))
         }
     }
 
@@ -1567,7 +1602,8 @@ private fun DrawScope.drawReefScene(P: OrnPaint, w: Float, h: Float, t: Float, f
         val x = -u * .3f + k * u * 1.6f
         val y = h * .42f + sin(k * 6f) * u * .03f - lf * u * .01f
         val ex = if (pop > .003f) (x - popX) else 0f
-        turtle(P, x + (if (abs(ex) < u * .3f) sign01(ex) * pop * u * .03f else 0f), y, u * .22f, 1f, t)
+        // di luar layar (sekitar seperempat waktu perjalanannya) tidak perlu digambar sama sekali
+        if (x + u * .30f > 0f && x - u * .30f < u) turtle(P, x + (if (abs(ex) < u * .3f) sign01(ex) * pop * u * .03f else 0f), y, u * .22f, 1f, t)
     }
 
     // ---- ikan bergerombol: gerombol kecil ke kanan, gerombol ikan bidadari ke kiri -----------------------------------------------------------------
@@ -1625,7 +1661,9 @@ private fun DrawScope.drawReefScene(P: OrnPaint, w: Float, h: Float, t: Float, f
         while (x <= u * 1.1f) { SP4.lineTo(x, yb + sin(x / u * 6f + .5f) * u * .012f - u * .005f); x += u * .05f }
         SP4.lineTo(u * 1.1f, h + 2f); SP4.close()
         drawPath(SP4, Brush.verticalGradient(listOf(mixc(P.b, P.paper, .55f), mixc(P.a, P.paper, .30f)), startY = yb - u * .02f, endY = h))
-        clipPath(SP4) {
+        // Tanpa clipPath: garis riak mulai >= .008u di bawah tepi atas pasir dan kilau paling tinggi hanya ~.002u melewati tepi (alpha <= 14%),
+        // jadi hasilnya tak terbedakan, tetapi satu klip berbentuk path (mahal di GPU) per frame hilang.
+        run {
             for (i in 0 until 5) {
                 val yy = yb + u * (.012f + .006f * i)
                 SP2.reset(); SP2.moveTo(-u * .05f, yy)
@@ -1803,14 +1841,82 @@ object OrnWarm {
     }
 }
 
-/** Ornamen kartu: digambar di belakang isi kartu (dan di belakang sampul), pose diam. Pasang tepat setelah .background(...). */
+/** Dua OrnPaint dianggap sama bila semua warna dan parameternya sama (pemanggil boleh membuat instans baru tiap rekomposisi). */
+private fun OrnPaint.sameAs(o: OrnPaint): Boolean =
+    this === o || (a == o.a && b == o.b && c == o.c && d == o.d && ink == o.ink && paper == o.paper &&
+        amt == o.amt && dark == o.dark && hot == o.hot && hot2 == o.hot2 && deep == o.deep)
+
+/** Ingatan terakhir yang direkam ke layer sebuah kartu: selama tak ada yang berubah, kartu cukup menempelkan layer-nya. */
+private class OrnCardKey {
+    var id = ""
+    var kind = ""
+    var p: OrnPaint? = null
+    var w = 0f
+    var h = 0f
+    var ver = -1
+    fun matches(i: String, k: String, pp: OrnPaint, ww: Float, hh: Float, v: Int): Boolean =
+        ver == v && w == ww && h == hh && id == i && kind == k && p?.sameAs(pp) == true
+    fun set(i: String, k: String, pp: OrnPaint, ww: Float, hh: Float, v: Int) { id = i; kind = k; p = pp; w = ww; h = hh; ver = v }
+}
+
+/**
+ * Ornamen kartu: digambar di belakang isi kartu (dan di belakang sampul), pose diam. Pasang tepat setelah .background(...).
+ *
+ * Adegan direkam SEKALI ke GraphicsLayer luring (tekstur GPU) lalu hanya ditempel. Tanpa ini setiap kartu yang terlihat menjalankan ulang
+ * ratusan operasi path / gradien di GPU pada SETIAP frame gulir (dan setiap kali border / riak / animasi kartu menyentuh node yang sama),
+ * padahal gambarnya diam. Perekaman ulang hanya terjadi bila ukuran, backdrop, warna, atau pose catatan itu berubah. Butuh Compose UI 1.7+.
+ */
 fun Modifier.cardOrnament(kind: String, P: OrnPaint, id: String): Modifier =
-    if (kind.isEmpty()) this else drawBehind {
-        OrnWarm.run()
-        OrnWarm.gpu(this)
-        OrnPose.ver
-        drawOrnament(kind, P, size.width, size.height, OrnPose.get(id), null)
+    if (kind.isEmpty()) this else composed {
+        val layer = rememberGraphicsLayer()
+        val key = remember { OrnCardKey() }
+        Modifier.drawBehind {
+            OrnWarm.run()
+            OrnWarm.gpu(this)
+            val ver = OrnPose.verOf(id)      // dibaca di fase gambar: hanya kartu milik id ini yang tergambar ulang saat editornya ditutup
+            val w = size.width; val h = size.height
+            if (w >= 1f && h >= 1f) {
+                if (!key.matches(id, kind, P, w, h, ver)) {
+                    layer.compositingStrategy = CompositingStrategy.Offscreen
+                    layer.record(this, layoutDirection, IntSize(w.toInt(), h.toInt())) {
+                        drawOrnament(kind, P, size.width, size.height, OrnPose.get(id), null)
+                    }
+                    key.set(id, kind, P, w, h, ver)
+                }
+                drawLayer(layer)
+            }
+        }
     }
+
+/**
+ * Pengatur laju gambar ornamen di editor / pratinjau.
+ *  - Laju diam dibatasi ~60 fps (layar 90 / 120 / 144 Hz menggambar tiap 2 vsync): gerak latar sangat lambat (hitungan piksel per detik),
+ *    jadi 60 fps tak terbedakan dari 120 fps, tetapi bebannya separuh. Saat disentuh / diketuk / diangkat laju kembali penuh.
+ *  - Penjaga beban: biaya gambar (ms di thread utama) diukur; bila melewati ~34% jatah satu periode, laju diturunkan satu tingkat
+ *    (dan naik lagi bila sudah longgar), supaya ornamen tidak pernah menggerus anggaran frame bagi teks / gulir pada perangkat lemah.
+ */
+private class OrnPacer(hz: Float, private val tag: String) {
+    val vsSec = 1f / hz.coerceIn(30f, 240f)
+    private val vs = vsSec * 1000f
+    private val base = (hz / 60f + .5f).toInt().coerceIn(1, 4)
+    private var n = 0
+    private var cost = 0f
+    var stride = base
+        private set
+
+    fun sample(ms: Float) {
+        n++
+        if (n <= 10) return                         // beberapa frame awal: JIT dingin / kompilasi shader, bukan beban sebenarnya
+        val x = ms.coerceIn(0f, 30f)
+        cost = if (n == 11) x else cost + (x - cost) * .08f
+        if (stride < 4 && cost > .34f * stride * vs) stride++
+        else if (stride > base && cost < .20f * (stride - 1) * vs) stride--
+        if (ORN_DEBUG && n % 180 == 0) Log.d("OrnPerf", "$tag cost=${"%.2f".format(cost)}ms stride=$stride vsync=${"%.1f".format(vs)}ms")
+    }
+}
+
+/** true = catat biaya gambar rata-rata dan laju terpilih ke logcat (tag OrnPerf) tiap ~3 detik; untuk mengukur di perangkat. */
+private const val ORN_DEBUG = false
 
 /** Tinggi wadah yang tampak dalam koordinat isi editor. Saat morph dari kartu, isi editor diskalakan; hasilnya = tinggi kartu / skala. */
 private fun ornViewH(vm: AppVM, size: Size): Float {
@@ -1843,24 +1949,32 @@ fun OrnamentLayer(
             clock.prev = ""
         }
     }
-    DisposableEffect(id) { onDispose { OrnPose.ver++ } }
+    DisposableEffect(id) { onDispose { OrnPose.bump(id) } }
     if (clock.cur.isEmpty() && clock.prev.isEmpty()) return
     val P = remember(pal, inten) { ornPaint(pal, inten) }
+    val view = LocalView.current
+    val pacer = remember(view) { OrnPacer(view.display?.refreshRate ?: 60f, id) }
     LaunchedEffect(id, clock) {
         OrnWarm.run()
         var last = 0L
         var sm = .016f
-        var odd = false
+        var skip = 0
         while (true) withFrameNanos { n ->
-            // saat mengetik ornamen sudah redup dan lambat: gambar ulang tiap dua frame (separuh beban, nyaris tak terlihat)
-            if (fx.calm > .6f) { odd = !odd; if (odd) return@withFrameNanos }
+            // Laju gambar: penuh selama ada interaksi (jari, ketukan, teks diangkat: adegan toh sudah tergambar tiap frame karena sinyalnya
+            // berubah); saat diam dibatasi pengatur laju (~60 fps, atau lebih rendah bila beban berat); saat mengetik (ornamen sudah
+            // redup dan lambat) separuhnya lagi. Frame yang dilewati tidak mengubah apa pun, dan dt berikutnya mencakup semuanya.
+            val busy = fx.down || fx.press > .01f || abs(fx.pop) > .003f || fx.hold > .01f || (fx.lift > .001f && fx.lift < .999f)
+            val every = if (busy) 1 else pacer.stride * (if (fx.calm > .6f) 2 else 1)
+            if (++skip < every) return@withFrameNanos
+            skip = 0
             if (last != 0L) {
                 // dt dihaluskan: frame yang tersendat (membuka editor yang berat, GC) hanya menggeser waktu sedikit, jadi gerak latar
-                // tidak "berhenti lalu melompat". Frame normal tetap mengikuti dt asli.
+                // tidak "berhenti lalu melompat". Selang yang memang disengaja (frame dilewati) bukan hitch, jadi batasnya ikut [every].
                 val raw = ((n - last) / 1e9f).coerceIn(.001f, .25f)
-                sm += (raw.coerceAtMost(.034f) - sm) * .35f
-                // frame yang tersendat hanya memajukan waktu sedikit (maks ~40 ms): setelah hitch gerak lanjut mulus, bukan melompat
-                val dt = if (raw > .034f) (sm + (raw - .034f) * .12f).coerceAtMost(.04f) else raw
+                val cap = every * pacer.vsSec + .018f
+                sm += (raw.coerceAtMost(cap) - sm) * .35f
+                // frame yang tersendat hanya memajukan waktu sedikit (maks ~cap + 6 ms): setelah hitch gerak lanjut mulus, bukan melompat
+                val dt = if (raw > cap) (sm + (raw - cap) * .12f).coerceAtMost(cap + .006f) else raw
                 // saat mengetik, waktu ornamen berjalan lebih lambat (gerak latar yang tenang = mata tidak "tertarik" dari teks)
                 clock.time += dt * (1f - .70f * fx.calm)
             }
@@ -1870,6 +1984,7 @@ fun OrnamentLayer(
     }
     // layer sendiri: invalidasi per frame ornamen tidak ikut merekam ulang node tetangga
     Canvas(modifier.graphicsLayer { }) {
+        val t0 = System.nanoTime()
         OrnWarm.gpu(this)
         val ph = if (vm != null) ornViewH(vm, size) else size.height
         val tn = clock.now
@@ -1877,6 +1992,7 @@ fun OrnamentLayer(
         val ca = 1f - .36f * fx.calm
         if (clock.prev.isNotEmpty()) drawOrnament(clock.prev, P, size.width, ph, tn, fx, alpha = (1f - s).coerceIn(0f, 1f) * ca, enter = (1f - s).coerceIn(0f, 1f))
         drawOrnament(clock.cur, P, size.width, ph, tn, fx, alpha = s.coerceIn(0f, 1f) * ca, enter = s)
+        pacer.sample((System.nanoTime() - t0) / 1e6f)
     }
 }
 
@@ -1886,6 +2002,17 @@ fun OrnamentLayer(
 // =====================================================================================================================
 
 private class ThemeSt(val hue: Float, val orn: String, val ti: Float)
+
+/** Nilai [value] yang disampel paling cepat tiap [ms]: perubahan beruntun (seret slider) digabung, nilai terbaru selalu sampai. */
+@Composable
+private fun <T> rememberThrottled(value: T, ms: Long = 90L): T {
+    var out by remember { mutableStateOf(value) }
+    val cur by rememberUpdatedState(value)
+    LaunchedEffect(Unit) {
+        snapshotFlow { cur }.collect { v -> out = v; delay(ms) }
+    }
+    return out
+}
 
 /** Kemajuan masuk/keluar (0..1, boleh sedikit melewati 1 karena pegas) untuk isi sebuah AnimatedVisibility. Dipakai slider untuk morphing. */
 @Composable
@@ -1915,6 +2042,10 @@ fun ThemePage(vm: AppVM, nav: Nav, id: String) {
     DisposableEffect(id) { onDispose { vm.setNoteTheme(id, latest.hue, latest.orn, latest.ti) } }
 
     val pv = remember(gp, hue, d?.cp, d?.cv) { if (d != null) notePalFor(gp, d.copy(th = hue)) else gp }
+    // Kotak backdrop memakai nilai yang dibatasi ~11 kali per detik: menyeret slider tidak lagi merekam ulang empat adegan sekaligus di
+    // tiap frame (pratinjau besar di atas tetap mengikuti jari tanpa jeda).
+    val tilePal = rememberThrottled(pv)
+    val tileInten = rememberThrottled(ti)
 
     PageScaffold("Note theme", d?.t?.ifEmpty { null } ?: "Untitled", { nav.pop() }) {
         SGroup("Preview", 0) {
@@ -1927,7 +2058,7 @@ fun ThemePage(vm: AppVM, nav: Nav, id: String) {
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 ORN_LIST.forEach { info ->
-                    OrnTile(info, pv, ti, orn == info.id, Modifier.width(92.dp)) { orn = info.id }
+                    OrnTile(info, tilePal, tileInten, orn == info.id, Modifier.width(92.dp)) { orn = info.id }
                 }
             }
             // intensitas hanya relevan kalau ada backdrop
