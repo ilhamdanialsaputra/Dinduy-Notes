@@ -22,7 +22,7 @@ import kotlin.math.sqrt
 
 // =====================================================================================
 //  Google Sans Flex "expressive": judul catatan dan heading H1-H3.
-//  Berkas fontnya diunduh Gradle saat build (assets/fonts/google_sans_flex.ttf), TIDAK ada di repository.
+//  Berkas fontnya ada di assets/fonts/google_sans_flex.ttf (OFL-1.1), diisi workflow "Prepare F-Droid" lalu di-commit. Build tidak butuh internet.
 //  Sumbu yang dipakai: wght (tebal-tipis), wdth (sempit-lebar), ROND (sudut tajam-bulat), opsz (ukuran optik), slnt (miring).
 //  Kalau berkas tidak ada, semuanya jatuh ke font aplikasi (tidak crash, tidak ada animasi huruf).
 // =====================================================================================

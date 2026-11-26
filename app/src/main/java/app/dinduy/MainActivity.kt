@@ -895,7 +895,6 @@ fun AppRoot(vm: AppVM, act: Actions) {
                     ModelDialogHost(vm)
                     PermissionHost(vm)
                     PdfOpenOverlay(vm)
-                    UpdateHost()
                     // layar muat awal: paling atas, hanya sekali per proses (beranda sudah dikomposisi di baliknya)
                     LaunchedEffect(Unit) { vm.boot() }
                     // layar muat awal DIHAPUS: persiapan sampul / tekstur buku tetap jalan di latar lewat vm.boot(), tanpa layar penutup

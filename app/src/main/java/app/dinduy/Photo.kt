@@ -16,6 +16,11 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.TextButton
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -58,9 +63,6 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -88,31 +90,6 @@ private fun decodeFull(vm: AppVM, id: String): Bitmap? {
     var s = 1
     while (max(o.outWidth, o.outHeight) / s > 2800) s *= 2
     return BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inSampleSize = s })
-}
-
-private suspend fun runOcr(bmp: Bitmap): List<OWord>? = suspendCancellableCoroutine { c ->
-    try {
-        val rec = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-        rec.process(InputImage.fromBitmap(bmp, 0))
-            .addOnSuccessListener { t ->
-                val out = ArrayList<OWord>()
-                var ln = 0
-                t.textBlocks.forEachIndexed { bi, blk ->
-                    blk.lines.forEach { line ->
-                        line.elements.forEach { el ->
-                            val bb = el.boundingBox
-                            if (bb != null) out.add(OWord(el.text, bb.left.toFloat(), bb.top.toFloat(), bb.right.toFloat(), bb.bottom.toFloat(), ln, bi))
-                        }
-                        ln++
-                    }
-                }
-                rec.close()
-                if (c.isActive) c.resume(out)
-            }
-            .addOnFailureListener { rec.close(); if (c.isActive) c.resume(null) }
-    } catch (e: Throwable) {
-        if (c.isActive) c.resume(null)
-    }
 }
 
 private fun joinWords(w: List<OWord>): String {
@@ -196,11 +173,34 @@ private fun PhotoScreen(vm: AppVM, id: String, onClose: () -> Unit) {
     var pan by remember { mutableStateOf(Offset.Zero) }
     val white = Color.White
 
+    var needData by remember { mutableStateOf(false) }
+    var dling by remember { mutableStateOf(false) }
+    var dlProg by remember { mutableFloatStateOf(0f) }
+    var dlErr by remember { mutableStateOf<String?>(null) }
+    var dlJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+
+    fun fetchData() {
+        dlErr = null; dling = true; dlProg = 0f
+        dlJob = scope.launch {
+            try {
+                Ocr.download(ctx) { dlProg = it }
+                dling = false; needData = false
+                vm.show("Text recognition data ready. Tap Scan text again.")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                dling = false; throw e
+            } catch (e: Exception) {
+                dling = false
+                dlErr = "Download failed. Check your connection and retry."
+            }
+        }
+    }
+
     fun start() {
         val b = bmp ?: return
+        if (!Ocr.ready(ctx)) { dlErr = null; needData = true; return }
         scan = true; busy = true; sa = -1; sb = -1; zoom = 1f; pan = Offset.Zero
         scope.launch {
-            val w = withContext(Dispatchers.Default) { runOcr(b) }
+            val w = withContext(Dispatchers.Default) { Ocr.recognize(ctx, b) }
             busy = false
             if (w == null) { vm.show("Couldn't read this photo"); scan = false }
             else if (w.isEmpty()) { vm.show("No text found"); scan = false }
@@ -208,6 +208,23 @@ private fun PhotoScreen(vm: AppVM, id: String, onClose: () -> Unit) {
         }
     }
 
+
+    if (needData) {
+        AlertDialog(
+            onDismissRequest = { if (!dling) needData = false },
+            containerColor = pal.c3,
+            title = { T("Download text recognition data?", 20f, 800, pal.os) },
+            text = {
+                Column {
+                    T("Scanning text works fully on your phone, but it needs language data (English and Indonesian, a few MB) downloaded once from GitHub (tesseract-ocr/tessdata_fast). Nothing from your notes is sent.", 15f, 500, pal.os)
+                    if (dling) { Spacer(Modifier.height(14.dp)); LinearProgressIndicator(progress = { dlProg }, modifier = Modifier.fillMaxWidth(), color = pal.p) }
+                    dlErr?.let { Spacer(Modifier.height(10.dp)); T(it, 14f, 600, pal.osv) }
+                }
+            },
+            confirmButton = { TextButton(enabled = !dling, onClick = { fetchData() }) { T(if (dlErr != null) "Retry" else "Download", 16f, 900, pal.p) } },
+            dismissButton = { TextButton(onClick = { dlJob?.cancel(); dling = false; needData = false }) { T("Cancel", 16f, 700, pal.osv) } }
+        )
+    }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         val b = bmp
         if (b != null) {

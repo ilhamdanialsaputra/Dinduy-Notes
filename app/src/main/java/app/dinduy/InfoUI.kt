@@ -36,6 +36,12 @@ import androidx.compose.ui.unit.dp
 private const val ABOUT = "A fast, private notes app with rich text, images, PDF reading, handwriting, " +
     "reminders and voice notes with on-device transcription. Your notes are stored on your phone."
 
+const val REPO_URL = "https://github.com/ilhamdanialsaputra/Dinduy-Notes"
+
+private fun appVersion(ctx: android.content.Context): String = try {
+    ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "?"
+} catch (e: Exception) { "?" }
+
 private const val DONATE_URL = "https://ko-fi.com/ilhamdanials#checkoutModal"
 
 private fun openUrl(ctx: android.content.Context, url: String) {
@@ -89,21 +95,16 @@ fun InfoScreen(onBack: () -> Unit) {
                     ls = -.01f, maxLines = 1
                 )
                 SGroup("About", 0) {
-                    SCard(POS_TOP, null, PaddingValues(horizontal = 20.dp, vertical = 18.dp)) {
+                    SCard(POS_ONE, null, PaddingValues(horizontal = 20.dp, vertical = 18.dp)) {
                         T("Dinduy", 20f, 500, pal.os)
-                        T("Version " + Upd.currentVersion(ctx), 14f, 500, pal.p, Modifier.padding(top = 2.dp))
+                        T("Version " + appVersion(ctx), 14f, 500, pal.p, Modifier.padding(top = 2.dp))
                         T(ABOUT, 14f, 400, pal.osv, Modifier.padding(top = 12.dp), lh = 1.4f)
                     }
-                    InfoRow(
-                        POS_BOT, "restore", if (UpdState.checking) "Checking for updates" else "Check for updates",
-                        UpdState.message ?: "Make sure you have the latest version", busy = UpdState.checking,
-                        onClick = if (UpdState.checking) null else ({ Upd.check(ctx) })
-                    )
                 }
                 SGroup("Project", 60) {
-                    InfoRow(POS_TOP, "code", "Source code", Upd.REPO_URL.removePrefix("https://")) { openUrl(ctx, Upd.REPO_URL) }
-                    InfoRow(POS_MID, "notes", "What's new", "Release notes for every version") { openUrl(ctx, Upd.REPO_URL + "/releases") }
-                    InfoRow(POS_BOT, "pen", "Report an issue", "Found a bug or have an idea?") { openUrl(ctx, Upd.REPO_URL + "/issues") }
+                    InfoRow(POS_TOP, "code", "Source code", REPO_URL.removePrefix("https://")) { openUrl(ctx, REPO_URL) }
+                    InfoRow(POS_MID, "notes", "What's new", "Release notes for every version") { openUrl(ctx, REPO_URL + "/releases") }
+                    InfoRow(POS_BOT, "pen", "Report an issue", "Found a bug or have an idea?") { openUrl(ctx, REPO_URL + "/issues") }
                 }
                 SGroup("Support", 120) {
                     InfoRow(POS_ONE, "heart", "Donate", "Support Dinduy's development on Ko-fi") { openUrl(ctx, DONATE_URL) }
@@ -135,75 +136,4 @@ fun InfoScreen(onBack: () -> Unit) {
             )
         }
     }
-}
-
-/** Dialog versi baru + unduhan berprogres + izin pasang. */
-@Composable
-fun UpdateHost() {
-    val r = UpdState.release ?: return
-    val pal = LocalPal.current
-    val ctx = LocalContext.current
-    val ready = UpdState.ready
-
-    // APK selesai diunduh: buka installer (efek ini jalan saat aplikasi tampil di depan)
-    LaunchedEffect(ready) { if (ready != null) Upd.install(ctx, ready) }
-
-    fun dismiss() {
-        Upd.cancel()
-        UpdState.release = null; UpdState.ready = null; UpdState.dlError = null
-    }
-
-    if (UpdState.needPerm) {
-        AlertDialog(
-            onDismissRequest = { UpdState.needPerm = false },
-            containerColor = pal.c3,
-            title = { T("Allow installs", 22f, 800, pal.os) },
-            text = { T("To install updates, allow Dinduy to install apps in system settings. Then come back and tap Download again.", 15f, 500, pal.os) },
-            confirmButton = {
-                TextButton(onClick = { UpdState.needPerm = false; Upd.openInstallSettings(ctx) }) { T("Open settings", 16f, 900, pal.p) }
-            },
-            dismissButton = { TextButton(onClick = { UpdState.needPerm = false }) { T("Cancel", 16f, 700, pal.osv) } }
-        )
-        return
-    }
-
-    AlertDialog(
-        onDismissRequest = { if (!UpdState.downloading) dismiss() },
-        containerColor = pal.c3,
-        title = { T("Update available", 22f, 800, pal.os) },
-        text = {
-            Column {
-                T("Version " + r.tag.removePrefix("v").removePrefix("V") + " is available (you have " + Upd.currentVersion(ctx) + ").", 15f, 700, pal.p)
-                if (r.notes.isNotEmpty()) {
-                    Spacer(Modifier.height(10.dp))
-                    Column(Modifier.heightIn(max = 200.dp).verticalScroll(rememberScrollState())) { T(r.notes, 14f, 500, pal.os) }
-                }
-                if (UpdState.downloading || ready != null) {
-                    Spacer(Modifier.height(16.dp))
-                    val p = UpdState.progress
-                    if (p in 0f..1f) LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth(), color = pal.p)
-                    else LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = pal.p)
-                    Spacer(Modifier.height(6.dp))
-                    T(
-                        when {
-                            ready != null -> "Downloaded. Opening the installer..."
-                            p in 0f..1f -> "Downloading " + (p * 100).toInt() + "%"
-                            else -> "Downloading..."
-                        }, 13f, 600, pal.osv
-                    )
-                }
-                UpdState.dlError?.let { Spacer(Modifier.height(10.dp)); T(it, 14f, 600, pal.osv) }
-            }
-        },
-        confirmButton = {
-            when {
-                ready != null -> TextButton(onClick = { Upd.install(ctx, ready) }) { T("Install", 16f, 900, pal.p) }
-                UpdState.downloading -> {}
-                else -> TextButton(onClick = { Upd.download(ctx) }) { T(if (UpdState.dlError != null) "Retry" else "Download", 16f, 900, pal.p) }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = { dismiss() }) { T(if (UpdState.downloading) "Cancel" else "Later", 16f, 700, pal.osv) }
-        }
-    )
 }
