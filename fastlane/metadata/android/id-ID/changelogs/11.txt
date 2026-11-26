@@ -1,0 +1,3 @@
+- Disiapkan untuk F-Droid: pembaruan otomatis dalam aplikasi dan izin pasang aplikasi dihapus
+- Pindai teks kini memakai Tesseract open-source (data bahasa diunduh sekali, dengan persetujuanmu)
+- Font dibundel; tidak perlu Google Play services
