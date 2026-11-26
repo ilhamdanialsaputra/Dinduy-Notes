@@ -26,7 +26,7 @@ jobs:
         with:
           gradle-version: "8.11.1"
 
-      # Tag v* harus sama dengan versionName, kalau tidak aplikasi terus menawarkan update yang sama
+      # Tag v* harus sama dengan versionName (F-Droid memakai tag untuk mendeteksi versi baru)
       - name: Cek tag = versionName
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
@@ -37,6 +37,19 @@ jobs:
             echo "::error::Tag $GITHUB_REF_NAME tidak sama dengan versionName \"$NAME\" di app/build.gradle.kts. Naikkan versionName dulu, commit, lalu buat tag lagi."
             exit 1
           fi
+
+      # Syarat F-Droid: font harus sudah ada di repo (jalankan workflow "Prepare F-Droid" sekali), lisensi, dan changelog
+      - name: Cek kelengkapan repo untuk F-Droid
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          ok=1
+          for f in google_sans_flex roboto_flex tinos_regular tinos_bold tinos_italic tinos_bolditalic reenie_beanie; do
+            [ -f "app/src/main/assets/fonts/$f.ttf" ] || { echo "::error::Font $f.ttf belum ada. Jalankan workflow 'Prepare F-Droid' dulu."; ok=0; }
+          done
+          [ -f LICENSE ] || { echo "::error::Berkas LICENSE tidak ada."; ok=0; }
+          CODE=$(grep -oP 'versionCode\s*=\s*\K[0-9]+' app/build.gradle.kts | head -n1)
+          [ -f "fastlane/metadata/android/en-US/changelogs/$CODE.txt" ] || { echo "::error::Changelog fastlane/metadata/android/en-US/changelogs/$CODE.txt belum ada."; ok=0; }
+          [ "$ok" = 1 ]
 
       - name: Keystore
         env:
