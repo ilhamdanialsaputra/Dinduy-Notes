@@ -3,4 +3,5 @@
 <full-backup-content>
     <exclude domain="file" path="secure" />
     <exclude domain="file" path="models" />
+    <exclude domain="file" path="ocr" />
 </full-backup-content>
