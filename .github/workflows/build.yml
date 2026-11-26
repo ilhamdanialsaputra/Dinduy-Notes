@@ -91,17 +91,22 @@ jobs:
           name: Dinduy-apk
           path: ${{ env.APK_NAME }}
 
-      # GitHub Release lewat gh CLI bawaan runner (tanpa action pihak ketiga)
-      - name: Buat GitHub Release
+      # Kalau rilis sudah dibuat lewat web GitHub (dengan deskripsi buatan sendiri), APK cukup ditempelkan.
+      # Kalau belum ada, rilis dibuat otomatis dari riwayat commit. Memakai gh CLI bawaan runner (tanpa action pihak ketiga).
+      - name: Buat / lengkapi GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          PREV=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
-          if [ -n "$PREV" ]; then RANGE="$PREV..$GITHUB_REF_NAME"; else RANGE="$GITHUB_REF_NAME"; fi
-          git log "$RANGE" --no-merges --pretty=format:'- %s' | head -n 15 > notes.md
-          [ -s notes.md ] || echo "- Bug fixes and improvements" > notes.md
-          gh release create "$GITHUB_REF_NAME" "$APK_NAME" \
-            --title "Dinduy $GITHUB_REF_NAME" \
-            --notes-file notes.md \
-            --verify-tag
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$APK_NAME" --clobber
+          else
+            PREV=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+            if [ -n "$PREV" ]; then RANGE="$PREV..$GITHUB_REF_NAME"; else RANGE="$GITHUB_REF_NAME"; fi
+            git log "$RANGE" --no-merges --pretty=format:'- %s' | head -n 15 > notes.md
+            [ -s notes.md ] || echo "- Bug fixes and improvements" > notes.md
+            gh release create "$GITHUB_REF_NAME" "$APK_NAME" \
+              --title "Dinduy $GITHUB_REF_NAME" \
+              --notes-file notes.md \
+              --verify-tag
+          fi
