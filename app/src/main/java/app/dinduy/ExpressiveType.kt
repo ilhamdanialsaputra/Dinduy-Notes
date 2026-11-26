@@ -43,6 +43,7 @@ object GSX {
     private val cache = HashMap<String, FontFamily?>()
 
     fun init(ctx: android.content.Context) {
+        ReenieFont.init(ctx)
         if (tried) return
         tried = true
         try {
@@ -231,3 +232,24 @@ class HeadAnim {
 private val headFxMap = java.util.WeakHashMap<Any, HeadAnim>()
 /** Jam animasi heading milik satu editor (tanpa mengubah kelas Ed). */
 fun headFxOf(ed: Any): HeadAnim = headFxMap.getOrPut(ed) { HeadAnim() }
+
+/**
+ * Reenie Beanie (OFL-1.1), dibundel di assets/fonts/reenie_beanie.ttf (diisi workflow "Prepare F-Droid").
+ * Pengganti Google Fonts downloadable (butuh Google Play services, dilarang F-Droid). Diinisialisasi dari GSX.init(ctx).
+ * Kalau berkasnya tidak ada, jatuh ke FontFamily.Cursive.
+ */
+object ReenieFont {
+    @Volatile var family: FontFamily = FontFamily.Cursive
+    private var tried = false
+    fun init(ctx: android.content.Context) {
+        if (tried) return
+        tried = true
+        try {
+            ctx.assets.open("fonts/reenie_beanie.ttf").close()
+            family = FontFamily(Font("fonts/reenie_beanie.ttf", ctx.assets, FontWeight.Normal, FontStyle.Normal))
+        } catch (e: Throwable) { }
+    }
+}
+
+/** Dipakai EditorUI. Selalu mengembalikan keluarga huruf yang valid. */
+val ReenieFamily: FontFamily get() = ReenieFont.family
