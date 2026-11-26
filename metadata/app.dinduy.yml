@@ -1,0 +1,30 @@
+# Untuk diajukan ke https://gitlab.com/fdroid/fdroiddata (file: metadata/app.dinduy.yml)
+Categories:
+  - Writing
+License: GPL-3.0-or-later
+SourceCode: https://github.com/ilhamdanialsaputra/Dinduy-Notes
+IssueTracker: https://github.com/ilhamdanialsaputra/Dinduy-Notes/issues
+Changelog: https://github.com/ilhamdanialsaputra/Dinduy-Notes/releases
+Donate: https://ko-fi.com/ilhamdanials
+
+AntiFeatures:
+  NonFreeNet:
+    en-US: Optional voice transcription can send audio to the Groq cloud service using your own API key. The app works fully without it.
+
+AutoName: Dinduy
+
+RepoType: git
+Repo: https://github.com/ilhamdanialsaputra/Dinduy-Notes.git
+
+Builds:
+  - versionName: '1.10'
+    versionCode: 11
+    commit: GANTI_DENGAN_HASH_COMMIT_LENGKAP_DARI_TAG_v1.10
+    subdir: app
+    gradle:
+      - yes
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+CurrentVersion: '1.10'
+CurrentVersionCode: 11
