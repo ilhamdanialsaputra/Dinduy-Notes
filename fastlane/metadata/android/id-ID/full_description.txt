@@ -1,0 +1,13 @@
+Dinduy adalah aplikasi catatan yang cepat dan privat. Catatan tersimpan di HP kamu.
+
+• Teks kaya: tebal, miring, daftar, ceklis, kutipan, kode, tabel, dan tautan
+• Gambar dengan pangkas, sampul, dan tema per catatan
+• Baca PDF, ekspor catatan ke PDF
+• Tulisan tangan dan stabilo langsung di halaman
+• Pengingat (sekali atau berulang) dan widget layar utama
+• Catatan suara dengan transkripsi di perangkat (Whisper). Transkripsi cloud opsional dengan API key Groq milikmu
+• Pindai teks dari foto (OCR) sepenuhnya di perangkat; data bahasa diunduh sekali, hanya setelah kamu setuju
+• Label, sematkan, arsip, sampah, pencarian, ekspor Markdown, bagikan catatan sebagai berkas .dinduy
+• Warna Material You, tema terang dan gelap AMOLED
+
+Tanpa iklan, tanpa pelacak, tanpa akun. Aplikasi tidak pernah memasang atau memperbarui dirinya sendiri.
