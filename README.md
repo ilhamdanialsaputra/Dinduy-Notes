@@ -1,321 +1,212 @@
-<div align="center">
-  
-<br>
+<img width="3264" height="3264" alt="20261125_172201" src="https://github.com/user-attachments/assets/f9b8e90c-7d38-4257-a2ea-aeacb7f34480" />
 
-<h1>D I N D U Y</h1>
+# Dinduy
 
-<p><b>Notes that stay neat, quick, and easy on your thumb.</b></p>
-<p><sub>Everything is stored on your own phone. No account. No server.</sub></p>
+**Notes that stay on your phone.** Text, handwriting, PDFs, photos and voice notes in one Android app.
 
-<br>
+![Android](https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white)
+![Kotlin](https://img.shields.io/badge/Kotlin-2.1.21-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white)
+![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-BOM%202025.09-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white)
+![Material 3](https://img.shields.io/badge/Material%203-Expressive-6750A4?style=for-the-badge&logo=materialdesign&logoColor=white)
 
-![Platform](https://img.shields.io/badge/Platform-Android-3DDC84?style=for-the-badge&logo=android&logoColor=white)
-![Kotlin](https://img.shields.io/badge/Kotlin-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white)
-![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white)
-![Material 3](https://img.shields.io/badge/Material%203-6750A4?style=for-the-badge&logo=materialdesign&logoColor=white)
+[![Release](https://img.shields.io/github/v/release/ilhamdanialsaputra/Dinduy-Notes?style=flat-square)](https://github.com/ilhamdanialsaputra/Dinduy-Notes/releases)
+[![Build](https://img.shields.io/github/actions/workflow/status/ilhamdanialsaputra/Dinduy-Notes/build.yml?style=flat-square&label=build)](https://github.com/ilhamdanialsaputra/Dinduy-Notes/actions/workflows/build.yml)
+![Min SDK](https://img.shields.io/badge/minSdk-26-informational?style=flat-square)
+![Target SDK](https://img.shields.io/badge/targetSdk-36-informational?style=flat-square)
+![ABI](https://img.shields.io/badge/ABI-arm64--v8a-informational?style=flat-square)
+![Data](https://img.shields.io/badge/data-on--device-success?style=flat-square)
+![No tracking](https://img.shields.io/badge/trackers-none-success?style=flat-square)
+[![License](https://img.shields.io/badge/license-GPL%20v3-blue?style=flat-square)](LICENSE)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-support-FF5E5B?style=flat-square&logo=kofi&logoColor=white)](https://ko-fi.com/ilhamdanials)
 
-![Min SDK](https://img.shields.io/badge/Min%20SDK-26-informational?style=flat-square)
-![Version](https://img.shields.io/badge/Version-1.3-blue?style=flat-square)
-![Data](https://img.shields.io/badge/Data-Stored%20Locally-success?style=flat-square)
-![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)
+[Description](#description) · [Features](#features) · [Architecture](#architecture) · [Techniques](#interesting-techniques) · [Libraries](#libraries-and-tools) · [Fonts](#fonts) · [Permissions](#permissions) · [Build and release](#build-and-release) · [Structure](#project-structure) · [License](#license)
 
-<br>
-
-[Features](#features) &nbsp;&nbsp;|&nbsp;&nbsp; [Privacy](#privacy) &nbsp;&nbsp;|&nbsp;&nbsp; [Quick Start](#quick-start) &nbsp;&nbsp;|&nbsp;&nbsp; [Backup](#backup-and-restore) &nbsp;&nbsp;|&nbsp;&nbsp; [Build](#building-from-source)
-
-</div>
-
-<br>
-
----
-
-<br>
-
-<div align="center">
-
-<img width="1920" height="1080" alt="Dinduy Notes_20261108_031652_0000" src="https://github.com/user-attachments/assets/e1ee6615-7090-4fc4-a9ed-5049e5d71342" />
-
-<img width="1920" height="1080" alt="Dinduy Notes_20261108_031653_0001" src="https://github.com/user-attachments/assets/6cbce289-bf6d-4d17-9106-3ccfa0cee326" />
-
-<img width="1920" height="1080" alt="Dinduy Notes_20261108_031653_0003" src="https://github.com/user-attachments/assets/5ec87b3b-2ce1-4746-a96f-9158d6a7a6f4" />
-
-<img width="1920" height="1080" alt="Dinduy Notes_20261108_031653_0004" src="https://github.com/user-attachments/assets/6c90a923-1ff8-4643-9247-1a38b239b9b1" />
-
-<img width="1920" height="1080" alt="Dinduy Notes_20261108_031653_0005" src="https://github.com/user-attachments/assets/8a542d43-2811-4359-ac40-6fbd156d5dfe" />
+<img width="1920" height="1080" alt="Dinduy Notes_20261108_031652_0000" src="https://github.com/user-attachments/assets/1a7e67f6-3e13-4507-abeb-c6efc20de8c5" />
 
 
-## Overview
+<img width="6144" height="3374" alt="IMG_20261126_091144" src="https://github.com/user-attachments/assets/34332275-b64d-4817-8630-ca45814153ae" />
 
-</div>
 
-Dinduy is a notes app that brings a lot together in one place: writing, doodling, reading PDFs, recording voice, and setting reminders. It follows the Material You look, and almost everything can be done with one thumb.
+## Description
 
-<br>
+Dinduy combines text editing, handwriting, PDF reading, voice notes and reminders. A note is a list of blocks: paragraphs, headings, lists, tables, quotes, code and photos. Rich text is stored as plain text plus formatting ranges. Pen and highlighter strokes attach to the text and move when it reflows.
 
-<table align="center">
-  <tr>
-    <td align="center" width="25%"><b>Write</b><br><sub>Rich text, tables, quotes, code</sub></td>
-    <td align="center" width="25%"><b>Draw</b><br><sub>Pen, highlighter, auto-tidy shapes</sub></td>
-    <td align="center" width="25%"><b>Read PDFs</b><br><sub>Search, copy, and draw on them</sub></td>
-    <td align="center" width="25%"><b>Record</b><br><sub>Voice notes and transcription</sub></td>
-  </tr>
-  <tr>
-    <td align="center"><b>Photos</b><br><sub>Covers, collages, text scan</sub></td>
-    <td align="center"><b>Reminders</b><br><sub>One-time or repeating</sub></td>
-    <td align="center"><b>Share</b><br><sub>.dinduy files and PDF</sub></td>
-    <td align="center"><b>Look</b><br><sub>Material You and AMOLED</sub></td>
-  </tr>
-</table>
+PDFs open as notes. You can search them, select text, draw on them and convert them to editable notes. The page-turn mode has two 3D page curls. Voice notes are transcribed on the device with whisper.cpp, or through Groq with your own API key. Text in photos is read with Tesseract.
 
-<br>
+The network is used only on request: downloading transcription models or OCR language data, Groq transcription, and link previews. The Groq key is stored encrypted ([Secure.kt](app/src/main/java/app/dinduy/Secure.kt)) and is left out of backups.
 
----
-
-<br>
-
-<div align="center">
+All app code is in [app/src/main/java/app/dinduy/](app/src/main/java/app/dinduy/), in one flat package. The OpenGL page curl engine is in [silkcurl/](app/src/main/java/app/dinduy/silkcurl/). Build settings are in [app/build.gradle.kts](app/build.gradle.kts).
 
 ## Features
 
-</div>
-
-### Writing
-
-| | |
+| Area | What it does |
 |:--|:--|
-| **Rich text** | Bold, italic, underline, strikethrough, highlight, and code |
-| **Lists** | Bullets, numbered, lettered, and checklists |
-| **Quotes** | Note, Tip, Important, Warning, Caution, Idea, Definition |
-| **Special blocks** | Code blocks, tables, and dividers |
-| **Layout** | Text alignment and paragraph indents |
-| **Markdown style** | Type `- ` for a bullet or `# ` for a heading |
-| **Helpers** | Search inside a note, undo, and redo |
+| **Writing** | Bold, italic, underline, strikethrough, highlight, inline code. Bulleted, numbered, lettered and checklist lists. Tables, code blocks, dividers and seven quote types. Markdown shortcuts (`- `, `# `). Search inside a note, undo and redo. |
+| **Photos** | Gallery or camera. Resize, crop, several photos per row, text flowing beside a photo. Note colors follow the cover photo. On-device text scan (OCR). |
+| **Drawing** | Pen, highlighter, eraser and selection. Finger or stylus. Hold the end of a stroke to snap it to a shape. |
+| **PDF** | Open from other apps through Open with or Share. Scroll or page mode, two 3D page curls, dark pages, search, text selection, drawing on pages, conversion to a note, export of notes to A4 PDF. |
+| **Voice** | Record inside a note, in the background if the app is minimized. Quick record from the New button. Transcription on-device or through Groq, in Auto, Indonesian or English. |
+| **Reminders** | One-time or repeating (daily, weekly, monthly, yearly). Notification actions: Done, Snooze 1 hour, Tomorrow morning. |
+| **Organizing** | Pins, labels, archive, trash, 1 or 2 column layout, drag to reorder, swipe gestures. |
+| **Sharing** | `.dinduy` files with photos, drawings, audio and PDFs. Full backup, with Merge or Replace on restore. Markdown and text import. |
+| **Appearance** | Light, dark (pure black for AMOLED) or system. Material You or custom color, monochrome mode, per-note themes and backdrops, four note fonts. Home-screen widgets for quick notes and a note list. |
 
-### Photos and covers
+## Architecture
 
-| | |
+- **UI.** One activity ([MainActivity.kt](app/src/main/java/app/dinduy/MainActivity.kt)) with Compose screens. App state lives in one `AppVM` view model ([Store.kt](app/src/main/java/app/dinduy/Store.kt)). Each open note has an `Ed` object ([Editor.kt](app/src/main/java/app/dinduy/Editor.kt)) that holds editor state and undo history.
+- **Data.** `Db` holds `Prefs`, a list of `Note` objects (each with `Blk` blocks) and labels ([Model.kt](app/src/main/java/app/dinduy/Model.kt)). Everything is one `dinduy.json` file, encoded with kotlinx.serialization. The decoder ignores unknown keys and coerces bad values, so files from other versions still load.
+- **Writes.** Each note's JSON is cached, so unchanged notes aren't encoded again. The file is written to a `.tmp` file and renamed. Widgets refresh after each write.
+- **Background work.** A foreground service ([Bg.kt](app/src/main/java/app/dinduy/Bg.kt)) covers downloads, recording and transcription with a single notification. It stops when the work ends or the app is removed from recents.
+- **Widgets and alarms.** `RemoteViews` widgets ([NotesWidget.kt](app/src/main/java/app/dinduy/NotesWidget.kt), [QuickNoteWidget.kt](app/src/main/java/app/dinduy/QuickNoteWidget.kt)). Reminder alarms and the boot receiver are in [Reminder.kt](app/src/main/java/app/dinduy/Reminder.kt).
+
+## Interesting techniques
+
+- **[Spans over plain text](https://developer.android.com/develop/ui/compose/text/style-text#multiple-styles).** Rich text is a `String` plus `(start, end, kind)` ranges. After each edit, a common prefix/suffix diff finds the changed region, shifts the ranges and merges overlaps. Each text field starts with a [zero-width space](https://en.wikipedia.org/wiki/Zero-width_space), so Backspace at the start of a block shows up as a text change. See [Model.kt](app/src/main/java/app/dinduy/Model.kt).
+- **Text wrapping around images.** Works like [CSS `float`](https://developer.mozilla.org/en-US/docs/Web/CSS/float), built by hand. Where a paragraph passes the bottom of a floating image, the editor adds display-only line breaks and em-space shims. The stored text is unchanged. See [Editor.kt](app/src/main/java/app/dinduy/Editor.kt).
+- **Strokes anchored to text.** A pen stroke attaches to a letter and keeps its shape in font-size units, so it moves and scales with the text. Strokes on photos use coordinates relative to the photo box. Holding the end of a stroke snaps it to a line, circle, square or triangle, using iterative [Ramer–Douglas–Peucker](https://en.wikipedia.org/wiki/Ramer%E2%80%93Douglas%E2%80%93Peucker_algorithm) simplification and a haptic tick. See [Ink.kt](app/src/main/java/app/dinduy/Ink.kt).
+- **[Pointer event passes](https://developer.android.com/reference/kotlin/androidx/compose/ui/input/pointer/PointerEventPass).** In the PDF reader, parent handlers read touches in the `Initial` pass. Selection handles and two-finger zoom take priority over the pager, list and page curl below them. See [Pdf.kt](app/src/main/java/app/dinduy/Pdf.kt).
+- **[Spring animation](https://developer.android.com/develop/ui/compose/animation/customize) from one progress value.** Cards, PDF books and photos morph to their open state from a single float, so closing is the exact reverse of opening. The app uses springs instead of fades. See [Book.kt](app/src/main/java/app/dinduy/Book.kt), [Cover.kt](app/src/main/java/app/dinduy/Cover.kt) and [Photo.kt](app/src/main/java/app/dinduy/Photo.kt).
+- **Animated variable fonts.** Titles and headings animate per word along the `wght`, `wdth`, `ROND`, `opsz` and `slnt` axes of Google Sans Flex. This is the Compose counterpart of CSS [`font-variation-settings`](https://developer.mozilla.org/en-US/docs/Web/CSS/font-variation-settings); see also [variable fonts in Compose](https://developer.android.com/develop/ui/compose/text/fonts#variable-fonts). Animation steps are quantized to limit the number of font families in memory, and word widths are locked so lines don't reflow. See [ExpressiveType.kt](app/src/main/java/app/dinduy/ExpressiveType.kt).
+- **[GraphicsLayer](https://developer.android.com/reference/kotlin/androidx/compose/ui/graphics/layer/GraphicsLayer) caching and windowed composition.** Home cards draw their animated backdrop once into an offscreen layer and reuse it. In long notes, only blocks near the viewport are composed. A cost score with separate on and off thresholds avoids flicker. Text state is held per field, so typing in one block doesn't recompose the others. See [Ornament.kt](app/src/main/java/app/dinduy/Ornament.kt) and [Editor.kt](app/src/main/java/app/dinduy/Editor.kt).
+- **3D book from a 2D canvas.** Each face of the PDF book is a plane projected with perspective, using [`Matrix.setPolyToPoly`](https://developer.android.com/reference/android/graphics/Matrix) and [`BitmapShader`](https://developer.android.com/reference/android/graphics/BitmapShader). Back faces are culled, and an off-axis camera moves instead of tilting the book. See [Book3D.kt](app/src/main/java/app/dinduy/Book3D.kt).
+- **OpenGL ES page curl.** "Silk curl" embeds the [PlayLikeCurl](https://github.com/karankalsi/PlayLikeCurl) engine as source. A [`GLSurfaceView`](https://developer.android.com/reference/android/opengl/GLSurfaceView) renderer takes a deck of three page bitmaps, sizes textures before allocating them, and checks GLES 2.0 and EGL support first. Pages with drawings or dark mode are rendered into bitmap copies before upload. See [SilkCurl.kt](app/src/main/java/app/dinduy/silkcurl/SilkCurl.kt).
+- **PDF text layer.** A `PDFTextStripper` subclass records each character's box as a fraction of the page size, which powers search and selection handles. Android's [`PdfRenderer`](https://developer.android.com/reference/android/graphics/pdf/PdfRenderer) opens one page at a time, so access goes through a coroutine [`Mutex`](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines.sync/-mutex/). See [Pdf.kt](app/src/main/java/app/dinduy/Pdf.kt).
+- **PDF to note conversion.** Local rules run first: two-column split, repeated header and footer removal, tables from column alignment, headings from document-wide font sizes. Optionally, Groq classifies ambiguous short lines, grouped by font style, in one small request. It never rewrites text. Without it, local rules decide. See [PdfConvert.kt](app/src/main/java/app/dinduy/PdfConvert.kt).
+- **Vector PDF export.** Notes are written with [`PdfDocument`](https://developer.android.com/reference/android/graphics/pdf/PdfDocument) at A4 size (595 × 842 pt). Text is laid out with [`StaticLayout`](https://developer.android.com/reference/android/text/StaticLayout) and split at block and line boundaries. See [PdfExport.kt](app/src/main/java/app/dinduy/PdfExport.kt).
+- **Keystore-backed secret storage.** The Groq key is encrypted with AES-256-GCM using a non-exportable [Android Keystore](https://developer.android.com/privacy-and-security/keystore) key. It uses additional authenticated data (see [`AesGcmParams`](https://developer.mozilla.org/en-US/docs/Web/API/AesGcmParams) for the concept), with the IV stored before the ciphertext. A file that can't be decrypted is deleted. The `secure/` folder is excluded from Auto Backup in [backup_rules.xml](app/src/main/res/xml/backup_rules.xml) and [data_extraction_rules.xml](app/src/main/res/xml/data_extraction_rules.xml).
+- **Network handling.** Whisper model downloads resume with a [`Range`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Range_requests) header from the bytes already on disk ([Audio.kt](app/src/main/java/app/dinduy/Audio.kt)). OCR data goes to a temporary file and is renamed after a size check ([Ocr.kt](app/src/main/java/app/dinduy/Ocr.kt)). The Groq client uses a fixed base URL, sends the key only in the `Authorization` header, doesn't follow [redirects](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Redirections), and drops segments with high `no_speech_prob` and low `avg_logprob` to filter text Whisper invents over silence ([Groq.kt](app/src/main/java/app/dinduy/Groq.kt)).
+- **Reminders computed from the first trigger.** The next time is derived from the stored first time plus a repeat rule, so alarms never modify note data. [`AlarmManager`](https://developer.android.com/reference/android/app/AlarmManager) uses exact alarms when permitted and inexact ones otherwise. A receiver reschedules after boot, app update, and time or time zone changes. See [Reminder.kt](app/src/main/java/app/dinduy/Reminder.kt) and [AndroidManifest.xml](app/src/main/AndroidManifest.xml).
+- **ZIP-based backup and share files.** A `.dinduy` file is a ZIP (`data.json`, `img/`, `audio/`, `pdf/`, `lp/`) used for both full backups and single-note sharing. The older `DINDUY01` format is still read. File names are built from validated IDs. The app registers the type with [intent filters](https://developer.android.com/guide/components/intents-filters) for `application/x-dinduy` and file-name patterns. See [Store.kt](app/src/main/java/app/dinduy/Store.kt).
+
+## Libraries and tools
+
+- [Tesseract4Android](https://github.com/adaptech-cz/Tesseract4Android) with [tessdata_fast](https://github.com/tesseract-ocr/tessdata_fast): on-device OCR. The `eng` and `ind` data is downloaded once, after consent. Results are parsed as hOCR with jsoup. The library comes from JitPack, which is restricted to that one group in [settings.gradle.kts](settings.gradle.kts).
+- [whisper.cpp](https://github.com/ggml-org/whisper.cpp) through the prebuilt [whisper-android](https://github.com/ffmpegkit-maintained/whisper) AAR: offline transcription. The ggml `base` (about 142 MB) and `small` (about 466 MB) models are downloaded from [Hugging Face](https://huggingface.co/ggerganov/whisper.cpp). The AAR only supports arm64-v8a, so the app is limited to that ABI.
+- [Groq speech-to-text API](https://console.groq.com/docs/speech-to-text) (`whisper-large-v3`): optional online transcription with the user's own key.
+- [PdfBox-Android](https://github.com/TomRoush/PdfBox-Android): text and character positions for search, selection and conversion. Keep rules are in [app/proguard-rules.pro](app/proguard-rules.pro).
+- [jsoup](https://jsoup.org/): Markdown handling, hOCR parsing and link preview metadata.
+- [pagecurl](https://github.com/oleksandrbalan/pagecurl): the Classic 3D page mode.
+- [PlayLikeCurl](https://github.com/karankalsi/PlayLikeCurl) ([maintained fork](https://github.com/Arnab11/PlayLikeCurl)): MIT-licensed GLES2 engine copied into `silkcurl`. The one local change is a wider field of view (45° to 55°).
+- [kotlinx.serialization](https://github.com/Kotlin/kotlinx.serialization) and [kotlinx.coroutines](https://github.com/Kotlin/kotlinx.coroutines).
+- [Compose BOM 2025.09.00](https://developer.android.com/develop/ui/compose/bom) with Material 3. Material 3 Expressive styling is done in app code ([Expressive.kt](app/src/main/java/app/dinduy/Expressive.kt), [Theme.kt](app/src/main/java/app/dinduy/Theme.kt)).
+- [R8](https://developer.android.com/build/shrink-code) in full mode with resource shrinking. Dependency metadata is left out of the APK for F-Droid.
+- F-Droid: the [build recipe](metadata/app.dinduy.yml) declares the `NonFreeNet` anti-feature for Groq. Store text and changelogs follow the [fastlane layout](https://f-droid.org/docs/All_About_Descriptions_Graphics_and_Screenshots/).
+
+## Fonts
+
+Font files are bundled in [app/src/main/assets/fonts/](app/src/main/assets/fonts/). The [Prepare F-Droid workflow](.github/workflows/prepare-fdroid.yml) copies them from the [google/fonts](https://github.com/google/fonts) repository. If a file is missing, the app falls back to system fonts.
+
+- [Google Sans Flex](https://fonts.google.com/specimen/Google+Sans+Flex): animated titles and headings.
+- [Roboto Flex](https://fonts.google.com/specimen/Roboto+Flex): note font option.
+- [Tinos](https://fonts.google.com/specimen/Tinos): note font option, metric-compatible with Times New Roman.
+- [Reenie Beanie](https://fonts.google.com/specimen/Reenie+Beanie): handwriting-style note font option.
+
+License texts for Google Sans Flex, Roboto Flex and Reenie Beanie are in [fonts-licenses/](fonts-licenses/).
+
+## Permissions
+
+Declared in [AndroidManifest.xml](app/src/main/AndroidManifest.xml).
+
+| Permission | Used for |
 |:--|:--|
-| **Insert photos** | From the gallery or straight from the camera |
-| **Arrange photos** | Resize, crop, and place several photos in one row |
-| **Flowing text** | Text flows automatically beside a photo |
-| **Cover** | The note's colors follow the cover photo |
-| **Text scan (OCR)** | Pull text out of a photo without internet, then copy it |
+| `INTERNET` | Model and OCR data downloads, Groq transcription, link previews |
+| `RECORD_AUDIO` | Voice notes |
+| `CAMERA` | Photos from the camera (hardware not required) |
+| `POST_NOTIFICATIONS` | Reminders and background task progress |
+| `SCHEDULE_EXACT_ALARM` (up to API 32), `USE_EXACT_ALARM` | Reminders at the exact time |
+| `RECEIVE_BOOT_COMPLETED` | Rescheduling reminders after a restart |
+| `FOREGROUND_SERVICE`, `_DATA_SYNC`, `_MICROPHONE` | Recording, downloads and transcription in the background |
 
-### Drawing
+## Build and release
 
-| | |
-|:--|:--|
-| **Tools** | Pen, highlighter, eraser, and a Select tool |
-| **Input** | Works with a finger or a stylus |
-| **Tidy shapes** | Lines, circles, squares, and triangles are cleaned up when you hold the end of a stroke |
-| **Sticks to text** | Drawings move along when the writing changes |
+- Toolchain: JDK 17, Gradle 8.11.1, Android Gradle Plugin 8.10.1, Kotlin 2.1.21 (Compose compiler plugin), `compileSdk` and `targetSdk` 36.
+- Fonts are committed, so the build needs no font download.
+- Signing: if `KS_FILE` is set, the build reads `KS_PASS`, `KS_ALIAS` and `KEY_PASS` and signs with that keystore. Without it, no signing config is applied, which is how F-Droid builds.
+- [build.yml](.github/workflows/build.yml) builds on pushes to `main` and `master` and on `v*` tags. A tag must match `versionName`. Tag builds also require the fonts, a LICENSE file and a changelog named after `versionCode`. They publish `Dinduy-<tag>.apk` to a GitHub Release, with notes from the commit log.
+- [prepare-fdroid.yml](.github/workflows/prepare-fdroid.yml) runs once by hand. It fetches the fonts and their licenses and commits them.
 
-### PDF reader
-
-| | |
-|:--|:--|
-| **Open from anywhere** | Through Open with or Share |
-| **Reading modes** | Scroll or page, including a 3D page-curl effect |
-| **Text tools** | Search words, select and copy text |
-| **Easy on the eyes** | Dark page mode |
-| **Annotations** | Draw directly on top of a PDF |
-
-### Voice notes
-
-| | |
-|:--|:--|
-| **Record** | Right inside a note, and it keeps going while the app is minimized |
-| **Quick record** | Swipe the New button to the left to start recording |
-| **Language** | Auto, Indonesian, or English |
-| **Auto format** | Punctuation, bold, and italic without changing your words |
-
-Two ways to turn speech into text:
-
-| Method | Strengths | Notes |
-|:--|:--|:--|
-| **Online (Groq)** | Fast and most accurate | Needs your own Groq API key |
-| **Offline (Whisper)** | Runs on your phone without internet | Model is downloaded once |
-
-### Reminders
-
-| | |
-|:--|:--|
-| **Flexible** | Add to any note, with a date and time |
-| **Repeating** | Daily, weekly, monthly, or yearly |
-| **Quick actions** | From the notification: Done, Snooze 1 hour, or Tomorrow morning |
-| **Restart safe** | Alarms are set up again automatically after the phone restarts |
-
-### Organizing notes
-
-| | |
-|:--|:--|
-| **Pin** | Important notes stay on top |
-| **Labels** | Group notes however you like |
-| **Archive and Trash** | Trash is emptied automatically after 30 days |
-| **Layout** | 1 or 2 columns |
-| **Free order** | Press, hold, and drag a card to where you want it |
-| **Gestures** | Swipe a card right to archive, left to delete |
-
-### Sharing and export
-
-| | |
-|:--|:--|
-| **.dinduy file** | Share a note with its photos, drawings, audio, and PDFs |
-| **PDF export** | A4 size with a preview and adjustable text size |
-| **Markdown** | Save or copy as text |
-| **Import** | .md, .txt, and PDF files |
-
-### Appearance
-
-| | |
-|:--|:--|
-| **Theme** | Light, dark (pure black for AMOLED), or follow the phone |
-| **Color** | Material You (Android 12 and up) or your own color |
-| **Monochrome** | All grayscale |
-| **Fonts** | Default, Roboto Flex, Times New Roman, Reenie Beanie |
-| **Widgets** | Quick note and notes list on the home screen |
-
-<br>
-
----
-
-<br>
-
-<div align="center">
-
-## Privacy
-
-</div>
-
-> [!IMPORTANT]
-> All notes live on your phone. There is no account and no Dinduy server.
-
-| | |
-|:--|:--|
-| **Internet** | Only used when you ask for it: downloading the offline model, Groq transcription, link previews, and checking for updates |
-| **API key** | Stored encrypted on the device (Android Keystore). It never goes into backups, shared files, or the code |
-| **Backup** | A single `.dinduy` file that you save wherever you choose |
-
-<br>
-
----
-
-<br>
-
-<div align="center">
-
-## Quick start
-
-</div>
-
-<table align="center">
-  <tr>
-    <td align="center" width="16%"><h3>1</h3><sub>Tap <b>New</b> to create a note</sub></td>
-    <td align="center" width="16%"><h3>2</h3><sub>Hold <b>New</b> for the add menu, or pull it up to start writing</sub></td>
-    <td align="center" width="16%"><h3>3</h3><sub>Hold a card to select, delete, or duplicate</sub></td>
-    <td align="center" width="16%"><h3>4</h3><sub>Swipe the bar above the keyboard for formatting tools</sub></td>
-    <td align="center" width="16%"><h3>5</h3><sub>Tap the down arrow for reading mode</sub></td>
-    <td align="center" width="16%"><h3>6</h3><sub>Tap the three dots for labels, cover, export, and sharing</sub></td>
-  </tr>
-</table>
-
-<br>
-
----
-
-<br>
-
-<div align="center">
-
-## Backup and restore
-
-</div>
-
-Open **Settings**, then the **Backup** section. Save or share one `.dinduy` file containing all your notes, photos, audio, and PDFs.
-
-When restoring, choose one:
-
-| Option | Result |
-|:--|:--|
-| **Merge** | Adds what is in the backup, your current notes stay safe |
-| **Replace all** | Replaces every note with the backup |
-
-> [!TIP]
-> The app reminds you when it has been more than a week since your last backup.
-
-<br>
-
----
-
-<br>
-
-<div align="center">
-
-## Requirements
-
-</div>
-
-| | |
-|:--|:--|
-| **Android** | 8.0 (API 26) or newer |
-| **Architecture** | arm64-v8a, because the offline transcription engine only supports this |
-
-<br>
-
----
-
-<br>
-
-<div align="center">
-
-## Building from source
-
-</div>
-
-Dinduy is written in Kotlin with Jetpack Compose and built with Gradle like a regular Android project.
-
-- Fonts are downloaded automatically during the build. If that fails, the app falls back to system fonts.
-- Without a keystore, the APK is signed with the debug key.
-
-> [!NOTE]
-> To update without uninstalling first, provide a keystore through these environment variables:
+## Project structure
 
 ```
-KS_FILE    KS_PASS    KS_ALIAS    KEY_PASS
+.
+├── .github/
+│   └── workflows/
+├── app/
+│   └── src/
+│       └── main/
+│           ├── assets/
+│           │   └── fonts/
+│           ├── java/
+│           │   └── app/
+│           │       └── dinduy/
+│           │           └── silkcurl/
+│           └── res/
+│               ├── drawable/
+│               ├── drawable-nodpi/
+│               ├── drawable-v31/
+│               ├── layout/
+│               ├── mipmap-anydpi-v26/
+│               ├── values/
+│               ├── values-night/
+│               ├── values-night-v31/
+│               ├── values-v31/
+│               └── xml/
+├── docs/
+│   └── images/
+├── fastlane/
+│   └── metadata/
+│       └── android/
+│           ├── en-US/
+│           │   ├── changelogs/
+│           │   └── images/
+│           │       └── phoneScreenshots/
+│           └── id-ID/
+│               └── changelogs/
+├── fonts-licenses/
+├── metadata/
+├── .gitignore
+├── build.gradle.kts
+├── gradle.properties
+├── LICENSE
+├── README.md
+└── settings.gradle.kts
 ```
 
-<br>
+- [app/src/main/java/app/dinduy/](app/src/main/java/app/dinduy/): all Kotlin code in one package, with files named by feature (`Editor*`, `Ink`, `Pdf*`, `Audio*`, `Reminder`, `Store`).
+- [app/src/main/java/app/dinduy/silkcurl/](app/src/main/java/app/dinduy/silkcurl/): the embedded PlayLikeCurl engine (Java, MIT header in each file) and the Kotlin glue in `SilkCurl.kt`.
+- [app/src/main/res/xml/](app/src/main/res/xml/): backup and data extraction rules, FileProvider paths and widget definitions.
+- `res/*-v31` and `res/*-night*`: widget colors for Android 12+ dynamic color and dark mode.
+- [docs/images/](docs/images/): the README images (`icon.png`, `visual.png`, `screenshots.png`).
+- [fastlane/metadata/android/](fastlane/metadata/android/): store listing in English and Indonesian. Changelogs are named by `versionCode`.
+- [metadata/](metadata/): F-Droid build recipe.
+- [.github/workflows/](.github/workflows/): the APK and release build, and the one-time font preparation.
 
----
+The app also creates these folders at runtime:
 
-<br>
-
-<div align="center">
-
-## Updates
-
-</div>
-
-Check for the latest version from the **Info** menu. Updates can be downloaded and installed right from inside the app.
-
-<br>
-
----
-
-<br>
-
-<div align="center">
+```
+filesDir/
+├── audio/        # voice recordings
+├── img/          # photos and covers
+├── models/       # Whisper models
+├── ocr/
+│   └── tessdata/ # OCR language data
+├── pdf/          # imported PDFs
+└── secure/       # encrypted Groq key
+cacheDir/
+├── lp/           # link preview thumbnails
+└── pdfx/         # PDF export temp files
+```
 
 ## License
 
-Released under the [MIT License](LICENSE).
+[GNU GPL v3](LICENSE). Code in `app/src/main/java/app/dinduy/silkcurl/` is MIT. Fonts are under their own licenses.
 
-<br>
+## Support
 
-<sub>Made so that taking notes feels good.</sub>
+If Dinduy is useful to you, you can support development on [Ko-fi](https://ko-fi.com/ilhamdanials).
 
-<br>
+---
 
-<img src="https://capsule-render.vercel.app/api?type=waving&color=6750A4&height=120&section=footer" width="100%" alt="">
+Yang berubah dari versi sebelumnya: header dengan icon, dua baris badge, slot visual dan kolase, tabel fitur, bagian Architecture, Permissions, Build and release, teknik baru (vector PDF export), dan folder `docs/images/` di struktur. Satu hal buat dicek: badge Release, Build dan link GitHub diambil dari `metadata/app.dinduy.yml` (`ilhamdanialsaputra/Dinduy-Notes`). Kalau nama repo-nya beda, bilang aja. Aku belum pasang badge F-Droid atau Play Store karena belum ada listing-nya.
 
-</div>
+Kalau sudah oke, bilang "lanjut" dan aku bikin file README.md-nya. Kalau ada yang mau diubah, sebut aja.
