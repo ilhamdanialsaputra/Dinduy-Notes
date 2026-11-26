@@ -5,61 +5,8 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+// Penandatanganan hanya untuk CI milik developer (env KS_FILE). F-Droid membangun tanpa kunci ini dan menandatangani sendiri.
 val ksFile: String? = System.getenv("KS_FILE")
-
-val extraRules = layout.buildDirectory.file("generated/extra-rules.pro").get().asFile.also {
-    it.parentFile.mkdirs()
-    it.writeText(
-        "-keep class com.tom_roush.pdfbox.** { *; }\n" +
-            "-keep class com.tom_roush.fontbox.** { *; }\n" +
-            "-dontwarn com.tom_roush.pdfbox.**\n" +
-            "-dontwarn com.tom_roush.fontbox.**\n" +
-            "-dontwarn com.gemalto.jp2.**\n" +
-            "-dontwarn org.bouncycastle.**\n" +
-            "-dontwarn javax.xml.**\n" +
-            "-dontwarn org.apache.commons.logging.**\n"
-    )
-}
-
-val fontAssets = layout.buildDirectory.dir("generated/font-assets")
-val fetchFonts by tasks.registering {
-    val root = fontAssets.get().asFile
-    outputs.dir(root)
-    doLast {
-        val out = File(root, "fonts").apply { mkdirs() }
-        val base = "https://raw.githubusercontent.com/google/fonts/main/ofl"
-        val gsf = "GoogleSansFlex%5BROND%2Copsz%2Cslnt%2Cwdth%2Cwght%5D.ttf"
-        val gsfGrad = "GoogleSansFlex%5BGRAD%2CROND%2Copsz%2Cslnt%2Cwdth%2Cwght%5D.ttf"
-        val cdn = "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl"
-        val files = listOf(
-            // Google Sans Flex (OFL, variabel: wght 1-1000, wdth 25-151, ROND 0-100, opsz 1-144). Dicoba beberapa alamat berurutan.
-            "google_sans_flex.ttf" to listOf(
-                "$base/googlesansflex/$gsf", "$cdn/googlesansflex/$gsf",
-                "$base/googlesansflex/$gsfGrad", "$cdn/googlesansflex/$gsfGrad"
-            ),
-            "tinos_regular.ttf" to listOf("$base/tinos/Tinos-Regular.ttf"),
-            "tinos_bold.ttf" to listOf("$base/tinos/Tinos-Bold.ttf"),
-            "tinos_italic.ttf" to listOf("$base/tinos/Tinos-Italic.ttf"),
-            "tinos_bolditalic.ttf" to listOf("$base/tinos/Tinos-BoldItalic.ttf")
-        )
-        for ((name, urls) in files) {
-            val f = File(out, name)
-            if (f.exists() && f.length() > 20_000) continue
-            var ok = false
-            for (url in urls) {
-                try {
-                    uri(url).toURL().openStream().use { i -> f.outputStream().use { o -> i.copyTo(o) } }
-                    if (f.length() > 20_000) { ok = true; break }
-                } catch (e: Exception) {
-                    logger.warn("Font $name failed from $url: ${e.message}")
-                }
-                f.delete()
-            }
-            if (!ok) logger.warn("Font $name could not be downloaded (app falls back to a system font)")
-        }
-    }
-}
-tasks.named("preBuild") { dependsOn(fetchFonts) }
 
 android {
     namespace = "app.dinduy"
@@ -69,9 +16,15 @@ android {
         applicationId = "app.dinduy"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10
-        versionName = "1.9"
+        versionCode = 11
+        versionName = "1.10"
         ndk { abiFilters += listOf("arm64-v8a") }
+    }
+
+    // Blob metadata dependensi bertanda tangan Google di dalam APK: tidak perlu, dan dimatikan sesuai saran F-Droid / IzzyOnDroid.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
     }
 
     signingConfigs {
@@ -89,8 +42,8 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro", extraRules)
-            signingConfig = if (ksFile != null) signingConfigs.getByName("ci") else signingConfigs.getByName("debug")
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (ksFile != null) signingConfig = signingConfigs.getByName("ci")
         }
         debug {
             if (ksFile != null) signingConfig = signingConfigs.getByName("ci")
@@ -103,7 +56,6 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
-    sourceSets.getByName("main").assets.srcDir(fetchFonts)
     packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
 }
 
@@ -113,7 +65,6 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.ui:ui-text-google-fonts")
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.core:core-ktx:1.16.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
@@ -123,7 +74,9 @@ dependencies {
     implementation("org.jsoup:jsoup:1.18.1")
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     implementation("io.github.oleksandrbalan:pagecurl:1.5.1")
-    implementation("com.google.mlkit:text-recognition:16.0.1")
+    // OCR: Tesseract (Apache-2.0), pengganti Google ML Kit (closed-source)
+    implementation("cz.adaptech.tesseract4android:tesseract4android:4.9.0")
+    // Transkripsi offline: whisper.cpp (MIT), Maven Central
     implementation("dev.ffmpegkit-maintained:whisper-android:1.0.0")
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
 }

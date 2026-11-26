@@ -1,6 +1,20 @@
 -keep class dev.ffmpegkit.** { *; }
 -keepclasseswithmembernames class * { native <methods>; }
 
+# Tesseract4Android (JNI)
+-keep class com.googlecode.tesseract.android.** { *; }
+-keep class com.googlecode.leptonica.android.** { *; }
+
+# PDFBox-Android
+-keep class com.tom_roush.pdfbox.** { *; }
+-keep class com.tom_roush.fontbox.** { *; }
+-dontwarn com.tom_roush.pdfbox.**
+-dontwarn com.tom_roush.fontbox.**
+-dontwarn com.gemalto.jp2.**
+-dontwarn org.bouncycastle.**
+-dontwarn javax.xml.**
+-dontwarn org.apache.commons.logging.**
+
 -keepattributes *Annotation*, InnerClasses, Signature, EnclosingMethod
 -dontnote kotlinx.serialization.AnnotationsKt
 -keepclassmembers class kotlinx.serialization.json.** { *** Companion; }
