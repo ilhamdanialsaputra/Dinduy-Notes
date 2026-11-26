@@ -1,0 +1,13 @@
+Dinduy is a fast, private notes app. Your notes are stored on your phone.
+
+• Rich text: bold, italic, lists, checklists, quotes, code, tables and links
+• Images with cropping, covers and per-note themes
+• Read PDFs, export notes to PDF
+• Handwriting and highlighter drawn right on the page
+• Reminders (one-time or repeating) and home-screen widgets
+• Voice notes with on-device transcription (Whisper). Optional cloud transcription with your own Groq API key
+• Scan text from photos (OCR) fully on-device; language data is downloaded once, only after you agree
+• Labels, pinning, archive, trash, search, Markdown export, share notes as .dinduy files
+• Material You colors, light and AMOLED dark themes
+
+No ads, no trackers, no accounts. The app never installs or updates itself.
