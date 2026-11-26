@@ -1,4 +1,6 @@
-<img width="3264" height="3264" alt="20261125_172201" src="https://github.com/user-attachments/assets/f9b8e90c-7d38-4257-a2ea-aeacb7f34480" />
+<div align="center">
+
+<img src="https://github.com/user-attachments/assets/f9b8e90c-7d38-4257-a2ea-aeacb7f34480" width="96" alt="Dinduy icon">
 
 # Dinduy
 
@@ -21,10 +23,13 @@
 
 [Description](#description) · [Features](#features) · [Architecture](#architecture) · [Techniques](#interesting-techniques) · [Libraries](#libraries-and-tools) · [Fonts](#fonts) · [Permissions](#permissions) · [Build and release](#build-and-release) · [Structure](#project-structure) · [License](#license)
 
-<img width="1920" height="1080" alt="Dinduy Notes_20261108_031652_0000" src="https://github.com/user-attachments/assets/1a7e67f6-3e13-4507-abeb-c6efc20de8c5" />
+</div>
 
+## Screenshot
+<img width="1920" height="1080" alt="Dinduy Notes_20261108_031652_0000" src="https://github.com/user-attachments/assets/67040d7b-627d-4929-b9cc-d03fbc9adc86" />
 
-<img width="6144" height="3374" alt="IMG_20261126_091144" src="https://github.com/user-attachments/assets/34332275-b64d-4817-8630-ca45814153ae" />
+<img width="6144" height="3374" alt="IMG_20261126_091144" src="https://github.com/user-attachments/assets/d91a6bb1-c9c3-4ce9-b49d-5de909791a17" />
+
 
 
 ## Description
@@ -151,8 +156,6 @@ Declared in [AndroidManifest.xml](app/src/main/AndroidManifest.xml).
 │               ├── values-night-v31/
 │               ├── values-v31/
 │               └── xml/
-├── docs/
-│   └── images/
 ├── fastlane/
 │   └── metadata/
 │       └── android/
@@ -176,7 +179,6 @@ Declared in [AndroidManifest.xml](app/src/main/AndroidManifest.xml).
 - [app/src/main/java/app/dinduy/silkcurl/](app/src/main/java/app/dinduy/silkcurl/): the embedded PlayLikeCurl engine (Java, MIT header in each file) and the Kotlin glue in `SilkCurl.kt`.
 - [app/src/main/res/xml/](app/src/main/res/xml/): backup and data extraction rules, FileProvider paths and widget definitions.
 - `res/*-v31` and `res/*-night*`: widget colors for Android 12+ dynamic color and dark mode.
-- [docs/images/](docs/images/): the README images (`icon.png`, `visual.png`, `screenshots.png`).
 - [fastlane/metadata/android/](fastlane/metadata/android/): store listing in English and Indonesian. Changelogs are named by `versionCode`.
 - [metadata/](metadata/): F-Droid build recipe.
 - [.github/workflows/](.github/workflows/): the APK and release build, and the one-time font preparation.
@@ -204,9 +206,3 @@ cacheDir/
 ## Support
 
 If Dinduy is useful to you, you can support development on [Ko-fi](https://ko-fi.com/ilhamdanials).
-
----
-
-Yang berubah dari versi sebelumnya: header dengan icon, dua baris badge, slot visual dan kolase, tabel fitur, bagian Architecture, Permissions, Build and release, teknik baru (vector PDF export), dan folder `docs/images/` di struktur. Satu hal buat dicek: badge Release, Build dan link GitHub diambil dari `metadata/app.dinduy.yml` (`ilhamdanialsaputra/Dinduy-Notes`). Kalau nama repo-nya beda, bilang aja. Aku belum pasang badge F-Droid atau Play Store karena belum ada listing-nya.
-
-Kalau sudah oke, bilang "lanjut" dan aku bikin file README.md-nya. Kalau ada yang mau diubah, sebut aja.
