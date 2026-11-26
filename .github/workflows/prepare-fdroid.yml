@@ -1,0 +1,78 @@
+name: Prepare F-Droid
+
+# Jalankan SEKALI dari tab Actions (Run workflow). Mengunduh font open-source dari repo resmi google/fonts,
+# menaruhnya di app/src/main/assets/fonts, lalu commit otomatis. Jadi tidak ada upload berkas biner manual.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fonts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ambil daftar berkas google/fonts (tanpa unduh isi)
+        run: |
+          git clone --depth 1 --filter=blob:none --no-checkout https://github.com/google/fonts.git /tmp/gf
+          git -C /tmp/gf ls-tree -r --name-only HEAD > /tmp/gf-files.txt
+          wc -l /tmp/gf-files.txt
+
+      - name: Cari folder tiap font
+        id: dirs
+        run: |
+          find_dir() {
+            f=$(grep -i -m1 -E "$1" /tmp/gf-files.txt || true)
+            if [ -z "$f" ]; then echo "::error::Font tidak ditemukan: $1"; exit 1; fi
+            dirname "$f"
+          }
+          echo "gsf=$(find_dir '^ofl/googlesansflex/GoogleSansFlex\[.*\]\.ttf$')" >> "$GITHUB_OUTPUT"
+          echo "rf=$(find_dir '^ofl/robotoflex/RobotoFlex\[.*\]\.ttf$')"        >> "$GITHUB_OUTPUT"
+          echo "tin=$(find_dir '^(apache|ofl)/tinos/Tinos-Regular\.ttf$')"       >> "$GITHUB_OUTPUT"
+          echo "ree=$(find_dir '^ofl/reeniebeanie/ReenieBeanie\.ttf$')"          >> "$GITHUB_OUTPUT"
+
+      - name: Unduh hanya folder yang dibutuhkan
+        run: |
+          cd /tmp/gf
+          git sparse-checkout init --cone
+          git sparse-checkout set "${{ steps.dirs.outputs.gsf }}" "${{ steps.dirs.outputs.rf }}" "${{ steps.dirs.outputs.tin }}" "${{ steps.dirs.outputs.ree }}"
+          git checkout
+
+      - name: Salin ke assets dan lisensi
+        run: |
+          set -e
+          OUT=app/src/main/assets/fonts
+          LIC=fonts-licenses
+          mkdir -p "$OUT" "$LIC"
+          pick() { ls "$1"/$2 2>/dev/null | head -1; }
+          cp "$(ls /tmp/gf/${{ steps.dirs.outputs.gsf }}/GoogleSansFlex\[*.ttf | head -1)" "$OUT/google_sans_flex.ttf"
+          cp "$(ls /tmp/gf/${{ steps.dirs.outputs.rf }}/RobotoFlex\[*.ttf | head -1)" "$OUT/roboto_flex.ttf"
+          T=/tmp/gf/${{ steps.dirs.outputs.tin }}
+          cp "$T/Tinos-Regular.ttf"    "$OUT/tinos_regular.ttf"
+          cp "$T/Tinos-Bold.ttf"       "$OUT/tinos_bold.ttf"
+          cp "$T/Tinos-Italic.ttf"     "$OUT/tinos_italic.ttf"
+          cp "$T/Tinos-BoldItalic.ttf" "$OUT/tinos_bolditalic.ttf"
+          cp /tmp/gf/${{ steps.dirs.outputs.ree }}/ReenieBeanie.ttf "$OUT/reenie_beanie.ttf"
+          # lisensi tiap font (OFL.txt / LICENSE.txt)
+          lic() { for f in OFL.txt LICENSE.txt; do [ -f "$1/$f" ] && cp "$1/$f" "$LIC/$2-$f" && return 0; done; echo "::warning::Berkas lisensi tidak ada di $1"; }
+          lic /tmp/gf/${{ steps.dirs.outputs.gsf }} google-sans-flex
+          lic /tmp/gf/${{ steps.dirs.outputs.rf }}  roboto-flex
+          lic "$T" tinos
+          lic /tmp/gf/${{ steps.dirs.outputs.ree }} reenie-beanie
+          # validasi ukuran (Tinos/Reenie kecil, variabel besar)
+          for f in "$OUT"/*.ttf; do
+            s=$(stat -c%s "$f"); echo "$f $s"
+            [ "$s" -gt 20000 ] || { echo "::error::$f terlalu kecil"; exit 1; }
+          done
+
+      - name: Commit hasil
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/assets/fonts fonts-licenses
+          if git diff --cached --quiet; then echo "Tidak ada perubahan."; else
+            git commit -m "Add bundled open-source fonts (OFL/Apache) for F-Droid"
+            git push
+          fi
