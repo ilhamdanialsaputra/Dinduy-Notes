@@ -1,0 +1,3 @@
+- Prepared for F-Droid: removed the built-in updater and the install-packages permission
+- Text scanning now uses open-source Tesseract (language data downloaded once, with your consent)
+- Fonts are bundled; no Google Play services needed
